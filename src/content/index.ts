@@ -10,6 +10,7 @@ import type {
 	DescribedElement,
 } from "../lib/messages.ts";
 import { Annotator } from "./annotator.ts";
+import { blurFields } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
 import { Reviewer } from "./review.ts";
 
@@ -17,11 +18,32 @@ declare global {
 	var __overmark: boolean | undefined;
 }
 
+/** Undoes the blur of `element:mark` or `page:blur`. */
+let restoreBlur: (() => void) | undefined;
+
+function blur(allForms: boolean): void {
+	restoreBlur?.();
+	restoreBlur = blurFields(document, allForms);
+}
+
+function unblur(): void {
+	restoreBlur?.();
+	restoreBlur = undefined;
+}
+
 function mark(
 	overlay: Overlay,
+	annotator: Annotator,
 	selector: string,
 	number: number,
+	blurForms: boolean,
 ): DescribedElement {
+	if (annotator.state().saving)
+		return {
+			ok: false,
+			error:
+				"The user is saving marks on this page right now; try again in a few seconds.",
+		};
 	let el: Element | null;
 	try {
 		el = document.querySelector(selector);
@@ -38,6 +60,7 @@ function mark(
 	const r = el.getBoundingClientRect();
 	const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
 	overlay.setTemporaryMark({ number, rect });
+	blur(blurForms);
 	return {
 		ok: true,
 		details: describeElement(el),
@@ -99,7 +122,9 @@ function start(): void {
 					return true; // answers asynchronously
 				case "case:show":
 					sendResponse(
-						reviewer.show(message.annotationId, message.candidate) ?? null,
+						reviewer.caseId === message.caseId
+							? (reviewer.show(message.annotationId, message.candidate) ?? null)
+							: null,
 					);
 					break;
 				case "case:clear":
@@ -107,10 +132,27 @@ function start(): void {
 					sendResponse(state());
 					break;
 				case "element:mark":
-					sendResponse(mark(overlay, message.selector, message.number));
+					sendResponse(
+						mark(
+							overlay,
+							annotator,
+							message.selector,
+							message.number,
+							message.blurForms,
+						),
+					);
 					break;
 				case "element:unmark":
 					overlay.setTemporaryMark(null);
+					unblur();
+					sendResponse(state());
+					break;
+				case "page:blur":
+					blur(message.blurForms);
+					sendResponse(state());
+					break;
+				case "page:unblur":
+					unblur();
 					sendResponse(state());
 					break;
 				default:

@@ -28,16 +28,33 @@ export type ContentRequest =
 	/** Find the case's elements on this page and outline them (`LoadResult`). */
 	| { type: "case:load"; case: Case }
 	/** Scroll to one annotation's element, or to another candidate (`AnnotationMatch`). */
-	| { type: "case:show"; annotationId: string; candidate?: number }
+	| {
+			type: "case:show";
+			/** `null` comes back when another case (or none) is loaded. */
+			caseId: string;
+			annotationId: string;
+			candidate?: number;
+	  }
 	/** Remove the outlines (`OverlayState`). */
 	| { type: "case:clear" }
 	/**
 	 * Scroll to the element `selector` and mark it with `number` for a
-	 * screenshot (`DescribedElement`); the overlay's own bars are hidden.
+	 * screenshot (`DescribedElement`); the overlay's own bars and the user's
+	 * unsaved marks are hidden, form fields blurred as for a save. Refused
+	 * while the user's own save is taking screenshots.
 	 */
-	| { type: "element:mark"; selector: string; number: number }
-	/** Remove that mark again (`OverlayState`). */
-	| { type: "element:unmark" };
+	| {
+			type: "element:mark";
+			selector: string;
+			number: number;
+			blurForms: boolean;
+	  }
+	/** Remove that mark and the blur again (`OverlayState`). */
+	| { type: "element:unmark" }
+	/** Blur form fields for a screenshot of the page as it is (`OverlayState`). */
+	| { type: "page:blur"; blurForms: boolean }
+	/** Undo `page:blur` (`OverlayState`). */
+	| { type: "page:unblur" };
 
 /** The answer to `element:mark`. */
 export type DescribedElement =
@@ -103,7 +120,16 @@ export type WorkerRequest =
 	| { type: "capture"; caseId: string; shotId: string }
 	| { type: "case:save"; request: SaveRequest }
 	/** Remove the pending screenshots of a save that was given up. */
-	| { type: "images:discard"; caseId: string; shotIds: string[] };
+	| { type: "images:discard"; caseId: string; shotIds: string[] }
+	/**
+	 * From the side panel: a PNG data URL of `tabId`, which must be in front
+	 * of `windowId` (`TabCapture`), through the worker's rate-limited queue.
+	 */
+	| { type: "capture:tab"; tabId: number; windowId: number };
+
+export interface TabCapture {
+	dataUrl: string;
+}
 
 export type WorkerResponse<T = object> =
 	| ({ ok: true } & T)

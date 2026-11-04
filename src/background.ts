@@ -12,6 +12,7 @@ import type {
 	Broadcast,
 	CaptureResult,
 	SaveResult,
+	TabCapture,
 	WorkerRequest,
 	WorkerResponse,
 } from "./lib/messages.ts";
@@ -42,7 +43,7 @@ async function ensureInFront(tabId: number, windowId: number): Promise<void> {
 	const tab = await chrome.tabs.get(tabId);
 	if (!tab.active || tab.windowId !== windowId)
 		throw new Error(
-			"The tab is no longer in front; switch back to it and save again.",
+			"The tab is no longer in front of its window; switch back to it and try again.",
 		);
 }
 
@@ -101,6 +102,14 @@ async function handle(
 				annotations: saved.annotations.length,
 			} satisfies SaveResult;
 		}
+		case "capture:tab": {
+			// From the side panel (an AI app's screenshot), not from a content script.
+			if (!sender.url?.startsWith(chrome.runtime.getURL("")))
+				throw new Error("only for Overmark's own pages");
+			return {
+				dataUrl: await capture(request.tabId, request.windowId),
+			} satisfies TabCapture;
+		}
 		case "images:discard":
 			await store.deleteImages(
 				request.caseId,
@@ -116,7 +125,8 @@ chrome.runtime.onMessage.addListener(
 		if (
 			request?.type !== "capture" &&
 			request?.type !== "case:save" &&
-			request?.type !== "images:discard"
+			request?.type !== "images:discard" &&
+			request?.type !== "capture:tab"
 		)
 			return false;
 		handle(request, sender).then(

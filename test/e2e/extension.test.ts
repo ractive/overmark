@@ -387,6 +387,23 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
 			);
 
+			// A saved relay the library refuses must not stop the panel.
+			await h.control.eval(
+				`localStorage.setItem("overmark:relay", "http://192.168.1.20:8080")`,
+			);
+			await h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			);
+			await h.control.waitFor(`document.querySelector("[data-case]")`);
+			expect(
+				await h.control.eval<string>(
+					`document.getElementById("ai-status").textContent`,
+				),
+			).toContain("cannot be used");
+			expect(
+				await h.control.eval<string>(`document.getElementById("relay").value`),
+			).toBe("http://localhost:8080");
+
 			// The side panel connects to the test relay by itself ("keep AI access on").
 			await h.control.eval(
 				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)}); localStorage.setItem("overmark:keep-ai-on", "true")`,
@@ -454,6 +471,31 @@ describe.skipIf(browserBinary === undefined)(
 
 				const shot = await client.callTool({ name: "capture", arguments: {} });
 				expect((shot.content as { type: string }[])[1]?.type).toBe("image");
+
+				// A change asks in the side panel, names the case, and offers no
+				// "Always allow" (DEC-008).
+				const verdict = client.callTool({
+					name: "set_verdict",
+					arguments: { caseId: listed?.caseId, verdict: "Darker" },
+				});
+				// The newest dialog: the connect dialog may still be open under it.
+				const dialog = `[...document.querySelectorAll("dialog[open]")].at(-1)`;
+				const buttons = `[...(${dialog}?.querySelectorAll("button") ?? [])].map((b) => b.textContent.trim())`;
+				await h.control.waitFor(`${buttons}.includes("Don't allow")`, 10_000);
+				expect(await h.control.eval<string[]>(buttons)).not.toContain(
+					"Always allow",
+				);
+				expect(await h.control.eval<string>(`${dialog}.textContent`)).toContain(
+					"Case: “AI test”",
+				);
+				// A hidden page gets no dialog "close" event: the panel's tab must
+				// be in front to answer (a real side panel is visible).
+				await h.control.activate();
+				await h.control.eval(
+					`[...${dialog}.querySelectorAll("button")].find((b) => b.textContent.trim() === "Don't allow").click()`,
+				);
+				expect((await verdict).isError).toBe(true);
+				await v2.page.activate();
 			} finally {
 				await client.close();
 			}
@@ -463,10 +505,21 @@ describe.skipIf(browserBinary === undefined)(
 				ok: boolean;
 				details: { tag: string };
 			}>(
-				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "[data-truth=submit]", number: 9 })`,
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "[data-truth=submit]", number: 9, blurForms: true })`,
 			);
 			expect(described.ok).toBe(true);
 			expect(described.details.tag).toBe("button");
+			// Its own mode (not a save's "capturing"), form fields blurred.
+			expect(
+				await v2.page.eval<string>(
+					`${HOST}.shadowRoot.querySelector(".layer").className`,
+				),
+			).toBe("layer marking");
+			expect(
+				await v2.page.eval<string>(
+					`document.querySelector("input[name=zip]").style.filter`,
+				),
+			).toBe("blur(6px)");
 			expect(
 				await v2.page.eval<number>(
 					`${shadow("g.temporary")}.childElementCount`,
@@ -480,6 +533,11 @@ describe.skipIf(browserBinary === undefined)(
 					`${shadow("g.temporary")}.childElementCount`,
 				),
 			).toBe(0);
+			expect(
+				await v2.page.eval<string>(
+					`document.querySelector("input[name=zip]").style.filter`,
+				),
+			).toBe("");
 			await v2.page.send("Page.close");
 		}, 90_000);
 	},

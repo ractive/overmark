@@ -2,6 +2,7 @@
  * The side panel: the tab in front, annotating it, and the saved cases.
  */
 
+import type { TabMcp } from "@ractive-ch/tab-mcp-client";
 import {
 	type Annotation,
 	type Case,
@@ -27,7 +28,7 @@ import type {
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { byId, formatDate, h, samePath, shortUrl } from "./dom.ts";
-import { createConnection, DEFAULT_RELAY, validRelay } from "./mcp.ts";
+import { createConnection, DEFAULT_RELAY, relayProblem } from "./mcp.ts";
 
 const store = new IdbStore();
 
@@ -429,6 +430,7 @@ async function showMatch(a: Annotation, candidate: number): Promise<void> {
 	try {
 		const m = (await chrome.tabs.sendMessage(loaded.tabId, {
 			type: "case:show",
+			caseId: loaded.caseId,
 			annotationId: a.id,
 			candidate,
 		})) as AnnotationMatch | null;
@@ -673,12 +675,26 @@ function caseChanged(caseId: string): void {
 	else void renderCases();
 }
 
-let mcp = createConnection(
-	readSetting(RELAY_KEY) ?? DEFAULT_RELAY,
-	store,
-	caseChanged,
-);
-relayInput.value = readSetting(RELAY_KEY) ?? DEFAULT_RELAY;
+function connectTo(relay: string): TabMcp {
+	return createConnection(relay, store, {
+		onChange: caseChanged,
+		blurForms: () => blurForms.checked,
+	});
+}
+
+/** Shown while disconnected when the saved relay could not be used. */
+let relayNote: string | undefined;
+let relay = readSetting(RELAY_KEY) ?? DEFAULT_RELAY;
+let mcp: TabMcp;
+try {
+	mcp = connectTo(relay);
+} catch (error) {
+	// A stored address the library refuses must not stop the panel.
+	relayNote = `The saved relay ${relay} cannot be used (${error instanceof Error ? error.message : String(error)}); using ${DEFAULT_RELAY}.`;
+	relay = DEFAULT_RELAY;
+	mcp = connectTo(relay);
+}
+relayInput.value = relay;
 keepOn.checked = readSetting(KEEP_ON_KEY) === "true";
 
 function renderAi(): void {
@@ -693,7 +709,7 @@ function renderAi(): void {
 				? "Connecting…"
 				: reconnecting
 					? "Connection lost, retrying…"
-					: "Not connected";
+					: (relayNote ?? "Not connected");
 	connectButton.textContent =
 		mcp.state === "disconnected" ? "Connect AI app" : "AI connection…";
 }
@@ -712,17 +728,29 @@ renderAi();
 
 relayInput.addEventListener("change", () => {
 	const value = relayInput.value.trim();
-	if (!validRelay(value)) {
-		relayInput.setCustomValidity("An http(s) or ws(s) address");
+	const refuse = (problem: string) => {
+		relayInput.setCustomValidity(problem);
 		relayInput.reportValidity();
-		return;
+	};
+	const problem = relayProblem(value);
+	if (problem !== undefined) return refuse(problem);
+	// Build the new connection first: the setting and the old connection
+	// change only once it exists.
+	let next: TabMcp;
+	try {
+		next = connectTo(value);
+	} catch (error) {
+		return refuse(error instanceof Error ? error.message : String(error));
 	}
 	relayInput.setCustomValidity("");
 	writeSetting(RELAY_KEY, value);
+	relayNote = undefined;
 	mcp.disconnect();
-	mcp = createConnection(value, store, caseChanged);
+	mcp = next;
 	watch(mcp);
 	renderAi();
+	if (keepOn.checked)
+		void mcp.connect({ resume: true }).catch(() => renderAi());
 });
 
 connectButton.addEventListener("click", () => {

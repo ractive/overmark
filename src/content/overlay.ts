@@ -86,6 +86,9 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
 .capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar,
 .capturing .review { display: none !important; }
+/* An AI app's screenshot of one element: only its temporary mark shows. */
+.marking .toolbar, .marking .popover, .marking .hover, .marking .reviewbar,
+.marking .review, .marking .drafts { display: none !important; }
 [hidden] { display: none !important; }
 `;
 
@@ -217,7 +220,8 @@ export class Overlay {
 						}),
 					]),
 		);
-		this.setCapturing(this.#marking);
+		// Its own class: a save's capturing state must survive an unmark.
+		this.layer.classList.toggle("marking", this.#marking);
 		this.#update();
 	}
 
