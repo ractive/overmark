@@ -1,9 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { inflateSync } from "node:zlib";
 import {
 	build,
+	checkOutdir,
 	createManifest,
 	extensionId,
 	readKey,
@@ -88,6 +90,54 @@ describe("build", () => {
 	});
 });
 
+describe("checkOutdir", () => {
+	const root = join(import.meta.dir, "..");
+
+	test("refuses the repository and its parents", async () => {
+		await expect(checkOutdir(root)).rejects.toThrow("holds the repository");
+		await expect(checkOutdir(dirname(root))).rejects.toThrow(
+			"holds the repository",
+		);
+		await expect(checkOutdir(`${root}/.`)).rejects.toThrow(
+			"holds the repository",
+		);
+	});
+
+	test("refuses a folder with other files", async () => {
+		const dir = tempDir();
+		writeFileSync(join(dir, "notes.txt"), "keep me");
+		await expect(checkOutdir(dir)).rejects.toThrow("not a build");
+		await expect(build({ outdir: dir })).rejects.toThrow("not a build");
+		expect(await Bun.file(join(dir, "notes.txt")).text()).toBe("keep me");
+	});
+
+	test("accepts a missing or empty folder and an earlier build", async () => {
+		const dir = tempDir();
+		await checkOutdir(dir);
+		await checkOutdir(join(dir, "missing"));
+		mkdirSync(join(dir, "old"));
+		writeFileSync(join(dir, "old", "manifest.json"), "{}");
+		writeFileSync(join(dir, "old", "content.js"), "");
+		await checkOutdir(join(dir, "old"));
+	});
+});
+
+/** The decoded scanlines of a PNG: IHDR plus the inflated IDAT data. */
+function pngPixels(png: Uint8Array): { header: number[]; data: Buffer } {
+	const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+	const idat: Uint8Array[] = [];
+	let header: number[] = [];
+	for (let at = 8; at < png.length; ) {
+		const length = view.getUint32(at);
+		const type = new TextDecoder().decode(png.subarray(at + 4, at + 8));
+		const data = png.subarray(at + 8, at + 8 + length);
+		if (type === "IHDR") header = [...data];
+		if (type === "IDAT") idat.push(data);
+		at += 12 + length;
+	}
+	return { header, data: inflateSync(Buffer.concat(idat)) };
+}
+
 describe("icons", () => {
 	test("are PNGs of the right size and match the committed ones", async () => {
 		for (const size of [16, 128]) {
@@ -100,7 +150,8 @@ describe("icons", () => {
 					join(import.meta.dir, `../assets/icons/icon-${size}.png`),
 				).arrayBuffer(),
 			);
-			expect(Buffer.from(committed).equals(Buffer.from(png))).toBe(true);
+			// Compare pixels, not bytes: another zlib may deflate them differently.
+			expect(pngPixels(committed)).toEqual(pngPixels(png));
 		}
 	});
 });

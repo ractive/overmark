@@ -12,7 +12,6 @@ export interface AnnotateTarget {
 	caseId: string;
 	title: string;
 	nextAnnotation: number;
-	nextShot: number;
 }
 
 /** What the side panel (or the service worker) asks the content script. */
@@ -75,6 +74,8 @@ export interface AnnotationMatch {
 	/** Which candidate is outlined. */
 	current: number;
 	candidates: CandidateInfo[];
+	/** Only part of the page was searched (very many elements, or out of time). */
+	truncated?: boolean;
 }
 
 export interface LoadResult {
@@ -83,7 +84,7 @@ export interface LoadResult {
 	matches: AnnotationMatch[];
 }
 
-/** The content script's answer to the `overlay:*` requests. */
+/** The content script's answer to the `overlay:*` and `case:clear` requests. */
 export interface OverlayState {
 	visible: boolean;
 	url: string;
@@ -98,9 +99,11 @@ export interface OverlayState {
 
 /** What the content script asks the service worker. */
 export type WorkerRequest =
+	/** Capture the visible tab as the pending screenshot `shotId` (save.ts). */
 	| { type: "capture"; caseId: string; shotId: string }
 	| { type: "case:save"; request: SaveRequest }
-	| { type: "images:discard"; caseId: string };
+	/** Remove the pending screenshots of a save that was given up. */
+	| { type: "images:discard"; caseId: string; shotIds: string[] };
 
 export type WorkerResponse<T = object> =
 	| ({ ok: true } & T)
@@ -118,8 +121,14 @@ export interface SaveResult {
 	annotations: number;
 }
 
-/** What the service worker tells extension pages. */
-export type Broadcast = { type: "cases:changed"; caseId: string };
+/**
+ * What extension pages hear without asking: the service worker saved a case,
+ * or a content script's overlay was shown or hidden (also from its own
+ * toolbar).
+ */
+export type Broadcast =
+	| { type: "cases:changed"; caseId: string }
+	| { type: "overlay:changed"; state: OverlayState };
 
 /** The content script's file, as the build writes it. */
 export const CONTENT_SCRIPT = "content.js";

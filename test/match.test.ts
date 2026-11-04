@@ -65,6 +65,31 @@ describe("matching v1 marks on v2", () => {
 		expect(classify(ranked)).toBe("lost");
 	});
 
+	test.each([
+		[
+			"a paragraph",
+			`<main><h2>Prices</h2><p data-gone>Prices rise by 3% in 2027.</p><p>Compare them with last year to see the change.</p></main>`,
+			"p[data-gone]",
+		],
+		[
+			"a list item",
+			`<main><ul><li data-gone>Free cancellation</li><li>Online support around the clock</li></ul></main>`,
+			"li[data-gone]",
+		],
+		[
+			"a button",
+			`<main><form><button data-gone type="button">Delete account</button><button type="button">Edit profile</button></form></main>`,
+			"button[data-gone]",
+		],
+	])("%s removed by the fix is lost, not its sibling", (_name, html, gone) => {
+		const window = new Window({ url: "https://www.example.com/kk" });
+		const v1 = window.document as unknown as Document;
+		v1.body.innerHTML = html;
+		const stored = describeElement(v1.querySelector(gone) as Element);
+		v1.querySelector(gone)?.remove();
+		expect(classify(rank(stored, details(v1).all))).toBe("lost");
+	});
+
 	test("two identical elements are a tie", () => {
 		const base: ElementDetails = {
 			tag: "p",

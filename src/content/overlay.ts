@@ -84,7 +84,8 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 6px; color: #fff; font: inherit;
 }
 .reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
-.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar, .capturing .review { display: none !important; }
+.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar,
+.capturing .review { display: none !important; }
 [hidden] { display: none !important; }
 `;
 
@@ -104,7 +105,7 @@ export interface ReviewItem {
 	number: number;
 	/** The element's box in window coordinates. */
 	rect: Rect;
-	/** `found`, else probable or ambiguous. */
+	/** The shown candidate is a confident, unambiguous match. */
 	found: boolean;
 	focused: boolean;
 }
@@ -131,6 +132,11 @@ export class Overlay {
 	#annotating = false;
 	#reviewing = false;
 	#marking = false;
+	/**
+	 * Called after the toolbar or the outlines are shown or hidden, including
+	 * by the overlay's own Close and Hide buttons.
+	 */
+	onChange: (() => void) | undefined;
 
 	constructor(doc: Document = document) {
 		this.doc = doc;
@@ -185,11 +191,13 @@ export class Overlay {
 	setAnnotating(on: boolean): void {
 		this.#annotating = on;
 		this.#update();
+		this.onChange?.();
 	}
 
 	setReviewing(on: boolean): void {
 		this.#reviewing = on;
 		this.#update();
+		this.onChange?.();
 	}
 
 	/**

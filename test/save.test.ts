@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Shot } from "../src/lib/case.ts";
-import { type AnnotationDraft, type Crop, saveCase } from "../src/lib/save.ts";
+import { pendingImage, type Shot } from "../src/lib/case.ts";
+import {
+	type AnnotationDraft,
+	type Crop,
+	type SaveRequest,
+	saveCase,
+} from "../src/lib/save.ts";
 import { MemoryStore } from "../src/lib/store.ts";
 
 const page = {
@@ -11,9 +16,10 @@ const page = {
 	userAgent: "test",
 };
 
+/** A shot with a provisional id, as the content script sends it. */
 const shot = (id: string): Shot => ({
 	id,
-	image: `shots/${id}.webp`,
+	image: pendingImage(id),
 	scrollX: 0,
 	scrollY: 0,
 	viewport: { width: 1280, height: 800, dpr: 2 },
@@ -31,100 +37,150 @@ const draft = (n: number, shotId: string): AnnotationDraft => ({
 	cropRect: { x: 0, y: 0, width: 140, height: 80 },
 });
 
-const crops: { rect: unknown; dpr: number }[] = [];
-const crop: Crop = async (_image, rect, dpr) => {
-	crops.push({ rect, dpr });
-	return { blob: new Blob(["crop"]), width: 280, height: 160 };
+let decodes = 0;
+const crop: Crop = async (_image, rects) => {
+	decodes++;
+	return rects.map(() => ({
+		blob: new Blob(["crop"]),
+		width: 280,
+		height: 160,
+	}));
 };
 
-async function withShot(store: MemoryStore, caseId: string, id: string) {
-	await store.putImage(caseId, `shots/${id}.webp`, {
-		blob: new Blob(["shot"]),
+async function captured(store: MemoryStore, caseId: string, shotId: string) {
+	await store.putImage(caseId, pendingImage(shotId), {
+		blob: new Blob([`shot ${shotId}`]),
 		width: 2560,
 		height: 1600,
 	});
 }
 
+function request(
+	caseId: string,
+	isNew: boolean,
+	shots: Shot[],
+	annotations: AnnotationDraft[],
+): SaveRequest {
+	return { caseId, isNew, title: "One", page, shots, annotations };
+}
+
+async function newCase(store: MemoryStore) {
+	await captured(store, "c_1", "p_a");
+	return saveCase(
+		store,
+		request("c_1", true, [shot("p_a")], [draft(1, "p_a"), draft(2, "p_a")]),
+		crop,
+	);
+}
+
+const keys = (store: MemoryStore) => [...store.images.keys()].sort();
+
 describe("saveCase", () => {
-	test("a new case with crops", async () => {
+	test("a new case: final shot ids, crops, one decode per screenshot, no pending images left", async () => {
 		const store = new MemoryStore();
-		await withShot(store, "c_1", "s1");
+		await captured(store, "c_1", "p_a");
+		const before = decodes;
 		const saved = await saveCase(
 			store,
 			{
-				caseId: "c_1",
-				isNew: true,
+				...request(
+					"c_1",
+					true,
+					[shot("p_a")],
+					[draft(1, "p_a"), draft(2, "p_a")],
+				),
 				title: "  Contrast  ",
-				page,
-				shots: [shot("s1")],
-				annotations: [draft(1, "s1"), draft(2, "s1")],
 			},
 			crop,
 			new Date("2026-11-04T12:00:00Z"),
 		);
+		expect(decodes - before).toBe(1);
 		expect(saved.title).toBe("Contrast");
-		expect(saved.annotations.map((a) => a.crop)).toEqual([
-			"crops/a1.webp",
-			"crops/a2.webp",
+		expect(saved.shots.map((s) => [s.id, s.image])).toEqual([
+			["s1", "shots/s1.webp"],
+		]);
+		expect(saved.annotations.map((a) => [a.shot, a.crop])).toEqual([
+			["s1", "crops/a1.webp"],
+			["s1", "crops/a2.webp"],
 		]);
 		expect("cropRect" in (saved.annotations[0] ?? {})).toBe(false);
-		expect(crops.at(-1)?.dpr).toBe(2);
-		expect(await store.getImage("c_1", "crops/a2.webp")).toBeDefined();
+		expect(keys(store)).toEqual([
+			"c_1/crops/a1.webp",
+			"c_1/crops/a2.webp",
+			"c_1/shots/s1.webp",
+		]);
 		expect((await store.getCase("c_1"))?.createdAt).toBe(
 			"2026-11-04T12:00:00.000Z",
 		);
 	});
 
-	test("adds to an existing case and keeps its verdict", async () => {
+	test("adding to a case keeps its title and verdict and numbers shots on", async () => {
 		const store = new MemoryStore();
-		await withShot(store, "c_1", "s1");
-		await saveCase(
-			store,
-			{
-				caseId: "c_1",
-				isNew: true,
-				title: "One",
-				page,
-				shots: [shot("s1")],
-				annotations: [draft(1, "s1")],
-			},
-			crop,
-		);
-		const stored = await store.getCase("c_1");
-		if (stored) await store.putCase({ ...stored, verdict: "Fix it" });
-		await withShot(store, "c_1", "s2");
+		await newCase(store);
+		await store.updateCase("c_1", (c) => ({
+			value: { ...(c as NonNullable<typeof c>), verdict: "Fix it" },
+		}));
+		await captured(store, "c_1", "p_b");
 		const saved = await saveCase(
 			store,
 			{
-				caseId: "c_1",
-				isNew: false,
-				title: "",
-				page,
-				shots: [shot("s2")],
-				annotations: [draft(2, "s2")],
+				...request("c_1", false, [shot("p_b")], [draft(3, "p_b")]),
+				title: "x",
 			},
 			crop,
 		);
 		expect(saved.title).toBe("One");
 		expect(saved.verdict).toBe("Fix it");
 		expect(saved.shots.map((s) => s.id)).toEqual(["s1", "s2"]);
-		expect(saved.annotations.map((a) => a.number)).toEqual([1, 2]);
+		expect(saved.annotations.map((a) => [a.number, a.shot])).toEqual([
+			[1, "s1"],
+			[2, "s1"],
+			[3, "s2"],
+		]);
 	});
 
-	test("a failed save removes the images it added", async () => {
+	test("a verdict saved while the crops are cut is kept", async () => {
 		const store = new MemoryStore();
-		await withShot(store, "c_1", "s1");
+		await newCase(store);
+		await captured(store, "c_1", "p_b");
+		const slowCrop: Crop = async (image, rects, dpr) => {
+			await store.updateCase("c_1", (c) => ({
+				value: { ...(c as NonNullable<typeof c>), verdict: "Agreed meanwhile" },
+			}));
+			return crop(image, rects, dpr);
+		};
+		const saved = await saveCase(
+			store,
+			request("c_1", false, [shot("p_b")], [draft(3, "p_b")]),
+			slowCrop,
+		);
+		expect(saved.verdict).toBe("Agreed meanwhile");
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(3);
+	});
+
+	test("a number the case has already is refused without touching its images", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		const before = new Map(store.images);
+		await captured(store, "c_1", "p_b");
 		await expect(
 			saveCase(
 				store,
-				{
-					caseId: "c_1",
-					isNew: true,
-					title: "x",
-					page,
-					shots: [shot("s1")],
-					annotations: [draft(1, "s1"), draft(1, "s1")], // number used twice
-				},
+				request("c_1", false, [shot("p_b")], [draft(1, "p_b")]),
+				crop,
+			),
+		).rejects.toThrow("mark 1 exists in the case already");
+		expect(store.images).toEqual(before);
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(2);
+	});
+
+	test("a number used twice in one save is refused and leaves nothing behind", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_1", "p_a");
+		await expect(
+			saveCase(
+				store,
+				request("c_1", true, [shot("p_a")], [draft(1, "p_a"), draft(1, "p_a")]),
 				crop,
 			),
 		).rejects.toThrow();
@@ -132,20 +188,30 @@ describe("saveCase", () => {
 		expect(await store.getCase("c_1")).toBeUndefined();
 	});
 
-	test("refuses to add to a missing case", async () => {
+	test("refuses to add to a missing case, or to overwrite one as new", async () => {
+		const store = new MemoryStore();
+		await expect(
+			saveCase(store, request("c_9", false, [], []), crop),
+		).rejects.toThrow("no longer exists");
+		await newCase(store);
+		await captured(store, "c_1", "p_b");
+		await expect(
+			saveCase(
+				store,
+				request("c_1", true, [shot("p_b")], [draft(5, "p_b")]),
+				crop,
+			),
+		).rejects.toThrow("exists already");
+		expect(store.images.has("c_1/pending/p_b.webp")).toBe(false);
+	});
+
+	test("a missing screenshot fails the save", async () => {
 		await expect(
 			saveCase(
 				new MemoryStore(),
-				{
-					caseId: "c_9",
-					isNew: false,
-					title: "",
-					page,
-					shots: [],
-					annotations: [],
-				},
+				request("c_1", true, [shot("p_a")], [draft(1, "p_a")]),
 				crop,
 			),
-		).rejects.toThrow("no longer exists");
+		).rejects.toThrow("the screenshot p_a is missing");
 	});
 });

@@ -6,8 +6,8 @@
  * storage.
  */
 
-import { shotImage } from "./lib/case.ts";
-import { cropImage, screenshotToWebp } from "./lib/images.ts";
+import { isSafeId, pendingImage } from "./lib/case.ts";
+import { cropImages, screenshotToWebp } from "./lib/images.ts";
 import type {
 	Broadcast,
 	CaptureResult,
@@ -15,7 +15,7 @@ import type {
 	WorkerRequest,
 	WorkerResponse,
 } from "./lib/messages.ts";
-import { discardUnsaved, saveCase } from "./lib/save.ts";
+import { saveCase } from "./lib/save.ts";
 import { IdbStore } from "./lib/store.ts";
 import { inject } from "./lib/tabs.ts";
 
@@ -37,12 +37,27 @@ const CAPTURE_GAP_MS = 600;
 let lastCapture = 0;
 let captureQueue: Promise<unknown> = Promise.resolve();
 
-function capture(windowId: number): Promise<string> {
+/** The tab must still be the one in front of its window, or the capture would show another. */
+async function ensureInFront(tabId: number, windowId: number): Promise<void> {
+	const tab = await chrome.tabs.get(tabId);
+	if (!tab.active || tab.windowId !== windowId)
+		throw new Error(
+			"The tab is no longer in front; switch back to it and save again.",
+		);
+}
+
+/** Capture the tab, which must be the one in front of its window before and after. */
+function capture(tabId: number, windowId: number): Promise<string> {
 	const run = async () => {
 		const wait = lastCapture + CAPTURE_GAP_MS - Date.now();
 		if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 		try {
-			return await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+			await ensureInFront(tabId, windowId);
+			const image = await chrome.tabs.captureVisibleTab(windowId, {
+				format: "png",
+			});
+			await ensureInFront(tabId, windowId);
+			return image;
 		} finally {
 			lastCapture = Date.now();
 		}
@@ -66,17 +81,19 @@ async function handle(
 ): Promise<object> {
 	switch (request.type) {
 		case "capture": {
-			const windowId = sender.tab?.windowId;
-			if (windowId === undefined) throw new Error("not sent from a tab");
-			const image = await screenshotToWebp(await capture(windowId));
-			await store.putImage(request.caseId, shotImage(request.shotId), image);
+			const tab = sender.tab;
+			if (tab?.id === undefined) throw new Error("not sent from a tab");
+			if (!isSafeId(request.caseId) || !isSafeId(request.shotId))
+				throw new Error("invalid id");
+			const image = await screenshotToWebp(await capture(tab.id, tab.windowId));
+			await store.putImage(request.caseId, pendingImage(request.shotId), image);
 			return {
 				width: image.width,
 				height: image.height,
 			} satisfies CaptureResult;
 		}
 		case "case:save": {
-			const saved = await saveCase(store, request.request, cropImage);
+			const saved = await saveCase(store, request.request, cropImages);
 			await broadcast({ type: "cases:changed", caseId: saved.id });
 			return {
 				caseId: saved.id,
@@ -85,7 +102,10 @@ async function handle(
 			} satisfies SaveResult;
 		}
 		case "images:discard":
-			await discardUnsaved(store, request.caseId);
+			await store.deleteImages(
+				request.caseId,
+				request.shotIds.filter(isSafeId).map(pendingImage),
+			);
 			return {};
 	}
 }

@@ -29,23 +29,39 @@ export const WEIGHTS = {
 	size: 0.5,
 } as const;
 
-function bigrams(s: string): Map<string, number> {
-	const out = new Map<string, number>();
-	for (let i = 0; i < s.length - 1; i++) {
-		const g = s.slice(i, i + 2);
-		out.set(g, (out.get(g) ?? 0) + 1);
+interface Grams {
+	text: string;
+	grams: Map<string, number>;
+}
+
+/**
+ * Normalised text and its bigrams, remembered: loading a case compares the
+ * same strings thousands of times. The cache is emptied when it grows large.
+ */
+const gramCache = new Map<string, Grams>();
+
+function grams(s: string): Grams {
+	let found = gramCache.get(s);
+	if (found === undefined) {
+		const text = s.toLowerCase().replace(/\s+/g, " ").trim();
+		const out = new Map<string, number>();
+		for (let i = 0; i < text.length - 1; i++) {
+			const g = text.slice(i, i + 2);
+			out.set(g, (out.get(g) ?? 0) + 1);
+		}
+		if (gramCache.size > 50_000) gramCache.clear();
+		found = { text, grams: out };
+		gramCache.set(s, found);
 	}
-	return out;
+	return found;
 }
 
 /** Dice coefficient of character bigrams, ignoring case and spacing (0 to 1). */
 export function textSimilarity(a: string, b: string): number {
-	const x = a.toLowerCase().replace(/\s+/g, " ").trim();
-	const y = b.toLowerCase().replace(/\s+/g, " ").trim();
+	const { text: x, grams: gx } = grams(a);
+	const { text: y, grams: gy } = grams(b);
 	if (x === y) return 1;
 	if (x.length < 2 || y.length < 2) return 0;
-	const gx = bigrams(x);
-	const gy = bigrams(y);
 	let shared = 0;
 	for (const [g, n] of gx) shared += Math.min(n, gy.get(g) ?? 0);
 	return (2 * shared) / (x.length - 1 + (y.length - 1));
@@ -84,6 +100,39 @@ function centre(d: ElementDetails): { x: number; y: number } | undefined {
 		x: (d.rect.x + d.rect.width / 2) / d.page.width,
 		y: (d.rect.y + d.rect.height / 2) / d.page.height,
 	};
+}
+
+/**
+ * How much a candidate shares what identifies the stored element (its test
+ * id, id, accessible name or text), 0 to 1; `undefined` when the stored
+ * element has none of these.
+ */
+export function identity(
+	stored: ElementDetails,
+	candidate: ElementDetails,
+): number | undefined {
+	if (stored.testId && candidate.testId === stored.testId) return 1;
+	if (stored.id && candidate.id === stored.id) return 1;
+	const texts: number[] = [];
+	if (stored.name)
+		texts.push(textSimilarity(stored.name, candidate.name ?? ""));
+	if (stored.text)
+		texts.push(textSimilarity(stored.text, candidate.text ?? ""));
+	if (texts.length > 0) return Math.max(...texts);
+	return stored.testId || stored.id ? 0 : undefined;
+}
+
+/**
+ * The share of the context score a candidate keeps by its identity: siblings
+ * share tag, classes, heading and position, so without this the neighbour of
+ * a removed element would be "found". An element whose name and text were
+ * rewritten completely is therefore reported lost: the screenshot still
+ * shows what was meant.
+ */
+function identityFactor(value: number | undefined): number {
+	if (value === undefined || value >= 0.7) return 1;
+	if (value <= 0.5) return 0.5;
+	return 0.5 + (value - 0.5) * 2.5;
 }
 
 /** How alike a candidate is to the stored element (0 to 1). */
@@ -141,7 +190,8 @@ export function score(
 			WEIGHTS.size,
 			areaB > 0 ? Math.min(areaA, areaB) / Math.max(areaA, areaB) : 0,
 		);
-	return weight === 0 ? 0 : total / weight;
+	if (weight === 0) return 0;
+	return (total / weight) * identityFactor(identity(stored, candidate));
 }
 
 export interface Ranked {
