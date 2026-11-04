@@ -10,6 +10,7 @@ import type {
 	ContentRequest,
 	DescribedElement,
 } from "../lib/messages.ts";
+import { PageActivity } from "./activity.ts";
 import { Annotator } from "./annotator.ts";
 import { PageBlur } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
@@ -20,31 +21,28 @@ declare global {
 }
 
 const pageBlur = new PageBlur(document);
+const activity = new PageActivity();
 
 /** Lets go of the blur an AI app's `element:mark` or `page:blur` holds. */
 let releaseBlur: (() => void) | undefined;
-
-function blur(allForms: boolean): void {
-	releaseBlur?.();
-	releaseBlur = pageBlur.hold(allForms);
-}
 
 function unblur(): void {
 	releaseBlur?.();
 	releaseBlur = undefined;
 }
 
-const SAVING =
-	"The user is saving marks on this page right now; try again in a few seconds.";
+/** An AI app's screenshot is over (or abandoned): its mark and blur go. */
+function endAi(overlay: Overlay): void {
+	overlay.setTemporaryMark(null);
+	unblur();
+}
 
 function mark(
 	overlay: Overlay,
-	annotator: Annotator,
 	selector: string,
 	number: number,
 	blurForms: boolean,
 ): DescribedElement {
-	if (annotator.state().saving) return { ok: false, error: SAVING };
 	let el: Element | null;
 	try {
 		el = document.querySelector(selector);
@@ -53,6 +51,8 @@ function mark(
 	}
 	if (el === null || overlay.host.contains(el))
 		return { ok: false, error: `No element on this page matches ${selector}` };
+	const started = activity.begin("ai-mark", () => endAi(overlay));
+	if (!started.ok) return started;
 	el.scrollIntoView({
 		block: "center",
 		inline: "nearest",
@@ -61,7 +61,7 @@ function mark(
 	const r = el.getBoundingClientRect();
 	const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
 	overlay.setTemporaryMark({ number, rect });
-	blur(blurForms);
+	releaseBlur = pageBlur.hold(blurForms);
 	return {
 		ok: true,
 		details: describeElement(el),
@@ -82,7 +82,7 @@ function start(): void {
 	// behind; its script can no longer be reached, so take the page over.
 	document.getElementById(HOST_ID)?.remove();
 	const overlay = new Overlay(document);
-	const annotator = new Annotator(overlay, pageBlur);
+	const annotator = new Annotator(overlay, pageBlur, activity);
 	const reviewer = new Reviewer(overlay);
 	const state = () => {
 		const s = annotator.state();
@@ -134,29 +134,22 @@ function start(): void {
 					break;
 				case "element:mark":
 					sendResponse(
-						mark(
-							overlay,
-							annotator,
-							message.selector,
-							message.number,
-							message.blurForms,
-						),
+						mark(overlay, message.selector, message.number, message.blurForms),
 					);
 					break;
 				case "element:unmark":
-					overlay.setTemporaryMark(null);
-					unblur();
+					activity.end("ai-mark");
+					endAi(overlay);
 					sendResponse(state());
 					break;
-				case "page:blur":
-					if (annotator.state().saving) {
-						sendResponse({ ok: false, error: SAVING } satisfies BlurResult);
-						break;
-					}
-					blur(message.blurForms);
-					sendResponse({ ok: true } satisfies BlurResult);
+				case "page:blur": {
+					const started = activity.begin("ai-capture", () => endAi(overlay));
+					if (started.ok) releaseBlur = pageBlur.hold(message.blurForms);
+					sendResponse(started satisfies BlurResult);
 					break;
+				}
 				case "page:unblur":
+					activity.end("ai-capture");
 					unblur();
 					sendResponse(state());
 					break;

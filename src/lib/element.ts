@@ -1,8 +1,30 @@
 /**
  * Describing an element: the details a case stores for each annotation, and
- * that matching (match.ts) compares on another build. What a user typed is
- * never read: neither form field values nor the text of editable regions
- * (`contenteditable`, `role="textbox"`).
+ * that matching (match.ts) compares on another build.
+ *
+ * What is recorded is this list and nothing else (DEC-009). All of it comes
+ * from the page's markup and its rendered text; nothing a user typed (field
+ * values, editor text) is ever read, and links lose their query and fragment,
+ * which can carry personal data or tokens.
+ *
+ * | Field | From | Limit |
+ * |---|---|---|
+ * | `tag` | the element's name | |
+ * | `id` | `id`, when it looks hand-written (classes.ts) | 100 |
+ * | `testId` | the first of `TEST_ID_ATTRIBUTES` | 300 |
+ * | `role` | `role`, else the role the tag implies | |
+ * | `name` | accessible name: `aria-label`, `aria-labelledby`, `alt`, a label's text, `placeholder`, `title`, or the text for buttons, links, headings | 200 |
+ * | `text` | rendered text without fields, editors, scripts and styles (`pageText`) | 200 |
+ * | `classes` | the readable part of each class (classes.ts) | 20 |
+ * | `attributes` | `ATTRIBUTE_RULES`: name, type, href (path), src (file name), placeholder, alt, title | 300 each |
+ * | `heading` | the text of the nearest heading before it | 200 |
+ * | `landmark` | role and name of the landmark around it | 200 |
+ * | `ancestors` | up to six: tag plus test id or first readable class | |
+ * | `rect`, `page` | position and size, the page's size | |
+ * | `selector` | a CSS selector built from the above | |
+ *
+ * The text of an editable element itself is not recorded either, and neither
+ * its name from content.
  */
 
 import { ELEMENT_ATTRIBUTES, type ElementDetails, type Rect } from "./case.ts";
@@ -304,29 +326,60 @@ export function ancestorsOf(el: Element, depth = 6): string[] {
 	return out;
 }
 
+const ATTRIBUTE_LIMIT = 300;
+
+/** A URL of the page: `data:` keeps its type only, others are resolved. */
+function url(value: string, el: Element): URL | undefined {
+	try {
+		return new URL(value, el.ownerDocument.baseURI);
+	} catch {
+		return undefined;
+	}
+}
+
+const kept = (value: string) => value;
+
+/**
+ * The attributes recorded, each through its rule; an attribute without a rule
+ * here is never recorded. `undefined` leaves it out.
+ */
+export const ATTRIBUTE_RULES: Record<
+	(typeof ELEMENT_ATTRIBUTES)[number],
+	(value: string, el: Element) => string | undefined
+> = {
+	name: kept,
+	type: kept,
+	placeholder: kept,
+	alt: kept,
+	title: kept,
+	/** The path (with the host for other sites); never the query or fragment. */
+	href(value, el) {
+		const u = url(value, el);
+		if (u === undefined) return undefined;
+		if (u.protocol === "data:")
+			return `data:${u.pathname.split(/[;,]/)[0] ?? ""}`;
+		if (u.protocol !== "http:" && u.protocol !== "https:")
+			return `${u.protocol}`;
+		const own = url(el.ownerDocument.baseURI, el)?.origin === u.origin;
+		return own ? u.pathname : `${u.host}${u.pathname}`;
+	},
+	/** The file name only. */
+	src(value, el) {
+		const u = url(value, el);
+		if (u === undefined) return undefined;
+		if (u.protocol === "data:")
+			return `data:${u.pathname.split(/[;,]/)[0] ?? ""}`;
+		return u.pathname.split("/").pop() || undefined;
+	},
+};
+
 function attributesOf(el: Element): Record<string, string> {
 	const out: Record<string, string> = {};
 	for (const name of ELEMENT_ATTRIBUTES) {
 		const value = el.getAttribute(name);
 		if (value === null || value === "") continue;
-		if (name === "href" || name === "src") {
-			try {
-				const url = new URL(value, el.ownerDocument.baseURI);
-				const shown =
-					url.protocol === "data:"
-						? `data:${url.pathname.split(/[;,]/)[0] ?? ""}`
-						: name === "src"
-							? (url.pathname.split("/").pop() ?? "")
-							: url.origin === new URL(el.ownerDocument.baseURI).origin
-								? url.pathname + url.search
-								: `${url.host}${url.pathname}`;
-				out[name] = shown.slice(0, 300);
-			} catch {
-				out[name] = value.slice(0, 300);
-			}
-			continue;
-		}
-		out[name] = value.slice(0, 300);
+		const recorded = ATTRIBUTE_RULES[name](value, el);
+		if (recorded) out[name] = recorded.slice(0, ATTRIBUTE_LIMIT);
 	}
 	return out;
 }

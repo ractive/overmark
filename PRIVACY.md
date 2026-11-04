@@ -16,7 +16,8 @@ When you save marks as a case, Overmark stores in your browser, on your computer
   text, a hand-written `id` and a test id (`data-testid`, `data-test`, `data-test-id`,
   `data-qa`, `data-cy`) if it has them, the readable part of its CSS classes, a few
   attributes (`name`, `type`, `placeholder`, `alt`, `title`, the image file name, and a
-  link's path with its query string, or the host and path for a link to another site),
+  link's path, or the host and path for a link to another site; never a link's query
+  string or fragment),
   the heading above it, its landmark, up to six of the elements around it (tag with
   test id or class), its position, the page's size, and a CSS selector;
 - screenshots of the visible part of the tab, with the marks on them, and a crop per

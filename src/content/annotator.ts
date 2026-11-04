@@ -34,6 +34,7 @@ import type {
 	WorkerResponse,
 } from "../lib/messages.ts";
 import { type AnnotationDraft, cropRectFor } from "../lib/save.ts";
+import type { PageActivity, ShowOptions } from "./activity.ts";
 import { elementAt, elementForRect } from "./anchor.ts";
 import type { PageBlur } from "./blur.ts";
 import type { Overlay } from "./overlay.ts";
@@ -94,20 +95,17 @@ export class Annotator {
 	#editing: Draft | null = null;
 	#target: AnnotateTarget | undefined;
 	#blurForms = false;
-	#saving = false;
-	/** "Stop annotating" arrived during a save: hide once it is done (if it worked). */
-	#hideAfterSave = false;
-	/** "Add marks" for another case arrived during a save: switch once it is done. */
-	#showAfterSave: { target?: AnnotateTarget; blurForms?: boolean } | undefined;
 	#saveForm = false;
 	#message = "";
 	#frame = 0;
 
 	readonly #pageBlur: PageBlur;
+	readonly #activity: PageActivity;
 
-	constructor(overlay: Overlay, blur: PageBlur) {
+	constructor(overlay: Overlay, blur: PageBlur, activity: PageActivity) {
 		this.overlay = overlay;
 		this.#pageBlur = blur;
+		this.#activity = activity;
 		const capture = overlay.capture;
 		capture.addEventListener("pointermove", (e) => this.#move(e));
 		capture.addEventListener("pointerdown", (e) => this.#down(e));
@@ -139,41 +137,35 @@ export class Annotator {
 			url: location.href,
 			title: document.title,
 			drafts: this.#drafts.length,
-			saving: this.#saving,
+			saving: this.#activity.saving,
 		};
 		if (this.#target) state.target = this.#target;
 		return state;
 	}
 
-	show(options: { target?: AnnotateTarget; blurForms?: boolean }): void {
-		if (this.#saving) {
-			// The running save keeps its case; the new one applies when it is done.
-			this.#showAfterSave = options;
-		} else {
+	show(options: ShowOptions): void {
+		// During a save its case stays; the new one applies when it is over.
+		if (!this.#activity.defer({ kind: "show", options })) {
 			this.#target = options.target;
 			this.#blurForms = options.blurForms ?? false;
 			this.#message = "";
 			this.#renumber();
 		}
-		this.#hideAfterSave = false;
 		this.overlay.setAnnotating(true);
 		this.#renderToolbar();
 		this.#render();
 	}
 
 	hide(): void {
-		if (this.#saving) {
-			// The remaining screenshots still need the marks.
-			this.#hideAfterSave = true;
-			return;
-		}
+		// The remaining screenshots of a save still need the marks.
+		if (this.#activity.defer({ kind: "hide" })) return;
 		if (this.#editing !== null) this.#commitComment();
 		this.setTool(null);
 		this.overlay.setAnnotating(false);
 	}
 
 	setTool(tool: Tool | null): void {
-		if (!this.#saving) this.#message = "";
+		if (!this.#activity.saving) this.#message = "";
 		this.#tool = tool;
 		this.#hover = null;
 		this.#drag = null;
@@ -453,7 +445,7 @@ export class Annotator {
 			return s;
 		};
 		const count = this.#drafts.length;
-		if (this.#saving) {
+		if (this.#activity.saving) {
 			status.textContent = this.#message || "Saving…";
 			bar.replaceChildren(brand, status);
 			return;
@@ -542,11 +534,10 @@ export class Annotator {
 
 	/** Save the marks as a new case, or add them to the target case. */
 	async save(title: string): Promise<SaveResult | undefined> {
-		if (this.#saving || this.#drafts.length === 0) return undefined;
-		if (this.overlay.marking || this.#pageBlur.held > 0) {
-			// An AI app is taking a screenshot of this page right now.
-			this.#message =
-				"An AI app is taking a screenshot; save again in a moment.";
+		if (this.#activity.saving || this.#drafts.length === 0) return undefined;
+		const started = this.#activity.begin("saving");
+		if (!started.ok) {
+			this.#message = started.error;
 			this.#renderToolbar();
 			return undefined;
 		}
@@ -557,7 +548,6 @@ export class Annotator {
 		const caseId = target?.caseId ?? newId("c");
 		const drafts = [...this.#drafts];
 		const start = this.#scroll();
-		this.#saving = true;
 		this.#saveForm = false;
 		this.setTool(null);
 		const captured: string[] = [];
@@ -674,16 +664,13 @@ export class Annotator {
 			return undefined;
 		} finally {
 			win.scrollTo({ left: start.x, top: start.y, behavior: "instant" });
-			this.#saving = false;
-			const next = this.#showAfterSave;
-			this.#showAfterSave = undefined;
-			if (this.#hideAfterSave) {
-				this.#hideAfterSave = false;
+			const afterwards = this.#activity.end("saving") ?? { kind: "stay" };
+			if (afterwards.kind === "hide") {
 				// A failed save stays up with its error, or its marks would be lost.
 				if (saved) this.hide();
-			} else if (next !== undefined) {
+			} else if (afterwards.kind === "show") {
 				const message = this.#message;
-				this.show(next);
+				this.show(afterwards.options);
 				this.#message = message;
 			}
 			this.#renderToolbar();

@@ -164,6 +164,54 @@ describe("describeElement", () => {
 		expect(describeElement($("#scripted")).text).toBe("Visible");
 	});
 
+	test("records the allow-listed details and nothing else", () => {
+		doc.body.insertAdjacentHTML(
+			"beforeend",
+			`<a id="link" href="/konto?token=secret-token&email=a%40b.ch#private" data-foo="secret-data" onclick="secret()" aria-describedby="x" style="color: red" title="Konto">Mein Konto</a>
+			<input id="field" name="email" type="email" value="secret-value" placeholder="E-Mail" />
+			<a id="mail" href="mailto:a@b.ch?subject=secret">Mail</a>`,
+		);
+		(doc.getElementById("field") as HTMLInputElement).value = "typed-secret";
+		const allowed = new Set([
+			"tag",
+			"id",
+			"testId",
+			"role",
+			"name",
+			"text",
+			"classes",
+			"attributes",
+			"heading",
+			"landmark",
+			"ancestors",
+			"rect",
+			"page",
+			"selector",
+		]);
+		for (const id of ["link", "field", "mail"]) {
+			const d = describeElement($(`#${id}`));
+			for (const key of Object.keys(d)) expect(allowed.has(key)).toBe(true);
+			for (const key of Object.keys(d.attributes))
+				expect([
+					"name",
+					"type",
+					"href",
+					"src",
+					"placeholder",
+					"alt",
+					"title",
+				]).toContain(key);
+			expect(JSON.stringify(d)).not.toContain("secret");
+		}
+		expect(describeElement($("#link")).attributes["href"]).toBe("/konto");
+		expect(describeElement($("#mail")).attributes["href"]).toBe("mailto:");
+		expect(describeElement($("#field")).attributes).toEqual({
+			name: "email",
+			type: "email",
+			placeholder: "E-Mail",
+		});
+	});
+
 	test("summary", () => {
 		expect(summarize(describeElement($("form button")))).toBe(
 			'button "Prämien berechnen" · Button_primary · under "Krankenkassen vergleichen"',

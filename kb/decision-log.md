@@ -78,3 +78,24 @@ consequential tool of a `TabMcp` or for none, so Overmark turns it off: `add_ann
 `set_verdict` and `delete_case` ask in the side panel each time. The question names the
 case and the page (an `onConfirm` that adds them to the description, then hands over to
 `confirmInPage`). A per-tool "Always allow" would need a client release that offers it.
+
+## DEC-009: What is recorded about an element is an allow-list
+
+The reviews found typed text leaking into element details twice (through an editor's
+wrapper, through a textarea's text). Instead of subtracting cases from "the element's
+text", `src/lib/element.ts` names every recorded field with its source and limit, and
+`ATTRIBUTE_RULES` every recorded attribute with its rule; an attribute without a rule is
+never read. Text comes only from `pageText`, which skips fields, editors, scripts and
+styles. Links keep their path only: a query string or fragment can carry personal data
+or tokens. Matching compares link paths, which is enough to tell links apart.
+
+## DEC-010: The page's one state machine
+
+The content script guarded the user's save against an AI app's screenshot (and the
+other way round) with flags spread over three files (`#saving`, `#hideAfterSave`,
+`#showAfterSave`, the temporary mark, blur holders); every review found another race.
+`PageActivity` (`src/content/activity.ts`) holds exactly one of idle, saving, an AI
+mark or an AI capture. What arrives during a save is refused (AI) or recorded as what
+to do afterwards (toolbar: show another case, or hide if the save worked). An AI
+activity ends by itself after 10 s, so a side panel that crashed cannot block saving.
+
