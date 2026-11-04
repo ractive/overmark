@@ -2,9 +2,22 @@
  * The side panel: the tab in front, annotating it, and the saved cases.
  */
 
-import { type Annotation, type Case, nextNumbers } from "../lib/case.ts";
+import {
+	type Annotation,
+	type Case,
+	MAX_VERDICT,
+	nextNumbers,
+	validateCase,
+} from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
-import { exportCase, exportFileName, importCase } from "../lib/export.ts";
+import {
+	exportCase,
+	exportFileName,
+	MAX_IMPORT_BYTES,
+	type ParsedExport,
+	readExport,
+	storeImport,
+} from "../lib/export.ts";
 import type {
 	AnnotationMatch,
 	Broadcast,
@@ -38,6 +51,10 @@ const KEEP_ON_KEY = "overmark:keep-ai-on";
 
 let overlay: OverlayState | undefined;
 let tabUrl = "";
+/** The tab the panel shows. */
+let shownTabId: number | undefined;
+/** Bumped by every newer piece of news, so an older `refreshTab()` drops its result. */
+let generation = 0;
 let openCaseId: string | undefined;
 let objectUrls: string[] = [];
 /** The case loaded onto a tab, and where its marks were found there. */
@@ -92,6 +109,7 @@ function renderOverlay(): void {
 async function startAnnotating(target?: Case): Promise<void> {
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
+	generation++; // a refresh still running must not overwrite this
 	try {
 		const next = nextNumbers(target);
 		overlay = await sendToTab(tab.id, {
@@ -103,7 +121,6 @@ async function startAnnotating(target?: Case): Promise<void> {
 							caseId: target.id,
 							title: target.title,
 							nextAnnotation: next.annotation,
-							nextShot: next.shot,
 						},
 					}
 				: {}),
@@ -115,10 +132,24 @@ async function startAnnotating(target?: Case): Promise<void> {
 	renderOverlay();
 }
 
+/** The overlay's state on the tab, or `undefined` where it is not injected. */
+async function overlayState(tabId: number): Promise<OverlayState | undefined> {
+	try {
+		return (await chrome.tabs.sendMessage(tabId, {
+			type: "overlay:state",
+		})) as OverlayState;
+	} catch {
+		return undefined;
+	}
+}
+
 annotate.addEventListener("click", async () => {
+	const tab = await activeTab();
+	if (tab?.id === undefined) return;
+	generation++; // a refresh still running must not overwrite this
+	// Ask the page: the state may have changed while no panel was listening.
+	overlay = await overlayState(tab.id);
 	if (overlay?.visible) {
-		const tab = await activeTab();
-		if (tab?.id === undefined) return;
 		try {
 			overlay = await sendToTab(tab.id, { type: "overlay:hide" });
 		} catch (error) {
@@ -131,34 +162,113 @@ annotate.addEventListener("click", async () => {
 });
 
 async function refreshTab(): Promise<void> {
+	const mine = ++generation;
 	const tab = await activeTab();
+	if (mine !== generation) return;
+	shownTabId = tab?.id;
 	tabUrl = tab?.url ?? "";
 	pageText.textContent = tab?.url
 		? shortUrl(tab.url)
 		: (tab?.title ?? "This page");
 	showHint(undefined);
-	overlay = undefined;
-	if (tab?.id !== undefined) {
-		try {
-			overlay = (await chrome.tabs.sendMessage(tab.id, {
-				type: "overlay:state",
-			})) as OverlayState;
-		} catch {
-			// Not injected on this page yet.
-		}
-	}
+	const state = tab?.id === undefined ? undefined : await overlayState(tab.id);
+	if (mine !== generation) return;
+	overlay = state;
+	if (
+		loaded !== undefined &&
+		(tab?.id !== loaded.tabId || overlay?.loadedCase !== loaded.caseId)
+	)
+		forgetLoaded();
 	renderOverlay();
 	await renderCases();
 }
 
+/** The loaded case's results no longer describe the tab: drop them. */
+function forgetLoaded(): void {
+	const caseId = loaded?.caseId;
+	loaded = undefined;
+	if (caseId !== undefined && openCaseId === caseId) void openCase(caseId);
+}
+
 importButton.addEventListener("click", () => importFile.click());
+const importPrompt = h("div", {
+	class: "hint",
+	id: "import-prompt",
+	hidden: true,
+});
+importButton.parentElement?.after(importPrompt);
+
+async function finishImport(
+	parsed: ParsedExport,
+	options: { copy?: boolean } = {},
+): Promise<void> {
+	importPrompt.hidden = true;
+	importPrompt.replaceChildren();
+	const c = await storeImport(store, parsed, options);
+	await openCase(c.id);
+}
+
+/** Ask before an import replaces a case that is here already. */
+function askReplace(parsed: ParsedExport, existing: Case): void {
+	const fail = (error: unknown) =>
+		showHint(
+			`Could not import: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	importPrompt.replaceChildren(
+		h(
+			"p",
+			{},
+			`“${existing.title}” is here already (changed ${formatDate(existing.updatedAt)}); the file's copy was changed ${formatDate(parsed.case.updatedAt)}.`,
+		),
+		h(
+			"div",
+			{ class: "row" },
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "import-replace",
+					onclick: () => void finishImport(parsed).catch(fail),
+				},
+				"Replace it",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "import-copy",
+					onclick: () => void finishImport(parsed, { copy: true }).catch(fail),
+				},
+				"Keep both",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					onclick: () => {
+						importPrompt.hidden = true;
+						importPrompt.replaceChildren();
+					},
+				},
+				"Cancel",
+			),
+		),
+	);
+	importPrompt.hidden = false;
+}
+
 importFile.addEventListener("change", async () => {
 	const file = importFile.files?.[0];
 	importFile.value = "";
 	if (file === undefined) return;
+	showHint(undefined);
 	try {
-		const c = await importCase(store, new Uint8Array(await file.arrayBuffer()));
-		await openCase(c.id);
+		if (file.size > MAX_IMPORT_BYTES)
+			throw new Error(`it is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB`);
+		const parsed = await readExport(new Uint8Array(await file.arrayBuffer()));
+		const existing = await store.getCase(parsed.case.id);
+		if (existing !== undefined) askReplace(parsed, existing);
+		else await finishImport(parsed);
 	} catch (error) {
 		showHint(
 			`Could not import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
@@ -246,6 +356,8 @@ async function imageUrl(
 const percent = (score: number) => `${Math.round(score * 100)}%`;
 
 function matchText(m: AnnotationMatch): string {
+	if (m.current > 0)
+		return `Candidate ${m.current + 1} of ${m.candidates.length} (${percent(m.score)})`;
 	switch (m.status) {
 		case "found":
 			return `Found here (${percent(m.score)})`;
@@ -254,7 +366,9 @@ function matchText(m: AnnotationMatch): string {
 		case "ambiguous":
 			return `Unsure: candidate ${m.current + 1} of ${m.candidates.length}`;
 		case "lost":
-			return "Not found on this page";
+			return m.truncated
+				? "Not found in the part of the page searched"
+				: "Not found on this page";
 		case "no-element":
 			return "No element recorded";
 	}
@@ -318,7 +432,13 @@ async function showMatch(a: Annotation, candidate: number): Promise<void> {
 			annotationId: a.id,
 			candidate,
 		})) as AnnotationMatch | null;
-		if (m === null) return;
+		if (m === null) {
+			forgetLoaded();
+			showCaseHint(
+				"The case is no longer loaded on that tab. Load it again to see its marks there.",
+			);
+			return;
+		}
 		loaded.matches.set(a.id, m);
 		const view = matchView(a);
 		if (view) document.getElementById(`match-${a.id}`)?.replaceWith(view);
@@ -338,10 +458,11 @@ async function loadOntoTab(c: Case): Promise<void> {
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
 	try {
-		const result = await sendToTab<LoadResult>(tab.id, {
+		const result = await sendToTab<LoadResult | { error: string }>(tab.id, {
 			type: "case:load",
 			case: c,
 		});
+		if ("error" in result) throw new Error(result.error);
 		loaded = {
 			caseId: c.id,
 			tabId: tab.id,
@@ -380,31 +501,53 @@ async function download(c: Case): Promise<void> {
 async function openCase(id: string): Promise<void> {
 	const c = await store.getCase(id);
 	if (c === undefined) return closeCase();
+	// Keep a verdict being typed when the case is shown again (marks added meanwhile).
+	const previous = caseView.querySelector<HTMLTextAreaElement>("#verdict");
+	const typing =
+		previous !== null &&
+		previous.dataset["case"] === id &&
+		previous.value !== previous.dataset["saved"]
+			? previous.value
+			: undefined;
 	openCaseId = id;
 	releaseImages();
 	const verdict = h("textarea", {
 		id: "verdict",
 		placeholder: "What should change, as agreed?",
+		maxlength: String(MAX_VERDICT),
+		"data-case": id,
 	});
-	verdict.value = c.verdict ?? "";
+	verdict.dataset["saved"] = c.verdict ?? "";
+	verdict.value = typing ?? c.verdict ?? "";
 	const saveVerdict = h(
 		"button",
 		{ type: "button", id: "save-verdict" },
 		"Save verdict",
 	);
 	saveVerdict.addEventListener("click", async () => {
-		const current = await store.getCase(id);
-		if (current === undefined) return;
 		const text = verdict.value.trim();
-		await store.putCase({
-			...current,
-			verdict: text === "" ? null : text,
-			updatedAt: new Date().toISOString(),
-		});
-		saveVerdict.textContent = "Saved";
+		try {
+			// One transaction, so marks saved meanwhile are kept.
+			await store.updateCase(id, (current) => {
+				if (current === undefined)
+					throw new Error("The case no longer exists.");
+				return {
+					value: validateCase({
+						...current,
+						verdict: text === "" ? null : text,
+						updatedAt: new Date().toISOString(),
+					}),
+				};
+			});
+			verdict.dataset["saved"] = text;
+			verdict.value = text;
+			saveVerdict.textContent = "Saved";
+		} catch (error) {
+			saveVerdict.textContent = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
+		}
 		setTimeout(() => {
 			saveVerdict.textContent = "Save verdict";
-		}, 1500);
+		}, 2500);
 	});
 	const del = h(
 		"button",
@@ -595,17 +738,36 @@ keepOn.addEventListener("change", () =>
 if (keepOn.checked) void mcp.connect({ resume: true }).catch(() => renderAi());
 
 chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
-	if (sender.id !== chrome.runtime.id || message?.type !== "cases:changed")
-		return false;
-	if (openCaseId === message.caseId) void openCase(message.caseId);
-	else void renderCases();
-	void refreshTab();
+	if (sender.id !== chrome.runtime.id) return false;
+	if (message?.type === "overlay:changed") {
+		// The page's own Hide removed the loaded case's outlines.
+		if (
+			loaded !== undefined &&
+			sender.tab?.id === loaded.tabId &&
+			message.state.loadedCase !== loaded.caseId
+		)
+			forgetLoaded();
+		// From a content script; only the tab the panel shows matters.
+		if (sender.tab?.id === undefined || sender.tab.id !== shownTabId)
+			return false;
+		generation++;
+		overlay = message.state;
+		renderOverlay();
+	} else if (message?.type === "cases:changed") {
+		if (openCaseId === message.caseId) void openCase(message.caseId);
+		else void renderCases();
+		void refreshTab();
+	}
 	return false;
 });
 
 chrome.tabs.onActivated.addListener(() => void refreshTab());
-chrome.tabs.onUpdated.addListener((_id, info) => {
+chrome.tabs.onUpdated.addListener((id, info) => {
+	if (id === loaded?.tabId && info.status === "loading") forgetLoaded();
 	if (info.status === "complete" || info.url !== undefined) void refreshTab();
+});
+chrome.tabs.onRemoved.addListener((id) => {
+	if (id === loaded?.tabId) forgetLoaded();
 });
 
 void refreshTab();

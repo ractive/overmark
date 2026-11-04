@@ -154,7 +154,12 @@ on the new page by weighted similarity (after Similo, see
 | position on the page | 0.5 | distance, relative to the page size |
 | size | 0.5 | area ratio |
 
-Only features the stored fingerprint has count. Classes are reduced to their readable
+Only features the stored fingerprint has count. Siblings share most of these
+features, so a candidate that shares none of what identifies the stored element (its
+test id, id, accessible name or text; similarity below 0.5) keeps only half its score,
+rising to all of it at 0.7: the neighbour of a removed element is "not found" rather
+than "found". An element whose text the fix rewrote completely is then not found
+either; the screenshot still shows what was meant. Classes are reduced to their readable
 part (`Button_primary__x7Yz2` → `Button_primary`); random ones (`sc-…`, `css-…`,
 `kLmNoP`) and generated ids (React `:r1:`, UUIDs, long numbers) are ignored. A best
 score of 0.75 or more is "found", 0.5 or more "probable"; when the second-best score is

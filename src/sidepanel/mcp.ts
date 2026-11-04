@@ -4,7 +4,7 @@
  */
 
 import { TabMcp } from "@ractive-ch/tab-mcp-client";
-import { cropImage, scaleImage, toWebp } from "../lib/images.ts";
+import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { CaseStore } from "../lib/store.ts";
 import { sendToTab } from "../lib/tabs.ts";
 import { createTools, INSTRUCTIONS, type TabBridge } from "./tools.ts";
@@ -71,7 +71,7 @@ export function createConnection(
 	const tools = createTools({
 		store,
 		tab: chromeTab,
-		images: { toWebp, scale: scaleImage, crop: cropImage },
+		images: { toWebp, scale: scaleImage, crop: cropImages },
 		onChange,
 	});
 	for (const tool of tools) void mcp.registerTool(tool);

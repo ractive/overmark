@@ -9,10 +9,10 @@ import { blobToBase64 } from "../lib/base64.ts";
 import {
 	type Case,
 	CaseError,
+	newId,
 	nextNumbers,
-	type Rect,
+	pendingImage,
 	type Shot,
-	shotImage,
 } from "../lib/case.ts";
 import type {
 	AnnotationMatch,
@@ -21,7 +21,7 @@ import type {
 	LoadResult,
 	OverlayState,
 } from "../lib/messages.ts";
-import { cropRectFor, saveCase } from "../lib/save.ts";
+import { type Crop, cropRectFor, saveCase } from "../lib/save.ts";
 import type { CaseStore, StoredImage } from "../lib/store.ts";
 
 export interface CurrentTab {
@@ -44,7 +44,8 @@ export interface ImageTools {
 	/** A screenshot as full-size WebP. */
 	toWebp(png: Blob): Promise<StoredImage>;
 	scale(image: Blob, maxSide: number): Promise<StoredImage>;
-	crop(image: Blob, rect: Rect, dpr: number): Promise<StoredImage>;
+	/** Several crops from one screenshot. */
+	crop: Crop;
 }
 
 export interface ToolDeps {
@@ -398,10 +399,11 @@ export function createTools(deps: ToolDeps): Tool[] {
 					.send(current.id, { type: "element:unmark" })
 					.catch(() => undefined);
 			}
-			const shotId = `s${next.shot}`;
+			// A provisional id: saving gives the shot its final one.
+			const shotId = newId("p");
 			const shot: Shot = {
 				id: shotId,
-				image: shotImage(shotId),
+				image: pendingImage(shotId),
 				scrollX: described.scroll.x,
 				scrollY: described.scroll.y,
 				viewport: described.viewport,
@@ -409,7 +411,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 			};
 			await store.putImage(c.id, shot.image, await images.toWebp(png));
 			const id = `a${next.annotation}`;
-			await saveCase(
+			const saved = await saveCase(
 				store,
 				{
 					caseId: c.id,
@@ -436,7 +438,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 			return {
 				content: [
 					text(
-						`Added mark ${next.annotation} to “${c.title}” on ${described.url}.`,
+						`Added mark ${next.annotation} to “${saved.title}” on ${described.url}.`,
 					),
 				],
 			};
@@ -459,14 +461,20 @@ export function createTools(deps: ToolDeps): Tool[] {
 		},
 		annotations: { consequentialHint: true, idempotentHint: true },
 		execute: async ({ caseId, verdict }) => {
-			const c = await mustGet(caseId);
 			const value = verdict.trim();
-			await store.putCase({
-				...c,
-				verdict: value === "" ? null : value,
-				updatedAt: new Date().toISOString(),
+			// In one transaction, so a save running meanwhile keeps the verdict.
+			await store.updateCase(caseId, (current) => {
+				if (current === undefined)
+					throw new CaseError(`No case with id ${caseId}; see list_cases.`);
+				return {
+					value: {
+						...current,
+						verdict: value === "" ? null : value,
+						updatedAt: new Date().toISOString(),
+					},
+				};
 			});
-			deps.onChange?.(c.id);
+			deps.onChange?.(caseId);
 			return {
 				content: [text(value === "" ? "Verdict cleared." : "Verdict saved.")],
 			};

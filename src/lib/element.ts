@@ -1,10 +1,11 @@
 /**
  * Describing an element: the details a case stores for each annotation, and
- * that matching (match.ts) compares on another build. Values typed into form
- * fields are never read.
+ * that matching (match.ts) compares on another build. What a user typed is
+ * never read: neither form field values nor the text of editable regions
+ * (`contenteditable`, `role="textbox"`).
  */
 
-import type { ElementDetails, Rect } from "./case.ts";
+import { ELEMENT_ATTRIBUTES, type ElementDetails, type Rect } from "./case.ts";
 import { isGeneratedId, readableClass, readableClasses } from "./classes.ts";
 
 export const TEST_ID_ATTRIBUTES = [
@@ -13,16 +14,6 @@ export const TEST_ID_ATTRIBUTES = [
 	"data-test",
 	"data-qa",
 	"data-cy",
-] as const;
-
-const KEPT_ATTRIBUTES = [
-	"name",
-	"type",
-	"href",
-	"src",
-	"placeholder",
-	"alt",
-	"title",
 ] as const;
 
 const HEADINGS = "h1, h2, h3, h4, h5, h6, [role='heading']";
@@ -46,11 +37,21 @@ export interface DescribeContext {
 	scroll: { x: number; y: number };
 }
 
+/** Inside an editor: its text is what somebody typed. */
+export function isEditable(el: Element): boolean {
+	return (
+		(el as HTMLElement).isContentEditable === true ||
+		el.closest(
+			'[contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+		) !== null
+	);
+}
+
 export function createContext(doc: Document): DescribeContext {
 	const root = doc.documentElement;
 	const win = doc.defaultView;
 	return {
-		headings: [...doc.querySelectorAll(HEADINGS)],
+		headings: [...doc.querySelectorAll(HEADINGS)].filter((h) => !isEditable(h)),
 		page: {
 			width: Math.max(root.scrollWidth, root.clientWidth),
 			height: Math.max(root.scrollHeight, root.clientHeight),
@@ -159,7 +160,11 @@ const NAMED_BY_CONTENT = new Set([
 	"li",
 ]);
 
-export function accessibleName(el: Element): string | undefined {
+/** The accessible name; `fromContent: false` leaves out names taken from the text inside. */
+export function accessibleName(
+	el: Element,
+	fromContent = true,
+): string | undefined {
 	const label = el.getAttribute("aria-label");
 	if (label?.trim()) return normalizeText(label);
 	const labelledBy = el.getAttribute("aria-labelledby");
@@ -184,7 +189,10 @@ export function accessibleName(el: Element): string | undefined {
 		const placeholder = el.getAttribute("placeholder");
 		if (placeholder?.trim()) return normalizeText(placeholder);
 	}
-	if (NAMED_BY_CONTENT.has(tag) || el.getAttribute("role") === "button") {
+	if (
+		fromContent &&
+		(NAMED_BY_CONTENT.has(tag) || el.getAttribute("role") === "button")
+	) {
 		const text = normalizeText(el.textContent);
 		if (text) return text;
 	}
@@ -261,18 +269,21 @@ export function ancestorsOf(el: Element, depth = 6): string[] {
 
 function attributesOf(el: Element): Record<string, string> {
 	const out: Record<string, string> = {};
-	for (const name of KEPT_ATTRIBUTES) {
+	for (const name of ELEMENT_ATTRIBUTES) {
 		const value = el.getAttribute(name);
 		if (value === null || value === "") continue;
 		if (name === "href" || name === "src") {
 			try {
 				const url = new URL(value, el.ownerDocument.baseURI);
-				out[name] =
-					name === "src"
-						? (url.pathname.split("/").pop() ?? "")
-						: url.origin === new URL(el.ownerDocument.baseURI).origin
-							? url.pathname + url.search
-							: `${url.host}${url.pathname}`;
+				const shown =
+					url.protocol === "data:"
+						? `data:${url.pathname.split(/[;,]/)[0] ?? ""}`
+						: name === "src"
+							? (url.pathname.split("/").pop() ?? "")
+							: url.origin === new URL(el.ownerDocument.baseURI).origin
+								? url.pathname + url.search
+								: `${url.host}${url.pathname}`;
+				out[name] = shown.slice(0, 300);
 			} catch {
 				out[name] = value.slice(0, 300);
 			}
@@ -387,9 +398,10 @@ export function describeElement(
 	if (testId) details.testId = testId;
 	const role = roleOf(el);
 	if (role) details.role = role;
-	const name = accessibleName(el);
+	const editable = isEditable(el);
+	const name = accessibleName(el, !editable);
 	if (name) details.name = name;
-	const text = normalizeText(el.textContent);
+	const text = editable ? "" : normalizeText(el.textContent);
 	if (text) details.text = text;
 	const heading = headingAbove(el, context.headings);
 	if (heading) details.heading = heading;

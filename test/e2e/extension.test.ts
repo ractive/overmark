@@ -9,10 +9,13 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { webpSize } from "../../src/lib/export.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
+	countColour,
 	type Db,
 	HOST,
+	imageBytes,
 	markElement,
 	READ_DB,
 	saveAs,
@@ -38,6 +41,10 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 	test("the content script shows and hides the overlay, once per page", async () => {
 		const { page, tabId } = await h.open("v1");
 		const inject = `chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`;
+		// What extension pages hear when the overlay changes by itself.
+		await h.control.eval(
+			`globalThis.changes = []; chrome.runtime.onMessage.addListener((m) => { if (m.type === "overlay:changed") globalThis.changes.push(m.state.visible); })`,
+		);
 		await h.control.eval(inject);
 		await h.control.eval(inject);
 		const state = await h.control.eval<{ visible: boolean; title: string }>(
@@ -53,10 +60,30 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		await page.click(
 			`${HOST}.shadowRoot.querySelector('[data-action="close"]')`,
 		);
+		await h.control.waitFor("globalThis.changes?.includes(false)");
 		const after = await h.control.eval<{ visible: boolean }>(
 			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" })`,
 		);
 		expect(after.visible).toBe(false);
+		await page.send("Page.close");
+	});
+
+	test("replaces an overlay that an orphaned instance left behind", async () => {
+		// After an extension reload or update the old content script can no
+		// longer be reached, but its overlay stays in the page.
+		const { page, tabId } = await h.open("v1");
+		await page.eval(
+			`(() => { const old = document.createElement("div"); old.id = "overmark-root"; old.dataset.orphan = "true"; document.documentElement.append(old); })()`,
+		);
+		const state = await h.control.eval<{ visible: boolean }>(
+			`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" }))`,
+		);
+		expect(state.visible).toBe(true);
+		expect(
+			await page.eval<string[]>(
+				`[...document.querySelectorAll("#overmark-root")].map((e) => e.dataset.orphan ?? "live")`,
+			),
+		).toEqual(["live"]);
 		await page.send("Page.close");
 	});
 });
@@ -168,6 +195,13 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			expect(image.size).toBeGreaterThan(500);
 		}
 
+		// Chrome's own WebP passes the header check imports use.
+		const shot = await imageBytes(h.control, "Prämienrechner", "shots/s1.webp");
+		expect(webpSize(Buffer.from(shot.base64, "base64"))).toEqual({
+			width: shot.width,
+			height: shot.height,
+		});
+
 		// The side panel lists it.
 		await h.control.waitFor(`document.querySelector("[data-case]")`);
 		expect(
@@ -175,6 +209,48 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 				`document.querySelector("[data-case] .title").textContent`,
 			),
 		).toBe("Prämienrechner");
+		await page.send("Page.close");
+	}, 60_000);
+
+	test("marks drawn before choosing a case are renumbered for it and added", async () => {
+		const before = (await h.control.eval<Db>(READ_DB)).cases[0];
+		if (before === undefined) throw new Error("the previous test saves a case");
+		const { page, tabId } = await h.open("v1");
+		await page.activate();
+		await h.control.eval(
+			`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" }))`,
+		);
+		await page.waitFor(shadow('[data-action="tool-note"]'));
+		await page.click(shadow('[data-action="tool-note"]'));
+		await page.click(`document.querySelector("h1")`);
+		await page.waitFor(shadow(".popover textarea"));
+		await page.type("Larger heading");
+		await page.click(shadow('[data-action="comment-done"]'));
+		const numbers = () =>
+			page.eval<string[]>(
+				`[...${shadow("svg.marks")}.querySelectorAll("g[data-number]")].map((g) => g.dataset.number)`,
+			);
+		expect(await numbers()).toEqual(["1"]);
+
+		// "Add marks on this tab" for the saved case (marks 1–3).
+		await h.control.eval(
+			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show", target: { caseId: ${JSON.stringify(before.id)}, title: ${JSON.stringify(before.title)}, nextAnnotation: 4 } })`,
+		);
+		expect(await numbers()).toEqual(["4"]);
+
+		await page.click(shadow('[data-action="save"]'));
+		await page.click(shadow('[data-action="save-confirm"]'));
+		await page.waitFor(
+			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+			20_000,
+		);
+		const db = await h.control.eval<Db>(READ_DB);
+		const after = db.cases.find((c) => c.id === before.id);
+		expect(after?.annotations.map((a) => a.number)).toEqual([1, 2, 3, 4]);
+		expect(after?.shots.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
+		expect(after?.annotations[3]?.shot).toBe("s3");
+		expect(db.images.some((i) => i.key.includes("/pending/"))).toBe(false);
+		expect(db.images.some((i) => i.key.endsWith("/crops/a4.webp"))).toBe(true);
 		await page.send("Page.close");
 	}, 60_000);
 });
@@ -209,7 +285,10 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
 			);
 			// The side panel (the control page) acts on the tab in front: v2.
-			await h.control.eval(`location.reload()`);
+			// goto waits for the new document; a reload through eval would not.
+			await h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			);
 			await h.control.waitFor(`document.querySelector("[data-case]")`);
 			await h.control.eval(`document.querySelector("[data-case]").click()`);
 			await h.control.waitFor(`document.getElementById("load-case")`);
@@ -257,6 +336,24 @@ describe.skipIf(browserBinary === undefined)(
 			await v2.page.waitFor(
 				`Math.abs(document.querySelector("[data-truth=contact]").getBoundingClientRect().top - innerHeight / 2) < innerHeight / 2`,
 			);
+
+			// Marks drawn while a case is loaded: its outlines stay out of the screenshot.
+			await showToolbar(h, v2.page, v2.tabId);
+			await markElement(v2.page, "[data-truth=tip]", "Still unclear");
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
+				),
+			).toBe(3);
+			await saveAs(v2.page, "With outlines loaded");
+			expect(
+				await countColour(
+					h.control,
+					"With outlines loaded",
+					"shots/s1.webp",
+					[0x1e, 0x8e, 0x3e],
+				),
+			).toBe(0);
 			await v2.page.send("Page.close");
 		}, 90_000);
 	},
@@ -292,7 +389,11 @@ describe.skipIf(browserBinary === undefined)(
 
 			// The side panel connects to the test relay by itself ("keep AI access on").
 			await h.control.eval(
-				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)}); localStorage.setItem("overmark:keep-ai-on", "true"); location.reload()`,
+				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)}); localStorage.setItem("overmark:keep-ai-on", "true")`,
+			);
+			// goto waits for the new document; a reload through eval would not.
+			await h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
 			);
 			await h.control.waitFor(
 				`document.getElementById("ai-status")?.textContent === "Waiting for an AI app to pair"`,

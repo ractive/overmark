@@ -117,7 +117,8 @@ const images: ImageTools = {
 		width: maxSide,
 		height: 10,
 	}),
-	crop: async () => ({ blob: webp(800), width: 300, height: 80 }),
+	crop: async (_image, rects) =>
+		rects.map(() => ({ blob: webp(800), width: 300, height: 80 })),
 };
 
 let store: MemoryStore;

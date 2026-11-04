@@ -1,6 +1,13 @@
 /**
- * Turning what the content script drew into a stored case (service worker):
- * crops from the screenshots it captured, and the case written or extended.
+ * Turning what the content script drew into a stored case (service worker).
+ *
+ * The content script captures each screenshot under a pending path of its
+ * own (`pending/<shot>.webp`), so a save can never overwrite an image another
+ * case version references. Saving cuts the crops (slow, outside any
+ * transaction), then commits in one transaction against the case as it is
+ * stored at that moment: the shots get their final ids, the marks' numbers are
+ * checked against the stored ones, and the case and its images are written
+ * together. A verdict saved or marks added meanwhile are kept.
  */
 
 import {
@@ -8,9 +15,12 @@ import {
 	CASE_FORMAT,
 	type Case,
 	cropImage,
+	nextNumbers,
 	type PageInfo,
+	pendingImage,
 	type Rect,
 	type Shot,
+	shotImage,
 	validateCase,
 } from "./case.ts";
 import type { CaseStore, StoredImage } from "./store.ts";
@@ -24,87 +34,108 @@ export interface SaveRequest {
 	isNew: boolean;
 	title: string;
 	page: PageInfo;
-	/** New shots; their images are stored already. */
+	/**
+	 * New shots with provisional ids; their images are stored under
+	 * `pendingImage(id)`. The saved case gives them their final ids.
+	 */
 	shots: Shot[];
 	annotations: AnnotationDraft[];
 }
 
+/** Cut several crops from one screenshot. */
 export type Crop = (
 	image: Blob,
-	rect: Rect,
+	rects: readonly Rect[],
 	dpr: number,
-) => Promise<StoredImage>;
+) => Promise<StoredImage[]>;
 
 export class SaveError extends Error {
 	override name = "SaveError";
 }
 
-/** Write the crops and the case; on failure, remove the images it added. */
+/** Write the crops and the case; the pending screenshots are removed either way. */
 export async function saveCase(
 	store: CaseStore,
 	request: SaveRequest,
 	crop: Crop,
 	now: Date = new Date(),
 ): Promise<Case> {
-	const existing = request.isNew
-		? undefined
-		: await store.getCase(request.caseId);
-	if (!request.isNew && existing === undefined)
-		throw new SaveError("The case no longer exists.");
-	if (request.isNew && (await store.getCase(request.caseId)) !== undefined)
-		throw new SaveError("A case with this id exists already.");
+	const pending = request.shots.map((s) => pendingImage(s.id));
 	try {
-		const shots = [...(existing?.shots ?? []), ...request.shots];
-		const annotations: Annotation[] = [...(existing?.annotations ?? [])];
-		for (const draft of request.annotations) {
-			const shot = shots.find((s) => s.id === draft.shot);
-			if (shot === undefined) throw new SaveError(`unknown shot ${draft.shot}`);
-			const image = await store.getImage(request.caseId, shot.image);
+		const screenshots = new Map<string, StoredImage>();
+		const crops = new Map<AnnotationDraft, StoredImage>();
+		for (const shot of request.shots) {
+			const image = await store.getImage(request.caseId, pendingImage(shot.id));
 			if (image === undefined)
-				throw new SaveError(`the screenshot ${shot.image} is missing`);
-			const path = cropImage(draft.id);
-			await store.putImage(
-				request.caseId,
-				path,
-				await crop(image.blob, draft.cropRect, shot.viewport.dpr),
+				throw new SaveError(`the screenshot ${shot.id} is missing`);
+			screenshots.set(shot.id, image);
+			const drafts = request.annotations.filter((a) => a.shot === shot.id);
+			const cut = await crop(
+				image.blob,
+				drafts.map((d) => d.cropRect),
+				shot.viewport.dpr,
 			);
-			const { cropRect: _, ...rest } = draft;
-			annotations.push({ ...rest, crop: path });
+			drafts.forEach((d, i) => {
+				const c = cut[i];
+				if (c !== undefined) crops.set(d, c);
+			});
+		}
+		for (const draft of request.annotations) {
+			if (!crops.has(draft))
+				throw new SaveError(`mark ${draft.number} names no new screenshot`);
 		}
 		const stamp = now.toISOString();
-		const saved = validateCase({
-			format: CASE_FORMAT,
-			id: request.caseId,
-			title: request.title.trim() || existing?.title || "Untitled case",
-			createdAt: existing?.createdAt ?? stamp,
-			updatedAt: stamp,
-			page: existing?.page ?? request.page,
-			shots,
-			annotations,
-			verdict: existing?.verdict ?? null,
+		return await store.updateCase(request.caseId, (current) => {
+			if (request.isNew && current !== undefined)
+				throw new SaveError("A case with this id exists already.");
+			if (!request.isNew && current === undefined)
+				throw new SaveError("The case no longer exists.");
+			const images = new Map<string, StoredImage>();
+			const finalIds = new Map<string, string>();
+			const shots = [...(current?.shots ?? [])];
+			let shotNumber = nextNumbers(current).shot;
+			for (const shot of request.shots) {
+				const id = `s${shotNumber++}`;
+				finalIds.set(shot.id, id);
+				shots.push({ ...shot, id, image: shotImage(id) });
+				const image = screenshots.get(shot.id);
+				if (image !== undefined) images.set(shotImage(id), image);
+			}
+			const taken = new Set(current?.annotations.map((a) => a.number));
+			const annotations: Annotation[] = [...(current?.annotations ?? [])];
+			for (const draft of request.annotations) {
+				if (taken.has(draft.number))
+					throw new SaveError(
+						`mark ${draft.number} exists in the case already (it changed meanwhile). Click "Add marks on this tab" in the side panel again, then save.`,
+					);
+				taken.add(draft.number);
+				const { cropRect: _, ...rest } = draft;
+				const id = `a${draft.number}`;
+				annotations.push({
+					...rest,
+					id,
+					shot: finalIds.get(draft.shot) ?? draft.shot,
+					crop: cropImage(id),
+				});
+				const image = crops.get(draft);
+				if (image !== undefined) images.set(cropImage(id), image);
+			}
+			const value = validateCase({
+				format: CASE_FORMAT,
+				id: request.caseId,
+				title: current?.title ?? (request.title.trim() || "Untitled case"),
+				createdAt: current?.createdAt ?? stamp,
+				updatedAt: stamp,
+				page: current?.page ?? request.page,
+				shots,
+				annotations,
+				verdict: current?.verdict ?? null,
+			});
+			return { value, images };
 		});
-		await store.putCase(saved);
-		return saved;
-	} catch (error) {
-		await discardUnsaved(store, request.caseId);
-		throw error;
+	} finally {
+		await store.deleteImages(request.caseId, pending).catch(() => undefined);
 	}
-}
-
-/** Remove the images of `caseId` that its stored version does not reference. */
-export async function discardUnsaved(
-	store: CaseStore,
-	caseId: string,
-): Promise<void> {
-	const stored = await store.getCase(caseId);
-	await store.pruneImages(caseId, referencedImages(stored));
-}
-
-export function referencedImages(c: Case | undefined): Set<string> {
-	return new Set([
-		...(c?.shots.map((s) => s.image) ?? []),
-		...(c?.annotations.map((a) => a.crop) ?? []),
-	]);
 }
 
 /** A rectangle grown by `pad` and kept inside the viewport. */
