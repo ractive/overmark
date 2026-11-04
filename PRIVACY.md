@@ -27,11 +27,11 @@ address, "Blur form fields in screenshots", "Keep AI access on", and the secret 
 which the tab-mcp library derives the address an AI app connects to.
 
 Overmark never reads what is typed into form fields or text editors. A screenshot shows
-what was on the screen, though, form fields included. When you save marks, "Blur form
-fields in screenshots" blurs the page's form fields while the screenshots are taken,
-and password fields are always blurred. This covers fields in the page itself, not
-fields inside embedded frames (for example a payment form from another site). The
-screenshots an AI app takes through Overmark (see below) are not blurred.
+what was on the screen, though, form fields included. Whenever Overmark takes a
+screenshot (when you save marks, and when an AI app asks for one, see below), password
+fields are blurred, and with "Blur form fields in screenshots" all form fields are.
+This covers fields in the page itself, not fields inside embedded frames (for example a
+payment form from another site).
 
 ## When data leaves your computer
 
@@ -48,9 +48,8 @@ Only in two cases, both started by you:
    handles the data under its own privacy policy.
 
    Changes the AI app wants to make (adding a mark, recording a verdict, deleting a
-   case) are shown to you first. The prompt also offers "Always allow": once you choose
-   it for a tool, that AI app may use the tool without asking until you disconnect the
-   app or reload the side panel.
+   case) are shown to you in the side panel first, every time, naming the case and the
+   page; nothing changes until you allow it.
 
    Closing the side panel pauses the connection; it does not end the pairing. The paired
    AI app can use the tools again when the side panel connects again, which happens by

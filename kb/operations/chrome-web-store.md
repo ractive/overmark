@@ -58,7 +58,7 @@ timestamp: 2026-11-04T19:00:00+01:00
 > Export a case as a zip with a Markdown summary and the images, or connect an AI app
 > such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
 > page in front, take screenshots, and record what should change. Changes it wants to
-> make are shown to you first, unless you choose "Always allow" for a tool.
+> make are shown to you first, every time.
 >
 > Everything stays in your browser unless you export a case or connect an AI app.
 
@@ -86,8 +86,8 @@ data only, and no tool runs code an AI app sends.
     PRIVACY.md for the full list).
   - **User activity:** limited to the marks the user draws and their comments.
 - Stored locally in the browser. Transmitted only to the relay and AI app the user
-  configures and pairs, and only while connected. Screenshots an AI app takes are not
-  blurred (the user's own saves can be).
+  configures and pairs, and only while connected. Every screenshot blurs password
+  fields, and all form fields when the user turns that on.
 - Not sold, not used for anything but the extension's purpose, not used to determine
   creditworthiness.
 

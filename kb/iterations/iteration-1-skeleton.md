@@ -37,4 +37,4 @@ tags: [iteration, build, ci]
 - [x] Service worker, side panel, content script overlay
 - [x] End-to-end harness (`test/e2e/`): Chromium with the extension, test pages, the overlay injected
 - [x] CI workflow
-- [ ] Review, PR
+- [x] Review, PR
