@@ -3,7 +3,7 @@
  * (`chrome.runtime` and `chrome.tabs` messaging).
  */
 
-import type { Case } from "./case.ts";
+import type { Case, ElementDetails, Rect, Viewport } from "./case.ts";
 import type { MatchStatus } from "./match.ts";
 import type { SaveRequest } from "./save.ts";
 
@@ -31,7 +31,28 @@ export type ContentRequest =
 	/** Scroll to one annotation's element, or to another candidate (`AnnotationMatch`). */
 	| { type: "case:show"; annotationId: string; candidate?: number }
 	/** Remove the outlines (`OverlayState`). */
-	| { type: "case:clear" };
+	| { type: "case:clear" }
+	/**
+	 * Scroll to the element `selector` and mark it with `number` for a
+	 * screenshot (`DescribedElement`); the overlay's own bars are hidden.
+	 */
+	| { type: "element:mark"; selector: string; number: number }
+	/** Remove that mark again (`OverlayState`). */
+	| { type: "element:unmark" };
+
+/** The answer to `element:mark`. */
+export type DescribedElement =
+	| {
+			ok: true;
+			details: ElementDetails;
+			/** The element's box in window coordinates. */
+			rect: Rect;
+			viewport: Viewport;
+			scroll: { x: number; y: number };
+			url: string;
+			title: string;
+	  }
+	| { ok: false; error: string };
 
 /** One of the best elements for an annotation on this page. */
 export interface CandidateInfo {
@@ -62,7 +83,7 @@ export interface LoadResult {
 	matches: AnnotationMatch[];
 }
 
-/** The content script's answer to every `ContentRequest`. */
+/** The content script's answer to the `overlay:*` requests. */
 export interface OverlayState {
 	visible: boolean;
 	url: string;

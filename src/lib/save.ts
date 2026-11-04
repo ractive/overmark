@@ -106,3 +106,25 @@ export function referencedImages(c: Case | undefined): Set<string> {
 		...(c?.annotations.map((a) => a.crop) ?? []),
 	]);
 }
+
+/** A rectangle grown by `pad` and kept inside the viewport. */
+export function cropRectFor(
+	bounds: Rect,
+	viewport: { width: number; height: number },
+): Rect {
+	const pad = bounds.width === 0 && bounds.height === 0 ? 120 : 40;
+	const x = Math.max(0, bounds.x - pad);
+	const y = Math.max(0, bounds.y - pad);
+	return {
+		x,
+		y,
+		width: Math.max(
+			1,
+			Math.min(viewport.width, bounds.x + bounds.width + pad) - x,
+		),
+		height: Math.max(
+			1,
+			Math.min(viewport.height, bounds.y + bounds.height + pad) - y,
+		),
+	};
+}

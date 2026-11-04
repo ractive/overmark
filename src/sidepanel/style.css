@@ -10,11 +10,6 @@
 	--danger: #c62828;
 	--ok: #2e7d32;
 	--warn: #b26a00;
-	font:
-		13px / 1.45 system-ui,
-		-apple-system,
-		"Segoe UI",
-		sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -35,6 +30,12 @@
 }
 
 body {
+	/* Chrome's own style sheet for extension pages sets the body to 75%. */
+	font:
+		13px / 1.45 system-ui,
+		-apple-system,
+		"Segoe UI",
+		sans-serif;
 	margin: 0;
 	background: var(--bg);
 	color: var(--fg);
@@ -291,4 +292,24 @@ button.link {
 
 .case-header .hint {
 	margin-top: 8px;
+}
+
+.field {
+	display: grid;
+	gap: 4px;
+	margin-bottom: 8px;
+	color: var(--muted);
+}
+
+.field input {
+	font: inherit;
+	padding: 5px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--line);
+	background: var(--bg);
+	color: var(--fg);
+}
+
+.field input:invalid {
+	border-color: var(--danger);
 }

@@ -31,7 +31,7 @@ import type {
 	WorkerRequest,
 	WorkerResponse,
 } from "../lib/messages.ts";
-import type { AnnotationDraft } from "../lib/save.ts";
+import { type AnnotationDraft, cropRectFor } from "../lib/save.ts";
 import { elementAt, elementForRect } from "./anchor.ts";
 import type { Overlay } from "./overlay.ts";
 import { planShots } from "./plan.ts";
@@ -78,28 +78,6 @@ function normalizeRect(a: Point, b: Point): Rect {
 		y: Math.min(a.y, b.y),
 		width: Math.abs(a.x - b.x),
 		height: Math.abs(a.y - b.y),
-	};
-}
-
-/** A rectangle grown by `pad` and kept inside the viewport. */
-function cropRectFor(
-	bounds: Rect,
-	viewport: { width: number; height: number },
-): Rect {
-	const pad = bounds.width === 0 && bounds.height === 0 ? 120 : 40;
-	const x = Math.max(0, bounds.x - pad);
-	const y = Math.max(0, bounds.y - pad);
-	return {
-		x,
-		y,
-		width: Math.max(
-			1,
-			Math.min(viewport.width, bounds.x + bounds.width + pad) - x,
-		),
-		height: Math.max(
-			1,
-			Math.min(viewport.height, bounds.y + bounds.height + pad) - y,
-		),
 	};
 }
 

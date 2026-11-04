@@ -4,6 +4,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
 	type Db,
@@ -252,6 +257,128 @@ describe.skipIf(browserBinary === undefined)(
 			await v2.page.waitFor(
 				`Math.abs(document.querySelector("[data-truth=contact]").getBoundingClientRect().top - innerHeight / 2) < innerHeight / 2`,
 			);
+			await v2.page.send("Page.close");
+		}, 90_000);
+	},
+);
+
+describe.skipIf(browserBinary === undefined)(
+	"an AI app through a relay",
+	() => {
+		let h: Harness;
+		const relay = startTestRelay();
+
+		beforeAll(async () => {
+			h = await startHarness(browserBinary as string);
+		}, 60_000);
+
+		afterAll(async () => {
+			await h?.stop();
+			await relay.stop();
+		});
+
+		test("the side panel's tools serve real cases to an MCP client", async () => {
+			const v1 = await h.open("v1");
+			await showToolbar(h, v1.page, v1.tabId);
+			await markElement(v1.page, "[data-truth=submit]", "Too pale");
+			await markElement(v1.page, "[data-truth=tip]", "Say how much");
+			await saveAs(v1.page, "AI test");
+			await v1.page.send("Page.close");
+			const v2 = await h.open("v2");
+			await v2.page.activate();
+			await h.control.eval(
+				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
+			);
+
+			// The side panel connects to the test relay by itself ("keep AI access on").
+			await h.control.eval(
+				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)}); localStorage.setItem("overmark:keep-ai-on", "true"); location.reload()`,
+			);
+			await h.control.waitFor(
+				`document.getElementById("ai-status")?.textContent === "Waiting for an AI app to pair"`,
+				10_000,
+			);
+			await h.control.eval(`document.getElementById("connect").click()`);
+			// The library's connect dialog shows the address in a read-only field.
+			await h.control.waitFor(
+				`document.querySelector(".tab-mcp-address-input")?.value.endsWith("/mcp")`,
+			);
+			const address = await h.control.eval<string>(
+				`document.querySelector(".tab-mcp-address-input").value`,
+			);
+			const token = await tokenFor(relay.store, address);
+			const client = new Client(
+				{ name: "e2e", version: "1.0.0" },
+				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+			);
+			await client.connect(
+				new StreamableHTTPClientTransport(new URL(address), {
+					requestInit: { headers: { Authorization: `Bearer ${token}` } },
+				}),
+			);
+			try {
+				const cases = await client.callTool({
+					name: "list_cases",
+					arguments: {},
+				});
+				const [listed] = JSON.parse(
+					(cases.content as { text: string }[])[0]?.text ?? "[]",
+				) as { caseId: string; title: string }[];
+				expect(listed?.title).toBe("AI test");
+
+				const read = await client.callTool({
+					name: "get_case",
+					arguments: { caseId: listed?.caseId },
+				});
+				const images = (
+					read.content as { type: string; data?: string; mimeType?: string }[]
+				).filter((c) => c.type === "image");
+				expect(images).toHaveLength(2);
+				const bytes = Buffer.from(images[0]?.data ?? "", "base64");
+				expect(images[0]?.mimeType).toBe("image/webp");
+				expect(bytes.subarray(8, 12).toString()).toBe("WEBP");
+
+				const load = await client.callTool({
+					name: "load_case",
+					arguments: { caseId: listed?.caseId },
+				});
+				const loaded = JSON.parse(
+					(load.content as { text: string }[])[0]?.text ?? "{}",
+				) as {
+					url: string;
+					marks: { status: string }[];
+				};
+				expect(loaded.url).toContain("/v2");
+				expect(loaded.marks.map((m) => m.status)).toEqual(["found", "found"]);
+
+				const shot = await client.callTool({ name: "capture", arguments: {} });
+				expect((shot.content as { type: string }[])[1]?.type).toBe("image");
+			} finally {
+				await client.close();
+			}
+
+			// The temporary mark for an AI app's screenshot.
+			const described = await h.control.eval<{
+				ok: boolean;
+				details: { tag: string };
+			}>(
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "[data-truth=submit]", number: 9 })`,
+			);
+			expect(described.ok).toBe(true);
+			expect(described.details.tag).toBe("button");
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("g.temporary")}.childElementCount`,
+				),
+			).toBeGreaterThan(0);
+			await h.control.eval(
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:unmark" })`,
+			);
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("g.temporary")}.childElementCount`,
+				),
+			).toBe(0);
 			await v2.page.send("Page.close");
 		}, 90_000);
 	},

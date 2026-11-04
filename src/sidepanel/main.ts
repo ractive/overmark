@@ -14,6 +14,7 @@ import type {
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { byId, formatDate, h, samePath, shortUrl } from "./dom.ts";
+import { createConnection, DEFAULT_RELAY, validRelay } from "./mcp.ts";
 
 const store = new IdbStore();
 
@@ -26,8 +27,14 @@ const blurForms = byId<HTMLInputElement>("blur-forms");
 const casesList = byId<HTMLDivElement>("cases");
 const importButton = byId<HTMLButtonElement>("import");
 const importFile = byId<HTMLInputElement>("import-file");
+const relayInput = byId<HTMLInputElement>("relay");
+const connectButton = byId<HTMLButtonElement>("connect");
+const aiStatus = byId<HTMLSpanElement>("ai-status");
+const keepOn = byId<HTMLInputElement>("keep-on");
 
 const BLUR_KEY = "overmark:blur-forms";
+const RELAY_KEY = "overmark:relay";
+const KEEP_ON_KEY = "overmark:keep-ai-on";
 
 let overlay: OverlayState | undefined;
 let tabUrl = "";
@@ -514,6 +521,78 @@ function closeCase(): void {
 	home.hidden = false;
 	void renderCases();
 }
+
+// --- AI app ----------------------------------------------------------------
+
+/** A tool changed or deleted a case: show it. */
+function caseChanged(caseId: string): void {
+	if (openCaseId === caseId) void openCase(caseId);
+	else void renderCases();
+}
+
+let mcp = createConnection(
+	readSetting(RELAY_KEY) ?? DEFAULT_RELAY,
+	store,
+	caseChanged,
+);
+relayInput.value = readSetting(RELAY_KEY) ?? DEFAULT_RELAY;
+keepOn.checked = readSetting(KEEP_ON_KEY) === "true";
+
+function renderAi(): void {
+	const grants = mcp.grants;
+	const reconnecting = mcp.reconnecting;
+	aiStatus.textContent =
+		mcp.state === "connected"
+			? grants.length > 0
+				? `Connected: ${grants.map((g) => g.client.name).join(", ")}`
+				: "Waiting for an AI app to pair"
+			: mcp.state === "connecting"
+				? "Connecting…"
+				: reconnecting
+					? "Connection lost, retrying…"
+					: "Not connected";
+	connectButton.textContent =
+		mcp.state === "disconnected" ? "Connect AI app" : "AI connection…";
+}
+
+function watch(connection: typeof mcp): void {
+	for (const type of [
+		"statechange",
+		"grantschange",
+		"reconnecting",
+		"disconnected",
+	])
+		connection.addEventListener(type, renderAi);
+}
+watch(mcp);
+renderAi();
+
+relayInput.addEventListener("change", () => {
+	const value = relayInput.value.trim();
+	if (!validRelay(value)) {
+		relayInput.setCustomValidity("An http(s) or ws(s) address");
+		relayInput.reportValidity();
+		return;
+	}
+	relayInput.setCustomValidity("");
+	writeSetting(RELAY_KEY, value);
+	mcp.disconnect();
+	mcp = createConnection(value, store, caseChanged);
+	watch(mcp);
+	renderAi();
+});
+
+connectButton.addEventListener("click", () => {
+	void mcp.showConnectDialog().catch((error: unknown) => {
+		aiStatus.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}`;
+	});
+});
+
+keepOn.addEventListener("change", () =>
+	writeSetting(KEEP_ON_KEY, String(keepOn.checked)),
+);
+
+if (keepOn.checked) void mcp.connect({ resume: true }).catch(() => renderAi());
 
 chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
 	if (sender.id !== chrome.runtime.id || message?.type !== "cases:changed")

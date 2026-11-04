@@ -42,8 +42,12 @@ async function render(
 
 /** A `captureVisibleTab` data URL as a full-size WebP. */
 export async function screenshotToWebp(dataUrl: string): Promise<StoredImage> {
-	const blob = await (await fetch(dataUrl)).blob();
-	const bitmap = await createImageBitmap(blob);
+	return toWebp(await (await fetch(dataUrl)).blob());
+}
+
+/** Any image as a full-size WebP. */
+export async function toWebp(image: Blob): Promise<StoredImage> {
+	const bitmap = await createImageBitmap(image);
 	try {
 		return await render(
 			bitmap,

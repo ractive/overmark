@@ -84,7 +84,7 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 6px; color: #fff; font: inherit;
 }
 .reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
-.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar { display: none !important; }
+.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar, .capturing .review { display: none !important; }
 [hidden] { display: none !important; }
 `;
 
@@ -127,8 +127,10 @@ export class Overlay {
 	readonly reviewBar: HTMLDivElement;
 	readonly #drafts: SVGGElement;
 	readonly #review: SVGGElement;
+	readonly #temporary: SVGGElement;
 	#annotating = false;
 	#reviewing = false;
+	#marking = false;
 
 	constructor(doc: Document = document) {
 		this.doc = doc;
@@ -145,7 +147,8 @@ export class Overlay {
 		this.marks = svg(doc, "svg", { class: "marks" });
 		this.#review = svg(doc, "g", { class: "review" });
 		this.#drafts = svg(doc, "g", { class: "drafts" });
-		this.marks.append(this.#review, this.#drafts);
+		this.#temporary = svg(doc, "g", { class: "temporary" });
+		this.marks.append(this.#review, this.#drafts, this.#temporary);
 		this.capture = doc.createElement("div");
 		this.capture.className = "capture";
 		this.popover = doc.createElement("div");
@@ -189,8 +192,29 @@ export class Overlay {
 		this.#update();
 	}
 
+	/**
+	 * Mark one element for a screenshot an AI app takes, with everything else
+	 * of Overmark's hidden; `null` removes it.
+	 */
+	setTemporaryMark(mark: { number: number; rect: Rect } | null): void {
+		this.#marking = mark !== null;
+		this.#temporary.replaceChildren(
+			...(mark === null
+				? []
+				: [
+						...this.#shape({ kind: "element", rect: mark.rect }),
+						this.#badge({
+							number: mark.number,
+							shape: { kind: "element", rect: mark.rect },
+						}),
+					]),
+		);
+		this.setCapturing(this.#marking);
+		this.#update();
+	}
+
 	#update(): void {
-		const shown = this.#annotating || this.#reviewing;
+		const shown = this.#annotating || this.#reviewing || this.#marking;
 		this.layer.hidden = !shown;
 		this.toolbar.hidden = !this.#annotating;
 		this.capture.hidden = !this.#annotating;

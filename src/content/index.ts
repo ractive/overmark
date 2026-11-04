@@ -3,13 +3,50 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import type { ContentRequest } from "../lib/messages.ts";
+import { describeElement } from "../lib/element.ts";
+import type { ContentRequest, DescribedElement } from "../lib/messages.ts";
 import { Annotator } from "./annotator.ts";
 import { Overlay } from "./overlay.ts";
 import { Reviewer } from "./review.ts";
 
 declare global {
 	var __overmark: boolean | undefined;
+}
+
+function mark(
+	overlay: Overlay,
+	selector: string,
+	number: number,
+): DescribedElement {
+	let el: Element | null;
+	try {
+		el = document.querySelector(selector);
+	} catch {
+		return { ok: false, error: `Not a valid CSS selector: ${selector}` };
+	}
+	if (el === null || overlay.host.contains(el))
+		return { ok: false, error: `No element on this page matches ${selector}` };
+	el.scrollIntoView({
+		block: "center",
+		inline: "nearest",
+		behavior: "instant",
+	});
+	const r = el.getBoundingClientRect();
+	const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
+	overlay.setTemporaryMark({ number, rect });
+	return {
+		ok: true,
+		details: describeElement(el),
+		rect,
+		viewport: {
+			width: innerWidth,
+			height: innerHeight,
+			dpr: devicePixelRatio || 1,
+		},
+		scroll: { x: scrollX, y: scrollY },
+		url: location.href,
+		title: document.title,
+	};
 }
 
 function start(): void {
@@ -51,6 +88,13 @@ function start(): void {
 					break;
 				case "case:clear":
 					reviewer.clear();
+					sendResponse(state());
+					break;
+				case "element:mark":
+					sendResponse(mark(overlay, message.selector, message.number));
+					break;
+				case "element:unmark":
+					overlay.setTemporaryMark(null);
 					sendResponse(state());
 					break;
 				default:
