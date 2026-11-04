@@ -6,13 +6,21 @@
 import type { ContentRequest } from "../lib/messages.ts";
 import { Annotator } from "./annotator.ts";
 import { Overlay } from "./overlay.ts";
+import { Reviewer } from "./review.ts";
 
 declare global {
 	var __overmark: boolean | undefined;
 }
 
 function start(): void {
-	const annotator = new Annotator(new Overlay(document));
+	const overlay = new Overlay(document);
+	const annotator = new Annotator(overlay);
+	const reviewer = new Reviewer(overlay);
+	const state = () => {
+		const s = annotator.state();
+		const loaded = reviewer.caseId;
+		return loaded === undefined ? s : { ...s, loadedCase: loaded };
+	};
 	chrome.runtime.onMessage.addListener(
 		(message: ContentRequest, sender, sendResponse) => {
 			if (sender.id !== chrome.runtime.id) return false;
@@ -24,16 +32,30 @@ function start(): void {
 							? { blurForms: message.blurForms }
 							: {}),
 					});
+					sendResponse(state());
 					break;
 				case "overlay:hide":
 					annotator.hide();
+					sendResponse(state());
 					break;
 				case "overlay:state":
+					sendResponse(state());
+					break;
+				case "case:load":
+					sendResponse(reviewer.load(message.case));
+					break;
+				case "case:show":
+					sendResponse(
+						reviewer.show(message.annotationId, message.candidate) ?? null,
+					);
+					break;
+				case "case:clear":
+					reviewer.clear();
+					sendResponse(state());
 					break;
 				default:
 					return false;
 			}
-			sendResponse(annotator.state());
 			return false;
 		},
 	);

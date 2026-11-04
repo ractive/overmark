@@ -258,3 +258,37 @@ button.link {
 	color: var(--muted);
 	text-decoration: underline;
 }
+
+.import {
+	margin-top: 10px;
+}
+
+.match {
+	display: grid;
+	gap: 4px;
+	padding: 6px 8px;
+	border-radius: 6px;
+	background: var(--surface);
+	border-left: 4px solid var(--muted);
+}
+
+.match .status {
+	font-weight: 600;
+}
+
+.match.found {
+	border-left-color: var(--ok);
+}
+
+.match.probable,
+.match.ambiguous {
+	border-left-color: var(--warn);
+}
+
+.match.lost {
+	border-left-color: var(--danger);
+}
+
+.case-header .hint {
+	margin-top: 8px;
+}

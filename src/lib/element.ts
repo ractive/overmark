@@ -369,6 +369,8 @@ export function documentRect(
 export function describeElement(
 	el: Element,
 	context: DescribeContext = createContext(el.ownerDocument),
+	/** Leave the selector out (it is slow): for scoring many candidates. */
+	options: { selector?: boolean } = {},
 ): ElementDetails {
 	const details: ElementDetails = {
 		tag: el.localName,
@@ -377,7 +379,7 @@ export function describeElement(
 		ancestors: ancestorsOf(el),
 		rect: documentRect(el, context.scroll),
 		page: context.page,
-		selector: cssSelector(el),
+		selector: options.selector === false ? "" : cssSelector(el),
 	};
 	const id = el.getAttribute("id");
 	if (id && !isGeneratedId(id)) details.id = id;

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="de">
+	<head>
+		<meta charset="utf-8" />
+		<title>Krankenkasse vergleichen (v2)</title>
+		<style>
+			body { margin: 0; font: 17px/1.6 sans-serif; }
+			.Header_root__Zz91q { display: flex; gap: 16px; align-items: center; padding: 16px 32px; background: #eef; }
+			.Nav_link__Hh7Kk { color: #225; }
+			.Promo_bar__r5t6Y { padding: 12px 32px; background: #ffe; }
+			.Hero_title__b8N1x { margin: 40px 32px 8px; font-size: 40px; }
+			.Teaser_card__Aa3Bb { margin: 24px 32px; padding: 16px; border: 1px solid #ccc; }
+			.Form_root__p0O9i { margin: 0 32px; display: grid; gap: 8px; max-width: 360px; }
+			.Button_primary__Ww2Ee { padding: 12px 20px; background: #0a6; color: #fff; border: 0; font-weight: 700; }
+			.filler { height: 1600px; }
+			footer { padding: 24px; background: #eee; }
+		</style>
+	</head>
+	<body>
+		<!-- v2: other CSS-module hashes and form id, a promo bar, the tips moved
+		     above the form, the button's text changed (the fix), bigger fonts. -->
+		<header class="Header_root__Zz91q">
+			<strong>Acme</strong>
+			<nav aria-label="Hauptmenü">
+				<a class="Nav_link__Hh7Kk" href="/versicherungen">Versicherungen</a>
+				<a class="Nav_link__Hh7Kk" href="/hypotheken">Hypotheken</a>
+				<a class="Nav_link__Hh7Kk" href="/login">Anmelden</a>
+			</nav>
+		</header>
+		<div class="Promo_bar__r5t6Y">Neu: Prämien 2027 sind da.</div>
+		<main>
+			<h1 class="Hero_title__b8N1x">Krankenkassen vergleichen</h1>
+			<section class="Teaser_card__Aa3Bb" aria-label="Tipps">
+				<h2>Tipps zum Sparen</h2>
+				<p data-truth="tip">Mit einer höheren Franchise sparen Sie bis zu 1600 Franken im Jahr.</p>
+			</section>
+			<form class="Form_root__p0O9i" id=":r7:">
+				<label>Postleitzahl <input name="zip" placeholder="z.B. 8000" /></label>
+				<label>Jahrgang <input name="year" placeholder="z.B. 1985" /></label>
+				<button class="Button_primary__Ww2Ee" type="submit" data-truth="submit">Prämien jetzt berechnen</button>
+			</form>
+			<div class="filler"></div>
+			<section class="Teaser_card__Aa3Bb" aria-label="Kontakt">
+				<h2>Kontakt</h2>
+				<p data-truth="contact">Unser Team hilft Ihnen gerne weiter.</p>
+				<p>Telefon 044 123 45 67</p>
+			</section>
+		</main>
+		<footer>© Acme</footer>
+	</body>
+</html>

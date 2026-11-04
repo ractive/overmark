@@ -2,9 +2,15 @@
  * The side panel: the tab in front, annotating it, and the saved cases.
  */
 
-import { type Case, nextNumbers } from "../lib/case.ts";
+import { type Annotation, type Case, nextNumbers } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
-import type { Broadcast, OverlayState } from "../lib/messages.ts";
+import { exportCase, exportFileName, importCase } from "../lib/export.ts";
+import type {
+	AnnotationMatch,
+	Broadcast,
+	LoadResult,
+	OverlayState,
+} from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { byId, formatDate, h, samePath, shortUrl } from "./dom.ts";
@@ -18,6 +24,8 @@ const hint = byId<HTMLParagraphElement>("hint");
 const annotate = byId<HTMLButtonElement>("annotate");
 const blurForms = byId<HTMLInputElement>("blur-forms");
 const casesList = byId<HTMLDivElement>("cases");
+const importButton = byId<HTMLButtonElement>("import");
+const importFile = byId<HTMLInputElement>("import-file");
 
 const BLUR_KEY = "overmark:blur-forms";
 
@@ -25,6 +33,10 @@ let overlay: OverlayState | undefined;
 let tabUrl = "";
 let openCaseId: string | undefined;
 let objectUrls: string[] = [];
+/** The case loaded onto a tab, and where its marks were found there. */
+let loaded:
+	| { caseId: string; tabId: number; matches: Map<string, AnnotationMatch> }
+	| undefined;
 
 function readSetting(key: string): string | null {
 	try {
@@ -132,6 +144,21 @@ async function refreshTab(): Promise<void> {
 	await renderCases();
 }
 
+importButton.addEventListener("click", () => importFile.click());
+importFile.addEventListener("change", async () => {
+	const file = importFile.files?.[0];
+	importFile.value = "";
+	if (file === undefined) return;
+	try {
+		const c = await importCase(store, new Uint8Array(await file.arrayBuffer()));
+		await openCase(c.id);
+	} catch (error) {
+		showHint(
+			`Could not import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+});
+
 // --- cases -----------------------------------------------------------------
 
 function caseItem(c: Case): HTMLLIElement {
@@ -209,6 +236,140 @@ async function imageUrl(
 	return url;
 }
 
+const percent = (score: number) => `${Math.round(score * 100)}%`;
+
+function matchText(m: AnnotationMatch): string {
+	switch (m.status) {
+		case "found":
+			return `Found here (${percent(m.score)})`;
+		case "probable":
+			return `Probably here (${percent(m.score)})`;
+		case "ambiguous":
+			return `Unsure: candidate ${m.current + 1} of ${m.candidates.length}`;
+		case "lost":
+			return "Not found on this page";
+		case "no-element":
+			return "No element recorded";
+	}
+}
+
+function matchView(a: Annotation): HTMLElement | null {
+	if (loaded === undefined) return null;
+	const m = loaded.matches.get(a.id);
+	if (m === undefined) return null;
+	const shown = m.candidates[m.current];
+	const box = h(
+		"div",
+		{
+			class: `match ${m.status}`,
+			id: `match-${a.id}`,
+			"data-status": m.status,
+		},
+		h("span", { class: "status" }, matchText(m)),
+		shown
+			? h(
+					"p",
+					{ class: "meta" },
+					`${shown.summary}${shown.visible ? "" : " · hidden at this width"}`,
+				)
+			: null,
+	);
+	const buttons = h("div", { class: "row" });
+	if (m.candidates.length > 0)
+		buttons.append(
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "show",
+					onclick: () => void showMatch(a, m.current),
+				},
+				"Show",
+			),
+		);
+	if (m.candidates.length > 1)
+		buttons.append(
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "next",
+					onclick: () => void showMatch(a, m.current + 1),
+				},
+				"Next candidate",
+			),
+		);
+	if (buttons.childElementCount > 0) box.append(buttons);
+	return box;
+}
+
+async function showMatch(a: Annotation, candidate: number): Promise<void> {
+	if (loaded === undefined) return;
+	try {
+		const m = (await chrome.tabs.sendMessage(loaded.tabId, {
+			type: "case:show",
+			annotationId: a.id,
+			candidate,
+		})) as AnnotationMatch | null;
+		if (m === null) return;
+		loaded.matches.set(a.id, m);
+		const view = matchView(a);
+		if (view) document.getElementById(`match-${a.id}`)?.replaceWith(view);
+	} catch (error) {
+		showCaseHint(describeError(error));
+	}
+}
+
+function showCaseHint(text: string | undefined): void {
+	const hintEl = document.getElementById("case-hint");
+	if (hintEl === null) return;
+	hintEl.hidden = text === undefined;
+	hintEl.textContent = text ?? "";
+}
+
+async function loadOntoTab(c: Case): Promise<void> {
+	const tab = await activeTab();
+	if (tab?.id === undefined) return;
+	try {
+		const result = await sendToTab<LoadResult>(tab.id, {
+			type: "case:load",
+			case: c,
+		});
+		loaded = {
+			caseId: c.id,
+			tabId: tab.id,
+			matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+		};
+		await openCase(c.id);
+		const found = result.matches.filter(
+			(m) => m.status !== "lost" && m.status !== "no-element",
+		).length;
+		showCaseHint(
+			`${found} of ${result.matches.length} marks found on ${shortUrl(result.url)}. Outlines: green found, amber dashed probable or unsure.`,
+		);
+	} catch (error) {
+		showCaseHint(describeError(error));
+	}
+}
+
+async function download(c: Case): Promise<void> {
+	try {
+		const zip = await exportCase(store, c);
+		const url = URL.createObjectURL(
+			new Blob([zip as Uint8Array<ArrayBuffer>], { type: "application/zip" }),
+		);
+		const link = h("a", { href: url, download: exportFileName(c) });
+		document.body.append(link);
+		link.click();
+		link.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 30_000);
+	} catch (error) {
+		showCaseHint(
+			`Could not export: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
 async function openCase(id: string): Promise<void> {
 	const c = await store.getCase(id);
 	if (c === undefined) return closeCase();
@@ -277,6 +438,7 @@ async function openCase(id: string): Promise<void> {
 				),
 				crop ? h("img", { src: crop, alt: `Mark ${a.number}` }) : null,
 				a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
+				loaded?.caseId === c.id ? matchView(a) : null,
 			),
 		);
 	}
@@ -303,13 +465,32 @@ async function openCase(id: string): Promise<void> {
 					{
 						type: "button",
 						class: "primary",
+						id: "load-case",
+						onclick: () => void loadOntoTab(c),
+					},
+					"Load onto this tab",
+				),
+				h(
+					"button",
+					{
+						type: "button",
 						id: "add-marks",
 						onclick: () => void startAnnotating(c),
 					},
-					"Add marks on this tab",
+					"Add marks",
+				),
+				h(
+					"button",
+					{
+						type: "button",
+						id: "export-case",
+						onclick: () => void download(c),
+					},
+					"Export",
 				),
 				del,
 			),
+			h("p", { class: "hint", id: "case-hint", hidden: true }),
 		),
 		h(
 			"section",
