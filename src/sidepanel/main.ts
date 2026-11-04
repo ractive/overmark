@@ -28,6 +28,10 @@ const BLUR_KEY = "overmark:blur-forms";
 
 let overlay: OverlayState | undefined;
 let tabUrl = "";
+/** The tab the panel shows. */
+let shownTabId: number | undefined;
+/** Bumped by every newer piece of news, so an older `refreshTab()` drops its result. */
+let generation = 0;
 let openCaseId: string | undefined;
 let objectUrls: string[] = [];
 
@@ -78,6 +82,7 @@ function renderOverlay(): void {
 async function startAnnotating(target?: Case): Promise<void> {
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
+	generation++; // a refresh still running must not overwrite this
 	try {
 		const next = nextNumbers(target);
 		overlay = await sendToTab(tab.id, {
@@ -114,7 +119,8 @@ async function overlayState(tabId: number): Promise<OverlayState | undefined> {
 annotate.addEventListener("click", async () => {
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
-	// The page's own Close button changes the state without telling the panel.
+	generation++; // a refresh still running must not overwrite this
+	// Ask the page: the state may have changed while no panel was listening.
 	overlay = await overlayState(tab.id);
 	if (overlay?.visible) {
 		try {
@@ -129,13 +135,18 @@ annotate.addEventListener("click", async () => {
 });
 
 async function refreshTab(): Promise<void> {
+	const mine = ++generation;
 	const tab = await activeTab();
+	if (mine !== generation) return;
+	shownTabId = tab?.id;
 	tabUrl = tab?.url ?? "";
 	pageText.textContent = tab?.url
 		? shortUrl(tab.url)
 		: (tab?.title ?? "This page");
 	showHint(undefined);
-	overlay = tab?.id === undefined ? undefined : await overlayState(tab.id);
+	const state = tab?.id === undefined ? undefined : await overlayState(tab.id);
+	if (mine !== generation) return;
+	overlay = state;
 	renderOverlay();
 	await renderCases();
 }
@@ -365,11 +376,19 @@ function closeCase(): void {
 }
 
 chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
-	if (sender.id !== chrome.runtime.id || message?.type !== "cases:changed")
-		return false;
-	if (openCaseId === message.caseId) void openCase(message.caseId);
-	else void renderCases();
-	void refreshTab();
+	if (sender.id !== chrome.runtime.id) return false;
+	if (message?.type === "overlay:changed") {
+		// From a content script; only the tab the panel shows matters.
+		if (sender.tab?.id === undefined || sender.tab.id !== shownTabId)
+			return false;
+		generation++;
+		overlay = message.state;
+		renderOverlay();
+	} else if (message?.type === "cases:changed") {
+		if (openCaseId === message.caseId) void openCase(message.caseId);
+		else void renderCases();
+		void refreshTab();
+	}
 	return false;
 });
 

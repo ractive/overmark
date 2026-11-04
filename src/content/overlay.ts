@@ -97,6 +97,8 @@ export class Overlay {
 	readonly capture: HTMLDivElement;
 	readonly toolbar: HTMLDivElement;
 	readonly popover: HTMLDivElement;
+	/** Called after `show()` and `hide()`, including the toolbar's Close. */
+	onChange: ((visible: boolean) => void) | undefined;
 
 	constructor(doc: Document = document) {
 		this.doc = doc;
@@ -134,10 +136,12 @@ export class Overlay {
 		// Stay on top of elements the page appended later.
 		if (this.host.nextElementSibling !== null)
 			this.doc.documentElement.append(this.host);
+		this.onChange?.(true);
 	}
 
 	hide(): void {
 		this.layer.hidden = true;
+		this.onChange?.(false);
 	}
 
 	/** Hide everything but the marks while a screenshot is taken. */

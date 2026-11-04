@@ -227,10 +227,26 @@ export class Page {
 		return this.#browser.send(method, params, this.sessionId);
 	}
 
-	async goto(url: string): Promise<void> {
+	async goto(url: string, timeoutMs = 15_000): Promise<void> {
 		const loaded = this.#browser.event("Page.loadEventFired", this.sessionId);
-		await this.send("Page.navigate", { url });
-		await loaded;
+		const { errorText } = (await this.send("Page.navigate", { url })) as {
+			errorText?: string;
+		};
+		if (errorText) throw new Error(`cannot open ${url}: ${errorText}`);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				loaded,
+				new Promise((_, reject) => {
+					timer = setTimeout(
+						() => reject(new Error(`${url} did not load`)),
+						timeoutMs,
+					);
+				}),
+			]);
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	/** Bring the tab to the front (the "active tab" of its window). */

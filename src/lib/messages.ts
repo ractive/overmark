@@ -59,8 +59,14 @@ export interface SaveResult {
 	annotations: number;
 }
 
-/** What the service worker tells extension pages. */
-export type Broadcast = { type: "cases:changed"; caseId: string };
+/**
+ * What extension pages hear without asking: the service worker saved a case,
+ * or a content script's overlay was shown or hidden (also from its own
+ * toolbar).
+ */
+export type Broadcast =
+	| { type: "cases:changed"; caseId: string }
+	| { type: "overlay:changed"; state: OverlayState };
 
 /** The content script's file, as the build writes it. */
 export const CONTENT_SCRIPT = "content.js";
