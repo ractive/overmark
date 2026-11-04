@@ -99,3 +99,14 @@ mark or an AI capture. What arrives during a save is refused (AI) or recorded as
 to do afterwards (toolbar: show another case, or hide if the save worked). An AI
 activity ends by itself after 10 s, so a side panel that crashed cannot block saving.
 
+## DEC-011: The side panel draws one state
+
+The panel kept its state in a dozen module variables (the tab, the overlay, the open
+case, the loaded results, object URLs, render counters) and re-rendered from several
+places; the second review found five races there. Now `PanelState` (`src/sidepanel/state.ts`)
+holds all of it, actions in `main.ts` change it only through `update`, which schedules
+one `render` (`view.ts`), and every asynchronous read goes through a `Latest`, so an
+older read never overwrites a newer one. The verdict field stays the same element while
+its case is open, so typing, focus and cursor survive every render; the other parts are
+redrawn when what they show changed.
+

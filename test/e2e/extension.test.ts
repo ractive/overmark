@@ -598,3 +598,73 @@ describe.skipIf(browserBinary === undefined)("screenshot scale", () => {
 		await page.send("Page.close");
 	}, 60_000);
 });
+
+describe.skipIf(browserBinary === undefined)("the side panel", () => {
+	let h: Harness;
+
+	beforeAll(async () => {
+		h = await startHarness(browserBinary as string);
+	}, 60_000);
+
+	afterAll(async () => {
+		await h?.stop();
+	});
+
+	test("a verdict being typed survives the case changing; delete asks twice", async () => {
+		const { page, tabId } = await h.open("v1");
+		await showToolbar(h, page, tabId);
+		await markElement(page, "h1", "Too long");
+		await saveAs(page, "Panel test");
+		await page.click(shadow('[data-action="close"]'));
+
+		await h.control.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
+		await h.control.waitFor(`document.querySelector("[data-case]")`);
+		await h.control.eval(`document.querySelector("[data-case]").click()`);
+		await h.control.waitFor(`document.getElementById("verdict")`);
+		await h.control.eval(
+			`(() => { const v = document.getElementById("verdict"); v.focus(); v.value = "Typed, not saved"; v.setSelectionRange(5, 5); })()`,
+		);
+
+		// Another mark, added from the page, changes the open case.
+		await page.activate();
+		await h.control.eval(`document.getElementById("add-marks").click()`);
+		await page.waitFor(
+			`${shadow('[data-role="status"]')}?.textContent.includes("Panel test")`,
+		);
+		await markElement(page, "[data-truth=tip]", "Say how much");
+		await page.click(shadow('[data-action="save"]'));
+		await page.click(shadow('[data-action="save-confirm"]'));
+		await page.waitFor(
+			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+			20_000,
+		);
+		await h.control.waitFor(
+			`document.querySelectorAll(".annotation").length === 2`,
+		);
+		expect(
+			await h.control.eval<{ value: string; focused: boolean; at: number }>(
+				`(() => { const v = document.getElementById("verdict"); return { value: v.value, focused: document.activeElement === v, at: v.selectionStart }; })()`,
+			),
+		).toEqual({ value: "Typed, not saved", focused: true, at: 5 });
+
+		// Saving the verdict, then deleting: the first click only asks.
+		await h.control.eval(`document.getElementById("save-verdict").click()`);
+		await h.control.waitFor(
+			`document.getElementById("verdict-status")?.textContent === "Saved"`,
+		);
+		await h.control.eval(`document.getElementById("delete-case").click()`);
+		expect(
+			await h.control.eval<string>(
+				`document.getElementById("delete-case").textContent`,
+			),
+		).toBe("Really delete?");
+		await h.control.eval(`document.getElementById("delete-case").click()`);
+		await h.control.waitFor(`!document.getElementById("home").hidden`);
+		await h.control.waitFor(
+			`![...document.querySelectorAll("[data-case] .title")].some((t) => t.textContent === "Panel test")`,
+		);
+		await page.send("Page.close");
+	}, 90_000);
+});
