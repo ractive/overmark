@@ -1,0 +1,12 @@
+# Keeps the pinned actions (the store upload action holds the store's
+# credentials) and the packages current; every update is a reviewed PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly

@@ -26,7 +26,12 @@ choose `dist/`. Click the Overmark icon on a tab (or press Alt+Shift+O) to open 
 panel there.
 
 `bun run zip` packs `overmark-<version>.zip` for sharing; unzip it and load the folder
-the same way. CI attaches the same zip to every run.
+the same way.
+
+Without building: every CI run has the zip as the artifact `overmark-unpacked` on its
+page (Actions → the run → Artifacts), and every release has it under Releases. Each also
+has `overmark-store`, the package for the Chrome Web Store; publishing it is described
+in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
 ## Use
 

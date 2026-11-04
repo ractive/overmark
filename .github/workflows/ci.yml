@@ -33,9 +33,19 @@ jobs:
       - run: bun run verify
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
-      - run: bun run zip
+      # Both packages of this commit, downloadable from the run's page: the
+      # extension with the fixed key for "Load unpacked", and the store package.
+      - run: bun scripts/build.ts --zip
+      - run: bun scripts/build.ts --store --zip --outdir dist-store
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: overmark-unpacked
-          path: overmark-*.zip
+          path: |
+            overmark-*.zip
+            !overmark-*-store.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: overmark-store
+          path: overmark-*-store.zip
           if-no-files-found: error

@@ -32,6 +32,50 @@ timestamp: 2026-11-04T19:00:00+01:00
    design note and `test/build.test.ts` with the new ID, and every relay's
    `TAB_MCP_SITES` entry. Edge Add-ons gives the extension a different ID again.
 
+## Where the packages come from
+
+- **Every CI run** (each push to a PR or to main) attaches two artifacts to its run
+  page: `overmark-unpacked` (the zip for "Load unpacked", with the fixed key) and
+  `overmark-store` (the store package, without it).
+- **A release:** bump `version` in `package.json` in a PR, merge it, then
+  `git tag vX.Y.Z <merge commit> && git push origin vX.Y.Z`. The release workflow
+  checks the tag, runs `verify`, and creates the GitHub release with both zips.
+
+## Updates through the publish workflow
+
+The API only updates an item that exists, so the first version goes in by hand (steps
+above). After that, "Publish to Chrome Web Store" (`publish.yml`, run by hand with a
+release tag) downloads the release's store zip, checks that its manifest has the tag's
+version and no key, and uploads it with
+[mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload)
+(Chrome Web Store API v2), pinned to a commit. With "submit" off the upload stays a
+draft in the dashboard; with it on, the version is submitted for review and published
+when approved. The store rejects an upload whose version is not higher than the last.
+
+One-time setup:
+
+1. In a Google Cloud project, enable the **Chrome Web Store API**. Configure the OAuth
+   consent screen (External) and set its publishing status to **In production**: while
+   it is "Testing", Google expires refresh tokens after seven days. An unverified app is
+   fine for this personal use.
+2. Create an OAuth client ID (type "Web application", with
+   `https://developers.google.com/oauthplayground` as redirect URI).
+3. In the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground), under
+   the settings, use your own client ID and secret; authorize the scope
+   `https://www.googleapis.com/auth/chromewebstore` with the store's developer account
+   and exchange the code for a refresh token.
+4. The publisher ID is under Publisher → Settings in the developer dashboard; the
+   extension ID is the item's ID.
+5. In the repository: Settings → Environments → new environment `chrome-web-store`.
+   Secrets `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`; variables
+   `CWS_PUBLISHER_ID`, `CWS_EXTENSION_ID`. Add yourself as required reviewer, and limit
+   deployments to tags `v*`.
+
+The upload action receives the client secret and the refresh token, which can publish
+every item of the developer account. That is why it is pinned to a commit and runs in a
+job that checks out nothing and installs nothing; Dependabot proposes its updates as
+PRs (`.github/dependabot.yml`).
+
 ## Listing
 
 - **Name:** Overmark
