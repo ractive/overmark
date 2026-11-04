@@ -18,9 +18,13 @@ timestamp: 2026-11-04T19:00:00+01:00
 1. A Chrome Web Store developer account (one-time US$5, two-step verification, the
    trader declaration). Which account is an open question
    ([open questions](../open-questions.md)).
-2. Publish [PRIVACY.md](../../PRIVACY.md) at a stable URL (a page on ractive.ch).
-3. Build the store package: `bun scripts/build.ts --store --zip` writes
-   `overmark-<version>-store.zip` (no `key` in the manifest; the store would reject it).
+2. Publish [PRIVACY.md](https://github.com/ractive/overmark/blob/main/PRIVACY.md) at a
+   stable URL (a page on ractive.ch).
+3. Build the store package: `bun scripts/build.ts --store --zip --outdir dist-store`
+   writes `overmark-<version>-store.zip` (no `key` in the manifest; the store would
+   reject it). Without `--outdir` it would replace `dist/`, the unpacked development
+   build, with a keyless one: Chrome would give that a new ID, and its cases and relay
+   origin would seem gone. A release attaches the same zip (`release.yml`).
 4. New item → upload the zip → fill in the listing below → visibility **Unlisted** →
    submit for review.
 5. After the first upload: Package → "View public key". Put that key into
@@ -31,8 +35,10 @@ timestamp: 2026-11-04T19:00:00+01:00
 ## Listing
 
 - **Name:** Overmark
-- **Summary (≤ 132 characters):** Annotate any web page, load the marks onto another
-  build of it, and talk them through with your AI app.
+- **Summary:** the store takes it from the manifest's `description`, which
+  `createManifest` in `scripts/build.ts` sets: "Annotate any web page, load the
+  annotations onto another build of it, and talk them through with your AI app." (at
+  most 132 characters). Change it there.
 - **Category:** Developer Tools
 - **Language:** English
 
@@ -52,7 +58,7 @@ timestamp: 2026-11-04T19:00:00+01:00
 > Export a case as a zip with a Markdown summary and the images, or connect an AI app
 > such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
 > page in front, take screenshots, and record what should change. Changes it wants to
-> make are shown to you first.
+> make are shown to you first, unless you choose "Always allow" for a tool.
 >
 > Everything stays in your browser unless you export a case or connect an AI app.
 
@@ -73,10 +79,15 @@ data only, and no tool runs code an AI app sends.
 
 **Data usage (Privacy practices tab):**
 
-- Collected: website content (screenshots, page text excerpts, page addresses) and user
-  activity limited to the marks the user draws.
+- Collected:
+  - **Web history:** the address, title and time of each page saved as a case, and the
+    address and title of the tab in front when an AI app asks for them.
+  - **Website content:** screenshots, page text excerpts and element details (see
+    PRIVACY.md for the full list).
+  - **User activity:** limited to the marks the user draws and their comments.
 - Stored locally in the browser. Transmitted only to the relay and AI app the user
-  configures and pairs, and only while connected.
+  configures and pairs, and only while connected. Screenshots an AI app takes are not
+  blurred (the user's own saves can be).
 - Not sold, not used for anything but the extension's purpose, not used to determine
   creditworthiness.
 
