@@ -13,7 +13,13 @@ import {
 	summarize,
 	TEST_ID_ATTRIBUTES,
 } from "../lib/element.ts";
-import { classify, FOUND, PROBABLE, rank } from "../lib/match.ts";
+import {
+	classify,
+	clearTextCache,
+	FOUND,
+	PROBABLE,
+	rank,
+} from "../lib/match.ts";
 import type {
 	AnnotationMatch,
 	CandidateInfo,
@@ -72,6 +78,7 @@ export class Reviewer {
 
 	async load(c: Case): Promise<LoadResult> {
 		const generation = ++this.#generation;
+		clearTextCache(); // what an abandoned load left behind
 		const doc = this.overlay.doc;
 		const host = this.overlay.host;
 		const context = createContext(doc);
@@ -164,6 +171,7 @@ export class Reviewer {
 		this.#timer = setInterval(() => this.#schedule(), 500);
 		this.#renderBar();
 		this.#render();
+		clearTextCache();
 		return {
 			caseId: c.id,
 			url: location.href,

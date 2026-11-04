@@ -37,14 +37,57 @@ export interface DescribeContext {
 	scroll: { x: number; y: number };
 }
 
-/** Inside an editor: its text is what somebody typed. */
+/** Where somebody types: the text inside is theirs, not the page's. */
+const EDITORS =
+	'textarea, select, input, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+
+/** Text that is no text on the page. */
+const HIDDEN_TEXT = new Set(["script", "style", "noscript", "template"]);
+
+/** An editor or inside one: its text is what somebody typed. */
 export function isEditable(el: Element): boolean {
 	return (
 		(el as HTMLElement).isContentEditable === true ||
+		el.localName === "textarea" ||
 		el.closest(
 			'[contenteditable]:not([contenteditable="false"]), [role="textbox"]',
 		) !== null
 	);
+}
+
+/**
+ * The text of an element without what is typed into editors and form fields
+ * inside it (and without scripts and styles), cut to about `max` characters.
+ * `skip` leaves out one more subtree, e.g. a label's control.
+ */
+export function pageText(
+	el: Element,
+	options: { max?: number; skip?: Node } = {},
+): string {
+	const max = options.max ?? 600;
+	let text = "";
+	const walk = (node: Node): void => {
+		for (
+			let child = node.firstChild;
+			child !== null;
+			child = child.nextSibling
+		) {
+			if (text.length >= max) return;
+			if (child === options.skip) continue;
+			if (child.nodeType === 3) {
+				text += child.nodeValue ?? "";
+			} else if (child.nodeType === 1) {
+				const e = child as Element;
+				if (HIDDEN_TEXT.has(e.localName) || e.matches(EDITORS)) {
+					text += " ";
+					continue;
+				}
+				walk(e);
+			}
+		}
+	};
+	walk(el);
+	return text;
 }
 
 export function createContext(doc: Document): DescribeContext {
@@ -172,7 +215,10 @@ export function accessibleName(
 		const doc = el.ownerDocument;
 		const text = labelledBy
 			.split(/\s+/)
-			.map((id) => doc.getElementById(id)?.textContent ?? "")
+			.map((id) => {
+				const target = doc.getElementById(id);
+				return target === null || isEditable(target) ? "" : pageText(target);
+			})
 			.join(" ");
 		if (text.trim()) return normalizeText(text);
 	}
@@ -193,23 +239,16 @@ export function accessibleName(
 		fromContent &&
 		(NAMED_BY_CONTENT.has(tag) || el.getAttribute("role") === "button")
 	) {
-		const text = normalizeText(el.textContent);
+		const text = normalizeText(pageText(el));
 		if (text) return text;
 	}
 	const title = el.getAttribute("title");
 	return title?.trim() ? normalizeText(title) : undefined;
 }
 
-/** A label's text without the text of the control inside it. */
+/** A label's text without its control or any other field inside it. */
 function labelText(label: Element, control: Element): string {
-	let text = "";
-	const walk = (node: Node) => {
-		if (node === control) return;
-		if (node.nodeType === 3) text += node.textContent ?? "";
-		for (const child of node.childNodes) walk(child);
-	};
-	walk(label);
-	return normalizeText(text);
+	return normalizeText(pageText(label, { skip: control }));
 }
 
 /** The nearest heading before `el` in document order (not `el` or one around it). */
@@ -235,9 +274,7 @@ export function headingAbove(
 		}
 	}
 	const h = headings[found];
-	return h === undefined
-		? undefined
-		: normalizeText(h.textContent) || undefined;
+	return h === undefined ? undefined : normalizeText(pageText(h)) || undefined;
 }
 
 export function landmarkOf(el: Element): string | undefined {
@@ -401,7 +438,7 @@ export function describeElement(
 	const editable = isEditable(el);
 	const name = accessibleName(el, !editable);
 	if (name) details.name = name;
-	const text = editable ? "" : normalizeText(el.textContent);
+	const text = editable ? "" : normalizeText(pageText(el));
 	if (text) details.text = text;
 	const heading = headingAbove(el, context.headings);
 	if (heading) details.heading = heading;

@@ -148,3 +148,16 @@ describe("validateCase limits", () => {
 		expect(c.annotations[0]?.element?.attributes).toEqual({ href: "/x" });
 	});
 });
+
+describe("mark ids", () => {
+	test("must be a<number>, so later saves cannot collide", () => {
+		const c = withMarks();
+		const first = c.annotations[0];
+		if (first === undefined) throw new Error("no mark");
+		const odd = {
+			...c,
+			annotations: [{ ...first, id: "a7", crop: "crops/a7.webp" }],
+		};
+		expect(() => validateCase(odd)).toThrow(`must be a${first.number}`);
+	});
+});

@@ -111,6 +111,15 @@ describe("checkOutdir", () => {
 		expect(await Bun.file(join(dir, "notes.txt")).text()).toBe("keep me");
 	});
 
+	test("refuses a file in place of the folder, and keeps it", async () => {
+		const dir = tempDir();
+		const file = join(dir, "manifest-key.txt");
+		writeFileSync(file, "keep me");
+		await expect(checkOutdir(file)).rejects.toThrow("it is a file");
+		await expect(build({ outdir: file })).rejects.toThrow("it is a file");
+		expect(await Bun.file(file).text()).toBe("keep me");
+	});
+
 	test("accepts a missing or empty folder and an earlier build", async () => {
 		const dir = tempDir();
 		await checkOutdir(dir);

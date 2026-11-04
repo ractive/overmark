@@ -17,10 +17,16 @@ import type {
 	WorkerResponse,
 } from "./lib/messages.ts";
 import { saveCase } from "./lib/save.ts";
-import { IdbStore } from "./lib/store.ts";
+import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
 import { inject } from "./lib/tabs.ts";
 
 const store = new IdbStore();
+
+// Screenshots of saves that never finished (the tab was closed or navigated
+// while saving) would otherwise stay in storage unseen.
+void store
+	.sweepPending(Date.now() - PENDING_MAX_AGE_MS)
+	.catch((error: unknown) => console.warn("Overmark: sweep", error));
 
 chrome.action.onClicked.addListener((tab) => {
 	if (tab.id === undefined) return;
@@ -87,7 +93,10 @@ async function handle(
 			if (!isSafeId(request.caseId) || !isSafeId(request.shotId))
 				throw new Error("invalid id");
 			const image = await screenshotToWebp(await capture(tab.id, tab.windowId));
-			await store.putImage(request.caseId, pendingImage(request.shotId), image);
+			await store.putImage(request.caseId, pendingImage(request.shotId), {
+				...image,
+				storedAt: Date.now(),
+			});
 			return {
 				width: image.width,
 				height: image.height,

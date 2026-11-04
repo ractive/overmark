@@ -61,8 +61,11 @@ class FakeTab implements TabBridge {
 	/** Runs during a capture, e.g. the user saving a mark meanwhile. */
 	duringCapture: (() => Promise<void>) | undefined;
 	captured: CurrentTab[] = [];
+	/** The user's own save is taking screenshots. */
+	saving = false;
+	url = "http://localhost:3000/kk";
 	async current() {
-		return { id: 7, windowId: 1, url: "http://localhost:3000/kk", title: "KK" };
+		return { id: 7, windowId: 1, url: this.url, title: "KK" };
 	}
 	async send<T>(_tabId: number, request: ContentRequest): Promise<T> {
 		this.sent.push(request);
@@ -116,6 +119,15 @@ class FakeTab implements TabBridge {
 							url: "http://localhost:3000/kk",
 							title: "KK",
 						}) satisfies DescribedElement as T;
+			case "page:blur":
+				return (
+					this.saving
+						? {
+								ok: false,
+								error: "The user is saving marks on this page right now",
+							}
+						: { ok: true }
+				) as T;
 			default:
 				return {} as T;
 		}
@@ -146,7 +158,11 @@ let changed: string[];
 let tools: Map<string, Tool>;
 
 /** Case c_1 with marks 1 and 2; its crops are `cropWidth` pixels wide. */
-async function seed(cropWidth = 10, comment?: string): Promise<Case> {
+async function seed(
+	cropWidth = 10,
+	comment?: string,
+	marks = 2,
+): Promise<Case> {
 	const c: Case = {
 		...sampleCase("c_1"),
 		shots: [
@@ -159,8 +175,8 @@ async function seed(cropWidth = 10, comment?: string): Promise<Case> {
 				capturedAt: "2026-11-04T10:00:00Z",
 			},
 		],
-		annotations: [mark(1), mark(2)].map((a) =>
-			comment === undefined ? a : { ...a, comment },
+		annotations: Array.from({ length: marks }, (_, i) => mark(i + 1)).map(
+			(a) => (comment === undefined ? a : { ...a, comment }),
 		),
 	};
 	await store.putCase(c);
@@ -191,10 +207,10 @@ function build(options: Partial<ToolDeps> = {}): void {
 async function call(
 	name: string,
 	input: Record<string, unknown> = {},
+	signal: AbortSignal = new AbortController().signal,
 ): Promise<Result> {
 	const tool = tools.get(name);
 	if (tool === undefined) throw new Error(`no tool ${name}`);
-	const signal = new AbortController().signal;
 	return (await tool.execute(input, {
 		signal,
 		client: { grantId: "g", id: "https://claude.ai/oauth", host: "claude.ai" },
@@ -265,6 +281,33 @@ describe("tools", () => {
 			0,
 		);
 		expect(total).toBeLessThan(30_000);
+	});
+
+	test("list_cases and load_case stay under the limit and say what they left out", async () => {
+		build({ maxMessageBytes: () => 20_000 });
+		for (let i = 0; i < 60; i++)
+			await store.putCase({
+				...sampleCase(
+					`c_${i + 10}`,
+					`2026-11-04T10:${String(i).padStart(2, "0")}:00Z`,
+				),
+				title: "T".repeat(450),
+			});
+		const listed = await call("list_cases");
+		const cases = json(listed);
+		expect(cases.length).toBeGreaterThan(0);
+		expect(cases.length).toBeLessThan(60);
+		expect(cases[0].caseId).toBe("c_69"); // newest first
+		expect(listed.content[1]?.text).toContain("older cases are left out");
+		expect(JSON.stringify(listed).length).toBeLessThan(20_000);
+
+		await seed(10, undefined, 200);
+		const loaded = await call("load_case", { caseId: "c_1" });
+		const marks = json(loaded).marks;
+		expect(marks.length).toBeLessThan(200);
+		expect(marks[0].mark).toBe(1);
+		expect(loaded.content[1]?.text).toContain("marks are left out");
+		expect(JSON.stringify(loaded).length).toBeLessThan(20_000);
 	});
 
 	test("get_image scales down to fit, and refuses what cannot fit", async () => {
@@ -394,6 +437,46 @@ describe("tools", () => {
 			{ type: "page:blur", blurForms: true },
 			{ type: "page:unblur" },
 		]);
+	});
+
+	test("capture is refused while the user's save takes screenshots", async () => {
+		tab.saving = true;
+		await expect(call("capture")).rejects.toThrow("saving marks");
+		expect(tab.captured).toEqual([]);
+	});
+
+	test("add_annotation is refused when the page in front changed after the user allowed it", async () => {
+		await seed();
+		const signal = new AbortController().signal;
+		const question = await confirmRequestFor(store, tab, {
+			tool: { name: "add_annotation", description: "Add a mark." },
+			arguments: { caseId: "c_1", selector: "button", comment: "x" },
+			client: {
+				grantId: "g",
+				id: "https://claude.ai/oauth",
+				host: "claude.ai",
+			},
+			signal,
+		});
+		expect(question.tool.description).toContain(
+			"Page: http://localhost:3000/kk",
+		);
+		tab.url = "https://mail.example/inbox";
+		await expect(
+			call(
+				"add_annotation",
+				{ caseId: "c_1", selector: "button", comment: "x" },
+				signal,
+			),
+		).rejects.toThrow("The page in front changed since the user allowed this");
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(2);
+		tab.url = "http://localhost:3000/kk";
+		await call(
+			"add_annotation",
+			{ caseId: "c_1", selector: "button", comment: "x" },
+			signal,
+		);
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(3);
 	});
 
 	test("add_annotation adds an AI mark with its own screenshot", async () => {

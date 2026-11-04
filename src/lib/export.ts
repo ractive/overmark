@@ -6,6 +6,7 @@ import {
 	type Case,
 	CaseError,
 	caseImages,
+	MAX_TITLE,
 	newId,
 	validateCase,
 } from "./case.ts";
@@ -54,6 +55,9 @@ export async function exportCase(
 
 /** The largest export the side panel reads. */
 export const MAX_IMPORT_BYTES = 150 * 1024 * 1024;
+
+/** case.json is text about marks; a real one is far smaller than this. */
+export const MAX_CASE_JSON_BYTES = 20 * 1024 * 1024;
 /** Limits per imported image: larger ones are no Overmark screenshot. */
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 export const MAX_IMAGE_SIDE = 16_384;
@@ -110,7 +114,11 @@ export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
 		);
 	const limits = { maxEntries: 2500, maxTotalBytes: MAX_IMPORT_BYTES };
 	const json = (
-		await readZip(zip, { ...limits, include: (n) => n === "case.json" })
+		await readZip(zip, {
+			...limits,
+			maxTotalBytes: MAX_CASE_JSON_BYTES,
+			include: (n) => n === "case.json",
+		})
 	).get("case.json");
 	if (json === undefined)
 		throw new CaseError(
@@ -161,11 +169,17 @@ export async function storeImport(
 	options: { copy?: boolean } = {},
 ): Promise<Case> {
 	const c: Case = options.copy
-		? { ...parsed.case, id: newId("c"), title: `${parsed.case.title} (copy)` }
+		? {
+				...parsed.case,
+				id: newId("c"),
+				title: `${parsed.case.title.slice(0, MAX_TITLE - COPY.length)}${COPY}`,
+			}
 		: parsed.case;
 	await store.replaceCase(c, parsed.images);
 	return c;
 }
+
+const COPY = " (copy)";
 
 /** Read an export and store it, replacing a case with the same id. */
 export async function importCase(

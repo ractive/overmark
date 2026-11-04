@@ -126,7 +126,11 @@ async function startAnnotating(target?: Case): Promise<void> {
 					}
 				: {}),
 		});
-		showHint(undefined);
+		showHint(
+			overlay?.saving
+				? "Overmark is still saving the last marks on this page; the toolbar switches once that is done."
+				: undefined,
+		);
 	} catch (error) {
 		showHint(describeError(error));
 	}
@@ -179,16 +183,27 @@ async function refreshTab(): Promise<void> {
 		loaded !== undefined &&
 		(tab?.id !== loaded.tabId || overlay?.loadedCase !== loaded.caseId)
 	)
-		forgetLoaded();
+		void forgetLoaded();
 	renderOverlay();
 	await renderCases();
 }
 
-/** The loaded case's results no longer describe the tab: drop them. */
-function forgetLoaded(): void {
-	const caseId = loaded?.caseId;
+/**
+ * The loaded case's results no longer describe the tab: drop them (and with
+ * `clearTab`, the outlines too), show the case again, then `hint`.
+ */
+async function forgetLoaded(
+	options: { hint?: string; clearTab?: boolean } = {},
+): Promise<void> {
+	const was = loaded;
 	loaded = undefined;
-	if (caseId !== undefined && openCaseId === caseId) void openCase(caseId);
+	if (was !== undefined && options.clearTab)
+		await chrome.tabs
+			.sendMessage(was.tabId, { type: "case:clear" })
+			.catch(() => undefined);
+	if (was !== undefined && openCaseId === was.caseId)
+		await openCase(was.caseId, options.hint);
+	else if (options.hint !== undefined) showCaseHint(options.hint);
 }
 
 importButton.addEventListener("click", () => importFile.click());
@@ -206,6 +221,8 @@ async function finishImport(
 	importPrompt.hidden = true;
 	importPrompt.replaceChildren();
 	const c = await storeImport(store, parsed, options);
+	// Results (and outlines) of the version it replaced describe other marks.
+	if (loaded?.caseId === c.id) await forgetLoaded({ clearTab: true });
 	await openCase(c.id);
 }
 
@@ -343,16 +360,21 @@ function releaseImages(): void {
 	objectUrls = [];
 }
 
+/** An object URL for a case's image, added to `urls` (one list per rendering). */
 async function imageUrl(
 	caseId: string,
 	path: string,
+	urls: string[],
 ): Promise<string | undefined> {
 	const image = await store.getImage(caseId, path);
 	if (image === undefined) return undefined;
 	const url = URL.createObjectURL(image.blob);
-	objectUrls.push(url);
+	urls.push(url);
 	return url;
 }
+
+/** Counts renderings of the case view, so a slower, older one gives up. */
+let caseRender = 0;
 
 const percent = (score: number) => `${Math.round(score * 100)}%`;
 
@@ -435,10 +457,9 @@ async function showMatch(a: Annotation, candidate: number): Promise<void> {
 			candidate,
 		})) as AnnotationMatch | null;
 		if (m === null) {
-			forgetLoaded();
-			showCaseHint(
-				"The case is no longer loaded on that tab. Load it again to see its marks there.",
-			);
+			await forgetLoaded({
+				hint: "The case is no longer loaded on that tab. Load it again to see its marks there.",
+			});
 			return;
 		}
 		loaded.matches.set(a.id, m);
@@ -500,19 +521,14 @@ async function download(c: Case): Promise<void> {
 	}
 }
 
-async function openCase(id: string): Promise<void> {
+/** Show a case, then `hint` under its buttons. */
+async function openCase(id: string, hint?: string): Promise<void> {
+	const render = ++caseRender;
 	const c = await store.getCase(id);
+	if (render !== caseRender) return;
 	if (c === undefined) return closeCase();
-	// Keep a verdict being typed when the case is shown again (marks added meanwhile).
-	const previous = caseView.querySelector<HTMLTextAreaElement>("#verdict");
-	const typing =
-		previous !== null &&
-		previous.dataset["case"] === id &&
-		previous.value !== previous.dataset["saved"]
-			? previous.value
-			: undefined;
 	openCaseId = id;
-	releaseImages();
+	const urls: string[] = [];
 	const verdict = h("textarea", {
 		id: "verdict",
 		placeholder: "What should change, as agreed?",
@@ -520,7 +536,7 @@ async function openCase(id: string): Promise<void> {
 		"data-case": id,
 	});
 	verdict.dataset["saved"] = c.verdict ?? "";
-	verdict.value = typing ?? c.verdict ?? "";
+	verdict.value = c.verdict ?? "";
 	const saveVerdict = h(
 		"button",
 		{ type: "button", id: "save-verdict" },
@@ -567,12 +583,12 @@ async function openCase(id: string): Promise<void> {
 	});
 	const shots = h("div", { class: "shots" });
 	for (const shot of c.shots) {
-		const url = await imageUrl(c.id, shot.image);
+		const url = await imageUrl(c.id, shot.image, urls);
 		if (url) shots.append(h("img", { src: url, alt: `Screenshot ${shot.id}` }));
 	}
 	const list = h("ol", { class: "annotations" });
 	for (const a of [...c.annotations].sort((x, y) => x.number - y.number)) {
-		const crop = await imageUrl(c.id, a.crop);
+		const crop = await imageUrl(c.id, a.crop, urls);
 		list.append(
 			h(
 				"li",
@@ -594,6 +610,26 @@ async function openCase(id: string): Promise<void> {
 			),
 		);
 	}
+	if (render !== caseRender) {
+		// A newer rendering started while this one read the images.
+		for (const url of urls) URL.revokeObjectURL(url);
+		return;
+	}
+	// Keep a verdict being typed when the case is shown again (marks added
+	// meanwhile): read it now, after the awaits, with the cursor where it was.
+	const previous = caseView.querySelector<HTMLTextAreaElement>("#verdict");
+	const typing =
+		previous !== null &&
+		previous.dataset["case"] === id &&
+		previous.value !== previous.dataset["saved"]
+			? {
+					value: previous.value,
+					focused: document.activeElement === previous,
+					start: previous.selectionStart,
+					end: previous.selectionEnd,
+				}
+			: undefined;
+	if (typing !== undefined) verdict.value = typing.value;
 	caseView.replaceChildren(
 		h(
 			"section",
@@ -654,11 +690,19 @@ async function openCase(id: string): Promise<void> {
 		h("section", {}, h("h2", {}, `Marks (${c.annotations.length})`), list),
 		h("section", {}, h("h2", {}, "Screenshots"), shots),
 	);
+	releaseImages();
+	objectUrls = urls;
 	home.hidden = true;
 	caseView.hidden = false;
+	if (typing?.focused) {
+		verdict.focus();
+		verdict.setSelectionRange(typing.start, typing.end);
+	}
+	if (hint !== undefined) showCaseHint(hint);
 }
 
 function closeCase(): void {
+	caseRender++; // a rendering still reading images must not come back
 	openCaseId = undefined;
 	releaseImages();
 	caseView.replaceChildren();
@@ -774,7 +818,7 @@ chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
 			sender.tab?.id === loaded.tabId &&
 			message.state.loadedCase !== loaded.caseId
 		)
-			forgetLoaded();
+			void forgetLoaded();
 		// From a content script; only the tab the panel shows matters.
 		if (sender.tab?.id === undefined || sender.tab.id !== shownTabId)
 			return false;
@@ -791,11 +835,11 @@ chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
 
 chrome.tabs.onActivated.addListener(() => void refreshTab());
 chrome.tabs.onUpdated.addListener((id, info) => {
-	if (id === loaded?.tabId && info.status === "loading") forgetLoaded();
+	if (id === loaded?.tabId && info.status === "loading") void forgetLoaded();
 	if (info.status === "complete" || info.url !== undefined) void refreshTab();
 });
 chrome.tabs.onRemoved.addListener((id) => {
-	if (id === loaded?.tabId) forgetLoaded();
+	if (id === loaded?.tabId) void forgetLoaded();
 });
 
 void refreshTab();

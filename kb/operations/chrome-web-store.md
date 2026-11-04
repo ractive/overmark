@@ -131,7 +131,8 @@ data only, and no tool runs code an AI app sends.
   - **User activity:** limited to the marks the user draws and their comments.
 - Stored locally in the browser. Transmitted only to the relay and AI app the user
   configures and pairs, and only while connected. Every screenshot blurs password
-  fields, and all form fields when the user turns that on.
+  fields, and all form fields when the user turns that on, except fields inside
+  embedded frames. Text typed into fields and editors is never recorded.
 - Not sold, not used for anything but the extension's purpose, not used to determine
   creditworthiness.
 

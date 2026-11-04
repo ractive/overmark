@@ -34,7 +34,7 @@ import type {
 } from "../lib/messages.ts";
 import { type AnnotationDraft, cropRectFor } from "../lib/save.ts";
 import { elementAt, elementForRect } from "./anchor.ts";
-import { blurFields } from "./blur.ts";
+import type { PageBlur } from "./blur.ts";
 import type { Overlay } from "./overlay.ts";
 import { planShots } from "./plan.ts";
 
@@ -94,14 +94,19 @@ export class Annotator {
 	#target: AnnotateTarget | undefined;
 	#blurForms = false;
 	#saving = false;
-	/** "Stop annotating" arrived during a save: hide once it is done. */
+	/** "Stop annotating" arrived during a save: hide once it is done (if it worked). */
 	#hideAfterSave = false;
+	/** "Add marks" for another case arrived during a save: switch once it is done. */
+	#showAfterSave: { target?: AnnotateTarget; blurForms?: boolean } | undefined;
 	#saveForm = false;
 	#message = "";
 	#frame = 0;
 
-	constructor(overlay: Overlay) {
+	readonly #pageBlur: PageBlur;
+
+	constructor(overlay: Overlay, blur: PageBlur) {
 		this.overlay = overlay;
+		this.#pageBlur = blur;
 		const capture = overlay.capture;
 		capture.addEventListener("pointermove", (e) => this.#move(e));
 		capture.addEventListener("pointerdown", (e) => this.#down(e));
@@ -140,7 +145,10 @@ export class Annotator {
 	}
 
 	show(options: { target?: AnnotateTarget; blurForms?: boolean }): void {
-		if (!this.#saving) {
+		if (this.#saving) {
+			// The running save keeps its case; the new one applies when it is done.
+			this.#showAfterSave = options;
+		} else {
 			this.#target = options.target;
 			this.#blurForms = options.blurForms ?? false;
 			this.#message = "";
@@ -528,12 +536,19 @@ export class Annotator {
 	// --- saving --------------------------------------------------------------
 
 	#blur(): () => void {
-		return blurFields(this.overlay.doc, this.#blurForms);
+		return this.#pageBlur.hold(this.#blurForms);
 	}
 
 	/** Save the marks as a new case, or add them to the target case. */
 	async save(title: string): Promise<SaveResult | undefined> {
 		if (this.#saving || this.#drafts.length === 0) return undefined;
+		if (this.overlay.marking || this.#pageBlur.held > 0) {
+			// An AI app is taking a screenshot of this page right now.
+			this.#message =
+				"An AI app is taking a screenshot; save again in a moment.";
+			this.#renderToolbar();
+			return undefined;
+		}
 		if (this.#editing !== null) this.#commitComment();
 		const win = this.overlay.doc.defaultView as Window;
 		const doc = this.overlay.doc;
@@ -545,6 +560,7 @@ export class Annotator {
 		this.#saveForm = false;
 		this.setTool(null);
 		const captured: string[] = [];
+		let saved = false;
 		try {
 			// Element details are read first, while the page is as the user saw it.
 			const context = createContext(doc);
@@ -642,6 +658,7 @@ export class Annotator {
 				nextAnnotation: Math.max(...drafts.map((d) => d.number)) + 1,
 			};
 			this.#message = `Saved “${result.title}”`;
+			saved = true;
 			return result;
 		} catch (error) {
 			if (captured.length > 0)
@@ -653,9 +670,16 @@ export class Annotator {
 		} finally {
 			win.scrollTo({ left: start.x, top: start.y, behavior: "instant" });
 			this.#saving = false;
+			const next = this.#showAfterSave;
+			this.#showAfterSave = undefined;
 			if (this.#hideAfterSave) {
 				this.#hideAfterSave = false;
-				this.hide();
+				// A failed save stays up with its error, or its marks would be lost.
+				if (saved) this.hide();
+			} else if (next !== undefined) {
+				const message = this.#message;
+				this.show(next);
+				this.#message = message;
 			}
 			this.#renderToolbar();
 			this.#render();

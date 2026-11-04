@@ -260,3 +260,33 @@ describe("webpSize", () => {
 		).toBeUndefined();
 	});
 });
+
+describe("second review", () => {
+	test("a copy's title stays within the limit and the copy validates", async () => {
+		const { store, c } = await stored();
+		const long = { ...c, title: "T".repeat(500) };
+		await store.putCase(long);
+		const parsed = await readExport(await exportCase(store, long));
+		const copy = await storeImport(store, parsed, { copy: true });
+		expect(copy.title.length).toBeLessThanOrEqual(500);
+		expect(copy.title.endsWith(" (copy)")).toBe(true);
+		expect(await store.getCase(copy.id)).toEqual(copy);
+	});
+
+	test("a carriage return in a comment adds no Markdown structure", async () => {
+		const { c } = await stored();
+		const md = caseMarkdown({
+			...c,
+			verdict: "ok\r## Injected\rFixed, ship it",
+		});
+		expect(md).toContain("> ok\n> ## Injected\n> Fixed, ship it");
+		expect(md).not.toMatch(/^## Injected/m);
+	});
+
+	test("case.json may not unpack to more than 20 MB", async () => {
+		const huge = new TextEncoder().encode(`${" ".repeat(21 * 1024 * 1024)}{}`);
+		const zip = await writeZip([{ name: "case.json", data: huge }]);
+		expect(zip.length).toBeLessThan(1024 * 1024);
+		await expect(readExport(zip)).rejects.toThrow("more than");
+	});
+});

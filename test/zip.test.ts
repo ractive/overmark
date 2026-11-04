@@ -90,14 +90,43 @@ describe("writeZip and readZip", () => {
 	});
 
 	test("stops inflating an entry that is larger than it says", async () => {
-		const data = new Uint8Array(1024 * 1024); // zeros deflate to ~1 KB
+		const data = new Uint8Array(64 * 1024 * 1024); // zeros deflate to ~64 KB
 		const zip = await writeZip([{ name: "bomb", data }]);
 		const view = new DataView(zip.buffer);
 		const central = zip.length - 22 - (46 + "bomb".length);
 		expect(view.getUint32(central, true)).toBe(0x02014b50);
 		view.setUint32(22, 1, true); // local header: size
 		view.setUint32(central + 24, 1, true); // central directory: size
-		await expect(readZip(zip)).rejects.toThrow("damaged entry: bomb");
+		// Count what the decompressor hands out: an inflate that reads to the
+		// end would produce all 64 MB before any size check could fail it.
+		const Original = globalThis.DecompressionStream;
+		let produced = 0;
+		class Counting {
+			readonly readable: ReadableStream<Uint8Array>;
+			readonly writable: WritableStream<BufferSource>;
+			constructor(format: CompressionFormat) {
+				const inner = new Original(format);
+				this.writable = inner.writable;
+				this.readable = inner.readable.pipeThrough(
+					new TransformStream<Uint8Array, Uint8Array>({
+						transform(chunk, controller) {
+							produced += chunk.length;
+							controller.enqueue(chunk);
+						},
+					}),
+				);
+			}
+		}
+		globalThis.DecompressionStream = Counting as typeof DecompressionStream;
+		try {
+			await expect(readZip(zip)).rejects.toThrow(
+				"entry bomb unpacks to more than it says",
+			);
+		} finally {
+			globalThis.DecompressionStream = Original;
+		}
+		expect(produced).toBeGreaterThan(0);
+		expect(produced).toBeLessThan(8 * 1024 * 1024);
 	});
 
 	test("rejects a central directory that runs past the end", async () => {
