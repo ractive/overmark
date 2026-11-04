@@ -3,7 +3,8 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import type { ContentRequest, OverlayState } from "../lib/messages.ts";
+import type { ContentRequest } from "../lib/messages.ts";
+import { Annotator } from "./annotator.ts";
 import { Overlay } from "./overlay.ts";
 
 declare global {
@@ -11,25 +12,28 @@ declare global {
 }
 
 function start(): void {
-	const overlay = new Overlay(document);
-	const state = (): OverlayState => ({
-		visible: overlay.visible,
-		url: location.href,
-		title: document.title,
-	});
+	const annotator = new Annotator(new Overlay(document));
 	chrome.runtime.onMessage.addListener(
-		(message: ContentRequest, _sender, sendResponse) => {
+		(message: ContentRequest, sender, sendResponse) => {
+			if (sender.id !== chrome.runtime.id) return false;
 			switch (message.type) {
 				case "overlay:show":
-					overlay.show();
+					annotator.show({
+						...(message.target ? { target: message.target } : {}),
+						...(message.blurForms !== undefined
+							? { blurForms: message.blurForms }
+							: {}),
+					});
 					break;
 				case "overlay:hide":
-					overlay.hide();
+					annotator.hide();
 					break;
 				case "overlay:state":
 					break;
+				default:
+					return false;
 			}
-			sendResponse(state());
+			sendResponse(annotator.state());
 			return false;
 		},
 	);
