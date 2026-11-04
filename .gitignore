@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.overmark.zip
+overmark-*.zip
+.DS_Store
+.hyalo-index
