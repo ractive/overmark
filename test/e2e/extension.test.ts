@@ -542,3 +542,59 @@ describe.skipIf(browserBinary === undefined)(
 		}, 90_000);
 	},
 );
+
+describe.skipIf(browserBinary === undefined)("screenshot scale", () => {
+	let h: Harness;
+
+	beforeAll(async () => {
+		h = await startHarness(browserBinary as string);
+	}, 60_000);
+
+	afterAll(async () => {
+		await h?.stop();
+	});
+
+	test("crops follow the captured image, not devicePixelRatio", async () => {
+		const { page, tabId } = await h.open("v1");
+		// devicePixelRatio 2, while Chrome still captures at 1×: like browser
+		// zoom or DevTools' device mode.
+		await page.send("Emulation.setDeviceMetricsOverride", {
+			width: 1280,
+			height: 800,
+			deviceScaleFactor: 2,
+			mobile: false,
+		});
+		await showToolbar(h, page, tabId);
+		await markElement(page, "[data-truth=submit]", "Too pale");
+		await saveAs(page, "Scale");
+		const sizes = await h.control.eval<
+			Record<string, { width: number; height: number }>
+		>(
+			`new Promise((resolve) => { const o = indexedDB.open("overmark"); o.onsuccess = () => { const tx = o.result.transaction(["cases", "images"]); const cases = tx.objectStore("cases").getAll(); const images = tx.objectStore("images").getAll(); const keys = tx.objectStore("images").getAllKeys(); tx.oncomplete = () => { const id = cases.result.find((c) => c.title === "Scale").id; const out = {}; keys.result.forEach((k, i) => { if (k.startsWith(id + "/")) out[k.slice(id.length + 1)] = { width: images.result[i].width, height: images.result[i].height }; }); resolve(out); }; }; })`,
+		);
+		const shot = sizes["shots/s1.webp"];
+		const crop = sizes["crops/a1.webp"];
+		const button = await page.eval<{ width: number; height: number }>(
+			`(() => { const r = document.querySelector("[data-truth=submit]").getBoundingClientRect(); return { width: r.width, height: r.height }; })()`,
+		);
+		expect(shot).toBeDefined();
+		expect(crop).toBeDefined();
+		const scale = (shot?.width ?? 0) / 1280;
+		// The button plus a 40 px margin on each side, at the image's scale:
+		// not at devicePixelRatio's, which would double it.
+		const pad = 2 * 40 + 2;
+		expect(crop?.width ?? 0).toBeGreaterThanOrEqual(
+			Math.floor(button.width * scale),
+		);
+		expect(crop?.width ?? 0).toBeLessThanOrEqual(
+			Math.ceil((button.width + pad) * scale),
+		);
+		expect(crop?.height ?? 0).toBeGreaterThanOrEqual(
+			Math.floor(button.height * scale),
+		);
+		expect(crop?.height ?? 0).toBeLessThanOrEqual(
+			Math.ceil((button.height + pad) * scale),
+		);
+		await page.send("Page.close");
+	}, 60_000);
+});

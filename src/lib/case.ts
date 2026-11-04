@@ -154,6 +154,21 @@ export function caseImages(c: Case): Set<string> {
 	]);
 }
 
+/**
+ * The screenshot's real pixels per CSS pixel. `devicePixelRatio` can differ
+ * from what `captureVisibleTab` delivers (browser zoom, device emulation), so
+ * the image's own width decides; `fallback` when it cannot.
+ */
+export function imageScale(
+	imageWidth: number,
+	viewportWidth: number,
+	fallback: number,
+): number {
+	return imageWidth > 0 && viewportWidth > 0
+		? imageWidth / viewportWidth
+		: fallback;
+}
+
 /** The IndexedDB key of a case's image. */
 export const imageKey = (caseId: string, path: string) => `${caseId}/${path}`;
 

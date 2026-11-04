@@ -8,6 +8,7 @@
 
 import {
 	type ElementDetails,
+	imageScale,
 	LANGUAGE,
 	newId,
 	type PageInfo,
@@ -598,9 +599,10 @@ export class Annotator {
 				this.#render();
 				const restore = this.#blur();
 				await frame();
+				let image: CaptureResult;
 				try {
 					captured.push(shotId);
-					await ask<CaptureResult>({ type: "capture", caseId, shotId });
+					image = await ask<CaptureResult>({ type: "capture", caseId, shotId });
 				} finally {
 					restore();
 					this.overlay.setCapturing(false);
@@ -610,7 +612,10 @@ export class Annotator {
 					image: pendingImage(shotId),
 					scrollX: actual.x,
 					scrollY: actual.y,
-					viewport,
+					viewport: {
+						...viewport,
+						dpr: imageScale(image.width, viewport.width, viewport.dpr),
+					},
 					capturedAt: new Date().toISOString(),
 				});
 				for (const index of window.marks) {

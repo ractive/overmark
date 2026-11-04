@@ -4,22 +4,19 @@
  * found, amber and dashed when only probable or tied.
  */
 
-import type { Annotation, Case, ElementDetails } from "../lib/case.ts";
 import {
-	createContext,
+	type Candidate,
+	createSearch,
+	findCandidates,
+} from "../lib/candidates.ts";
+import type { Annotation, Case } from "../lib/case.ts";
+import {
 	cssSelector,
 	type DescribeContext,
 	describeElement,
 	summarize,
-	TEST_ID_ATTRIBUTES,
 } from "../lib/element.ts";
-import {
-	classify,
-	clearTextCache,
-	FOUND,
-	PROBABLE,
-	rank,
-} from "../lib/match.ts";
+import { clearTextCache, FOUND } from "../lib/match.ts";
 import type {
 	AnnotationMatch,
 	CandidateInfo,
@@ -27,25 +24,11 @@ import type {
 } from "../lib/messages.ts";
 import type { Overlay } from "./overlay.ts";
 
-/** More candidates than this are not scored for one annotation. */
-const MAX_CANDIDATES = 8000;
-/** After this long, annotations are not searched for in the whole page. */
-const FULL_SCAN_BUDGET_MS = 4000;
-
-interface Candidate {
-	element: Element;
-	score: number;
-}
-
 interface Entry {
 	annotation: Annotation;
 	/** The best elements worth showing, best first. */
 	candidates: Candidate[];
 	match: AnnotationMatch;
-}
-
-function quote(value: string): string {
-	return `"${value.replace(/["\\]/g, "\\$&")}"`;
 }
 
 /** Let the page run between annotations: loading a big case takes a while. */
@@ -79,31 +62,10 @@ export class Reviewer {
 	async load(c: Case): Promise<LoadResult> {
 		const generation = ++this.#generation;
 		clearTextCache(); // what an abandoned load left behind
-		const doc = this.overlay.doc;
-		const host = this.overlay.host;
-		const context = createContext(doc);
-		const cache = new Map<Element, ElementDetails>();
-		const describe = (e: Element) => {
-			let d = cache.get(e);
-			if (d === undefined) {
-				d = describeElement(e, context, { selector: false });
-				cache.set(e, d);
-			}
-			return d;
-		};
-		const own = (e: Element) => e !== host && !host.contains(e);
-		let everything: { elements: Element[]; truncated: boolean } | undefined;
-		const all = () => {
-			if (everything === undefined) {
-				const list = [...doc.body.querySelectorAll("*")].filter(own);
-				everything = {
-					elements: list.slice(0, MAX_CANDIDATES),
-					truncated: list.length > MAX_CANDIDATES,
-				};
-			}
-			return everything;
-		};
-		const deadline = performance.now() + FULL_SCAN_BUDGET_MS;
+		const search = createSearch(this.overlay.doc, {
+			exclude: this.overlay.host,
+		});
+		const context = search.context;
 		const entries: Entry[] = [];
 		for (const annotation of [...c.annotations].sort(
 			(a, b) => a.number - b.number,
@@ -125,36 +87,15 @@ export class Reviewer {
 				});
 				continue;
 			}
-			let elements = this.#likely(stored).filter(own);
-			let truncated = elements.length > MAX_CANDIDATES;
-			elements = elements.slice(0, MAX_CANDIDATES);
-			let ranked = rank(stored, elements.map(describe));
-			if ((ranked[0]?.score ?? 0) < PROBABLE) {
-				// The tag or role may have changed: score the whole page, while
-				// there is time.
-				if (performance.now() < deadline) {
-					({ elements, truncated } = all());
-					ranked = rank(stored, elements.map(describe));
-				} else {
-					truncated = true;
-				}
-			}
-			const status = classify(ranked);
-			const kept =
-				status === "lost"
-					? []
-					: ranked.filter((r, i) => i === 0 || r.score >= PROBABLE);
-			const candidates = kept.map((r) => ({
-				element: elements[r.index] as Element,
-				score: r.score,
-			}));
+			const found = findCandidates(search, stored);
+			const { status, candidates, truncated } = found;
 			entries.push({
 				annotation,
 				candidates,
 				match: {
 					...base,
 					status,
-					score: ranked[0]?.score ?? 0,
+					score: found.score,
 					candidates: candidates.map((k) =>
 						this.#info(k.element, k.score, context),
 					),
@@ -177,25 +118,6 @@ export class Reviewer {
 			url: location.href,
 			matches: entries.map((e) => e.match),
 		};
-	}
-
-	/** Elements likely to be the stored one: same tag, test id, id or role. */
-	#likely(stored: ElementDetails): Element[] {
-		const doc = this.overlay.doc;
-		const found = new Set<Element>(doc.getElementsByTagName(stored.tag));
-		const add = (selector: string) => {
-			try {
-				for (const e of doc.querySelectorAll(selector)) found.add(e);
-			} catch {
-				// An odd value that is no valid selector.
-			}
-		};
-		if (stored.testId)
-			for (const name of TEST_ID_ATTRIBUTES)
-				add(`[${name}=${quote(stored.testId)}]`);
-		if (stored.id) add(`[id=${quote(stored.id)}]`);
-		if (stored.role) add(`[role=${quote(stored.role)}]`);
-		return [...found];
 	}
 
 	#info(el: Element, score: number, context: DescribeContext): CandidateInfo {

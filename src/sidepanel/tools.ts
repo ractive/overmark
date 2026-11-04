@@ -9,6 +9,7 @@ import { blobToBase64 } from "../lib/base64.ts";
 import {
 	type Case,
 	CaseError,
+	imageScale,
 	newId,
 	nextNumbers,
 	pendingImage,
@@ -534,15 +535,23 @@ export function createTools(deps: ToolDeps): Tool[] {
 		}
 		// A provisional id: saving gives the shot its final one.
 		const shotId = newId("p");
+		const webp = await images.toWebp(png);
 		const shot: Shot = {
 			id: shotId,
 			image: pendingImage(shotId),
 			scrollX: described.scroll.x,
 			scrollY: described.scroll.y,
-			viewport: described.viewport,
+			viewport: {
+				...described.viewport,
+				dpr: imageScale(
+					webp.width,
+					described.viewport.width,
+					described.viewport.dpr,
+				),
+			},
 			capturedAt: new Date().toISOString(),
 		};
-		await store.putImage(c.id, shot.image, await images.toWebp(png));
+		await store.putImage(c.id, shot.image, webp);
 		const id = `a${next.annotation}`;
 		let saved: Case;
 		try {
