@@ -56,34 +56,60 @@ export async function screenshotToWebp(dataUrl: string): Promise<StoredImage> {
 }
 
 /**
- * A part of a screenshot: `rect` in CSS pixels of the shot, `dpr` its pixels
- * per CSS pixel. The crop is clamped to the image and at most `maxSide` long.
+ * Parts of a screenshot, cut from one decode of it: each `rect` in CSS pixels
+ * of the shot, `dpr` its pixels per CSS pixel. Crops are clamped to the image
+ * and at most `maxSide` long.
  */
+export async function cropImages(
+	image: Blob,
+	rects: readonly Rect[],
+	dpr: number,
+	maxSide = MAX_SIDE,
+): Promise<StoredImage[]> {
+	const bitmap = await createImageBitmap(image);
+	try {
+		const out: StoredImage[] = [];
+		for (const rect of rects) {
+			const x = Math.min(
+				bitmap.width - 1,
+				Math.max(0, Math.floor(rect.x * dpr)),
+			);
+			const y = Math.min(
+				bitmap.height - 1,
+				Math.max(0, Math.floor(rect.y * dpr)),
+			);
+			const width = Math.max(
+				1,
+				Math.min(bitmap.width - x, Math.ceil(rect.width * dpr)),
+			);
+			const height = Math.max(
+				1,
+				Math.min(bitmap.height - y, Math.ceil(rect.height * dpr)),
+			);
+			out.push(await render(bitmap, { x, y, width, height }, maxSide));
+		}
+		return out;
+	} finally {
+		bitmap.close();
+	}
+}
+
+/** One part of a screenshot (see `cropImages`). */
 export async function cropImage(
 	image: Blob,
 	rect: Rect,
 	dpr: number,
 	maxSide = MAX_SIDE,
 ): Promise<StoredImage> {
-	const bitmap = await createImageBitmap(image);
-	try {
-		const x = Math.max(0, Math.floor(rect.x * dpr));
-		const y = Math.max(0, Math.floor(rect.y * dpr));
-		const width = Math.max(
-			1,
-			Math.min(bitmap.width - x, Math.ceil(rect.width * dpr)),
-		);
-		const height = Math.max(
-			1,
-			Math.min(bitmap.height - y, Math.ceil(rect.height * dpr)),
-		);
-		return await render(bitmap, { x, y, width, height }, maxSide);
-	} finally {
-		bitmap.close();
-	}
+	const [crop] = await cropImages(image, [rect], dpr, maxSide);
+	if (crop === undefined) throw new Error("no crop");
+	return crop;
 }
 
-/** The whole image, scaled down to at most `maxSide`. */
+/**
+ * The whole image, scaled down to at most `maxSide`: for images handed to AI
+ * apps (iteration 4's `get_image` and `capture`).
+ */
 export async function scaleImage(
 	image: Blob,
 	maxSide = MAX_SIDE,

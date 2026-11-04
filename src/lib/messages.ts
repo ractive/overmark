@@ -10,7 +10,6 @@ export interface AnnotateTarget {
 	caseId: string;
 	title: string;
 	nextAnnotation: number;
-	nextShot: number;
 }
 
 /** What the side panel (or the service worker) asks the content script. */
@@ -38,9 +37,11 @@ export interface OverlayState {
 
 /** What the content script asks the service worker. */
 export type WorkerRequest =
+	/** Capture the visible tab as the pending screenshot `shotId` (save.ts). */
 	| { type: "capture"; caseId: string; shotId: string }
 	| { type: "case:save"; request: SaveRequest }
-	| { type: "images:discard"; caseId: string };
+	/** Remove the pending screenshots of a save that was given up. */
+	| { type: "images:discard"; caseId: string; shotIds: string[] };
 
 export type WorkerResponse<T = object> =
 	| ({ ok: true } & T)

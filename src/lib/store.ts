@@ -22,8 +22,29 @@ export interface CaseStore {
 	deleteCase(id: string): Promise<void>;
 	getImage(caseId: string, path: string): Promise<StoredImage | undefined>;
 	putImage(caseId: string, path: string, image: StoredImage): Promise<void>;
+	/**
+	 * Read a case, change it and write it back in one transaction, so a
+	 * concurrent writer (the side panel, another tab) is never overwritten.
+	 * `change` runs synchronously inside the transaction and gets `undefined`
+	 * for a missing case; throwing aborts everything. The images it returns
+	 * are written in the same transaction.
+	 */
+	updateCase(id: string, change: CaseChange): Promise<Case>;
+	/** Deletes these images of the case. */
+	deleteImages(caseId: string, paths: readonly string[]): Promise<void>;
 	/** Deletes the case's images whose paths are not in `keep`. */
 	pruneImages(caseId: string, keep: ReadonlySet<string>): Promise<void>;
+}
+
+export type CaseChange = (current: Case | undefined) => {
+	value: Case;
+	/** Images to write with the case, by path. */
+	images?: ReadonlyMap<string, StoredImage>;
+};
+
+function checkId(id: string, value: Case): void {
+	if (value.id !== id)
+		throw new Error(`updateCase: case ${id} cannot become ${value.id}`);
 }
 
 const byUpdate = (a: Case, b: Case) => b.updatedAt.localeCompare(a.updatedAt);
@@ -66,6 +87,22 @@ export class MemoryStore implements CaseStore {
 		image: StoredImage,
 	): Promise<void> {
 		this.images.set(imageKey(caseId, path), image);
+	}
+
+	async updateCase(id: string, change: CaseChange): Promise<Case> {
+		const current = this.cases.get(id);
+		const { value, images } = change(
+			current === undefined ? undefined : structuredClone(current),
+		);
+		checkId(id, value);
+		this.cases.set(id, structuredClone(value));
+		for (const [path, image] of images ?? [])
+			this.images.set(imageKey(id, path), image);
+		return structuredClone(value);
+	}
+
+	async deleteImages(caseId: string, paths: readonly string[]): Promise<void> {
+		for (const path of paths) this.images.delete(imageKey(caseId, path));
 	}
 
 	async pruneImages(caseId: string, keep: ReadonlySet<string>): Promise<void> {
@@ -165,6 +202,45 @@ export class IdbStore implements CaseStore {
 		const db = await this.#open();
 		const tx = db.transaction("images", "readwrite");
 		tx.objectStore("images").put(image, imageKey(caseId, path));
+		await done(tx);
+	}
+
+	async updateCase(id: string, change: CaseChange): Promise<Case> {
+		const db = await this.#open();
+		const tx = db.transaction(["cases", "images"], "readwrite");
+		const cases = tx.objectStore("cases");
+		let result: Case | undefined;
+		let failure: unknown;
+		const read = cases.get(id);
+		read.onsuccess = () => {
+			try {
+				const { value, images } = change(read.result as Case | undefined);
+				checkId(id, value);
+				cases.put(value);
+				const store = tx.objectStore("images");
+				for (const [path, image] of images ?? [])
+					store.put(image, imageKey(id, path));
+				result = value;
+			} catch (error) {
+				failure = error;
+				tx.abort();
+			}
+		};
+		try {
+			await done(tx);
+		} catch (error) {
+			throw failure ?? error;
+		}
+		if (result === undefined) throw failure ?? new Error("case not written");
+		return result;
+	}
+
+	async deleteImages(caseId: string, paths: readonly string[]): Promise<void> {
+		if (paths.length === 0) return;
+		const db = await this.#open();
+		const tx = db.transaction("images", "readwrite");
+		const store = tx.objectStore("images");
+		for (const path of paths) store.delete(imageKey(caseId, path));
 		await done(tx);
 	}
 

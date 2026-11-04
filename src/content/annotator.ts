@@ -11,11 +11,11 @@ import {
 	newId,
 	type PageInfo,
 	type Point,
+	pendingImage,
 	type Rect,
 	type Shape,
 	type Shot,
 	shapeBounds,
-	shotImage,
 	translateShape,
 } from "../lib/case.ts";
 import {
@@ -114,6 +114,8 @@ export class Annotator {
 	#target: AnnotateTarget | undefined;
 	#blurForms = false;
 	#saving = false;
+	/** "Stop annotating" arrived during a save: hide once it is done. */
+	#hideAfterSave = false;
 	#saveForm = false;
 	#message = "";
 	#frame = 0;
@@ -162,19 +164,27 @@ export class Annotator {
 			this.#target = options.target;
 			this.#blurForms = options.blurForms ?? false;
 			this.#message = "";
+			this.#renumber();
 		}
+		this.#hideAfterSave = false;
 		this.overlay.show();
 		this.#renderToolbar();
 		this.#render();
 	}
 
 	hide(): void {
+		if (this.#saving) {
+			// The remaining screenshots still need the marks.
+			this.#hideAfterSave = true;
+			return;
+		}
 		if (this.#editing !== null) this.#commitComment();
 		this.setTool(null);
 		this.overlay.hide();
 	}
 
 	setTool(tool: Tool | null): void {
+		if (!this.#saving) this.#message = "";
 		this.#tool = tool;
 		this.#hover = null;
 		this.#drag = null;
@@ -286,6 +296,15 @@ export class Annotator {
 
 	// --- marks and comments --------------------------------------------------
 
+	/** Number the unsaved marks on from the target's next number (or 1 for a new case). */
+	#renumber(): void {
+		let next = this.#target?.nextAnnotation ?? 1;
+		for (const draft of this.#drafts) draft.number = next++;
+		const label = this.overlay.popover.querySelector(".label");
+		if (this.#editing !== null && label !== null)
+			label.textContent = `Comment for mark ${this.#editing.number}`;
+	}
+
 	#nextNumber(): number {
 		const first = this.#target?.nextAnnotation ?? 1;
 		return Math.max(first - 1, ...this.#drafts.map((d) => d.number)) + 1;
@@ -298,6 +317,7 @@ export class Annotator {
 			comment: "",
 			element,
 		};
+		this.#message = "";
 		this.#drafts.push(draft);
 		this.#openComment(draft);
 		this.#renderToolbar();
@@ -376,6 +396,7 @@ export class Annotator {
 	}
 
 	undo(): void {
+		this.#message = "";
 		const last = this.#drafts.pop();
 		if (last !== undefined && last === this.#editing) this.#closeComment();
 		this.#renderToolbar();
@@ -552,7 +573,7 @@ export class Annotator {
 		this.#saving = true;
 		this.#saveForm = false;
 		this.setTool(null);
-		let captured = false;
+		const captured: string[] = [];
 		try {
 			// Element details are read first, while the page is as the user saw it.
 			const context = createContext(doc);
@@ -572,7 +593,6 @@ export class Annotator {
 			);
 			const shots: Shot[] = [];
 			const annotations: AnnotationDraft[] = [];
-			let shotNumber = target?.nextShot ?? 1;
 			for (const [i, window] of plan.entries()) {
 				this.#message = `Taking screenshot ${i + 1} of ${plan.length}…`;
 				this.#renderToolbar();
@@ -585,13 +605,14 @@ export class Annotator {
 				await frame();
 				await sleep(150);
 				const actual = this.#scroll();
-				const shotId = `s${shotNumber++}`;
+				// Provisional: the saved case gives the shot its final id (save.ts).
+				const shotId = newId("p");
 				this.overlay.setCapturing(true);
 				this.#render();
 				const restore = this.#blur();
 				await frame();
 				try {
-					captured = true;
+					captured.push(shotId);
 					await ask<CaptureResult>({ type: "capture", caseId, shotId });
 				} finally {
 					restore();
@@ -599,7 +620,7 @@ export class Annotator {
 				}
 				shots.push({
 					id: shotId,
-					image: shotImage(shotId),
+					image: pendingImage(shotId),
 					scrollX: actual.x,
 					scrollY: actual.y,
 					viewport,
@@ -646,18 +667,23 @@ export class Annotator {
 				caseId: result.caseId,
 				title: result.title,
 				nextAnnotation: Math.max(...drafts.map((d) => d.number)) + 1,
-				nextShot: shotNumber,
 			};
 			this.#message = `Saved “${result.title}”`;
 			return result;
 		} catch (error) {
-			if (captured)
-				await ask({ type: "images:discard", caseId }).catch(() => undefined);
+			if (captured.length > 0)
+				await ask({ type: "images:discard", caseId, shotIds: captured }).catch(
+					() => undefined,
+				);
 			this.#message = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
 			return undefined;
 		} finally {
 			win.scrollTo({ left: start.x, top: start.y, behavior: "instant" });
 			this.#saving = false;
+			if (this.#hideAfterSave) {
+				this.#hideAfterSave = false;
+				this.hide();
+			}
 			this.#renderToolbar();
 			this.#render();
 		}

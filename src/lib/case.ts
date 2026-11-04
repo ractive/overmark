@@ -6,6 +6,9 @@
 
 export const CASE_FORMAT = "overmark/1";
 
+/** The longest verdict a case may hold, in characters. */
+export const MAX_VERDICT = 50_000;
+
 export interface Point {
 	x: number;
 	y: number;
@@ -120,6 +123,8 @@ export function newId(prefix: string): string {
 
 export const shotImage = (shotId: string) => `shots/${shotId}.webp`;
 export const cropImage = (annotationId: string) => `crops/${annotationId}.webp`;
+/** A screenshot taken for a save that is not committed yet (save.ts). */
+export const pendingImage = (shotId: string) => `pending/${shotId}.webp`;
 
 /** The IndexedDB key of a case's image. */
 export const imageKey = (caseId: string, path: string) => `${caseId}/${path}`;
@@ -268,9 +273,9 @@ function element(v: unknown, path: string): ElementDetails | null {
 	if (v === null) return null;
 	const o = obj(v, path);
 	const attributes: Record<string, string> = {};
-	for (const [k, value] of Object.entries(
-		obj(o["attributes"], `${path}.attributes`),
-	)) {
+	const entries = Object.entries(obj(o["attributes"], `${path}.attributes`));
+	if (entries.length > 50) fail(`${path}.attributes`, "more than 50 entries");
+	for (const [k, value] of entries) {
 		attributes[k] = str(value, `${path}.attributes.${k}`, 2000);
 	}
 	const page = obj(o["page"], `${path}.page`);
@@ -305,6 +310,9 @@ function element(v: unknown, path: string): ElementDetails | null {
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** Ids of cases, shots and annotations: safe in image paths and keys. */
+export const isSafeId = (value: string) => SAFE_ID.test(value);
+
 function id(v: unknown, path: string): string {
 	const s = str(v, path, 64);
 	if (!SAFE_ID.test(s)) fail(path, "is not a valid id");
@@ -333,6 +341,7 @@ export function validateCase(value: unknown): Case {
 		};
 	});
 	const shotIds = new Set(shots.map((s) => s.id));
+	if (shotIds.size !== shots.length) fail("case.shots", "an id is used twice");
 	const numbers = new Set<number>();
 	const ids = new Set<string>();
 	const annotations = arr(o["annotations"], "case.annotations", 1000).map(
@@ -385,6 +394,6 @@ export function validateCase(value: unknown): Case {
 		verdict:
 			verdict === null || verdict === undefined
 				? null
-				: str(verdict, "case.verdict", 50_000),
+				: str(verdict, "case.verdict", MAX_VERDICT),
 	};
 }

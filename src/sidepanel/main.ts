@@ -2,7 +2,12 @@
  * The side panel: the tab in front, annotating it, and the saved cases.
  */
 
-import { type Case, nextNumbers } from "../lib/case.ts";
+import {
+	type Case,
+	MAX_VERDICT,
+	nextNumbers,
+	validateCase,
+} from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
 import type { Broadcast, OverlayState } from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
@@ -84,7 +89,6 @@ async function startAnnotating(target?: Case): Promise<void> {
 							caseId: target.id,
 							title: target.title,
 							nextAnnotation: next.annotation,
-							nextShot: next.shot,
 						},
 					}
 				: {}),
@@ -96,10 +100,23 @@ async function startAnnotating(target?: Case): Promise<void> {
 	renderOverlay();
 }
 
+/** The overlay's state on the tab, or `undefined` where it is not injected. */
+async function overlayState(tabId: number): Promise<OverlayState | undefined> {
+	try {
+		return (await chrome.tabs.sendMessage(tabId, {
+			type: "overlay:state",
+		})) as OverlayState;
+	} catch {
+		return undefined;
+	}
+}
+
 annotate.addEventListener("click", async () => {
+	const tab = await activeTab();
+	if (tab?.id === undefined) return;
+	// The page's own Close button changes the state without telling the panel.
+	overlay = await overlayState(tab.id);
 	if (overlay?.visible) {
-		const tab = await activeTab();
-		if (tab?.id === undefined) return;
 		try {
 			overlay = await sendToTab(tab.id, { type: "overlay:hide" });
 		} catch (error) {
@@ -118,16 +135,7 @@ async function refreshTab(): Promise<void> {
 		? shortUrl(tab.url)
 		: (tab?.title ?? "This page");
 	showHint(undefined);
-	overlay = undefined;
-	if (tab?.id !== undefined) {
-		try {
-			overlay = (await chrome.tabs.sendMessage(tab.id, {
-				type: "overlay:state",
-			})) as OverlayState;
-		} catch {
-			// Not injected on this page yet.
-		}
-	}
+	overlay = tab?.id === undefined ? undefined : await overlayState(tab.id);
 	renderOverlay();
 	await renderCases();
 }
@@ -212,31 +220,53 @@ async function imageUrl(
 async function openCase(id: string): Promise<void> {
 	const c = await store.getCase(id);
 	if (c === undefined) return closeCase();
+	// Keep a verdict being typed when the case is shown again (marks added meanwhile).
+	const previous = caseView.querySelector<HTMLTextAreaElement>("#verdict");
+	const typing =
+		previous !== null &&
+		previous.dataset["case"] === id &&
+		previous.value !== previous.dataset["saved"]
+			? previous.value
+			: undefined;
 	openCaseId = id;
 	releaseImages();
 	const verdict = h("textarea", {
 		id: "verdict",
 		placeholder: "What should change, as agreed?",
+		maxlength: String(MAX_VERDICT),
+		"data-case": id,
 	});
-	verdict.value = c.verdict ?? "";
+	verdict.dataset["saved"] = c.verdict ?? "";
+	verdict.value = typing ?? c.verdict ?? "";
 	const saveVerdict = h(
 		"button",
 		{ type: "button", id: "save-verdict" },
 		"Save verdict",
 	);
 	saveVerdict.addEventListener("click", async () => {
-		const current = await store.getCase(id);
-		if (current === undefined) return;
 		const text = verdict.value.trim();
-		await store.putCase({
-			...current,
-			verdict: text === "" ? null : text,
-			updatedAt: new Date().toISOString(),
-		});
-		saveVerdict.textContent = "Saved";
+		try {
+			// One transaction, so marks saved meanwhile are kept.
+			await store.updateCase(id, (current) => {
+				if (current === undefined)
+					throw new Error("The case no longer exists.");
+				return {
+					value: validateCase({
+						...current,
+						verdict: text === "" ? null : text,
+						updatedAt: new Date().toISOString(),
+					}),
+				};
+			});
+			verdict.dataset["saved"] = text;
+			verdict.value = text;
+			saveVerdict.textContent = "Saved";
+		} catch (error) {
+			saveVerdict.textContent = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
+		}
 		setTimeout(() => {
 			saveVerdict.textContent = "Save verdict";
-		}, 1500);
+		}, 2500);
 	});
 	const del = h(
 		"button",
