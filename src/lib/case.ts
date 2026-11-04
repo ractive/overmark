@@ -23,6 +23,9 @@ export const LANGUAGE = /^[A-Za-z0-9-]{0,35}$/;
 /** The highest annotation number a case may use. */
 export const MAX_NUMBER = 99_999;
 
+/** The longest verdict a case may hold, in characters. */
+export const MAX_VERDICT = 50_000;
+
 export interface Point {
 	x: number;
 	y: number;
@@ -137,6 +140,16 @@ export function newId(prefix: string): string {
 
 export const shotImage = (shotId: string) => `shots/${shotId}.webp`;
 export const cropImage = (annotationId: string) => `crops/${annotationId}.webp`;
+/** A screenshot taken for a save that is not committed yet (save.ts). */
+export const pendingImage = (shotId: string) => `pending/${shotId}.webp`;
+
+/** The paths of all images a case references (its screenshots and crops). */
+export function caseImages(c: Case): Set<string> {
+	return new Set([
+		...c.shots.map((s) => s.image),
+		...c.annotations.map((a) => a.crop),
+	]);
+}
 
 /** The IndexedDB key of a case's image. */
 export const imageKey = (caseId: string, path: string) => `${caseId}/${path}`;
@@ -323,6 +336,9 @@ function element(v: unknown, path: string): ElementDetails | null {
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SHOT_ID = /^s[1-9]\d{0,5}$/;
 
+/** Ids of cases, shots and annotations: safe in image paths and keys. */
+export const isSafeId = (value: string) => SAFE_ID.test(value);
+
 function id(v: unknown, path: string): string {
 	const s = str(v, path, 64);
 	if (!SAFE_ID.test(s)) fail(path, "is not a valid id");
@@ -418,6 +434,6 @@ export function validateCase(value: unknown): Case {
 		verdict:
 			verdict === null || verdict === undefined
 				? null
-				: str(verdict, "case.verdict", 50_000),
+				: str(verdict, "case.verdict", MAX_VERDICT),
 	};
 }

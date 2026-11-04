@@ -2,9 +2,14 @@
  * A case as a zip (`case.json`, `case.md`, `shots/`, `crops/`) and back.
  */
 
-import { type Case, CaseError, newId, validateCase } from "./case.ts";
+import {
+	type Case,
+	CaseError,
+	caseImages,
+	newId,
+	validateCase,
+} from "./case.ts";
 import { caseMarkdown } from "./markdown.ts";
-import { referencedImages } from "./save.ts";
 import type { CaseStore, StoredImage } from "./store.ts";
 import { readZip, writeZip, type ZipEntry } from "./zip.ts";
 
@@ -35,7 +40,7 @@ export async function exportCase(
 		},
 		{ name: "case.md", data: encoder.encode(caseMarkdown(c)) },
 	];
-	for (const path of referencedImages(c)) {
+	for (const path of caseImages(c)) {
 		const image = await store.getImage(c.id, path);
 		if (image === undefined)
 			throw new CaseError(`the image ${path} is missing`);
@@ -118,7 +123,7 @@ export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
 		throw new CaseError("case.json is not valid JSON.");
 	}
 	const c = validateCase(parsed);
-	const wanted = referencedImages(c);
+	const wanted = caseImages(c);
 	const files = await readZip(zip, {
 		...limits,
 		include: (n) => wanted.has(n),

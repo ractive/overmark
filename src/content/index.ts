@@ -3,9 +3,9 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import type { ContentRequest } from "../lib/messages.ts";
+import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import { Annotator } from "./annotator.ts";
-import { Overlay } from "./overlay.ts";
+import { HOST_ID, Overlay } from "./overlay.ts";
 import { Reviewer } from "./review.ts";
 
 declare global {
@@ -13,6 +13,9 @@ declare global {
 }
 
 function start(): void {
+	// An instance orphaned by an extension reload or update leaves its overlay
+	// behind; its script can no longer be reached, so take the page over.
+	document.getElementById(HOST_ID)?.remove();
 	const overlay = new Overlay(document);
 	const annotator = new Annotator(overlay);
 	const reviewer = new Reviewer(overlay);
@@ -20,6 +23,11 @@ function start(): void {
 		const s = annotator.state();
 		const loaded = reviewer.caseId;
 		return loaded === undefined ? s : { ...s, loadedCase: loaded };
+	};
+	overlay.onChange = () => {
+		const message: Broadcast = { type: "overlay:changed", state: state() };
+		// Nobody may be listening (side panel closed): that is fine.
+		chrome.runtime.sendMessage(message).catch(() => {});
 	};
 	chrome.runtime.onMessage.addListener(
 		(message: ContentRequest, sender, sendResponse) => {

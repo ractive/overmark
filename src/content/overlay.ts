@@ -130,6 +130,11 @@ export class Overlay {
 	readonly #review: SVGGElement;
 	#annotating = false;
 	#reviewing = false;
+	/**
+	 * Called after the toolbar or the outlines are shown or hidden, including
+	 * by the overlay's own Close and Hide buttons.
+	 */
+	onChange: (() => void) | undefined;
 
 	constructor(doc: Document = document) {
 		this.doc = doc;
@@ -183,11 +188,13 @@ export class Overlay {
 	setAnnotating(on: boolean): void {
 		this.#annotating = on;
 		this.#update();
+		this.onChange?.();
 	}
 
 	setReviewing(on: boolean): void {
 		this.#reviewing = on;
 		this.#update();
+		this.onChange?.();
 	}
 
 	#update(): void {

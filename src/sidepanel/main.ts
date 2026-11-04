@@ -2,7 +2,13 @@
  * The side panel: the tab in front, annotating it, and the saved cases.
  */
 
-import { type Annotation, type Case, nextNumbers } from "../lib/case.ts";
+import {
+	type Annotation,
+	type Case,
+	MAX_VERDICT,
+	nextNumbers,
+	validateCase,
+} from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
 import {
 	exportCase,
@@ -38,6 +44,10 @@ const BLUR_KEY = "overmark:blur-forms";
 
 let overlay: OverlayState | undefined;
 let tabUrl = "";
+/** The tab the panel shows. */
+let shownTabId: number | undefined;
+/** Bumped by every newer piece of news, so an older `refreshTab()` drops its result. */
+let generation = 0;
 let openCaseId: string | undefined;
 let objectUrls: string[] = [];
 /** The case loaded onto a tab, and where its marks were found there. */
@@ -92,6 +102,7 @@ function renderOverlay(): void {
 async function startAnnotating(target?: Case): Promise<void> {
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
+	generation++; // a refresh still running must not overwrite this
 	try {
 		const next = nextNumbers(target);
 		overlay = await sendToTab(tab.id, {
@@ -103,7 +114,6 @@ async function startAnnotating(target?: Case): Promise<void> {
 							caseId: target.id,
 							title: target.title,
 							nextAnnotation: next.annotation,
-							nextShot: next.shot,
 						},
 					}
 				: {}),
@@ -115,10 +125,24 @@ async function startAnnotating(target?: Case): Promise<void> {
 	renderOverlay();
 }
 
+/** The overlay's state on the tab, or `undefined` where it is not injected. */
+async function overlayState(tabId: number): Promise<OverlayState | undefined> {
+	try {
+		return (await chrome.tabs.sendMessage(tabId, {
+			type: "overlay:state",
+		})) as OverlayState;
+	} catch {
+		return undefined;
+	}
+}
+
 annotate.addEventListener("click", async () => {
+	const tab = await activeTab();
+	if (tab?.id === undefined) return;
+	generation++; // a refresh still running must not overwrite this
+	// Ask the page: the state may have changed while no panel was listening.
+	overlay = await overlayState(tab.id);
 	if (overlay?.visible) {
-		const tab = await activeTab();
-		if (tab?.id === undefined) return;
 		try {
 			overlay = await sendToTab(tab.id, { type: "overlay:hide" });
 		} catch (error) {
@@ -131,22 +155,18 @@ annotate.addEventListener("click", async () => {
 });
 
 async function refreshTab(): Promise<void> {
+	const mine = ++generation;
 	const tab = await activeTab();
+	if (mine !== generation) return;
+	shownTabId = tab?.id;
 	tabUrl = tab?.url ?? "";
 	pageText.textContent = tab?.url
 		? shortUrl(tab.url)
 		: (tab?.title ?? "This page");
 	showHint(undefined);
-	overlay = undefined;
-	if (tab?.id !== undefined) {
-		try {
-			overlay = (await chrome.tabs.sendMessage(tab.id, {
-				type: "overlay:state",
-			})) as OverlayState;
-		} catch {
-			// Not injected on this page yet.
-		}
-	}
+	const state = tab?.id === undefined ? undefined : await overlayState(tab.id);
+	if (mine !== generation) return;
+	overlay = state;
 	if (
 		loaded !== undefined &&
 		(tab?.id !== loaded.tabId || overlay?.loadedCase !== loaded.caseId)
@@ -474,31 +494,53 @@ async function download(c: Case): Promise<void> {
 async function openCase(id: string): Promise<void> {
 	const c = await store.getCase(id);
 	if (c === undefined) return closeCase();
+	// Keep a verdict being typed when the case is shown again (marks added meanwhile).
+	const previous = caseView.querySelector<HTMLTextAreaElement>("#verdict");
+	const typing =
+		previous !== null &&
+		previous.dataset["case"] === id &&
+		previous.value !== previous.dataset["saved"]
+			? previous.value
+			: undefined;
 	openCaseId = id;
 	releaseImages();
 	const verdict = h("textarea", {
 		id: "verdict",
 		placeholder: "What should change, as agreed?",
+		maxlength: String(MAX_VERDICT),
+		"data-case": id,
 	});
-	verdict.value = c.verdict ?? "";
+	verdict.dataset["saved"] = c.verdict ?? "";
+	verdict.value = typing ?? c.verdict ?? "";
 	const saveVerdict = h(
 		"button",
 		{ type: "button", id: "save-verdict" },
 		"Save verdict",
 	);
 	saveVerdict.addEventListener("click", async () => {
-		const current = await store.getCase(id);
-		if (current === undefined) return;
 		const text = verdict.value.trim();
-		await store.putCase({
-			...current,
-			verdict: text === "" ? null : text,
-			updatedAt: new Date().toISOString(),
-		});
-		saveVerdict.textContent = "Saved";
+		try {
+			// One transaction, so marks saved meanwhile are kept.
+			await store.updateCase(id, (current) => {
+				if (current === undefined)
+					throw new Error("The case no longer exists.");
+				return {
+					value: validateCase({
+						...current,
+						verdict: text === "" ? null : text,
+						updatedAt: new Date().toISOString(),
+					}),
+				};
+			});
+			verdict.dataset["saved"] = text;
+			verdict.value = text;
+			saveVerdict.textContent = "Saved";
+		} catch (error) {
+			saveVerdict.textContent = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
+		}
 		setTimeout(() => {
 			saveVerdict.textContent = "Save verdict";
-		}, 1500);
+		}, 2500);
 	});
 	const del = h(
 		"button",
@@ -617,11 +659,26 @@ function closeCase(): void {
 }
 
 chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
-	if (sender.id !== chrome.runtime.id || message?.type !== "cases:changed")
-		return false;
-	if (openCaseId === message.caseId) void openCase(message.caseId);
-	else void renderCases();
-	void refreshTab();
+	if (sender.id !== chrome.runtime.id) return false;
+	if (message?.type === "overlay:changed") {
+		// The page's own Hide removed the loaded case's outlines.
+		if (
+			loaded !== undefined &&
+			sender.tab?.id === loaded.tabId &&
+			message.state.loadedCase !== loaded.caseId
+		)
+			forgetLoaded();
+		// From a content script; only the tab the panel shows matters.
+		if (sender.tab?.id === undefined || sender.tab.id !== shownTabId)
+			return false;
+		generation++;
+		overlay = message.state;
+		renderOverlay();
+	} else if (message?.type === "cases:changed") {
+		if (openCaseId === message.caseId) void openCase(message.caseId);
+		else void renderCases();
+		void refreshTab();
+	}
 	return false;
 });
 

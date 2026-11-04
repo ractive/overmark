@@ -8,7 +8,7 @@
  */
 
 import { readdir, rm } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { CONTENT_SCRIPT } from "../src/lib/messages.ts";
 import { writeZip } from "../src/lib/zip.ts";
@@ -99,8 +99,29 @@ async function bundle(
 	}
 }
 
+/**
+ * Refuse to empty a directory that is not a build: the repository, one of its
+ * parents, or a folder with other files in it and no `manifest.json`.
+ */
+export async function checkOutdir(outdir: string): Promise<void> {
+	const target = resolve(outdir);
+	if (`${ROOT}${sep}`.startsWith(`${target}${sep}`))
+		throw new Error(`refusing to empty ${target}: it holds the repository`);
+	let names: string[];
+	try {
+		names = await readdir(target);
+	} catch {
+		return; // does not exist yet
+	}
+	if (names.length > 0 && !names.includes("manifest.json"))
+		throw new Error(
+			`refusing to empty ${target}: not empty and not a build (no manifest.json)`,
+		);
+}
+
 export async function build(options: BuildOptions = {}): Promise<BuildResult> {
-	const outdir = options.outdir ?? join(ROOT, "dist");
+	const outdir = resolve(options.outdir ?? join(ROOT, "dist"));
+	await checkOutdir(outdir);
 	const minify = options.minify ?? true;
 	const pkg = (await Bun.file(join(ROOT, "package.json")).json()) as {
 		version: string;
