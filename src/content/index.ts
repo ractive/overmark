@@ -42,8 +42,12 @@ function start(): void {
 					sendResponse(state());
 					break;
 				case "case:load":
-					sendResponse(reviewer.load(message.case));
-					break;
+					reviewer.load(message.case).then(sendResponse, (error: unknown) =>
+						sendResponse({
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					);
+					return true; // answers asynchronously
 				case "case:show":
 					sendResponse(
 						reviewer.show(message.annotationId, message.candidate) ?? null,

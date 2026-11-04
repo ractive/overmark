@@ -54,6 +54,8 @@ export interface AnnotationMatch {
 	/** Which candidate is outlined. */
 	current: number;
 	candidates: CandidateInfo[];
+	/** Only part of the page was searched (very many elements, or out of time). */
+	truncated?: boolean;
 }
 
 export interface LoadResult {
@@ -62,7 +64,7 @@ export interface LoadResult {
 	matches: AnnotationMatch[];
 }
 
-/** The content script's answer to every `ContentRequest`. */
+/** The content script's answer to the `overlay:*` and `case:clear` requests. */
 export interface OverlayState {
 	visible: boolean;
 	url: string;

@@ -98,3 +98,63 @@ export async function saveAs(page: Page, title: string): Promise<void> {
 		20_000,
 	);
 }
+
+/** Run `body` (an expression using `image`, the stored `{ blob, width, height }`) on a case's image. */
+function withImage(title: string, path: string, body: string): string {
+	return `new Promise((resolve, reject) => {
+	const open = indexedDB.open("overmark");
+	open.onerror = () => reject(open.error);
+	open.onsuccess = () => {
+		const tx = open.result.transaction(["cases", "images"]);
+		const cases = tx.objectStore("cases").getAll();
+		tx.oncomplete = () => {
+			const c = cases.result.find((x) => x.title === ${JSON.stringify(title)});
+			if (!c) return reject(new Error("no case " + ${JSON.stringify(title)}));
+			const get = open.result.transaction("images").objectStore("images").get(c.id + "/" + ${JSON.stringify(path)});
+			get.onsuccess = async () => { try { const image = get.result; resolve(await (${body})); } catch (e) { reject(e); } };
+			get.onerror = () => reject(get.error);
+		};
+	};
+})`;
+}
+
+/** A stored image's bytes (base64) and the size the store recorded. */
+export function imageBytes(
+	control: Page,
+	title: string,
+	path: string,
+): Promise<{ base64: string; width: number; height: number }> {
+	return control.eval(
+		withImage(
+			title,
+			path,
+			`image.blob.arrayBuffer().then((b) => { let s = ""; for (const x of new Uint8Array(b)) s += String.fromCharCode(x); return { base64: btoa(s), width: image.width, height: image.height }; })`,
+		),
+	);
+}
+
+/** How many pixels of a stored image are within `tolerance` of a colour. */
+export function countColour(
+	control: Page,
+	title: string,
+	path: string,
+	[r, g, b]: [number, number, number],
+	tolerance = 12,
+): Promise<number> {
+	return control.eval(
+		withImage(
+			title,
+			path,
+			`createImageBitmap(image.blob).then((bitmap) => {
+				const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+				const ctx = canvas.getContext("2d");
+				ctx.drawImage(bitmap, 0, 0);
+				const data = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+				let n = 0;
+				for (let i = 0; i < data.length; i += 4)
+					if (Math.abs(data[i] - ${r}) <= ${tolerance} && Math.abs(data[i + 1] - ${g}) <= ${tolerance} && Math.abs(data[i + 2] - ${b}) <= ${tolerance}) n++;
+				return n;
+			})`,
+		),
+	);
+}

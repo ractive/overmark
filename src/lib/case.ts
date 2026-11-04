@@ -6,6 +6,23 @@
 
 export const CASE_FORMAT = "overmark/1";
 
+/** The attributes element details keep (element.ts). */
+export const ELEMENT_ATTRIBUTES = [
+	"name",
+	"type",
+	"href",
+	"src",
+	"placeholder",
+	"alt",
+	"title",
+] as const;
+
+/** A language tag as `<html lang>` gives it, e.g. `de-CH`. */
+export const LANGUAGE = /^[A-Za-z0-9-]{0,35}$/;
+
+/** The highest annotation number a case may use. */
+export const MAX_NUMBER = 99_999;
+
 export interface Point {
 	x: number;
 	y: number;
@@ -267,11 +284,11 @@ function optionalString(o: Obj, key: string, path: string, out: Obj): void {
 function element(v: unknown, path: string): ElementDetails | null {
 	if (v === null) return null;
 	const o = obj(v, path);
+	const given = obj(o["attributes"], `${path}.attributes`);
 	const attributes: Record<string, string> = {};
-	for (const [k, value] of Object.entries(
-		obj(o["attributes"], `${path}.attributes`),
-	)) {
-		attributes[k] = str(value, `${path}.attributes.${k}`, 2000);
+	for (const k of ELEMENT_ATTRIBUTES) {
+		if (Object.hasOwn(given, k))
+			attributes[k] = str(given[k], `${path}.attributes.${k}`, 2000);
 	}
 	const page = obj(o["page"], `${path}.page`);
 	const out: Obj = {
@@ -304,10 +321,17 @@ function element(v: unknown, path: string): ElementDetails | null {
 }
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const SHOT_ID = /^s[1-9]\d{0,5}$/;
 
 function id(v: unknown, path: string): string {
 	const s = str(v, path, 64);
 	if (!SAFE_ID.test(s)) fail(path, "is not a valid id");
+	return s;
+}
+
+function language(v: unknown, path: string): string {
+	const s = str(v, path, 35);
+	if (!LANGUAGE.test(s)) fail(path, "is not a language tag");
 	return s;
 }
 
@@ -317,9 +341,14 @@ export function validateCase(value: unknown): Case {
 	if (o["format"] !== CASE_FORMAT)
 		fail("case.format", `must be "${CASE_FORMAT}"`);
 	const page = obj(o["page"], "case.page");
+	const shotIds = new Set<string>();
 	const shots = arr(o["shots"], "case.shots", 200).map((v, i): Shot => {
 		const s = obj(v, `case.shots[${i}]`);
 		const shotId = id(s["id"], `case.shots[${i}].id`);
+		if (!SHOT_ID.test(shotId))
+			fail(`case.shots[${i}].id`, "must be s followed by a number");
+		if (shotIds.has(shotId)) fail(`case.shots[${i}].id`, "is used twice");
+		shotIds.add(shotId);
 		const image = str(s["image"], `case.shots[${i}].image`);
 		if (image !== shotImage(shotId))
 			fail(`case.shots[${i}].image`, `must be ${shotImage(shotId)}`);
@@ -332,7 +361,6 @@ export function validateCase(value: unknown): Case {
 			capturedAt: str(s["capturedAt"], `case.shots[${i}].capturedAt`, 64),
 		};
 	});
-	const shotIds = new Set(shots.map((s) => s.id));
 	const numbers = new Set<number>();
 	const ids = new Set<string>();
 	const annotations = arr(o["annotations"], "case.annotations", 1000).map(
@@ -343,8 +371,13 @@ export function validateCase(value: unknown): Case {
 			if (ids.has(annotationId)) fail(`${p}.id`, "is used twice");
 			ids.add(annotationId);
 			const number = num(a["number"], `${p}.number`);
-			if (!Number.isInteger(number) || number < 1 || numbers.has(number))
-				fail(`${p}.number`, "must be a unique positive integer");
+			if (
+				!Number.isInteger(number) ||
+				number < 1 ||
+				number > MAX_NUMBER ||
+				numbers.has(number)
+			)
+				fail(`${p}.number`, `must be a unique integer from 1 to ${MAX_NUMBER}`);
 			numbers.add(number);
 			const shot = str(a["shot"], `${p}.shot`, 64);
 			if (!shotIds.has(shot)) fail(`${p}.shot`, "names no shot of the case");
@@ -376,7 +409,7 @@ export function validateCase(value: unknown): Case {
 		page: {
 			url: str(page["url"], "case.page.url", 8000),
 			title: str(page["title"], "case.page.title", 2000),
-			lang: str(page["lang"], "case.page.lang", 64),
+			lang: language(page["lang"], "case.page.lang"),
 			viewport: viewport(page["viewport"], "case.page.viewport"),
 			userAgent: str(page["userAgent"], "case.page.userAgent", 2000),
 		},

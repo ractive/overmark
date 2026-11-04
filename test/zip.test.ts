@@ -64,6 +64,32 @@ describe("writeZip and readZip", () => {
 		await expect(readZip(zip)).rejects.toThrow("damaged entry");
 	});
 
+	test("an entry that unpacks to more than it claims stops at its claim", async () => {
+		const zip = await writeZip([
+			{ name: "bomb", data: new Uint8Array(4 * 1024 * 1024) },
+		]);
+		const view = new DataView(zip.buffer);
+		const central = zip.length - 22 - (46 + "bomb".length);
+		expect(view.getUint16(8, true)).toBe(8); // deflated
+		view.setUint32(22, 1, true); // local header: uncompressed size
+		view.setUint32(central + 24, 1, true); // central directory: the same
+		await expect(readZip(zip, { maxTotalBytes: 10 })).rejects.toThrow(
+			"damaged entry: bomb",
+		);
+	});
+
+	test("unpacks only the entries asked for", async () => {
+		const zip = await writeZip([
+			{ name: "case.json", data: text("{}") },
+			{ name: "big.bin", data: new Uint8Array(1000) },
+		]);
+		const files = await readZip(zip, {
+			include: (name) => name === "case.json",
+			maxTotalBytes: 10,
+		});
+		expect([...files.keys()]).toEqual(["case.json"]);
+	});
+
 	test("enforces the limits", async () => {
 		const zip = await writeZip([
 			{ name: "a", data: new Uint8Array(100) },

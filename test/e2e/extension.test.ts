@@ -4,10 +4,13 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { webpSize } from "../../src/lib/export.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
+	countColour,
 	type Db,
 	HOST,
+	imageBytes,
 	markElement,
 	READ_DB,
 	saveAs,
@@ -163,6 +166,13 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			expect(image.size).toBeGreaterThan(500);
 		}
 
+		// Chrome's own WebP passes the header check imports use.
+		const shot = await imageBytes(h.control, "Prämienrechner", "shots/s1.webp");
+		expect(webpSize(Buffer.from(shot.base64, "base64"))).toEqual({
+			width: shot.width,
+			height: shot.height,
+		});
+
 		// The side panel lists it.
 		await h.control.waitFor(`document.querySelector("[data-case]")`);
 		expect(
@@ -252,6 +262,24 @@ describe.skipIf(browserBinary === undefined)(
 			await v2.page.waitFor(
 				`Math.abs(document.querySelector("[data-truth=contact]").getBoundingClientRect().top - innerHeight / 2) < innerHeight / 2`,
 			);
+
+			// Marks drawn while a case is loaded: its outlines stay out of the screenshot.
+			await showToolbar(h, v2.page, v2.tabId);
+			await markElement(v2.page, "[data-truth=tip]", "Still unclear");
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
+				),
+			).toBe(3);
+			await saveAs(v2.page, "With outlines loaded");
+			expect(
+				await countColour(
+					h.control,
+					"With outlines loaded",
+					"shots/s1.webp",
+					[0x1e, 0x8e, 0x3e],
+				),
+			).toBe(0);
 			await v2.page.send("Page.close");
 		}, 90_000);
 	},

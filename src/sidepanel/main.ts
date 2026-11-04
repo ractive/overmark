@@ -4,7 +4,14 @@
 
 import { type Annotation, type Case, nextNumbers } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
-import { exportCase, exportFileName, importCase } from "../lib/export.ts";
+import {
+	exportCase,
+	exportFileName,
+	MAX_IMPORT_BYTES,
+	type ParsedExport,
+	readExport,
+	storeImport,
+} from "../lib/export.ts";
 import type {
 	AnnotationMatch,
 	Broadcast,
@@ -140,18 +147,101 @@ async function refreshTab(): Promise<void> {
 			// Not injected on this page yet.
 		}
 	}
+	if (
+		loaded !== undefined &&
+		(tab?.id !== loaded.tabId || overlay?.loadedCase !== loaded.caseId)
+	)
+		forgetLoaded();
 	renderOverlay();
 	await renderCases();
 }
 
+/** The loaded case's results no longer describe the tab: drop them. */
+function forgetLoaded(): void {
+	const caseId = loaded?.caseId;
+	loaded = undefined;
+	if (caseId !== undefined && openCaseId === caseId) void openCase(caseId);
+}
+
 importButton.addEventListener("click", () => importFile.click());
+const importPrompt = h("div", {
+	class: "hint",
+	id: "import-prompt",
+	hidden: true,
+});
+importButton.parentElement?.after(importPrompt);
+
+async function finishImport(
+	parsed: ParsedExport,
+	options: { copy?: boolean } = {},
+): Promise<void> {
+	importPrompt.hidden = true;
+	importPrompt.replaceChildren();
+	const c = await storeImport(store, parsed, options);
+	await openCase(c.id);
+}
+
+/** Ask before an import replaces a case that is here already. */
+function askReplace(parsed: ParsedExport, existing: Case): void {
+	const fail = (error: unknown) =>
+		showHint(
+			`Could not import: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	importPrompt.replaceChildren(
+		h(
+			"p",
+			{},
+			`“${existing.title}” is here already (changed ${formatDate(existing.updatedAt)}); the file's copy was changed ${formatDate(parsed.case.updatedAt)}.`,
+		),
+		h(
+			"div",
+			{ class: "row" },
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "import-replace",
+					onclick: () => void finishImport(parsed).catch(fail),
+				},
+				"Replace it",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "import-copy",
+					onclick: () => void finishImport(parsed, { copy: true }).catch(fail),
+				},
+				"Keep both",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					onclick: () => {
+						importPrompt.hidden = true;
+						importPrompt.replaceChildren();
+					},
+				},
+				"Cancel",
+			),
+		),
+	);
+	importPrompt.hidden = false;
+}
+
 importFile.addEventListener("change", async () => {
 	const file = importFile.files?.[0];
 	importFile.value = "";
 	if (file === undefined) return;
+	showHint(undefined);
 	try {
-		const c = await importCase(store, new Uint8Array(await file.arrayBuffer()));
-		await openCase(c.id);
+		if (file.size > MAX_IMPORT_BYTES)
+			throw new Error(`it is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB`);
+		const parsed = await readExport(new Uint8Array(await file.arrayBuffer()));
+		const existing = await store.getCase(parsed.case.id);
+		if (existing !== undefined) askReplace(parsed, existing);
+		else await finishImport(parsed);
 	} catch (error) {
 		showHint(
 			`Could not import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
@@ -239,6 +329,8 @@ async function imageUrl(
 const percent = (score: number) => `${Math.round(score * 100)}%`;
 
 function matchText(m: AnnotationMatch): string {
+	if (m.current > 0)
+		return `Candidate ${m.current + 1} of ${m.candidates.length} (${percent(m.score)})`;
 	switch (m.status) {
 		case "found":
 			return `Found here (${percent(m.score)})`;
@@ -247,7 +339,9 @@ function matchText(m: AnnotationMatch): string {
 		case "ambiguous":
 			return `Unsure: candidate ${m.current + 1} of ${m.candidates.length}`;
 		case "lost":
-			return "Not found on this page";
+			return m.truncated
+				? "Not found in the part of the page searched"
+				: "Not found on this page";
 		case "no-element":
 			return "No element recorded";
 	}
@@ -311,7 +405,13 @@ async function showMatch(a: Annotation, candidate: number): Promise<void> {
 			annotationId: a.id,
 			candidate,
 		})) as AnnotationMatch | null;
-		if (m === null) return;
+		if (m === null) {
+			forgetLoaded();
+			showCaseHint(
+				"The case is no longer loaded on that tab. Load it again to see its marks there.",
+			);
+			return;
+		}
 		loaded.matches.set(a.id, m);
 		const view = matchView(a);
 		if (view) document.getElementById(`match-${a.id}`)?.replaceWith(view);
@@ -331,10 +431,11 @@ async function loadOntoTab(c: Case): Promise<void> {
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
 	try {
-		const result = await sendToTab<LoadResult>(tab.id, {
+		const result = await sendToTab<LoadResult | { error: string }>(tab.id, {
 			type: "case:load",
 			case: c,
 		});
+		if ("error" in result) throw new Error(result.error);
 		loaded = {
 			caseId: c.id,
 			tabId: tab.id,
@@ -525,8 +626,12 @@ chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
 });
 
 chrome.tabs.onActivated.addListener(() => void refreshTab());
-chrome.tabs.onUpdated.addListener((_id, info) => {
+chrome.tabs.onUpdated.addListener((id, info) => {
+	if (id === loaded?.tabId && info.status === "loading") forgetLoaded();
 	if (info.status === "complete" || info.url !== undefined) void refreshTab();
+});
+chrome.tabs.onRemoved.addListener((id) => {
+	if (id === loaded?.tabId) forgetLoaded();
 });
 
 void refreshTab();

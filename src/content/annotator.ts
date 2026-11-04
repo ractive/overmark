@@ -8,6 +8,7 @@
 
 import {
 	type ElementDetails,
+	LANGUAGE,
 	newId,
 	type PageInfo,
 	type Point,
@@ -632,7 +633,9 @@ export class Annotator {
 			const page: PageInfo = {
 				url: location.href,
 				title: doc.title,
-				lang: doc.documentElement.lang || "",
+				lang: LANGUAGE.test(doc.documentElement.lang)
+					? doc.documentElement.lang
+					: "",
 				viewport,
 				userAgent: navigator.userAgent,
 			};

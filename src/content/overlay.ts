@@ -84,7 +84,8 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 6px; color: #fff; font: inherit;
 }
 .reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
-.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar { display: none !important; }
+.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar,
+.capturing .review { display: none !important; }
 [hidden] { display: none !important; }
 `;
 
@@ -104,7 +105,7 @@ export interface ReviewItem {
 	number: number;
 	/** The element's box in window coordinates. */
 	rect: Rect;
-	/** `found`, else probable or ambiguous. */
+	/** The shown candidate is a confident, unambiguous match. */
 	found: boolean;
 	focused: boolean;
 }

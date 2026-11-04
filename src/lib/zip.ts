@@ -20,7 +20,10 @@ export interface WriteZipOptions {
 /** Limits that keep a hostile archive from exhausting memory. */
 export interface ReadZipOptions {
 	maxEntries?: number;
+	/** The most bytes all included entries may unpack to together. */
 	maxTotalBytes?: number;
+	/** Unpack only the entries this accepts (default: all). */
+	include?: (name: string) => boolean;
 }
 
 export class ZipError extends Error {
@@ -52,14 +55,46 @@ export function crc32(data: Uint8Array): number {
 	return (crc ^ 0xffffffff) >>> 0;
 }
 
-async function transform(
-	data: Uint8Array,
-	stream: CompressionStream | DecompressionStream,
-): Promise<Uint8Array> {
+async function deflate(data: Uint8Array): Promise<Uint8Array> {
 	const body = new Blob([data as Uint8Array<ArrayBuffer>])
 		.stream()
-		.pipeThrough(stream);
+		.pipeThrough(new CompressionStream("deflate-raw"));
 	return new Uint8Array(await new Response(body).arrayBuffer());
+}
+
+/**
+ * Inflate a deflated entry, never producing more than `size` bytes: an entry
+ * that claims a small size and unpacks to gigabytes stops at its claim.
+ */
+async function inflate(
+	data: Uint8Array,
+	size: number,
+	name: string,
+): Promise<Uint8Array> {
+	const reader = new Blob([data as Uint8Array<ArrayBuffer>])
+		.stream()
+		.pipeThrough(new DecompressionStream("deflate-raw"))
+		.getReader();
+	const out = new Uint8Array(size);
+	let length = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (length + value.length > size) {
+				await reader.cancel().catch(() => undefined);
+				throw new ZipError(`damaged entry: ${name}`);
+			}
+			out.set(value, length);
+			length += value.length;
+		}
+	} catch (error) {
+		throw error instanceof ZipError
+			? error
+			: new ZipError(`damaged entry: ${name}`);
+	}
+	if (length !== size) throw new ZipError(`damaged entry: ${name}`);
+	return out;
 }
 
 function dosTime(date: Date): { time: number; day: number } {
@@ -95,10 +130,7 @@ export async function writeZip(
 		let method = 0;
 		let body = entry.data;
 		if (compress(entry.name) && entry.data.length > 0) {
-			const deflated = await transform(
-				entry.data,
-				new CompressionStream("deflate-raw"),
-			);
+			const deflated = await deflate(entry.data);
 			if (deflated.length < entry.data.length) {
 				method = 8;
 				body = deflated;
@@ -191,6 +223,7 @@ export async function readZip(
 		const name = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength));
 		at += 46 + nameLength + extraLength + commentLength;
 		if (name.endsWith("/")) continue;
+		if (options.include !== undefined && !options.include(name)) continue;
 		if (flags & 1) throw new ZipError(`encrypted entry: ${name}`);
 		if (compressedSize === 0xffffffff || size === 0xffffffff)
 			throw new ZipError(`zip64 entry: ${name}`);
@@ -211,8 +244,7 @@ export async function readZip(
 		const body = bytes.subarray(start, start + compressedSize);
 		let data: Uint8Array;
 		if (method === 0) data = body.slice();
-		else if (method === 8)
-			data = await transform(body, new DecompressionStream("deflate-raw"));
+		else if (method === 8) data = await inflate(body, size, name);
 		else throw new ZipError(`unsupported compression ${method}: ${name}`);
 		if (data.length !== size || crc32(data) !== crc)
 			throw new ZipError(`damaged entry: ${name}`);
