@@ -214,7 +214,10 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
 			);
 			// The side panel (the control page) acts on the tab in front: v2.
-			await h.control.eval(`location.reload()`);
+			// goto waits for the new document; a reload through eval would not.
+			await h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			);
 			await h.control.waitFor(`document.querySelector("[data-case]")`);
 			await h.control.eval(`document.querySelector("[data-case]").click()`);
 			await h.control.waitFor(`document.getElementById("load-case")`);
