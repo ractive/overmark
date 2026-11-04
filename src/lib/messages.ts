@@ -16,5 +16,11 @@ export interface OverlayState {
 	title: string;
 }
 
+/**
+ * What the content script tells extension pages by itself: the overlay was
+ * shown or hidden, also from its own toolbar.
+ */
+export type Broadcast = { type: "overlay:changed"; state: OverlayState };
+
 /** The content script's file, as the build writes it. */
 export const CONTENT_SCRIPT = "content.js";

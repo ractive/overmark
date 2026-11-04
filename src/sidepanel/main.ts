@@ -2,7 +2,7 @@
  * The side panel: the tab in front and the overlay's switch.
  */
 
-import type { OverlayState } from "../lib/messages.ts";
+import type { Broadcast, OverlayState } from "../lib/messages.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 
 function element<T extends HTMLElement>(id: string): T {
@@ -16,6 +16,10 @@ const hint = element<HTMLParagraphElement>("hint");
 const annotate = element<HTMLButtonElement>("annotate");
 
 let overlayVisible = false;
+/** The tab the panel shows. */
+let shownTabId: number | undefined;
+/** Bumped by every newer piece of news, so an older `refresh()` drops its result. */
+let generation = 0;
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 	const win = await chrome.windows.getCurrent();
@@ -36,30 +40,33 @@ function render(state: OverlayState | undefined): void {
 }
 
 async function refresh(): Promise<void> {
+	const mine = ++generation;
 	const tab = await activeTab();
+	if (mine !== generation) return;
+	shownTabId = tab?.id;
 	pageText.textContent = tab?.url ?? tab?.title ?? "This page";
 	showHint(undefined);
 	if (tab?.id === undefined) return render(undefined);
+	let state: OverlayState | undefined;
 	try {
-		render(
-			(await chrome.tabs.sendMessage(tab.id, {
-				type: "overlay:state",
-			})) as OverlayState,
-		);
+		state = (await chrome.tabs.sendMessage(tab.id, {
+			type: "overlay:state",
+		})) as OverlayState;
 	} catch {
-		render(undefined); // not injected yet
+		state = undefined; // not injected yet
 	}
+	if (mine === generation) render(state);
 }
 
 annotate.addEventListener("click", async () => {
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
+	const mine = ++generation;
 	try {
-		render(
-			await sendToTab(tab.id, {
-				type: overlayVisible ? "overlay:hide" : "overlay:show",
-			}),
-		);
+		const state = await sendToTab(tab.id, {
+			type: overlayVisible ? "overlay:hide" : "overlay:show",
+		});
+		if (mine === generation) render(state);
 		showHint(undefined);
 	} catch (error) {
 		showHint(
@@ -68,6 +75,13 @@ annotate.addEventListener("click", async () => {
 				: `Could not reach the page: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
+});
+
+chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
+	if (message.type !== "overlay:changed") return;
+	if (sender.tab?.id === undefined || sender.tab.id !== shownTabId) return;
+	generation++;
+	render(message.state);
 });
 
 chrome.tabs.onActivated.addListener(() => void refresh());

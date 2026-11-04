@@ -29,58 +29,85 @@ export interface Harness {
 	stop(): Promise<void>;
 }
 
-export async function startHarness(binary: string): Promise<Harness> {
-	const outdir = mkdtempSync(join(tmpdir(), "overmark-dist-"));
-	const { id } = await build({ outdir, test: true, minify: false });
-	if (id === undefined) throw new Error("test build without a key");
-	const pages = join(import.meta.dir, "pages");
-	const server = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		async fetch(req) {
-			const path = new URL(req.url).pathname.replace(/^\/+/, "") || "v1";
-			const file = Bun.file(
-				join(pages, path.endsWith(".html") ? path : `${path}.html`),
-			);
-			if (!(await file.exists()) || path.includes(".."))
-				return new Response("not found", { status: 404 });
-			return new Response(file, {
-				headers: { "content-type": "text/html; charset=utf-8" },
-			});
-		},
-	});
-	const base = `http://127.0.0.1:${server.port}`;
-	const browser = await Browser.launch(binary, outdir);
+/**
+ * Open an extension page to call `chrome.*` from, waiting for the extension
+ * to be installed (after launch, or after `chrome.runtime.reload()`).
+ */
+export async function openControl(
+	browser: Browser,
+	extensionId: string,
+): Promise<Page> {
 	const control = await browser.newPage();
-	// The extension may take a moment to install after launch.
 	for (let attempt = 0; ; attempt++) {
 		try {
-			await control.goto(`chrome-extension://${id}/sidepanel/index.html`);
+			await control.goto(
+				`chrome-extension://${extensionId}/sidepanel/index.html`,
+			);
 			if (
 				await control.eval<boolean>("typeof chrome?.tabs?.query === 'function'")
 			)
-				break;
+				return control;
 		} catch (error) {
-			if (attempt > 40) throw error;
+			if (attempt >= 40) throw error;
 		}
+		if (attempt >= 40) throw new Error("extension pages have no chrome.tabs");
 		await Bun.sleep(100);
 	}
-	return {
-		browser,
-		base,
-		extensionId: id,
-		control,
-		async open(path) {
-			const page = await browser.newPage(`${base}/${path}`);
-			const tabId = await control.eval<number>(
-				`chrome.tabs.query({}).then((tabs) => tabs.find((t) => t.url === ${JSON.stringify(`${base}/${path}`)})?.id)`,
-			);
-			return { page, tabId };
-		},
-		async stop() {
-			await browser.close();
-			await server.stop(true);
-			rmSync(outdir, { recursive: true, force: true });
-		},
+}
+
+export async function startHarness(binary: string): Promise<Harness> {
+	const outdir = mkdtempSync(join(tmpdir(), "overmark-dist-"));
+	let server: ReturnType<typeof Bun.serve> | undefined;
+	let browser: Browser | undefined;
+	const cleanUp = async () => {
+		await browser?.close();
+		await server?.stop(true);
+		rmSync(outdir, { recursive: true, force: true });
 	};
+	try {
+		const { id } = await build({ outdir, test: true, minify: false });
+		if (id === undefined) throw new Error("test build without a key");
+		const pages = join(import.meta.dir, "pages");
+		server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			async fetch(req) {
+				const path = new URL(req.url).pathname.replace(/^\/+/, "") || "v1";
+				const file = Bun.file(
+					join(pages, path.endsWith(".html") ? path : `${path}.html`),
+				);
+				if (!(await file.exists()) || path.includes(".."))
+					return new Response("not found", { status: 404 });
+				return new Response(file, {
+					headers: { "content-type": "text/html; charset=utf-8" },
+				});
+			},
+		});
+		const base = `http://127.0.0.1:${server.port}`;
+		const launched = await Browser.launch(binary, outdir);
+		browser = launched;
+		const control = await openControl(launched, id).catch((error: unknown) => {
+			throw new Error(
+				`the extension did not load; is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
+				{ cause: error },
+			);
+		});
+		return {
+			browser: launched,
+			base,
+			extensionId: id,
+			control,
+			async open(path) {
+				const page = await launched.newPage(`${base}/${path}`);
+				const tabId = await control.eval<number>(
+					`chrome.tabs.query({}).then((tabs) => tabs.find((t) => t.url === ${JSON.stringify(`${base}/${path}`)})?.id)`,
+				);
+				return { page, tabId };
+			},
+			stop: cleanUp,
+		};
+	} catch (error) {
+		await cleanUp();
+		throw error;
+	}
 }

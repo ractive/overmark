@@ -36,6 +36,8 @@ export class Overlay {
 	readonly root: ShadowRoot;
 	readonly layer: HTMLDivElement;
 	readonly toolbar: HTMLDivElement;
+	/** Called after `show()` and `hide()`, including the toolbar's Close. */
+	onChange: ((visible: boolean) => void) | undefined;
 	#visible = false;
 
 	constructor(doc: Document = document) {
@@ -76,10 +78,12 @@ export class Overlay {
 		// Stay on top of elements the page appends later.
 		if (this.host.nextElementSibling !== null)
 			this.host.ownerDocument.documentElement.append(this.host);
+		this.onChange?.(true);
 	}
 
 	hide(): void {
 		this.#visible = false;
 		this.layer.hidden = true;
+		this.onChange?.(false);
 	}
 }

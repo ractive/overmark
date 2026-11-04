@@ -52,14 +52,46 @@ export function crc32(data: Uint8Array): number {
 	return (crc ^ 0xffffffff) >>> 0;
 }
 
-async function transform(
-	data: Uint8Array,
-	stream: CompressionStream | DecompressionStream,
-): Promise<Uint8Array> {
+async function deflate(data: Uint8Array): Promise<Uint8Array> {
 	const body = new Blob([data as Uint8Array<ArrayBuffer>])
 		.stream()
-		.pipeThrough(stream);
+		.pipeThrough(new CompressionStream("deflate-raw"));
 	return new Uint8Array(await new Response(body).arrayBuffer());
+}
+
+/**
+ * Inflate an entry's raw-deflate body, stopping as soon as it grows past its
+ * declared size: a hostile archive's declared sizes say nothing about the
+ * real ones, so the limits are enforced on the output itself.
+ */
+async function inflate(
+	body: Uint8Array,
+	size: number,
+	name: string,
+): Promise<Uint8Array> {
+	const reader = new Blob([body as Uint8Array<ArrayBuffer>])
+		.stream()
+		.pipeThrough(new DecompressionStream("deflate-raw"))
+		.getReader();
+	const chunks: Uint8Array[] = [];
+	let length = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		length += value.length;
+		if (length > size) {
+			await reader.cancel();
+			throw new ZipError(`damaged entry: ${name}`);
+		}
+		chunks.push(value);
+	}
+	const out = new Uint8Array(length);
+	let at = 0;
+	for (const chunk of chunks) {
+		out.set(chunk, at);
+		at += chunk.length;
+	}
+	return out;
 }
 
 function dosTime(date: Date): { time: number; day: number } {
@@ -78,6 +110,8 @@ export async function writeZip(
 	entries: readonly ZipEntry[],
 	options: WriteZipOptions = {},
 ): Promise<Uint8Array> {
+	if (entries.length > 0xffff)
+		throw new ZipError("more than 65535 entries (zip64 is not supported)");
 	const encoder = new TextEncoder();
 	const { time, day } = dosTime(options.date ?? new Date());
 	const compress =
@@ -95,10 +129,7 @@ export async function writeZip(
 		let method = 0;
 		let body = entry.data;
 		if (compress(entry.name) && entry.data.length > 0) {
-			const deflated = await transform(
-				entry.data,
-				new CompressionStream("deflate-raw"),
-			);
+			const deflated = await deflate(entry.data);
 			if (deflated.length < entry.data.length) {
 				method = 8;
 				body = deflated;
@@ -135,8 +166,12 @@ export async function writeZip(
 		locals.push(local, body);
 		centrals.push(central);
 		offset += local.length + body.length;
+		if (offset > 0xffffffff)
+			throw new ZipError("more than 4 GiB (zip64 is not supported)");
 	}
 	const centralSize = centrals.reduce((n, c) => n + c.length, 0);
+	if (offset + centralSize > 0xffffffff)
+		throw new ZipError("more than 4 GiB (zip64 is not supported)");
 	const end = new Uint8Array(22);
 	const ev = new DataView(end.buffer);
 	ev.setUint32(0, END, true);
@@ -188,6 +223,8 @@ export async function readZip(
 		const extraLength = view.getUint16(at + 30, true);
 		const commentLength = view.getUint16(at + 32, true);
 		const localOffset = view.getUint32(at + 42, true);
+		if (at + 46 + nameLength + extraLength + commentLength > bytes.length)
+			throw new ZipError("broken central directory");
 		const name = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength));
 		at += 46 + nameLength + extraLength + commentLength;
 		if (name.endsWith("/")) continue;
@@ -211,8 +248,7 @@ export async function readZip(
 		const body = bytes.subarray(start, start + compressedSize);
 		let data: Uint8Array;
 		if (method === 0) data = body.slice();
-		else if (method === 8)
-			data = await transform(body, new DecompressionStream("deflate-raw"));
+		else if (method === 8) data = await inflate(body, size, name);
 		else throw new ZipError(`unsupported compression ${method}: ${name}`);
 		if (data.length !== size || crc32(data) !== crc)
 			throw new ZipError(`damaged entry: ${name}`);
