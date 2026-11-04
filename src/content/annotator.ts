@@ -34,6 +34,7 @@ import type {
 } from "../lib/messages.ts";
 import { type AnnotationDraft, cropRectFor } from "../lib/save.ts";
 import { elementAt, elementForRect } from "./anchor.ts";
+import { blurFields } from "./blur.ts";
 import type { Overlay } from "./overlay.ts";
 import { planShots } from "./plan.ts";
 
@@ -527,24 +528,7 @@ export class Annotator {
 	// --- saving --------------------------------------------------------------
 
 	#blur(): () => void {
-		const fields = this.#blurForms
-			? this.overlay.doc.querySelectorAll<HTMLElement>(
-					"input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select, [contenteditable='true'], [contenteditable='']",
-				)
-			: this.overlay.doc.querySelectorAll<HTMLElement>("input[type=password]");
-		const before = [...fields].map((f) => ({
-			f,
-			value: f.style.getPropertyValue("filter"),
-			priority: f.style.getPropertyPriority("filter"),
-		}));
-		for (const { f } of before)
-			f.style.setProperty("filter", "blur(6px)", "important");
-		return () => {
-			for (const { f, value, priority } of before) {
-				if (value) f.style.setProperty("filter", value, priority);
-				else f.style.removeProperty("filter");
-			}
-		};
+		return blurFields(this.overlay.doc, this.#blurForms);
 	}
 
 	/** Save the marks as a new case, or add them to the target case. */

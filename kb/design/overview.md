@@ -176,10 +176,22 @@ candidates.
 | `load_case` | Loads a case onto the tab in front and reports what was found | no |
 | `highlight` | Scrolls to and outlines one annotation's element (or another candidate) | no |
 | `capture` | A screenshot of the tab in front | no |
-| `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes ("Always allow" offered) |
-| `set_verdict` | Writes the case's verdict | yes ("Always allow" offered) |
+| `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes |
+| `set_verdict` | Writes the case's verdict | yes |
 | `delete_case` | Deletes a case | yes |
 
+Every call that changes something asks in the side panel, every time (DEC-008). The
+question names the case (title, page, number of marks) and, for `add_annotation`, the page
+in front, next to the raw arguments.
+
+The tools that act on the tab (`load_case`, `highlight`, `capture`, `add_annotation`) run
+one at a time: they share the page's one loaded case and one temporary mark. An AI app's
+screenshots blur form fields as the user's own do (password fields always, all fields
+with the side panel's setting), go through the service worker's capture queue, and are
+refused when the tab is no longer in front.
+
 Results that carry page content are marked `untrustedContentHint`: page text can contain
-instructions aimed at the AI app. Images are WebP and kept under the relay's 1 MiB
-message limit.
+instructions aimed at the AI app. A result stays within three quarters of the relay's
+message limit (1 MiB by default), its text included: a large case is sent with element
+summaries and shortened texts, and crops that do not fit are listed for `get_image`.
+Images are WebP; crops of at most 800 px go as they are stored.
