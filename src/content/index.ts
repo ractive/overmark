@@ -3,13 +3,77 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import type { Broadcast, ContentRequest } from "../lib/messages.ts";
+import { describeElement } from "../lib/element.ts";
+import type {
+	Broadcast,
+	ContentRequest,
+	DescribedElement,
+} from "../lib/messages.ts";
 import { Annotator } from "./annotator.ts";
+import { blurFields } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
 import { Reviewer } from "./review.ts";
 
 declare global {
 	var __overmark: boolean | undefined;
+}
+
+/** Undoes the blur of `element:mark` or `page:blur`. */
+let restoreBlur: (() => void) | undefined;
+
+function blur(allForms: boolean): void {
+	restoreBlur?.();
+	restoreBlur = blurFields(document, allForms);
+}
+
+function unblur(): void {
+	restoreBlur?.();
+	restoreBlur = undefined;
+}
+
+function mark(
+	overlay: Overlay,
+	annotator: Annotator,
+	selector: string,
+	number: number,
+	blurForms: boolean,
+): DescribedElement {
+	if (annotator.state().saving)
+		return {
+			ok: false,
+			error:
+				"The user is saving marks on this page right now; try again in a few seconds.",
+		};
+	let el: Element | null;
+	try {
+		el = document.querySelector(selector);
+	} catch {
+		return { ok: false, error: `Not a valid CSS selector: ${selector}` };
+	}
+	if (el === null || overlay.host.contains(el))
+		return { ok: false, error: `No element on this page matches ${selector}` };
+	el.scrollIntoView({
+		block: "center",
+		inline: "nearest",
+		behavior: "instant",
+	});
+	const r = el.getBoundingClientRect();
+	const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
+	overlay.setTemporaryMark({ number, rect });
+	blur(blurForms);
+	return {
+		ok: true,
+		details: describeElement(el),
+		rect,
+		viewport: {
+			width: innerWidth,
+			height: innerHeight,
+			dpr: devicePixelRatio || 1,
+		},
+		scroll: { x: scrollX, y: scrollY },
+		url: location.href,
+		title: document.title,
+	};
 }
 
 function start(): void {
@@ -58,11 +122,37 @@ function start(): void {
 					return true; // answers asynchronously
 				case "case:show":
 					sendResponse(
-						reviewer.show(message.annotationId, message.candidate) ?? null,
+						reviewer.caseId === message.caseId
+							? (reviewer.show(message.annotationId, message.candidate) ?? null)
+							: null,
 					);
 					break;
 				case "case:clear":
 					reviewer.clear();
+					sendResponse(state());
+					break;
+				case "element:mark":
+					sendResponse(
+						mark(
+							overlay,
+							annotator,
+							message.selector,
+							message.number,
+							message.blurForms,
+						),
+					);
+					break;
+				case "element:unmark":
+					overlay.setTemporaryMark(null);
+					unblur();
+					sendResponse(state());
+					break;
+				case "page:blur":
+					blur(message.blurForms);
+					sendResponse(state());
+					break;
+				case "page:unblur":
+					unblur();
 					sendResponse(state());
 					break;
 				default:

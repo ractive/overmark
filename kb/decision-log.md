@@ -68,3 +68,13 @@ Zip reading and writing (store and deflate through `CompressionStream`), base64,
 (`OffscreenCanvas`) and the UI are a few hundred lines of own code; the owner prefers
 that to packages for such things. The only runtime dependency is
 `@ractive-ch/tab-mcp-client`.
+
+## DEC-008: Every change an AI app asks for is confirmed, every time
+
+The PR #4 review found that `alwaysAllow: true` let one click on "Always allow" wave
+through every later `delete_case` of that AI app, for example one steered by
+instructions hidden in page text. tab-mcp-client 0.10.0 offers "Always allow" for every
+consequential tool of a `TabMcp` or for none, so Overmark turns it off: `add_annotation`,
+`set_verdict` and `delete_case` ask in the side panel each time. The question names the
+case and the page (an `onConfirm` that adds them to the description, then hands over to
+`confirmInPage`). A per-tool "Always allow" would need a client release that offers it.

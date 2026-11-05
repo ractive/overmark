@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 4: AI apps through tab-mcp"
-status: planned
+status: in-progress
 description: "TabMcp in the side panel with a relay setting and the connect dialog, and the tools list_cases, get_case, get_image, load_case, highlight, capture, add_annotation, set_verdict and delete_case."
 timestamp: 2026-11-04T17:00:00+01:00
 tags: [iteration, mcp]
@@ -24,8 +24,8 @@ tags: [iteration, mcp]
 
 ## Tasks
 
-- [ ] `src/sidepanel/tools.ts` (factory) with tests
-- [ ] `src/sidepanel/mcp.ts` and the side panel's AI section
-- [ ] Test through `startTestRelay` and the MCP client
-- [ ] README: relay and Claude Code
+- [x] `src/sidepanel/tools.ts` (factory) with tests
+- [x] `src/sidepanel/mcp.ts` and the side panel's AI section
+- [x] Test through `startTestRelay` and the MCP client
+- [x] README: relay and Claude Code
 - [ ] Review, PR

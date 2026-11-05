@@ -86,6 +86,9 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
 .capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar,
 .capturing .review { display: none !important; }
+/* An AI app's screenshot of one element: only its temporary mark shows. */
+.marking .toolbar, .marking .popover, .marking .hover, .marking .reviewbar,
+.marking .review, .marking .drafts { display: none !important; }
 [hidden] { display: none !important; }
 `;
 
@@ -128,8 +131,10 @@ export class Overlay {
 	readonly reviewBar: HTMLDivElement;
 	readonly #drafts: SVGGElement;
 	readonly #review: SVGGElement;
+	readonly #temporary: SVGGElement;
 	#annotating = false;
 	#reviewing = false;
+	#marking = false;
 	/**
 	 * Called after the toolbar or the outlines are shown or hidden, including
 	 * by the overlay's own Close and Hide buttons.
@@ -151,7 +156,8 @@ export class Overlay {
 		this.marks = svg(doc, "svg", { class: "marks" });
 		this.#review = svg(doc, "g", { class: "review" });
 		this.#drafts = svg(doc, "g", { class: "drafts" });
-		this.marks.append(this.#review, this.#drafts);
+		this.#temporary = svg(doc, "g", { class: "temporary" });
+		this.marks.append(this.#review, this.#drafts, this.#temporary);
 		this.capture = doc.createElement("div");
 		this.capture.className = "capture";
 		this.popover = doc.createElement("div");
@@ -197,8 +203,30 @@ export class Overlay {
 		this.onChange?.();
 	}
 
+	/**
+	 * Mark one element for a screenshot an AI app takes, with everything else
+	 * of Overmark's hidden; `null` removes it.
+	 */
+	setTemporaryMark(mark: { number: number; rect: Rect } | null): void {
+		this.#marking = mark !== null;
+		this.#temporary.replaceChildren(
+			...(mark === null
+				? []
+				: [
+						...this.#shape({ kind: "element", rect: mark.rect }),
+						this.#badge({
+							number: mark.number,
+							shape: { kind: "element", rect: mark.rect },
+						}),
+					]),
+		);
+		// Its own class: a save's capturing state must survive an unmark.
+		this.layer.classList.toggle("marking", this.#marking);
+		this.#update();
+	}
+
 	#update(): void {
-		const shown = this.#annotating || this.#reviewing;
+		const shown = this.#annotating || this.#reviewing || this.#marking;
 		this.layer.hidden = !shown;
 		this.toolbar.hidden = !this.#annotating;
 		this.capture.hidden = !this.#annotating;

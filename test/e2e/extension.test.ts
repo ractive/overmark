@@ -4,6 +4,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
 import { webpSize } from "../../src/lib/export.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
@@ -349,6 +354,190 @@ describe.skipIf(browserBinary === undefined)(
 					[0x1e, 0x8e, 0x3e],
 				),
 			).toBe(0);
+			await v2.page.send("Page.close");
+		}, 90_000);
+	},
+);
+
+describe.skipIf(browserBinary === undefined)(
+	"an AI app through a relay",
+	() => {
+		let h: Harness;
+		const relay = startTestRelay();
+
+		beforeAll(async () => {
+			h = await startHarness(browserBinary as string);
+		}, 60_000);
+
+		afterAll(async () => {
+			await h?.stop();
+			await relay.stop();
+		});
+
+		test("the side panel's tools serve real cases to an MCP client", async () => {
+			const v1 = await h.open("v1");
+			await showToolbar(h, v1.page, v1.tabId);
+			await markElement(v1.page, "[data-truth=submit]", "Too pale");
+			await markElement(v1.page, "[data-truth=tip]", "Say how much");
+			await saveAs(v1.page, "AI test");
+			await v1.page.send("Page.close");
+			const v2 = await h.open("v2");
+			await v2.page.activate();
+			await h.control.eval(
+				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
+			);
+
+			// A saved relay the library refuses must not stop the panel.
+			await h.control.eval(
+				`localStorage.setItem("overmark:relay", "http://192.168.1.20:8080")`,
+			);
+			await h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			);
+			await h.control.waitFor(`document.querySelector("[data-case]")`);
+			expect(
+				await h.control.eval<string>(
+					`document.getElementById("ai-status").textContent`,
+				),
+			).toContain("cannot be used");
+			expect(
+				await h.control.eval<string>(`document.getElementById("relay").value`),
+			).toBe("http://localhost:8080");
+
+			// The side panel connects to the test relay by itself ("keep AI access on").
+			await h.control.eval(
+				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)}); localStorage.setItem("overmark:keep-ai-on", "true")`,
+			);
+			// goto waits for the new document; a reload through eval would not.
+			await h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			);
+			await h.control.waitFor(
+				`document.getElementById("ai-status")?.textContent === "Waiting for an AI app to pair"`,
+				10_000,
+			);
+			await h.control.eval(`document.getElementById("connect").click()`);
+			// The library's connect dialog shows the address in a read-only field.
+			await h.control.waitFor(
+				`document.querySelector(".tab-mcp-address-input")?.value.endsWith("/mcp")`,
+			);
+			const address = await h.control.eval<string>(
+				`document.querySelector(".tab-mcp-address-input").value`,
+			);
+			const token = await tokenFor(relay.store, address);
+			const client = new Client(
+				{ name: "e2e", version: "1.0.0" },
+				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+			);
+			await client.connect(
+				new StreamableHTTPClientTransport(new URL(address), {
+					requestInit: { headers: { Authorization: `Bearer ${token}` } },
+				}),
+			);
+			try {
+				const cases = await client.callTool({
+					name: "list_cases",
+					arguments: {},
+				});
+				const [listed] = JSON.parse(
+					(cases.content as { text: string }[])[0]?.text ?? "[]",
+				) as { caseId: string; title: string }[];
+				expect(listed?.title).toBe("AI test");
+
+				const read = await client.callTool({
+					name: "get_case",
+					arguments: { caseId: listed?.caseId },
+				});
+				const images = (
+					read.content as { type: string; data?: string; mimeType?: string }[]
+				).filter((c) => c.type === "image");
+				expect(images).toHaveLength(2);
+				const bytes = Buffer.from(images[0]?.data ?? "", "base64");
+				expect(images[0]?.mimeType).toBe("image/webp");
+				expect(bytes.subarray(8, 12).toString()).toBe("WEBP");
+
+				const load = await client.callTool({
+					name: "load_case",
+					arguments: { caseId: listed?.caseId },
+				});
+				const loaded = JSON.parse(
+					(load.content as { text: string }[])[0]?.text ?? "{}",
+				) as {
+					url: string;
+					marks: { status: string }[];
+				};
+				expect(loaded.url).toContain("/v2");
+				expect(loaded.marks.map((m) => m.status)).toEqual(["found", "found"]);
+
+				const shot = await client.callTool({ name: "capture", arguments: {} });
+				expect((shot.content as { type: string }[])[1]?.type).toBe("image");
+
+				// A change asks in the side panel, names the case, and offers no
+				// "Always allow" (DEC-008).
+				const verdict = client.callTool({
+					name: "set_verdict",
+					arguments: { caseId: listed?.caseId, verdict: "Darker" },
+				});
+				// The newest dialog: the connect dialog may still be open under it.
+				const dialog = `[...document.querySelectorAll("dialog[open]")].at(-1)`;
+				const buttons = `[...(${dialog}?.querySelectorAll("button") ?? [])].map((b) => b.textContent.trim())`;
+				await h.control.waitFor(`${buttons}.includes("Don't allow")`, 10_000);
+				expect(await h.control.eval<string[]>(buttons)).not.toContain(
+					"Always allow",
+				);
+				expect(await h.control.eval<string>(`${dialog}.textContent`)).toContain(
+					"Case: “AI test”",
+				);
+				// A hidden page gets no dialog "close" event: the panel's tab must
+				// be in front to answer (a real side panel is visible).
+				await h.control.activate();
+				await h.control.eval(
+					`[...${dialog}.querySelectorAll("button")].find((b) => b.textContent.trim() === "Don't allow").click()`,
+				);
+				expect((await verdict).isError).toBe(true);
+				await v2.page.activate();
+			} finally {
+				await client.close();
+			}
+
+			// The temporary mark for an AI app's screenshot.
+			const described = await h.control.eval<{
+				ok: boolean;
+				details: { tag: string };
+			}>(
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "[data-truth=submit]", number: 9, blurForms: true })`,
+			);
+			expect(described.ok).toBe(true);
+			expect(described.details.tag).toBe("button");
+			// Its own mode (not a save's "capturing"), form fields blurred.
+			expect(
+				await v2.page.eval<string>(
+					`${HOST}.shadowRoot.querySelector(".layer").className`,
+				),
+			).toBe("layer marking");
+			expect(
+				await v2.page.eval<string>(
+					`document.querySelector("input[name=zip]").style.filter`,
+				),
+			).toBe("blur(6px)");
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("g.temporary")}.childElementCount`,
+				),
+			).toBeGreaterThan(0);
+			await h.control.eval(
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:unmark" })`,
+			);
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("g.temporary")}.childElementCount`,
+				),
+			).toBe(0);
+			expect(
+				await v2.page.eval<string>(
+					`document.querySelector("input[name=zip]").style.filter`,
+				),
+			).toBe("");
 			await v2.page.send("Page.close");
 		}, 90_000);
 	},

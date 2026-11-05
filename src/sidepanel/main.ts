@@ -2,6 +2,7 @@
  * The side panel: the tab in front, annotating it, and the saved cases.
  */
 
+import type { TabMcp } from "@ractive-ch/tab-mcp-client";
 import {
 	type Annotation,
 	type Case,
@@ -27,6 +28,7 @@ import type {
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { byId, formatDate, h, samePath, shortUrl } from "./dom.ts";
+import { createConnection, DEFAULT_RELAY, relayProblem } from "./mcp.ts";
 
 const store = new IdbStore();
 
@@ -39,8 +41,14 @@ const blurForms = byId<HTMLInputElement>("blur-forms");
 const casesList = byId<HTMLDivElement>("cases");
 const importButton = byId<HTMLButtonElement>("import");
 const importFile = byId<HTMLInputElement>("import-file");
+const relayInput = byId<HTMLInputElement>("relay");
+const connectButton = byId<HTMLButtonElement>("connect");
+const aiStatus = byId<HTMLSpanElement>("ai-status");
+const keepOn = byId<HTMLInputElement>("keep-on");
 
 const BLUR_KEY = "overmark:blur-forms";
+const RELAY_KEY = "overmark:relay";
+const KEEP_ON_KEY = "overmark:keep-ai-on";
 
 let overlay: OverlayState | undefined;
 let tabUrl = "";
@@ -422,6 +430,7 @@ async function showMatch(a: Annotation, candidate: number): Promise<void> {
 	try {
 		const m = (await chrome.tabs.sendMessage(loaded.tabId, {
 			type: "case:show",
+			caseId: loaded.caseId,
 			annotationId: a.id,
 			candidate,
 		})) as AnnotationMatch | null;
@@ -657,6 +666,104 @@ function closeCase(): void {
 	home.hidden = false;
 	void renderCases();
 }
+
+// --- AI app ----------------------------------------------------------------
+
+/** A tool changed or deleted a case: show it. */
+function caseChanged(caseId: string): void {
+	if (openCaseId === caseId) void openCase(caseId);
+	else void renderCases();
+}
+
+function connectTo(relay: string): TabMcp {
+	return createConnection(relay, store, {
+		onChange: caseChanged,
+		blurForms: () => blurForms.checked,
+	});
+}
+
+/** Shown while disconnected when the saved relay could not be used. */
+let relayNote: string | undefined;
+let relay = readSetting(RELAY_KEY) ?? DEFAULT_RELAY;
+let mcp: TabMcp;
+try {
+	mcp = connectTo(relay);
+} catch (error) {
+	// A stored address the library refuses must not stop the panel.
+	relayNote = `The saved relay ${relay} cannot be used (${error instanceof Error ? error.message : String(error)}); using ${DEFAULT_RELAY}.`;
+	relay = DEFAULT_RELAY;
+	mcp = connectTo(relay);
+}
+relayInput.value = relay;
+keepOn.checked = readSetting(KEEP_ON_KEY) === "true";
+
+function renderAi(): void {
+	const grants = mcp.grants;
+	const reconnecting = mcp.reconnecting;
+	aiStatus.textContent =
+		mcp.state === "connected"
+			? grants.length > 0
+				? `Connected: ${grants.map((g) => g.client.name).join(", ")}`
+				: "Waiting for an AI app to pair"
+			: mcp.state === "connecting"
+				? "Connecting…"
+				: reconnecting
+					? "Connection lost, retrying…"
+					: (relayNote ?? "Not connected");
+	connectButton.textContent =
+		mcp.state === "disconnected" ? "Connect AI app" : "AI connection…";
+}
+
+function watch(connection: typeof mcp): void {
+	for (const type of [
+		"statechange",
+		"grantschange",
+		"reconnecting",
+		"disconnected",
+	])
+		connection.addEventListener(type, renderAi);
+}
+watch(mcp);
+renderAi();
+
+relayInput.addEventListener("change", () => {
+	const value = relayInput.value.trim();
+	const refuse = (problem: string) => {
+		relayInput.setCustomValidity(problem);
+		relayInput.reportValidity();
+	};
+	const problem = relayProblem(value);
+	if (problem !== undefined) return refuse(problem);
+	// Build the new connection first: the setting and the old connection
+	// change only once it exists.
+	let next: TabMcp;
+	try {
+		next = connectTo(value);
+	} catch (error) {
+		return refuse(error instanceof Error ? error.message : String(error));
+	}
+	relayInput.setCustomValidity("");
+	writeSetting(RELAY_KEY, value);
+	relayNote = undefined;
+	mcp.disconnect();
+	mcp = next;
+	watch(mcp);
+	renderAi();
+	if (keepOn.checked)
+		void mcp.connect({ resume: true }).catch(() => renderAi());
+});
+
+connectButton.addEventListener("click", () => {
+	void mcp.showConnectDialog().catch((error: unknown) => {
+		aiStatus.textContent = `Could not connect: ${error instanceof Error ? error.message : String(error)}`;
+	});
+});
+
+keepOn.addEventListener("change", () =>
+	writeSetting(KEEP_ON_KEY, String(keepOn.checked)),
+);
+
+if (keepOn.checked) void mcp.connect({ resume: true }).catch(() => renderAi());
 
 chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
 	if (sender.id !== chrome.runtime.id) return false;
