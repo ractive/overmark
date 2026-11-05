@@ -30,6 +30,24 @@ describe.skipIf(browserBinary === undefined)("web components", () => {
 		await h?.stop();
 	});
 
+	test("the wheel scrolls a container around a shadow root while a tool is active", async () => {
+		const { page, tabId } = await h.open("shadow");
+		await showToolbar(h, page, tabId);
+		await page.click(shadow('[data-action="tool-box"]'));
+		const scroller = `document.getElementById("outer")`;
+		const at = await page.centreOf(scroller);
+		await page.send("Input.dispatchMouseEvent", {
+			type: "mouseWheel",
+			// Left of the toolbar, which sits in the middle at the bottom.
+			x: 100,
+			y: at.y,
+			deltaX: 0,
+			deltaY: 200,
+		});
+		await page.waitFor(`${scroller}.scrollTop >= 200`);
+		await page.send("Page.close");
+	}, 60_000);
+
 	test("a mark in a shadow root is on the button, also on the next visit", async () => {
 		const { page, tabId } = await h.open("shadow");
 		await showToolbar(h, page, tabId);

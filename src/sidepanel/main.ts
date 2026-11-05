@@ -131,8 +131,12 @@ async function refreshTab(): Promise<void> {
 				tab?.id === undefined
 					? undefined
 					: { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" };
-			// A hint is about the tab in front when it was given.
-			if (next?.id !== s.tab?.id || next?.url !== s.tab?.url)
+			// A hint is about the tab in front when it was given; the first read
+			// of that tab is no change of it.
+			if (
+				s.tab !== undefined &&
+				(next?.id !== s.tab.id || next?.url !== s.tab.url)
+			)
 				s.hint = undefined;
 			s.tab = next;
 			s.overlay = overlay;

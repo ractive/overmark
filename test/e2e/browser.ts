@@ -408,6 +408,11 @@ export class Page {
 			targetId: this.targetId,
 		});
 		await this.send("Page.bringToFront");
+		// A screenshot of a tab that has not painted since waits for a frame that
+		// may never come.
+		await this.eval(
+			"new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 1000); })",
+		);
 	}
 
 	/** Evaluate an expression (awaiting promises) and return its JSON value. */
@@ -490,7 +495,19 @@ export class Page {
 
 	/** Click the element an expression returns (also inside a shadow root). */
 	async click(expression: string): Promise<void> {
-		const { x, y } = await this.centreOf(expression);
+		// Sent at once, a click lands on what was at that spot before a scroll or a
+		// late list moved it: wait until the element has stayed put for two frames.
+		let at = await this.centreOf(expression);
+		for (let tries = 0; tries < 20; tries++) {
+			await this.eval(
+				"new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 200); })",
+			);
+			const now = await this.centreOf(expression);
+			const stayed = now.x === at.x && now.y === at.y;
+			at = now;
+			if (stayed) break;
+		}
+		const { x, y } = at;
 		await this.clickAt(x, y);
 	}
 

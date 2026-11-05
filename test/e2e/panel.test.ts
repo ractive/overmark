@@ -547,6 +547,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			const box = id("all-sites");
 			// A test build has it from the start, and Chrome will not take that away.
 			await h.control.waitFor(`${box}.checked`);
+			await h.control.waitFor(`${id("page")}.textContent !== "…"`);
 			await h.control.eval(`${box}.click()`);
 			await h.control.waitFor(
 				`${id("hint")}.textContent.includes("Could not change the access")`,

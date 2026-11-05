@@ -43,6 +43,7 @@ import type {
 	WorkerResponse,
 } from "../lib/messages.ts";
 import { type AnnotationDraft, cropRectFor } from "../lib/save.ts";
+import { parentOf, shadowTrees } from "../lib/shadow.ts";
 import {
 	AI_TIMEOUT_MS,
 	type PageActivity,
@@ -151,6 +152,8 @@ export class Annotator {
 	#message = "";
 	#frame = 0;
 	#views: View[] = [];
+	/** The screenshot the page still looks like, if any: a new mark can share it. */
+	#shown: View | undefined;
 	/** Screenshots run one after the other; this never rejects. */
 	#shots: Promise<void> = Promise.resolve();
 	#lastShot = 0;
@@ -165,6 +168,7 @@ export class Annotator {
 	#unblur: (() => void) | undefined;
 	/** The last screenshot's page scrolled while it was taken. */
 	#shotMoved = false;
+	#saveCalled = false;
 
 	readonly #pageBlur: PageBlur;
 	readonly #activity: PageActivity;
@@ -194,6 +198,15 @@ export class Annotator {
 		// Capture phase: scrolling inside a container moves elements too.
 		doc.addEventListener("scroll", moved, { capture: true, passive: true });
 		win?.addEventListener("resize", moved);
+		// What no mutation shows: typed values, checkboxes, a canvas redrawn.
+		for (const type of ["input", "change", "click", "keydown"])
+			win?.addEventListener(
+				type,
+				(e) => {
+					if (e.target !== overlay.host) this.#mutated = true;
+				},
+				true,
+			);
 		win?.addEventListener(
 			"keydown",
 			(e) => {
@@ -265,8 +278,10 @@ export class Annotator {
 	}
 
 	#watch(): void {
-		if (this.overlay.annotating)
-			this.#observer?.observe(this.overlay.doc.documentElement, {
+		if (!this.overlay.annotating) return;
+		// Shadow roots too: a mutation inside one is not reported outside it.
+		for (const root of shadowTrees(this.overlay.doc, this.overlay.host))
+			this.#observer?.observe(root, {
 				subtree: true,
 				childList: true,
 				attributes: true,
@@ -294,7 +309,7 @@ export class Annotator {
 		const win = this.overlay.doc.defaultView;
 		const root = this.overlay.doc.scrollingElement;
 		let at = elementAt(e.clientX, e.clientY, this.overlay.host);
-		for (; at !== null && at !== root; at = at.parentElement) {
+		for (; at !== null && at !== root; at = parentOf(at)) {
 			const { overflowY, overflowX } = win?.getComputedStyle(at) ?? {};
 			const scrolls = (overflow: string | undefined) =>
 				overflow === "auto" || overflow === "scroll";
@@ -451,6 +466,7 @@ export class Annotator {
 		view.marks = view.marks.filter((d) => d !== draft);
 		if (view.marks.length > 0) return;
 		this.#views = this.#views.filter((v) => v !== view);
+		if (this.#shown === view) this.#shown = undefined;
 		this.#discard([view.shot.id]);
 	}
 
@@ -744,10 +760,10 @@ export class Annotator {
 
 	async #shoot(draft: Draft, same: boolean, drawn: Shape): Promise<void> {
 		if (draft.shot !== undefined || !this.#drafts.includes(draft)) return;
-		const last = this.#views.at(-1);
-		if (same && last !== undefined && last.shot.url === draft.url) {
-			last.marks.push(draft);
-			draft.shot = { view: last, shape: drawn };
+		const shown = this.#shown;
+		if (same && shown !== undefined && shown.shot.url === draft.url) {
+			shown.marks.push(draft);
+			draft.shot = { view: shown, shape: drawn };
 			return;
 		}
 		await this.#take(draft, drawn);
@@ -797,10 +813,12 @@ export class Annotator {
 			if (drawn !== undefined) {
 				const now = shapeBounds(this.#onWindow(draft));
 				const then = shapeBounds(drawn);
-				if (now.x !== then.x || now.y !== then.y) return;
+				if (now.x !== then.x || now.y !== then.y || location.href !== draft.url)
+					return;
 			}
 			const win = this.overlay.doc.defaultView as Window;
 			const shotId = newId("p");
+			this.#shown = undefined;
 			// The blur changes the page's DOM, which is no change of the page.
 			this.#observer?.disconnect();
 			this.overlay.setCapturing(true);
@@ -839,6 +857,7 @@ export class Annotator {
 			const view = this.#view(shotId, scroll, viewport, image);
 			view.marks.push(draft);
 			this.#views.push(view);
+			this.#shown = view;
 			draft.shot = { view, shape };
 			// Undone while it was being taken.
 			if (!this.#drafts.includes(draft)) this.#forget(draft);
@@ -908,13 +927,32 @@ export class Annotator {
 
 	/** Save the marks as a new case, or add them to the target case. */
 	async save(title: string): Promise<SaveResult | undefined> {
+		// A second click must not start over while screenshots are still awaited.
+		if (this.#saveCalled) return undefined;
+		this.#saveCalled = true;
+		try {
+			return await this.#save(title);
+		} finally {
+			this.#saveCalled = false;
+		}
+	}
+
+	async #save(title: string): Promise<SaveResult | undefined> {
 		if (this.#activity.saving || this.#drafts.length === 0) return undefined;
 		this.#title = title;
 		if (this.#editing !== null) this.#commitComment();
 		await this.#shots;
 		try {
-			for (const draft of this.#drafts)
-				if (draft.shot === undefined) await this.#takeBack(draft);
+			for (const draft of this.#drafts) {
+				if (draft.shot !== undefined) continue;
+				if (draft.url !== location.href) {
+					// Its page is gone: a screenshot of this one would show something else.
+					this.#message = `Mark ${draft.number} has no screenshot and was drawn on another page. Go back there, or undo it.`;
+					this.#renderToolbar();
+					return undefined;
+				}
+				await this.#takeBack(draft);
+			}
 		} catch (error) {
 			this.#message = `Not saved: ${errorText(error)}`;
 			this.#renderToolbar();

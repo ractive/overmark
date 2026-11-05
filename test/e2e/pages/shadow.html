@@ -14,6 +14,7 @@
 			<app-panel></app-panel>
 			<app-vault></app-vault>
 			<app-send>Offerte senden</app-send>
+			<div id="outer" style="height: 120px; overflow: auto"><app-list></app-list></div>
 		</main>
 		<script>
 			const button = (text) => `<style>button { padding: 8px 16px; }</style><section><button>${text}</button></section>`;
@@ -32,6 +33,13 @@
 					this.attachShadow({ mode: "open" }).innerHTML = button("<slot></slot>");
 				}
 			}
+			class List extends HTMLElement {
+				connectedCallback() {
+					this.attachShadow({ mode: "open" }).innerHTML =
+						`<div style="height: 900px">Lang</div>`;
+				}
+			}
+			customElements.define("app-list", List);
 			customElements.define("app-panel", Panel);
 			customElements.define("app-vault", Vault);
 			customElements.define("app-send", Send);

@@ -15,6 +15,7 @@ import {
 	saveAs,
 	shadow,
 	showToolbar,
+	worker,
 } from "./steps.ts";
 
 const BLUE: [number, number, number] = [0, 120, 255];
@@ -108,6 +109,125 @@ describe.skipIf(browserBinary === undefined)(
 			expect(
 				await countColour(h.control, "Waited", "shots/s1.webp", GREEN),
 			).toBe(0);
+			await close(page);
+		}, 60_000);
+
+		test("after an undo the next mark does not share a screenshot from elsewhere", async () => {
+			const { page, tabId } = await open("long");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "#near", "at the top");
+			await shotsTaken();
+			await markElement(page, "#far", "undone");
+			await shotsTaken();
+			await page.click(shadow('[data-action="undo"]'));
+			await markElement(page, "#far", "kept");
+			await shotsTaken();
+			await saveAs(page, "After undo");
+			const { c } = await saved("After undo");
+			expect(c.annotations.map((a) => a.shot)).toEqual(["s1", "s2"]);
+			expect(
+				await countColour(h.control, "After undo", "crops/a2.webp", GREEN),
+			).toBeGreaterThan(1000);
+			await close(page);
+		}, 60_000);
+
+		test("a failed screenshot leaves nothing for the next mark to share", async () => {
+			const { page, tabId } = await open("long");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "#near", "at the top");
+			await shotsTaken();
+			await page.eval("window.scrollTo(0, 2400)");
+			await Bun.sleep(100);
+			// The next screenshot fails, with the tab in front and nothing moving.
+			await (await worker(h)).eval(`(() => {
+			const real = chrome.tabs.captureVisibleTab;
+			chrome.tabs.captureVisibleTab = () => {
+				chrome.tabs.captureVisibleTab = real;
+				return Promise.reject(new Error("no picture"));
+			};
+		})()`);
+			await markElement(page, "#far", "its screenshot fails");
+			await page.waitFor(
+				`${shadow('[data-role="status"]')}?.textContent.includes("No screenshot")`,
+			);
+			await markElement(page, "#far", "the next one");
+			await shotsTaken();
+			await saveAs(page, "Failed shot");
+			const { c } = await saved("Failed shot");
+			expect(c.annotations[2]?.shot).not.toBe("s1");
+			expect(
+				await countColour(h.control, "Failed shot", "crops/a3.webp", GREEN),
+			).toBeGreaterThan(1000);
+			await close(page);
+		}, 60_000);
+
+		test("a value typed between two marks is a change of the page", async () => {
+			const { page, tabId } = await open("ui");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "#label", "before");
+			await shotsTaken();
+			await page.click(shadow('[data-action="tool-element"]'));
+			await page.click(`document.getElementById("plain")`);
+			await page.type("X");
+			await markElement(page, "#other", "after");
+			await shotsTaken();
+			await saveAs(page, "Typed");
+			expect((await saved("Typed")).c.shots).toHaveLength(2);
+			await close(page);
+		}, 60_000);
+
+		test("a second click on Save while a screenshot is awaited saves once", async () => {
+			const { page, tabId } = await open("long");
+			await showToolbar(h, page, tabId);
+			await sendToTab(tabId, { type: "page:blur", blurForms: false });
+			await markElement(page, "#near", "drawn at the top");
+			await page.eval("window.scrollTo(0, 2400)");
+			await sendToTab(tabId, { type: "page:unblur" });
+			await Bun.sleep(1000);
+			await page.click(shadow('[data-action="save"]'));
+			await page.waitFor(shadow('input[aria-label="Case title"]'));
+			await page.eval(
+				`(() => { const i = ${shadow('input[aria-label="Case title"]')}; i.focus(); i.select(); })()`,
+			);
+			await page.type("Clicked twice");
+			await page.eval(
+				`(() => { const b = ${shadow('[data-action="save-confirm"]')}; b.click(); b.click(); })()`,
+			);
+			await page.waitFor(
+				`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+				20_000,
+			);
+			await Bun.sleep(1200);
+			expect(
+				await page.eval<string>(
+					`${shadow('[data-role="status"]')}.textContent`,
+				),
+			).toStartWith("Saved");
+			const db = await h.control.eval<Db>(READ_DB);
+			expect(db.cases.filter((c) => c.title === "Clicked twice")).toHaveLength(
+				1,
+			);
+			await close(page);
+		}, 60_000);
+
+		test("a mark without a screenshot from another route stops the save, and is kept", async () => {
+			const { page, tabId } = await open("app");
+			await showToolbar(h, page, tabId);
+			// An AI app holds the page, so the mark's screenshot has to wait.
+			await sendToTab(tabId, { type: "page:blur", blurForms: false });
+			await markElement(page, "#near", "on the first route");
+			await page.eval("goToB()");
+			await sendToTab(tabId, { type: "page:unblur" });
+			await Bun.sleep(1200);
+			await page.click(shadow('[data-action="save"]'));
+			await page.waitFor(shadow('input[aria-label="Case title"]'));
+			await page.click(shadow('[data-action="save-confirm"]'));
+			await page.waitFor(
+				`${shadow('[data-role="status"]')}?.textContent.includes("another page")`,
+			);
+			expect(
+				await sendToTab<{ drafts: number }>(tabId, { type: "overlay:state" }),
+			).toMatchObject({ drafts: 1 });
 			await close(page);
 		}, 60_000);
 

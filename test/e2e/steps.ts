@@ -261,8 +261,11 @@ export async function panelHome(h: Harness): Promise<Page> {
 	);
 	await h.control.activate();
 	// The list moves what is below it when it arrives.
+	const { cases } = await h.control.eval<Db>(READ_DB);
 	await h.control.waitFor(
-		`document.getElementById("cases").childElementCount > 0`,
+		cases.length === 0
+			? `document.getElementById("cases").childElementCount > 0`
+			: `document.querySelectorAll("[data-case]").length === ${cases.length}`,
 	);
 	return h.control;
 }
@@ -290,9 +293,16 @@ export async function exportOpenCase(
 	await panel.click(`document.getElementById("export-case")`);
 	const { suggestedFilename } = (await begun) as { suggestedFilename: string };
 	const path = join(folder, suggestedFilename);
+	// Chrome may still be writing it: it is done when it has stopped growing.
+	let size = -1;
 	await until(
-		() => Bun.file(path).exists(), // Chrome renames it when it is complete
-		(exists) => exists,
+		async () => {
+			const before = size;
+			size = Bun.file(path).size;
+			await Bun.sleep(200);
+			return before;
+		},
+		(before) => before > 0 && before === size,
 	);
 	return path;
 }
@@ -300,18 +310,14 @@ export async function exportOpenCase(
 /** Choose `file` through the side panel's Import button and file input. */
 export async function importFile(panel: Page, file: string): Promise<void> {
 	await panel.send("Page.setInterceptFileChooserDialog", { enabled: true });
-	let opened: { backendNodeId: number } | undefined;
-	void panel.event("Page.fileChooserOpened").then((event) => {
-		opened = event as { backendNodeId: number };
-	});
-	// The list above can still move the button: click until the chooser comes.
-	for (let attempt = 0; opened === undefined && attempt < 5; attempt++) {
-		await panel.click(`document.getElementById("import")`);
-		await Bun.sleep(1000);
-	}
-	if (opened === undefined)
-		throw new Error("the Import button opened no file chooser");
-	const { backendNodeId } = opened;
+	const chooser = panel.event("Page.fileChooserOpened");
+	await panel.click(`document.getElementById("import")`);
+	const { backendNodeId } = (await Promise.race([
+		chooser,
+		Bun.sleep(5000).then(() => {
+			throw new Error("the Import button opened no file chooser");
+		}),
+	])) as { backendNodeId: number };
 	await panel.send("DOM.setFileInputFiles", { files: [file], backendNodeId });
 	await panel.send("Page.setInterceptFileChooserDialog", { enabled: false });
 }

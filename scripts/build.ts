@@ -60,6 +60,13 @@ const LICENCES: Readonly<Record<string, string>> = {
 	"@ractive-ch/tab-mcp-client": `${CLIENT}/LICENSE`,
 };
 
+/** The licence in a package's notice file; one without an MIT text stops the build. */
+export function mitText(name: string, file: string): string {
+	const start = file.indexOf("MIT License");
+	if (start < 0) throw new Error(`no MIT licence text for ${name}`);
+	return file.slice(start);
+}
+
 /** Overmark's licence and those of `packages`; a package without one stops the build. */
 export async function notices(packages: Iterable<string>): Promise<string> {
 	const text = (path: string) => Bun.file(join(ROOT, path)).text();
@@ -70,8 +77,7 @@ export async function notices(packages: Iterable<string>): Promise<string> {
 		const path = LICENCES[name];
 		if (path === undefined)
 			throw new Error(`no licence known for the bundled package ${name}`);
-		const licence = await text(path);
-		parts.push(`${name}\n\n${licence.slice(licence.indexOf("MIT License"))}`);
+		parts.push(`${name}\n\n${mitText(name, await text(path))}`);
 	}
 	return parts.join(`\n${"-".repeat(78)}\n\n`);
 }
@@ -121,7 +127,9 @@ async function bundle(
 		target: "browser",
 		format,
 		...(naming ? { naming } : {}),
-		...(test ? { define: { OVERMARK_TEST_BUILD: "true" } } : {}),
+		// Always defined: left to run time, an element with that id on the page
+		// would answer for it and open the overlay's shadow root.
+		define: { OVERMARK_TEST_BUILD: test ? "true" : "false" },
 		minify,
 		splitting: format === "esm" && entrypoint.endsWith(".html"),
 		sourcemap: "linked",

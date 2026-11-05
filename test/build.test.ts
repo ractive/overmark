@@ -8,6 +8,7 @@ import {
 	checkOutdir,
 	createManifest,
 	extensionId,
+	mitText,
 	NOTICES_FILE,
 	notices,
 	readKey,
@@ -145,6 +146,27 @@ describe("build", () => {
 			expect(text).toContain("Copyright (c) 2020 Jeremy Danyow");
 			expect(text).not.toContain("CDN build");
 		}
+	});
+
+	test("a package has no test switch left for a page to answer", async () => {
+		const outdir = mkdtempSync(join(tmpdir(), "overmark-flag-"));
+		try {
+			await build({ outdir, store: true });
+			const content = await Bun.file(join(outdir, "content.js")).text();
+			expect(content).not.toContain("OVERMARK_TEST_BUILD");
+			expect(content).toContain('"closed"');
+		} finally {
+			rmSync(outdir, { recursive: true, force: true });
+		}
+	});
+
+	test("a licence that is not the expected MIT text stops the build", () => {
+		expect(mitText("x", "Copyright\n\nMIT License\n\nText")).toBe(
+			"MIT License\n\nText",
+		);
+		expect(() => mitText("x", "Apache License 2.0")).toThrow(
+			"no MIT licence text for x",
+		);
 	});
 
 	test("a bundled package without a known licence stops the build", async () => {

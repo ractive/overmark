@@ -93,6 +93,38 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 		expect(await captures()).toBe(before);
 	});
 
+	test("a capture Chrome never answers, and the queue goes on", async () => {
+		await a.page.activate();
+		await serviceWorker.eval(
+			"globalThis.duringCapture = () => new Promise(() => {})",
+		);
+		const stuck = await capture(a.tabId);
+		await serviceWorker.eval("globalThis.duringCapture = undefined");
+		expect(stuck.error).toContain("did not deliver");
+		expect((await capture(a.tabId)).ok).toBe(true);
+	}, 20_000);
+
+	test("ids that are no ids", async () => {
+		const send = (message: object) =>
+			h.control.eval<{ ok: boolean; error?: string }>(
+				`chrome.runtime.sendMessage(${JSON.stringify(message)})`,
+			);
+		expect(
+			await send({ type: "images:discard", caseId: "../x", shotIds: [] }),
+		).toEqual({ ok: false, error: "invalid id" });
+		expect(
+			await send({
+				type: "case:save",
+				request: {
+					caseId: "c_1",
+					imagesFrom: "../x",
+					shots: [],
+					annotations: [],
+				},
+			}),
+		).toEqual({ ok: false, error: "invalid id" });
+	});
+
 	test("capture:tab from a content script", async () => {
 		await a.page.activate();
 		const before = await captures();
