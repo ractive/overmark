@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	newId,
 	nextNumbers,
 	validateCase,
 } from "../src/lib/case.ts";
@@ -159,5 +160,35 @@ describe("mark ids", () => {
 			annotations: [{ ...first, id: "a7", crop: "crops/a7.webp" }],
 		};
 		expect(() => validateCase(odd)).toThrow(`must be a${first.number}`);
+	});
+});
+
+describe("newId", () => {
+	test("works where crypto.randomUUID does not exist (a plain http: page)", () => {
+		const { randomUUID } = crypto;
+		Object.defineProperty(crypto, "randomUUID", {
+			value: undefined,
+			configurable: true,
+		});
+		try {
+			expect(newId("c")).toMatch(/^c_[0-9a-f]{16}$/);
+		} finally {
+			Object.defineProperty(crypto, "randomUUID", {
+				value: randomUUID,
+				configurable: true,
+			});
+		}
+	});
+});
+
+describe("a shot's address", () => {
+	test("is optional, kept, and limited", () => {
+		const c = withMarks();
+		expect(validateCase(c).shots[0]).not.toHaveProperty("url");
+		const shot = c.shots[0] as Case["shots"][number];
+		shot.url = "https://example.com/route";
+		expect(validateCase(c).shots[0]?.url).toBe("https://example.com/route");
+		shot.url = "x".repeat(8001);
+		expect(() => validateCase(c)).toThrow("case.shots[0].url");
 	});
 });

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>App</title>
+<style>
+	html, body { height: 100%; margin: 0; overflow: hidden; font: 20px sans-serif; }
+	main { height: 100%; overflow: auto; }
+	.block { width: 600px; height: 300px; margin: 40px; color: #fff; }
+	#near { background: rgb(0, 120, 255); }
+	#far { background: rgb(0, 170, 80); margin-top: 1800px; }
+	#route-b { background: rgb(240, 150, 0); }
+</style>
+</head>
+<body>
+<main id="scroller">
+	<div class="block" id="near">Near the top</div>
+	<div class="block" id="far">Far down</div>
+</main>
+<script>
+	window.goToB = () => {
+		history.pushState({}, "", "/app/b");
+		document.getElementById("scroller").replaceChildren(
+			Object.assign(document.createElement("div"), {
+				id: "route-b",
+				className: "block",
+				textContent: "Route B",
+			}),
+		);
+	};
+</script>
+</body>
+</html>

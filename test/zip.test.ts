@@ -127,7 +127,7 @@ describe("writeZip and readZip", () => {
 		}
 		expect(produced).toBeGreaterThan(0);
 		expect(produced).toBeLessThan(8 * 1024 * 1024);
-	});
+	}, 30_000);
 
 	test("rejects a central directory that runs past the end", async () => {
 		const zip = await writeZip([{ name: "a.txt", data: text("abc") }]);

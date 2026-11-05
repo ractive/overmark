@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { pendingImage, type Shot } from "../src/lib/case.ts";
+import type { Draw } from "../src/lib/save.ts";
 import {
 	type AnnotationDraft,
 	type Crop,
@@ -174,11 +175,14 @@ describe("saveCase", () => {
 		// would pass a deep comparison.
 		for (const [key, image] of before)
 			expect(store.images.get(key)).toBe(image);
-		expect([...store.images.keys()].sort()).toEqual([...before.keys()].sort());
+		// Only the new screenshot is added, pending: the marks can be saved again.
+		expect([...store.images.keys()].sort()).toEqual(
+			[...before.keys(), "c_1/pending/p_b.webp"].sort(),
+		);
 		expect((await store.getCase("c_1"))?.annotations).toHaveLength(2);
 	});
 
-	test("a number used twice in one save is refused and leaves nothing behind", async () => {
+	test("a number used twice in one save is refused and stores no case", async () => {
 		const store = new MemoryStore();
 		await captured(store, "c_1", "p_a");
 		await expect(
@@ -188,7 +192,7 @@ describe("saveCase", () => {
 				crop,
 			),
 		).rejects.toThrow();
-		expect(store.images.size).toBe(0);
+		expect([...store.images.keys()]).toEqual(["c_1/pending/p_a.webp"]);
 		expect(await store.getCase("c_1")).toBeUndefined();
 	});
 
@@ -206,7 +210,37 @@ describe("saveCase", () => {
 				crop,
 			),
 		).rejects.toThrow("exists already");
-		expect(store.images.has("c_1/pending/p_b.webp")).toBe(false);
+		// The marks can be saved again: their screenshot must still be there.
+		expect(store.images.has("c_1/pending/p_b.webp")).toBe(true);
+	});
+
+	test("reads pending screenshots from imagesFrom and draws the marks on them", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_session", "p_a");
+		const drawn: number[][] = [];
+		const draw: Draw = async (image, marks) => {
+			drawn.push(marks.map((m) => m.number));
+			return { blob: image, width: 1, height: 1 };
+		};
+		const saved = await saveCase(
+			store,
+			{
+				...request(
+					"c_1",
+					true,
+					[shot("p_a")],
+					[draft(1, "p_a"), draft(2, "p_a")],
+				),
+				imagesFrom: "c_session",
+			},
+			crop,
+			new Date(),
+			draw,
+		);
+		expect(saved.id).toBe("c_1");
+		expect(drawn).toEqual([[1, 2]]);
+		expect(store.images.has("c_session/pending/p_a.webp")).toBe(false);
+		expect(store.images.has("c_1/shots/s1.webp")).toBe(true);
 	});
 
 	test("a missing screenshot fails the save", async () => {

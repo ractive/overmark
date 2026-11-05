@@ -2,6 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { BUSY, PageActivity } from "../src/content/activity.ts";
 
 describe("PageActivity", () => {
+	test("a mark's screenshot holds the page; the toolbar need not wait for it", () => {
+		const a = new PageActivity();
+		expect(a.busy).toBeUndefined();
+		expect(a.begin("shot")).toEqual({ ok: true });
+		expect(a.saving).toBe(false);
+		expect(a.busy).toBe(BUSY.shot);
+		expect(a.begin("ai-mark")).toEqual({ ok: false, error: BUSY.shot });
+		expect(a.defer({ kind: "hide" })).toBe(false);
+		expect(a.end("shot")).toBeUndefined();
+		expect(a.busy).toBeUndefined();
+	});
+
 	test("one activity at a time; the others are refused with a reason", () => {
 		const a = new PageActivity();
 		expect(a.begin("saving")).toEqual({ ok: true });

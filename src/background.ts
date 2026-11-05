@@ -7,10 +7,16 @@
  */
 
 import { isSafeId, pendingImage } from "./lib/case.ts";
-import { cropImages, screenshotToWebp } from "./lib/images.ts";
+import {
+	cropImages,
+	drawMarks,
+	PENDING_QUALITY,
+	screenshotToWebp,
+} from "./lib/images.ts";
 import type {
 	Broadcast,
 	CaptureResult,
+	ContentRequest,
 	SaveResult,
 	TabCapture,
 	WorkerRequest,
@@ -92,7 +98,11 @@ async function handle(
 			if (tab?.id === undefined) throw new Error("not sent from a tab");
 			if (!isSafeId(request.caseId) || !isSafeId(request.shotId))
 				throw new Error("invalid id");
-			const image = await screenshotToWebp(await capture(tab.id, tab.windowId));
+			const png = await capture(tab.id, tab.windowId);
+			// Encoding takes a while; the page need not stay blurred for it.
+			const taken: ContentRequest = { type: "page:captured" };
+			void chrome.tabs.sendMessage(tab.id, taken).catch(() => undefined);
+			const image = await screenshotToWebp(png, PENDING_QUALITY);
 			await store.putImage(request.caseId, pendingImage(request.shotId), {
 				...image,
 				storedAt: Date.now(),
@@ -103,7 +113,13 @@ async function handle(
 			} satisfies CaptureResult;
 		}
 		case "case:save": {
-			const saved = await saveCase(store, request.request, cropImages);
+			const saved = await saveCase(
+				store,
+				request.request,
+				cropImages,
+				new Date(),
+				drawMarks,
+			);
 			await broadcast({ type: "cases:changed", caseId: saved.id });
 			return {
 				caseId: saved.id,

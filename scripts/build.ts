@@ -83,6 +83,7 @@ async function bundle(
 	format: "esm" | "iife",
 	minify: boolean,
 	naming?: string,
+	test = false,
 ): Promise<void> {
 	const result = await Bun.build({
 		entrypoints: [join(ROOT, entrypoint)],
@@ -90,6 +91,7 @@ async function bundle(
 		target: "browser",
 		format,
 		...(naming ? { naming } : {}),
+		...(test ? { define: { OVERMARK_TEST_BUILD: "true" } } : {}),
 		minify,
 		splitting: format === "esm" && entrypoint.endsWith(".html"),
 		sourcemap: "linked",
@@ -133,7 +135,14 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	};
 	await rm(outdir, { recursive: true, force: true });
 	await bundle("src/background.ts", outdir, "esm", minify);
-	await bundle("src/content/index.ts", outdir, "iife", minify, CONTENT_SCRIPT);
+	await bundle(
+		"src/content/index.ts",
+		outdir,
+		"iife",
+		minify,
+		CONTENT_SCRIPT,
+		options.test,
+	);
 	await bundle(
 		"src/sidepanel/index.html",
 		join(outdir, "sidepanel"),

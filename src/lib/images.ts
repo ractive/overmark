@@ -4,6 +4,7 @@
  */
 
 import type { Rect } from "./case.ts";
+import { paintMark, type RenderedMark } from "./marks.ts";
 import type { StoredImage } from "./store.ts";
 
 /** The longest side Claude looks at; larger images are scaled down anyway. */
@@ -11,10 +12,14 @@ export const MAX_SIDE = 1568;
 
 const QUALITY = 0.85;
 
+/** Screenshots waiting for their marks are encoded a second time at saving. */
+export const PENDING_QUALITY = 0.95;
+
 async function render(
 	source: ImageBitmap,
 	crop: { x: number; y: number; width: number; height: number },
 	maxSide: number,
+	quality = QUALITY,
 ): Promise<StoredImage> {
 	const scale = Math.min(1, maxSide / Math.max(crop.width, crop.height));
 	const width = Math.max(1, Math.round(crop.width * scale));
@@ -33,27 +38,56 @@ async function render(
 		width,
 		height,
 	);
-	const blob = await canvas.convertToBlob({
-		type: "image/webp",
-		quality: QUALITY,
-	});
+	const blob = await canvas.convertToBlob({ type: "image/webp", quality });
 	return { blob, width, height };
 }
 
 /** A `captureVisibleTab` data URL as a full-size WebP. */
-export async function screenshotToWebp(dataUrl: string): Promise<StoredImage> {
-	return toWebp(await (await fetch(dataUrl)).blob());
+export async function screenshotToWebp(
+	dataUrl: string,
+	quality = QUALITY,
+): Promise<StoredImage> {
+	return toWebp(await (await fetch(dataUrl)).blob(), quality);
 }
 
 /** Any image as a full-size WebP. */
-export async function toWebp(image: Blob): Promise<StoredImage> {
+export async function toWebp(
+	image: Blob,
+	quality = QUALITY,
+): Promise<StoredImage> {
 	const bitmap = await createImageBitmap(image);
 	try {
 		return await render(
 			bitmap,
 			{ x: 0, y: 0, width: bitmap.width, height: bitmap.height },
 			Number.POSITIVE_INFINITY,
+			quality,
 		);
+	} finally {
+		bitmap.close();
+	}
+}
+
+/** A screenshot with `marks` on it, as the overlay showed them; `dpr` as for `cropImages`. */
+export async function drawMarks(
+	image: Blob,
+	marks: readonly RenderedMark[],
+	dpr: number,
+): Promise<StoredImage> {
+	const bitmap = await createImageBitmap(image);
+	try {
+		const { width, height } = bitmap;
+		const canvas = new OffscreenCanvas(width, height);
+		const ctx = canvas.getContext("2d");
+		if (ctx === null) throw new Error("no 2d canvas");
+		ctx.drawImage(bitmap, 0, 0);
+		ctx.scale(dpr, dpr);
+		for (const mark of marks) paintMark(ctx, mark);
+		const blob = await canvas.convertToBlob({
+			type: "image/webp",
+			quality: QUALITY,
+		});
+		return { blob, width, height };
 	} finally {
 		bitmap.close();
 	}

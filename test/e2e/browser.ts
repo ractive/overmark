@@ -109,6 +109,8 @@ export class Browser {
 				"--disable-gpu",
 				"--disable-background-networking",
 				"--window-size=1280,800",
+				// A plain http: host that is no secure context, as 127.0.0.1 is.
+				"--host-resolver-rules=MAP overmark.test 127.0.0.1",
 				`--disable-extensions-except=${extensionDir}`,
 				`--load-extension=${extensionDir}`,
 				...(process.platform === "linux" ? ["--no-sandbox"] : []),

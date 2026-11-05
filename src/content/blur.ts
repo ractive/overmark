@@ -45,17 +45,26 @@ export function blurFields(doc: Document, allForms: boolean): () => void {
 	const fields = roots(doc).flatMap((root) => [
 		...root.querySelectorAll<HTMLElement>(selector),
 	]);
+	const inline = (f: HTMLElement, name: string) => ({
+		name,
+		value: f.style.getPropertyValue(name),
+		priority: f.style.getPropertyPriority(name),
+	});
 	const before = fields.map((f) => ({
 		f,
-		value: f.style.getPropertyValue("filter"),
-		priority: f.style.getPropertyPriority("filter"),
+		styles: [inline(f, "filter"), inline(f, "transition")],
 	}));
-	for (const { f } of before)
+	for (const { f } of before) {
+		// A page's `transition: all` would fade the blur in after the screenshot.
+		f.style.setProperty("transition", "none", "important");
 		f.style.setProperty("filter", "blur(6px)", "important");
+	}
 	return () => {
-		for (const { f, value, priority } of before) {
-			if (value) f.style.setProperty("filter", value, priority);
-			else f.style.removeProperty("filter");
+		for (const { f, styles } of before) {
+			for (const { name, value, priority } of styles) {
+				if (value) f.style.setProperty(name, value, priority);
+				else f.style.removeProperty(name);
+			}
 		}
 	};
 }

@@ -15,8 +15,11 @@ export interface StoredImage {
 	storedAt?: number;
 }
 
-/** A screenshot waiting for its save (`pending/`) older than this was abandoned. */
-export const PENDING_MAX_AGE_MS = 10 * 60_000;
+/**
+ * A mark's screenshot waits under a pending path until the marks are saved,
+ * which can be days in a tab left open; after that it counts as abandoned.
+ */
+export const PENDING_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
 const isPendingKey = (key: string) => key.includes("/pending/");
 

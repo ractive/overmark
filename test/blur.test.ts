@@ -78,3 +78,15 @@ describe("PageBlur", () => {
 		expect(filter($("name"))).toBe("");
 	});
 });
+
+test("a field's own transition cannot fade the blur in late, and comes back", () => {
+	const field = doc.getElementById("name") as HTMLElement;
+	field.style.setProperty("transition", "all 2s");
+	const blur = new PageBlur(doc);
+	const release = blur.hold(true);
+	expect(field.style.getPropertyValue("transition")).toBe("none");
+	expect(field.style.getPropertyPriority("transition")).toBe("important");
+	release();
+	expect(field.style.getPropertyValue("transition")).toBe("all 2s");
+	expect(field.style.getPropertyPriority("transition")).toBe("");
+});
