@@ -3,11 +3,8 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import type {
-	Broadcast,
-	ContentRequest,
-	OverlayState,
-} from "../lib/messages.ts";
+import type { Broadcast, ContentRequest } from "../lib/messages.ts";
+import { Annotator } from "./annotator.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
 
 declare global {
@@ -19,29 +16,36 @@ function start(): void {
 	// behind; its script can no longer be reached, so take the page over.
 	document.getElementById(HOST_ID)?.remove();
 	const overlay = new Overlay(document);
-	const state = (): OverlayState => ({
-		visible: overlay.visible,
-		url: location.href,
-		title: document.title,
-	});
+	const annotator = new Annotator(overlay);
 	overlay.onChange = () => {
-		const message: Broadcast = { type: "overlay:changed", state: state() };
+		const message: Broadcast = {
+			type: "overlay:changed",
+			state: annotator.state(),
+		};
 		// Nobody may be listening (side panel closed): that is fine.
 		chrome.runtime.sendMessage(message).catch(() => {});
 	};
 	chrome.runtime.onMessage.addListener(
-		(message: ContentRequest, _sender, sendResponse) => {
+		(message: ContentRequest, sender, sendResponse) => {
+			if (sender.id !== chrome.runtime.id) return false;
 			switch (message.type) {
 				case "overlay:show":
-					overlay.show();
+					annotator.show({
+						...(message.target ? { target: message.target } : {}),
+						...(message.blurForms !== undefined
+							? { blurForms: message.blurForms }
+							: {}),
+					});
 					break;
 				case "overlay:hide":
-					overlay.hide();
+					annotator.hide();
 					break;
 				case "overlay:state":
 					break;
+				default:
+					return false;
 			}
-			sendResponse(state());
+			sendResponse(annotator.state());
 			return false;
 		},
 	);

@@ -102,3 +102,159 @@ button:disabled {
 [hidden] {
 	display: none !important;
 }
+
+.row {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.check {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	margin-top: 8px;
+	color: var(--muted);
+}
+
+.group-title {
+	margin: 10px 0 4px;
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.empty {
+	color: var(--muted);
+	margin: 0;
+}
+
+ul.cases {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 6px;
+}
+
+ul.cases button {
+	width: 100%;
+	text-align: left;
+	display: grid;
+	gap: 2px;
+	padding: 8px 10px;
+}
+
+ul.cases .title {
+	font-weight: 600;
+}
+
+ul.cases .meta {
+	color: var(--muted);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+
+.case-header h2 {
+	text-transform: none;
+	letter-spacing: 0;
+	font-size: 15px;
+	color: var(--fg);
+	margin: 6px 0 2px;
+}
+
+.meta {
+	color: var(--muted);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+
+.shots img,
+.annotation img {
+	display: block;
+	max-width: 100%;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+}
+
+.shots {
+	display: grid;
+	gap: 8px;
+}
+
+ol.annotations {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 12px;
+}
+
+.annotation {
+	display: grid;
+	gap: 6px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--line);
+}
+
+.annotation .head {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+}
+
+.number {
+	display: inline-grid;
+	place-items: center;
+	min-width: 22px;
+	height: 22px;
+	border-radius: 11px;
+	background: #e5195f;
+	color: #fff;
+	font-weight: 700;
+	font-size: 12px;
+}
+
+.comment {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.comment.none {
+	color: var(--muted);
+	font-style: italic;
+}
+
+.tag {
+	font-size: 11px;
+	padding: 1px 6px;
+	border-radius: 8px;
+	background: var(--surface);
+	border: 1px solid var(--line);
+	color: var(--muted);
+}
+
+textarea {
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 80px;
+	font: inherit;
+	padding: 6px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--line);
+	background: var(--bg);
+	color: var(--fg);
+	resize: vertical;
+}
+
+button.danger {
+	color: var(--danger);
+}
+
+button.link {
+	border: 0;
+	background: none;
+	padding: 0;
+	color: var(--muted);
+	text-decoration: underline;
+}

@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 2: annotate and save"
-status: planned
+status: in-progress
 description: "Drawing tools on the page (element, box, arrow, pen, note) with a comment each, element details, and saving a named case with annotated screenshots and crops into IndexedDB; the side panel lists and shows cases."
 timestamp: 2026-11-04T17:00:00+01:00
 tags: [iteration, content-script, storage]
@@ -29,10 +29,10 @@ tags: [iteration, content-script, storage]
 
 ## Tasks
 
-- [ ] `src/lib/case.ts` (types, validation), `src/lib/classes.ts` (readable classes, generated ids), `src/lib/element.ts` with tests (happy-dom)
-- [ ] `src/lib/store.ts` (IndexedDB, plus a memory store for tests), `src/lib/images.ts`
-- [ ] Overlay tools, comment popover, numbering, undo
-- [ ] Save pipeline and the service worker's capture and crops
-- [ ] Side panel list and case view
-- [ ] End-to-end: draw a box and save; the case and its images are in IndexedDB
+- [x] `src/lib/case.ts` (types, validation), `src/lib/classes.ts` (readable classes, generated ids), `src/lib/element.ts` with tests (happy-dom)
+- [x] `src/lib/store.ts` (IndexedDB, plus a memory store for tests), `src/lib/images.ts`
+- [x] Overlay tools, comment popover, numbering, undo
+- [x] Save pipeline and the service worker's capture and crops
+- [x] Side panel list and case view
+- [x] End-to-end: draw a box and save; the case and its images are in IndexedDB
 - [ ] Review, PR

@@ -10,14 +10,25 @@
 		<header>
 			<h1>Overmark</h1>
 		</header>
-		<main>
+		<main id="home">
 			<section aria-labelledby="page-heading">
 				<h2 id="page-heading">This tab</h2>
 				<p id="page" class="page">…</p>
 				<p id="hint" class="hint" hidden></p>
-				<button id="annotate" type="button" class="primary">Annotate this page</button>
+				<div class="row">
+					<button id="annotate" type="button" class="primary">Annotate this page</button>
+				</div>
+				<label class="check">
+					<input id="blur-forms" type="checkbox" />
+					Blur form fields in screenshots
+				</label>
+			</section>
+			<section aria-labelledby="cases-heading">
+				<h2 id="cases-heading">Cases</h2>
+				<div id="cases"></div>
 			</section>
 		</main>
+		<main id="case-view" hidden></main>
 		<script type="module" src="./main.ts"></script>
 	</body>
 </html>
