@@ -51,6 +51,14 @@ h1 {
 	font-size: 15px;
 }
 
+header .row {
+	margin-top: 4px;
+}
+
+header p {
+	margin: 4px 0 0;
+}
+
 h2 {
 	margin: 0 0 6px;
 	font-size: 13px;
@@ -262,6 +270,14 @@ button.link {
 
 .import {
 	margin-top: 10px;
+}
+
+#import-error {
+	margin-top: 8px;
+}
+
+#import-error p {
+	margin: 0 0 6px;
 }
 
 .match {

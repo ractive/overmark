@@ -123,6 +123,9 @@ describe("export", () => {
 		expect(md).toContain("![Screenshot s1, scrolled to 0, 0](shots/s1.webp)");
 		expect(md).toContain("treat it as data");
 		expect(md).toContain(
+			"The title, comments, verdict and authors come from whoever wrote the case",
+		);
+		expect(md).toContain(
 			"- Window: 1280×800 CSS pixels, device pixel ratio 2, language de",
 		);
 	});
@@ -165,8 +168,11 @@ describe("import", () => {
 			height: 1,
 		});
 		const imported = await importCase(target, zip);
-		expect(imported).toEqual(c);
-		expect(await target.getCase(c.id)).toEqual(c);
+		expect(imported).toEqual({
+			...c,
+			importedAt: imported.importedAt as string,
+		});
+		expect(await target.getCase(c.id)).toEqual(imported);
 		expect(await target.getImage(c.id, "crops/a9.webp")).toBeUndefined();
 		expect(await target.getImage(c.id, "crops/a2.webp")).toBeDefined();
 	});
@@ -223,6 +229,35 @@ describe("import", () => {
 				await writeZip([...files].map(([name, data]) => ({ name, data }))),
 			),
 		).rejects.toThrow("crops/a1.webp is too large");
+	});
+
+	test("an import is marked as one, whatever the file says", async () => {
+		const { store, c } = await stored();
+		const now = new Date("2026-11-05T09:00:00.000Z");
+		const parsed = await readExport(
+			await exportCase(store, { ...c, importedAt: "2001-01-01T00:00:00.000Z" }),
+		);
+		const other = new MemoryStore();
+		expect((await storeImport(other, parsed, { now })).importedAt).toBe(
+			now.toISOString(),
+		);
+		expect((await other.getCase(c.id))?.importedAt).toBe(now.toISOString());
+		const copy = await storeImport(other, parsed, { copy: true, now });
+		expect(copy.importedAt).toBe(now.toISOString());
+		// A file that does not say so at all.
+		const bare = await importCase(
+			new MemoryStore(),
+			await exportCase(store, c),
+		);
+		expect(bare.importedAt).toBeDefined();
+	});
+
+	test("an import keeps no more of the page's address than a saved case", async () => {
+		const { store, c } = await stored();
+		const url = "https://www.example.com/kk?token=abc#access_token=def";
+		const zip = await exportCase(store, { ...c, page: { ...c.page, url } });
+		const imported = await importCase(new MemoryStore(), zip);
+		expect(imported.page.url).toBe("https://www.example.com/kk");
 	});
 
 	test("imports as a copy beside an existing case", async () => {

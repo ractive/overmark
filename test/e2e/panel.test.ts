@@ -1,0 +1,816 @@
+/**
+ * End to end: what only the whole side panel shows, in its real page with the
+ * real extension (`main.ts` has no unit tests). The tests write the store
+ * directly where a case's marks do not matter, and replace a `chrome.*`
+ * function of the panel's page to make a page slow or a permission answer.
+ */
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import type { Case } from "../../src/lib/case.ts";
+import { exportCase } from "../../src/lib/export.ts";
+import { MemoryStore } from "../../src/lib/store.ts";
+import { sampleCase } from "../fixtures.ts";
+import type { Page } from "./browser.ts";
+import { browserBinary, type Harness, startHarness } from "./harness.ts";
+import {
+	type Db,
+	markElement,
+	READ_DB,
+	saveAs,
+	shadow,
+	showToolbar,
+} from "./steps.ts";
+
+const id = (name: string) => `document.getElementById(${JSON.stringify(name)})`;
+
+/** Until `check` says yes. */
+async function until(
+	check: () => Promise<boolean>,
+	what: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const end = Date.now() + timeoutMs;
+	while (!(await check())) {
+		if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+		await Bun.sleep(50);
+	}
+}
+
+/** A test with room for a slow machine: one that times out runs on into the next. */
+const slowTest = (name: string, run: () => Promise<void>) =>
+	test(name, run, 60_000);
+
+describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
+	let h: Harness;
+
+	beforeAll(async () => {
+		h = await startHarness(browserBinary as string);
+	}, 60_000);
+
+	afterAll(async () => {
+		await h?.stop();
+	});
+
+	const panelUrl = () =>
+		`chrome-extension://${h.extensionId}/sidepanel/index.html`;
+	const openPanel = () => h.control.goto(panelUrl());
+	const readDb = () => h.control.eval<Db>(READ_DB);
+	const storedCase = async (caseId: string) =>
+		(await h.control.eval<{ cases: Case[] }>(READ_DB)).cases.find(
+			(c) => c.id === caseId,
+		);
+
+	/** Write these cases over what the store has. */
+	const putCases = (cases: Case[]) =>
+		h.control.eval(`new Promise((resolve, reject) => {
+			const open = indexedDB.open("overmark");
+			open.onerror = () => reject(open.error);
+			open.onsuccess = () => {
+				const tx = open.result.transaction("cases", "readwrite");
+				for (const c of ${JSON.stringify(cases)}) tx.objectStore("cases").put(c);
+				tx.oncomplete = () => { open.result.close(); resolve(); };
+				tx.onerror = () => reject(tx.error);
+			};
+		})`);
+
+	/** The panel on an empty store with these cases and no settings. */
+	async function fresh(cases: Case[] = []): Promise<void> {
+		await h.control.eval(`new Promise((resolve, reject) => {
+			const open = indexedDB.open("overmark");
+			open.onerror = () => reject(open.error);
+			open.onsuccess = () => {
+				const tx = open.result.transaction(["cases", "images"], "readwrite");
+				tx.objectStore("cases").clear();
+				tx.objectStore("images").clear();
+				tx.oncomplete = () => { open.result.close(); resolve(); };
+				tx.onerror = () => reject(tx.error);
+			};
+		})`);
+		await putCases(cases);
+		await h.control.eval("localStorage.clear()");
+		await openPanel();
+	}
+
+	/** Open the case with this id in `page`. */
+	async function openCase(caseId: string, page = h.control): Promise<void> {
+		const item = `document.querySelector('button[data-case="${caseId}"]')`;
+		await page.waitFor(item);
+		await page.eval(`${item}.click()`);
+		await page.waitFor(`${id("verdict")}?.dataset.case === "${caseId}"`);
+	}
+
+	const backHome = (page = h.control) =>
+		page.eval(`document.querySelector(".case-header .link").click()`);
+
+	/** What typing does; a script's `value` alone tells the panel nothing. */
+	const typeVerdict = (text: string, page = h.control) =>
+		page.eval(
+			`(() => { const v = ${id("verdict")}; v.value = ${JSON.stringify(text)}; v.dispatchEvent(new Event("input")); })()`,
+		);
+
+	/** Make `chrome.tabs.sendMessage` in the panel go through `body`. */
+	const wrapSend = (body: string) =>
+		h.control.eval(
+			`(() => { const send = chrome.tabs.sendMessage.bind(chrome.tabs); chrome.tabs.sendMessage = (tabId, message) => (${body})(tabId, message, send); })()`,
+		);
+
+	/** A page with a saved case of one mark, and that case's id. */
+	async function annotated(title: string) {
+		const { page, tabId } = await h.open("v1");
+		await showToolbar(h, page, tabId);
+		await markElement(page, "h1", "Too long");
+		await saveAs(page, title);
+		await page.click(shadow('[data-action="close"]'));
+		const saved = (await readDb()).cases.find((c) => c.title === title);
+		return { page, tabId, caseId: saved?.id as string };
+	}
+
+	const overlayOf = (tabId: number) =>
+		h.control.eval<{ loadedCase?: string }>(
+			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" })`,
+		);
+
+	/** Both clicks of a deliberate Delete. */
+	async function confirmDelete(): Promise<void> {
+		await h.control.eval(`${id("delete-case")}.click()`);
+		await Bun.sleep(600);
+		await h.control.eval(`${id("delete-case")}.click()`);
+		await h.control.waitFor(`!${id("home")}.hidden`);
+	}
+
+	/** Pick a file in the panel's import field. */
+	async function importFile(name: string, bytes: Uint8Array): Promise<void> {
+		const base64 = Buffer.from(bytes).toString("base64");
+		await h.control.eval(`(() => {
+			const bytes = Uint8Array.from(atob("${base64}"), (c) => c.charCodeAt(0));
+			const data = new DataTransfer();
+			data.items.add(new File([bytes], ${JSON.stringify(name)}, { type: "application/zip" }));
+			const input = ${id("import-file")};
+			input.files = data.files;
+			input.dispatchEvent(new Event("change"));
+		})()`);
+	}
+
+	const zipOf = (c: Case) => exportCase(new MemoryStore(), c);
+
+	slowTest(
+		"Delete keeps the keyboard's focus, so Enter can confirm it",
+		async () => {
+			await fresh([sampleCase("c_keys")]);
+			await openCase("c_keys");
+			await h.control.activate();
+			await h.control.eval(`${id("delete-case")}.focus()`);
+			const enter = async () => {
+				for (const type of ["keyDown", "keyUp"])
+					await h.control.send("Input.dispatchKeyEvent", {
+						type,
+						key: "Enter",
+						code: "Enter",
+						windowsVirtualKeyCode: 13,
+						...(type === "keyDown" ? { text: "\r" } : {}),
+					});
+			};
+			await enter();
+			await h.control.waitFor(
+				`${id("delete-case")}.textContent === "Really delete?"`,
+			);
+			expect(await h.control.eval(`document.activeElement?.id`)).toBe(
+				"delete-case",
+			);
+			await Bun.sleep(600);
+			await enter();
+			await h.control.waitFor(`!${id("home")}.hidden`);
+			expect(await storedCase("c_keys")).toBeUndefined();
+		},
+	);
+
+	slowTest("a double-click on Delete deletes nothing", async () => {
+		await fresh([sampleCase("c_twice")]);
+		await openCase("c_twice");
+		await h.control.activate();
+		await h.control.eval(
+			`(() => { const d = ${id("delete-case")}; d.click(); d.click(); })()`,
+		);
+		await Bun.sleep(100);
+		expect(await storedCase("c_twice")).toBeDefined();
+		expect(await h.control.eval(`${id("delete-case")}.textContent`)).toBe(
+			"Really delete?",
+		);
+		await Bun.sleep(500);
+		await h.control.eval(`${id("delete-case")}.click()`);
+		await h.control.waitFor(`!${id("home")}.hidden`);
+		expect(await storedCase("c_twice")).toBeUndefined();
+	});
+
+	slowTest(
+		"Delete disarms by itself: a click much later only asks again",
+		async () => {
+			await fresh([sampleCase("c_late")]);
+			await openCase("c_late");
+			await h.control.activate();
+			await h.control.eval(`${id("delete-case")}.click()`);
+			await h.control.waitFor(
+				`${id("delete-case")}.textContent === "Delete"`,
+				6000,
+			);
+			await h.control.eval(`${id("delete-case")}.click()`);
+			await h.control.waitFor(
+				`${id("delete-case")}.textContent === "Really delete?"`,
+			);
+			expect(await storedCase("c_late")).toBeDefined();
+		},
+	);
+
+	slowTest(
+		"a verdict not saved comes back with its case, and only there",
+		async () => {
+			await fresh([sampleCase("c_one"), sampleCase("c_two")]);
+			await openCase("c_one");
+			await typeVerdict("Darker, as agreed");
+			await backHome();
+			await openCase("c_two");
+			expect(await h.control.eval(`${id("verdict")}.value`)).toBe("");
+			await backHome();
+			await openCase("c_one");
+			expect(await h.control.eval(`${id("verdict")}.value`)).toBe(
+				"Darker, as agreed",
+			);
+			expect(await h.control.eval(`${id("verdict-status")}.textContent`)).toBe(
+				"Not saved yet",
+			);
+			expect((await storedCase("c_one"))?.verdict).toBeNull();
+			// Saved, it is no draft any more.
+			await h.control.eval(`${id("save-verdict")}.click()`);
+			await h.control.waitFor(
+				`${id("verdict-status")}.textContent === "Saved"`,
+			);
+			await backHome();
+			await openCase("c_one");
+			expect(await h.control.eval(`${id("verdict")}.value`)).toBe(
+				"Darker, as agreed",
+			);
+			expect((await storedCase("c_one"))?.verdict).toBe("Darker, as agreed");
+		},
+	);
+
+	slowTest(
+		"a panel in another window follows; a saved verdict shows what is stored",
+		async () => {
+			await fresh([sampleCase("c_both")]);
+			const other = await h.browser.newPage(panelUrl());
+			await openCase("c_both");
+			await openCase("c_both", other);
+
+			// Saved with a newline: the stored text is trimmed, and so is the field.
+			await typeVerdict("abc\n");
+			await h.control.eval(`${id("save-verdict")}.click()`);
+			await h.control.waitFor(`${id("verdict")}.value === "abc"`);
+			await other.waitFor(`${id("verdict")}.value === "abc"`);
+
+			// Saved in the other window: this one is not typing, so it follows.
+			await typeVerdict("From the other window", other);
+			await other.eval(`${id("save-verdict")}.click()`);
+			await h.control.waitFor(
+				`${id("verdict")}.value === "From the other window"`,
+			);
+
+			// Deleted in the other window: this one leaves the case.
+			await other.eval(`${id("delete-case")}.click()`);
+			await Bun.sleep(600);
+			await other.eval(`${id("delete-case")}.click()`);
+			await h.control.waitFor(`!${id("home")}.hidden`);
+			await other.send("Page.close");
+		},
+	);
+
+	slowTest("a deleted case's outlines leave the page", async () => {
+		await fresh();
+		const { page, tabId, caseId } = await annotated("Outlined");
+		await openPanel();
+		await openCase(caseId);
+		await page.activate();
+		await h.control.eval(`${id("load-case")}.click()`);
+		await h.control.waitFor(
+			`${id("case-hint")}.textContent.includes("marks found")`,
+		);
+		expect((await overlayOf(tabId)).loadedCase).toBe(caseId);
+		await confirmDelete();
+		await until(
+			async () => (await overlayOf(tabId)).loadedCase === undefined,
+			"the outlines to go",
+		);
+		await page.send("Page.close");
+	});
+
+	slowTest(
+		"the outlines of a case an AI app loaded leave the page too",
+		async () => {
+			await fresh();
+			const { page, tabId, caseId } = await annotated("Loaded by a tool");
+			await openPanel();
+			await page.activate();
+			const c = await storedCase(caseId);
+			// As load_case does; the panel's `loaded` knows nothing of it.
+			await h.control.eval(
+				`chrome.tabs.sendMessage(${tabId}, { type: "case:load", case: ${JSON.stringify(c)} })`,
+			);
+			await openCase(caseId);
+			await confirmDelete();
+			await until(
+				async () => (await overlayOf(tabId)).loadedCase === undefined,
+				"the outlines to go",
+			);
+			await page.send("Page.close");
+		},
+	);
+
+	slowTest("a case a tool deleted leaves the page as well", async () => {
+		await fresh();
+		const { page, tabId, caseId } = await annotated("Deleted by a tool");
+		await openPanel();
+		await page.activate();
+		const c = await storedCase(caseId);
+		await h.control.eval(
+			`chrome.tabs.sendMessage(${tabId}, { type: "case:load", case: ${JSON.stringify(c)} })`,
+		);
+		await h.control.waitFor(`${id("page")}.textContent.endsWith("/v1")`);
+		// What the panel of the window where the tool ran tells this one.
+		const other = await h.browser.newPage(panelUrl());
+		await page.activate();
+		await other.eval(`new Promise((resolve, reject) => {
+			const open = indexedDB.open("overmark");
+			open.onerror = () => reject(open.error);
+			open.onsuccess = () => {
+				const tx = open.result.transaction("cases", "readwrite");
+				tx.objectStore("cases").delete(${JSON.stringify(caseId)});
+				tx.oncomplete = () => { open.result.close(); resolve(); };
+			};
+		})`);
+		await other.eval(
+			`chrome.runtime.sendMessage({ type: "cases:changed", caseId: ${JSON.stringify(caseId)} })`,
+		);
+		await until(
+			async () => (await overlayOf(tabId)).loadedCase === undefined,
+			"the outlines to go",
+		);
+		await other.send("Page.close");
+		await page.send("Page.close");
+	});
+
+	slowTest("Show says so when the page is busy", async () => {
+		await fresh();
+		const { page, caseId } = await annotated("Busy page");
+		await openPanel();
+		await openCase(caseId);
+		await page.activate();
+		await h.control.eval(`${id("load-case")}.click()`);
+		const show = `document.querySelector('[data-action="show"]')`;
+		await h.control.waitFor(show);
+		await wrapSend(`(tabId, message, send) =>
+			message.type === "case:show"
+				? Promise.resolve({ error: "Overmark is saving on this page." })
+				: send(tabId, message)`);
+		await h.control.eval(`${show}.click()`);
+		await h.control.waitFor(
+			`${id("case-hint")}.textContent === "Overmark is saving on this page."`,
+		);
+		// The match it showed stays.
+		expect(await h.control.eval(`Boolean(${show})`)).toBe(true);
+		await page.send("Page.close");
+	});
+
+	slowTest(
+		"the outcome of Load does not land on the case opened meanwhile",
+		async () => {
+			await fresh([sampleCase("c_slow"), sampleCase("c_next")]);
+			const { page, tabId } = await h.open("v1");
+			await page.activate();
+			await h.control.eval(
+				`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`,
+			);
+			await openCase("c_slow");
+			await h.control.eval(`globalThis.leftCase = false`);
+			await wrapSend(`async (tabId, message, send) => {
+				if (message.type !== "case:load") return send(tabId, message);
+				while (!globalThis.leftCase)
+					await new Promise((r) => setTimeout(r, 20));
+				const answer = await send(tabId, message);
+				globalThis.answered = true;
+				return answer;
+			}`);
+			await h.control.eval(`${id("load-case")}.click()`);
+			await backHome();
+			await openCase("c_next");
+			await h.control.eval(`globalThis.leftCase = true`);
+			await h.control.waitFor(`globalThis.answered`);
+			await Bun.sleep(100);
+			expect(await h.control.eval(`${id("case-hint")}.hidden`)).toBe(true);
+			await page.send("Page.close");
+		},
+	);
+
+	slowTest(
+		"news from the tab just left does not stop the panel following",
+		async () => {
+			await fresh();
+			const a = await h.open("v1");
+			await a.page.activate();
+			await h.control.eval(
+				`chrome.scripting.executeScript({ target: { tabId: ${a.tabId} }, files: ["content.js"] })`,
+			);
+			await openPanel();
+			await h.control.waitFor(`${id("page")}.textContent.endsWith("/v1")`);
+			// The tab now in front is slow to answer.
+			await h.control.eval(`globalThis.slow = true`);
+			await wrapSend(`async (tabId, message, send) => {
+			while (globalThis.slow && tabId !== ${a.tabId} && message.type === "overlay:state")
+				await new Promise((r) => setTimeout(r, 20));
+			return send(tabId, message);
+		}`);
+			const b = await h.open("v2");
+			await b.page.activate();
+			await h.control.eval(
+				`chrome.tabs.sendMessage(${a.tabId}, { type: "overlay:show" })`,
+			);
+			await Bun.sleep(200);
+			await h.control.eval(`globalThis.slow = false`);
+			await h.control.waitFor(`${id("page")}.textContent.endsWith("/v2")`);
+			await a.page.send("Page.close");
+			await b.page.send("Page.close");
+		},
+	);
+
+	slowTest(
+		"Replace asks again when the case changed under the prompt",
+		async () => {
+			const c: Case = { ...sampleCase("c_file"), verdict: "From the file" };
+			await fresh([{ ...c, verdict: "Stored" }]);
+			await importFile("case.overmark.zip", await zipOf(c));
+			const replace = `document.querySelector('[data-action="import-replace"]')`;
+			await h.control.waitFor(replace);
+
+			// An AI app's change, say, while the prompt is open.
+			const changed = {
+				...c,
+				verdict: "Newer",
+				updatedAt: "2026-11-05T10:00:00Z",
+			};
+			await putCases([changed]);
+			const asked = await h.control.eval<string>(
+				`${id("import-prompt")}.textContent`,
+			);
+			await h.control.eval(`${replace}.click()`);
+			await h.control.waitFor(
+				`${id("import-prompt")}.textContent !== ${JSON.stringify(asked)}`,
+			);
+			expect(await h.control.eval(`${id("import-prompt")}.hidden`)).toBe(false);
+			expect((await storedCase("c_file"))?.verdict).toBe("Newer");
+
+			// Knowing that, the user replaces it after all.
+			await h.control.eval(`${replace}.click()`);
+			await h.control.waitFor(`${id("verdict")}?.value === "From the file"`);
+			expect((await storedCase("c_file"))?.verdict).toBe("From the file");
+		},
+	);
+
+	slowTest(
+		"an imported case says where it came from, also after a change",
+		async () => {
+			await fresh();
+			await importFile("case.overmark.zip", await zipOf(sampleCase("c_in")));
+			await h.control.waitFor(`${id("verdict")}?.dataset.case === "c_in"`);
+			await h.control.waitFor(
+				`${id("case-origin")}.textContent.includes("Imported from a file")`,
+			);
+			expect(await h.control.eval(`${id("case-origin")}.hidden`)).toBe(false);
+			await typeVerdict("Ours");
+			await h.control.eval(`${id("save-verdict")}.click()`);
+			await h.control.waitFor(
+				`${id("verdict-status")}.textContent === "Saved"`,
+			);
+			expect((await storedCase("c_in"))?.importedAt).toBeDefined();
+		},
+	);
+
+	slowTest("an import error stays until it is dismissed", async () => {
+		await fresh();
+		const a = await h.open("v1");
+		const b = await h.open("v2");
+		await b.page.activate();
+		await importFile("broken.zip", new Uint8Array([1, 2, 3]));
+		await h.control.waitFor(
+			`${id("import-error-text")}.textContent.includes("Could not import broken.zip")`,
+		);
+		// A tab in the background finishes loading.
+		await a.page.goto(`${h.base}/v1`);
+		await Bun.sleep(300);
+		expect(await h.control.eval(`${id("import-error")}.hidden`)).toBe(false);
+		await h.control.eval(`${id("import-dismiss")}.click()`);
+		await h.control.waitFor(`${id("import-error")}.hidden`);
+		await a.page.send("Page.close");
+		await b.page.send("Page.close");
+	});
+
+	slowTest("a hint stays until the tab in front changes", async () => {
+		await fresh();
+		const a = await h.open("v1");
+		const b = await h.open("v2");
+		await b.page.activate();
+		await h.control.waitFor(`${id("page")}.textContent.endsWith("/v2")`);
+		await h.control.eval(`(() => {
+			const no = () => Promise.reject(new Error("no access"));
+			chrome.tabs.sendMessage = no;
+			chrome.scripting.executeScript = no;
+		})()`);
+		await h.control.eval(`${id("annotate")}.click()`);
+		await h.control.waitFor(
+			`${id("hint")}.textContent.includes("Click the Overmark icon")`,
+		);
+		await a.page.goto(`${h.base}/v1`);
+		await Bun.sleep(300);
+		expect(await h.control.eval(`${id("hint")}.hidden`)).toBe(false);
+		await a.page.activate();
+		await h.control.waitFor(`${id("hint")}.hidden`);
+		await a.page.send("Page.close");
+		await b.page.send("Page.close");
+	});
+
+	slowTest(
+		"Allow on all sites shows the permission and changes it",
+		async () => {
+			await fresh();
+			const box = id("all-sites");
+			// A test build has it from the start, and Chrome will not take that away.
+			await h.control.waitFor(`${box}.checked`);
+			await h.control.eval(`${box}.click()`);
+			await h.control.waitFor(
+				`${id("hint")}.textContent.includes("Could not change the access")`,
+			);
+			await h.control.waitFor(`${box}.checked`);
+
+			await h.control.eval(`(() => {
+			globalThis.asked = [];
+			globalThis.granted = true;
+			globalThis.answer = false;
+			chrome.permissions.contains = async () => globalThis.granted;
+			chrome.permissions.request = async (p) => {
+				globalThis.asked.push(["request", ...p.origins]);
+				globalThis.granted = globalThis.answer;
+				return globalThis.granted;
+			};
+			chrome.permissions.remove = async (p) => {
+				globalThis.asked.push(["remove", ...p.origins]);
+				globalThis.granted = false;
+				return true;
+			};
+		})()`);
+			await h.control.eval(`${box}.click()`);
+			await h.control.waitFor(`!${box}.checked`);
+			// Declined: it stays off.
+			await h.control.eval(`${box}.click()`);
+			await h.control.waitFor(`globalThis.asked.length === 2`);
+			await h.control.waitFor(`!${box}.checked`);
+			await h.control.eval(`globalThis.answer = true; ${box}.click()`);
+			await h.control.waitFor(`${box}.checked`);
+			expect(await h.control.eval(`globalThis.asked`)).toEqual([
+				["remove", "<all_urls>"],
+				["request", "<all_urls>"],
+				["request", "<all_urls>"],
+			]);
+		},
+	);
+
+	slowTest(
+		"the blur setting goes to every tab, whatever a tab answers",
+		async () => {
+			await fresh();
+			const a = await h.open("v1");
+			const b = await h.open("v2");
+			const tabs = await h.control.eval<number[]>(
+				`chrome.tabs.query({}).then((tabs) => tabs.map((t) => t.id).sort())`,
+			);
+			await h.control.eval(`globalThis.told = []`);
+			await wrapSend(`(tabId, message, send) => {
+			if (message.type !== "overlay:settings") return send(tabId, message);
+			globalThis.told.push({ tabId, ...message });
+			return Promise.reject(new Error("no receiver"));
+		}`);
+			await h.control.eval(`${id("blur-forms")}.click()`);
+			await h.control.waitFor(`globalThis.told.length === ${tabs.length}`);
+			const told =
+				await h.control.eval<{ tabId: number; blurForms: boolean }[]>(
+					`globalThis.told`,
+				);
+			expect(told.map((t) => t.tabId).sort()).toEqual(tabs);
+			expect(told.every((t) => t.blurForms === true)).toBe(true);
+			await a.page.send("Page.close");
+			await b.page.send("Page.close");
+		},
+	);
+
+	describe("with a relay", () => {
+		const status = `${id("ai-status")}.textContent`;
+
+		async function keepOnWith(relay: string): Promise<void> {
+			await h.control.eval(
+				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay)}); localStorage.setItem("overmark:keep-ai-on", "true")`,
+			);
+			await openPanel();
+		}
+
+		/** A paired MCP client, through the connect dialog's address. */
+		async function pairedClient(store: Parameters<typeof tokenFor>[0]) {
+			await h.control.eval(`${id("connect")}.click()`);
+			await h.control.waitFor(
+				`document.querySelector(".tab-mcp-address-input")?.value.endsWith("/mcp")`,
+			);
+			const address = await h.control.eval<string>(
+				`document.querySelector(".tab-mcp-address-input").value`,
+			);
+			await h.control.activate();
+			await h.control.eval(`document.querySelector("dialog[open]").close()`);
+			const token = await tokenFor(store, address);
+			const client = new Client(
+				{ name: "e2e", version: "1.0.0" },
+				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+			);
+			await client.connect(
+				new StreamableHTTPClientTransport(new URL(address), {
+					requestInit: { headers: { Authorization: `Bearer ${token}` } },
+				}),
+			);
+			return client;
+		}
+
+		const visible = (page: Page, name: string) =>
+			page.eval<boolean>(`${id(name)}.getClientRects().length > 0`);
+
+		slowTest(
+			"Stop AI access ends the session and keeps the pairing",
+			async () => {
+				const relay = startTestRelay({ pageWaitMs: 0 });
+				await fresh([sampleCase("c_ai")]);
+				await keepOnWith(relay.url);
+				await h.control.waitFor(
+					`${status} === "Waiting for an AI app to pair"`,
+					10_000,
+				);
+				const client = await pairedClient(relay.store);
+				const list = () =>
+					client.callTool({ name: "list_cases", arguments: {} });
+				try {
+					await list();
+					await h.control.waitFor(
+						`${id("ai-call")}.textContent.includes("List cases")`,
+					);
+					expect(
+						await h.control.eval(`${id("ai-call")}.textContent`),
+					).toContain("Last AI call: List cases");
+
+					// The connection, the call and the way out show in a case too.
+					await openCase("c_ai");
+					for (const part of ["ai-status", "ai-call", "stop-ai"])
+						expect(await visible(h.control, part)).toBe(true);
+
+					await h.control.eval(`${id("stop-ai")}.click()`);
+					await h.control.waitFor(`${status} === "Not connected"`);
+					await h.control.waitFor(`${id("stop-ai")}.hidden`);
+					expect(relay.relay.sessionCount).toBe(0);
+					const stopped = await list().catch((e: Error) => ({
+						isError: true,
+						content: [{ text: e.message }],
+					}));
+					expect(stopped.isError).toBe(true);
+
+					// "Keep AI access on" would undo it, now and at the next opening.
+					expect(await h.control.eval(`${id("keep-on")}.checked`)).toBe(false);
+					expect(
+						await h.control.eval(`localStorage.getItem("overmark:keep-ai-on")`),
+					).toBe("false");
+					await Bun.sleep(200);
+					expect(relay.relay.sessionCount).toBe(0);
+
+					// The pairing is still there: the same token works after a connect.
+					await backHome();
+					await h.control.activate();
+					await h.control.click(id("connect"));
+					await until(
+						async () => relay.relay.sessionCount === 1,
+						"the panel to connect",
+					);
+					expect((await list()).isError).toBeFalsy();
+				} finally {
+					await client.close();
+					await relay.stop();
+				}
+			},
+		);
+
+		test.each([
+			["idle", { idleTimeoutMs: 300, heartbeatMs: 200 }],
+			["expired", { sessionLifetimeMs: 800 }],
+		])(
+			"Keep AI access on connects again after a session ended as %s",
+			async (_reason, limits) => {
+				const relay = startTestRelay(limits);
+				await fresh();
+				await keepOnWith(relay.url);
+				await h.control.waitFor(
+					`${status} === "Waiting for an AI app to pair"`,
+					10_000,
+				);
+				await h.control.eval(`(() => {
+				globalThis.seen = [];
+				new MutationObserver(() => globalThis.seen.push(${status})).observe(
+					${id("ai-status")},
+					{ childList: true },
+				);
+			})()`);
+				await h.control.waitFor(`globalThis.seen.includes("Connecting…")`);
+				await h.control.waitFor(
+					`${status} === "Waiting for an AI app to pair"`,
+				);
+				await relay.stop();
+			},
+			60_000,
+		);
+
+		slowTest(
+			"a change by a tool reaches the panel in another window",
+			async () => {
+				const relay = startTestRelay();
+				await fresh([sampleCase("c_tool")]);
+				const other = await h.browser.newPage(panelUrl());
+				await openCase("c_tool", other);
+				await keepOnWith(relay.url);
+				await h.control.waitFor(
+					`${status} === "Waiting for an AI app to pair"`,
+					10_000,
+				);
+				const client = await pairedClient(relay.store);
+				try {
+					const verdict = client.callTool({
+						name: "set_verdict",
+						arguments: { caseId: "c_tool", verdict: "Darker" },
+					});
+					const allow = `[...document.querySelectorAll("dialog[open] button")].find((b) => b.textContent.trim() === "Allow")`;
+					await h.control.waitFor(allow, 10_000);
+					await h.control.activate();
+					await h.control.waitFor(`!${allow}.disabled`);
+					await h.control.eval(`${allow}.click()`);
+					expect((await verdict).isError).toBeFalsy();
+					await other.waitFor(`${id("verdict")}.value === "Darker"`);
+				} finally {
+					await client.close();
+					await other.send("Page.close");
+					await relay.stop();
+				}
+			},
+		);
+
+		slowTest(
+			"Keep AI access on goes on trying a relay that is down, and says why",
+			async () => {
+				const gone = startTestRelay();
+				const { port } = gone.relay;
+				const { url } = gone;
+				await gone.stop();
+				await fresh();
+				await keepOnWith(url);
+				await h.control.waitFor(
+					`${status}.startsWith("Not connected: Could not connect to the relay")`,
+					10_000,
+				);
+				expect(await h.control.eval(status)).toContain("Trying again");
+				expect(await h.control.eval(`${id("stop-ai")}.hidden`)).toBe(false);
+				const relay = startTestRelay({ port });
+				await h.control.waitFor(
+					`${status} === "Waiting for an AI app to pair"`,
+					15_000,
+				);
+				await relay.stop();
+			},
+		);
+
+		slowTest("unchecked, it stops trying", async () => {
+			const gone = startTestRelay();
+			const { port } = gone.relay;
+			const { url } = gone;
+			await gone.stop();
+			await fresh();
+			await keepOnWith(url);
+			await h.control.waitFor(`${status}.includes("Trying again")`, 10_000);
+			await h.control.eval(`${id("keep-on")}.click()`);
+			await h.control.waitFor(`${status} === "Not connected"`);
+			const relay = startTestRelay({ port });
+			await Bun.sleep(6000);
+			expect(relay.relay.sessionCount).toBe(0);
+			await relay.stop();
+		});
+	});
+});

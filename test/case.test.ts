@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	MAX_URL,
 	newId,
 	nextNumbers,
+	plainUrl,
 	validateCase,
 } from "../src/lib/case.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -190,5 +192,62 @@ describe("a shot's address", () => {
 		expect(validateCase(c).shots[0]?.url).toBe("https://example.com/route");
 		shot.url = "x".repeat(8001);
 		expect(() => validateCase(c)).toThrow("case.shots[0].url");
+	});
+});
+
+describe("plainUrl", () => {
+	test.each([
+		["https://a.example/kk", "https://a.example/kk"],
+		["https://a.example/kk?token=abc", "https://a.example/kk"],
+		["https://a.example/kk#access_token=abc", "https://a.example/kk"],
+		["https://a.example/#section", "https://a.example/"],
+		["https://user:pw@a.example/kk", "https://a.example/kk"],
+		["http://localhost:3000/a/b?x=1#y", "http://localhost:3000/a/b"],
+		["file:///tmp/page.html?x=1#y", "file:///tmp/page.html"],
+		// A hash route names the page; what follows it does not.
+		["https://a.example/#/cases/7", "https://a.example/#/cases/7"],
+		["https://a.example/#!/cases/7", "https://a.example/#!/cases/7"],
+		["https://a.example/app?x=1#/cases/7", "https://a.example/app#/cases/7"],
+		["https://a.example/#/cases?token=abc", "https://a.example/#/cases"],
+		["https://a.example/#!/cases?token=abc", "https://a.example/#!/cases"],
+		["https://a.example/#/cb#access_token=abc", "https://a.example/#/cb"],
+		["https://a.example/#/cb&access_token=abc", "https://a.example/#/cb"],
+		[
+			"https://a.example/#/access_token=abc",
+			"https://a.example/#/access_token",
+		],
+	])("%s", (href, plain) => {
+		expect(plainUrl(href)).toBe(plain);
+	});
+
+	test("a value that is no address is cut to what a case may hold", () => {
+		expect(plainUrl("not an address")).toBe("not an address");
+		expect(plainUrl("")).toBe("");
+		expect(plainUrl("x".repeat(MAX_URL + 5))).toHaveLength(MAX_URL);
+	});
+
+	test("what it returns is always a page address a case may hold", () => {
+		const long = `https://a.example/${"x".repeat(MAX_URL)}?token=abc`;
+		const c = sampleCase();
+		c.page.url = plainUrl(long);
+		expect(c.page.url).toHaveLength(MAX_URL);
+		expect(validateCase(c).page.url).toBe(c.page.url);
+	});
+});
+
+describe("importedAt", () => {
+	test("stays through validation, and is no must", () => {
+		const c = { ...sampleCase(), importedAt: "2026-11-05T09:00:00.000Z" };
+		expect(validateCase(c).importedAt).toBe("2026-11-05T09:00:00.000Z");
+		expect("importedAt" in validateCase(sampleCase())).toBe(false);
+	});
+
+	test("must be a short text", () => {
+		expect(() => validateCase({ ...sampleCase(), importedAt: 5 })).toThrow(
+			"case.importedAt",
+		);
+		expect(() =>
+			validateCase({ ...sampleCase(), importedAt: "x".repeat(65) }),
+		).toThrow("case.importedAt");
 	});
 });

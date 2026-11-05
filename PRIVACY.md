@@ -8,10 +8,13 @@ account and no analytics. Its author receives nothing from it.
 When you save marks as a case, Overmark stores in your browser, on your computer
 (IndexedDB of the extension):
 
-- the case's title, your comments, the verdict, and when the case and its screenshots
-  were made and changed;
-- the page's address and title, its language, the window size and pixel density, and
-  the browser's user agent;
+- the case's title, your comments, the verdict, when the case and its screenshots were
+  made and changed, and for an imported case when it was imported;
+- the page's address, its title, its language, the window size and pixel density, and
+  the browser's user agent. The address is kept without its query string or fragment,
+  which can carry personal data or tokens, and without a user name or password. Only a
+  fragment that is a route of the page (`#/cases/7`) stays, up to the first `?`, `&`,
+  `=` or `#` in it;
 - for each marked element: its tag, role, accessible name, up to 200 characters of its
   text, a hand-written `id` and a test id (`data-testid`, `data-test`, `data-test-id`,
   `data-qa`, `data-cy`) if it has them, the readable part of its CSS classes, a few
@@ -43,7 +46,8 @@ Only in two cases, both started by you:
    you.
 2. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
-   address, title, element details and screenshots of the tab in front. They travel
+   address (cut as above), title, element details and screenshots of the tab in front.
+   They travel
    through the relay whose address you entered, and on to the AI app you paired with a
    code. The tab-mcp relay software forwards them without storing them; a relay that
    someone else runs is subject to its operator's practices. The AI app's provider
@@ -51,12 +55,14 @@ Only in two cases, both started by you:
 
    Changes the AI app wants to make (adding a mark, recording a verdict, deleting a
    case) are shown to you in the side panel first, every time, naming the case and the
-   page; nothing changes until you allow it.
+   page; nothing changes until you allow it. The side panel shows the app's last call.
 
-   Closing the side panel pauses the connection; it does not end the pairing. The paired
-   AI app can use the tools again when the side panel connects again, which happens by
-   itself when "Keep AI access on" is checked. Disconnect, next to the app in the AI
-   connection dialog, removes the app.
+   Closing the side panel, or "Stop AI access" at the top of it, pauses the connection;
+   it does not end the pairing. "Stop AI access" also turns "Keep AI access on" off. The
+   paired AI app can use the tools again when the side panel connects again, which
+   happens by itself while "Keep AI access on" is checked: when the side panel opens, and
+   when the relay ended a session that was idle or too old. Disconnect, next to the app
+   in the AI connection dialog, removes the app.
 
 Overmark does not sell data, use it for advertising, or pass it to anyone else.
 

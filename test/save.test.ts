@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pendingImage, type Shot } from "../src/lib/case.ts";
+import { type Case, pendingImage, type Shot } from "../src/lib/case.ts";
 import type { Draw } from "../src/lib/save.ts";
 import {
 	type AnnotationDraft,
@@ -138,6 +138,57 @@ describe("saveCase", () => {
 			[2, "s1"],
 			[3, "s2"],
 		]);
+	});
+
+	test("a new case keeps the page's address without query or fragment", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_url", "p1");
+		const saved = await saveCase(
+			store,
+			{
+				...request("c_url", true, [shot("p1")], [draft(1, "p1")]),
+				page: { ...page, url: "https://a.example/reset?token=abc#def" },
+			},
+			crop,
+		);
+		expect(saved.page.url).toBe("https://a.example/reset");
+	});
+
+	test("a shot keeps its page's address without query or fragment", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_shot", "p1");
+		const saved = await saveCase(
+			store,
+			request(
+				"c_shot",
+				true,
+				[{ ...shot("p1"), url: "https://a.example/route?token=abc#def" }],
+				[draft(1, "p1")],
+			),
+			crop,
+		);
+		expect(saved.shots[0]?.url).toBe("https://a.example/route");
+		expect(saved.shots[0]?.id).toBe("s1");
+	});
+
+	test("adding to an imported case keeps that it was imported", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_imp", "p1");
+		await saveCase(
+			store,
+			request("c_imp", true, [shot("p1")], [draft(1, "p1")]),
+			crop,
+		);
+		await store.updateCase("c_imp", (c) => ({
+			value: { ...(c as Case), importedAt: "2026-11-05T09:00:00.000Z" },
+		}));
+		await captured(store, "c_imp", "p2");
+		const saved = await saveCase(
+			store,
+			request("c_imp", false, [shot("p2")], [draft(2, "p2")]),
+			crop,
+		);
+		expect(saved.importedAt).toBe("2026-11-05T09:00:00.000Z");
 	});
 
 	test("a verdict saved while the crops are cut is kept", async () => {

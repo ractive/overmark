@@ -141,6 +141,8 @@ export interface Case {
 	shots: Shot[];
 	annotations: Annotation[];
 	verdict: string | null;
+	/** When this copy came in from a file: its texts are whoever wrote the file's. */
+	importedAt?: string;
 }
 
 /** The longest case title. */
@@ -186,6 +188,26 @@ export function imageScale(
 	return imageWidth > 0 && viewportWidth > 0
 		? imageWidth / viewportWidth
 		: fallback;
+}
+
+/**
+ * A page's address as Overmark keeps it and tells an AI app: origin and path,
+ * since a query or a fragment can carry personal data or tokens, as for links
+ * (DEC-009). A hash route (`#/path`, `#!/path`) names the page, so it stays,
+ * up to the first character that starts parameters.
+ */
+export function plainUrl(href: string): string {
+	try {
+		const url = new URL(href);
+		const route = /^#!?\/[^?#&=]*/.exec(url.hash)?.[0] ?? "";
+		url.username = "";
+		url.password = "";
+		url.search = "";
+		url.hash = route;
+		return url.href.slice(0, MAX_URL);
+	} catch {
+		return href.slice(0, MAX_URL);
+	}
 }
 
 /** The IndexedDB key of a case's image. */
@@ -459,6 +481,7 @@ export function validateCase(value: unknown): Case {
 		},
 	);
 	const verdict = o["verdict"];
+	const importedAt = o["importedAt"];
 	return {
 		format: CASE_FORMAT,
 		id: id(o["id"], "case.id"),
@@ -478,5 +501,8 @@ export function validateCase(value: unknown): Case {
 			verdict === null || verdict === undefined
 				? null
 				: str(verdict, "case.verdict", MAX_VERDICT),
+		...(importedAt === undefined
+			? {}
+			: { importedAt: str(importedAt, "case.importedAt", 64) }),
 	};
 }

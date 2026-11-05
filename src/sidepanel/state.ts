@@ -29,6 +29,15 @@ export interface CaseImages {
 	urls: Map<string, string>;
 }
 
+/** An AI app's last tool call. */
+export interface AiCall {
+	/** The tool's title. */
+	tool: string;
+	app: string;
+	/** `Date.now()` when it came. */
+	at: number;
+}
+
 export interface PanelState {
 	tab: TabInfo | undefined;
 	overlay: OverlayState | undefined;
@@ -44,11 +53,25 @@ export interface PanelState {
 	loaded: Loaded | undefined;
 	/** An import that would replace a case that is here already. */
 	importing: { parsed: ParsedExport; existing: Case } | undefined;
-	/** "Delete" was clicked once. */
-	deleteArmed: boolean;
+	/** Why the last import failed, until the next import or a dismiss. */
+	importError: string | undefined;
+	/** When "Delete" was clicked once. */
+	deleteArmedAt: number | undefined;
 	/** Next to "Save verdict": "Saved", or why not. */
 	verdictStatus: string | undefined;
-	ai: { status: string; connected: boolean };
+	/** Verdicts typed and not saved yet, by case. */
+	verdictDrafts: Map<string, string>;
+	/** Overmark may run on every site ("Allow on all sites"). */
+	allSites: boolean;
+	ai: {
+		status: string;
+		connected: boolean;
+		/** Connected, or on the way there: something "Stop AI access" can end. */
+		active: boolean;
+		/** "Keep AI access on". */
+		keepOn: boolean;
+		lastCall: AiCall | undefined;
+	};
 }
 
 export const initialState = (): PanelState => ({
@@ -62,9 +85,18 @@ export const initialState = (): PanelState => ({
 	caseHint: undefined,
 	loaded: undefined,
 	importing: undefined,
-	deleteArmed: false,
+	importError: undefined,
+	deleteArmedAt: undefined,
 	verdictStatus: undefined,
-	ai: { status: "Not connected", connected: false },
+	verdictDrafts: new Map(),
+	allSites: false,
+	ai: {
+		status: "Not connected",
+		connected: false,
+		active: false,
+		keepOn: false,
+		lastCall: undefined,
+	},
 });
 
 /** The state and its one way to change. */

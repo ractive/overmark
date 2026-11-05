@@ -18,6 +18,7 @@ import {
 	nextNumbers,
 	type PageInfo,
 	pendingImage,
+	plainUrl,
 	type Rect,
 	type Shot,
 	shotImage,
@@ -114,7 +115,12 @@ export async function saveCase(
 		for (const shot of request.shots) {
 			const id = `s${shotNumber++}`;
 			finalIds.set(shot.id, id);
-			shots.push({ ...shot, id, image: shotImage(id) });
+			shots.push({
+				...shot,
+				...(shot.url === undefined ? {} : { url: plainUrl(shot.url) }),
+				id,
+				image: shotImage(id),
+			});
 			const image = screenshots.get(shot.id);
 			if (image !== undefined)
 				images.set(shotImage(id), {
@@ -148,10 +154,14 @@ export async function saveCase(
 			title: current?.title ?? (request.title.trim() || "Untitled case"),
 			createdAt: current?.createdAt ?? stamp,
 			updatedAt: stamp,
-			page: current?.page ?? request.page,
+			page: current?.page ?? {
+				...request.page,
+				url: plainUrl(request.page.url),
+			},
 			shots,
 			annotations,
 			verdict: current?.verdict ?? null,
+			importedAt: current?.importedAt,
 		});
 		return { value, images };
 	});
