@@ -8,7 +8,7 @@ description: >-
 tags:
   - operations
   - release
-timestamp: 2026-11-04T19:00:00+01:00
+timestamp: 2026-11-05T08:00:00+01:00
 ---
 
 # Publishing in the Chrome Web Store
@@ -39,14 +39,21 @@ timestamp: 2026-11-04T19:00:00+01:00
   `overmark-store` (the store package, without it).
 - **A release:** bump `version` in `package.json` in a PR, merge it, then
   `git tag vX.Y.Z <merge commit> && git push origin vX.Y.Z`. The release workflow
-  checks the tag, runs `verify`, and creates the GitHub release with both zips.
+  checks the tag, runs `verify`, and creates the GitHub release with both zips. It stops
+  if the tag has moved off the commit it built.
+
+Every build, and so every zip, holds `LICENSES.txt`: Overmark's licence and those of the
+packages in its bundles. A bundled package whose licence the build does not know stops
+the build (`LICENCES` in `scripts/build.ts`).
 
 ## Updates through the publish workflow
 
 The API only updates an item that exists, so the first version goes in by hand (steps
-above). After that, "Publish to Chrome Web Store" (`publish.yml`, run by hand with a
-release tag) downloads the release's store zip, checks that its manifest has the tag's
-version and no key, and uploads it with
+above). After that, run "Publish to Chrome Web Store" (`publish.yml`) by hand: Actions →
+Publish to Chrome Web Store → Run workflow, and pick the release's tag under "Use workflow
+from". The default there is `main`, which fails: the tag the workflow runs on is the tag
+it uploads, and it has no other way to name one. It downloads that release's store zip,
+checks that its manifest has the tag's version and no key, and uploads it with
 [mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload)
 (Chrome Web Store API v2), pinned to a commit. With "submit" off the upload stays a
 draft in the dashboard; with it on, the version is submitted for review and published
@@ -69,7 +76,7 @@ One-time setup:
 5. In the repository: Settings → Environments → new environment `chrome-web-store`.
    Secrets `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`; variables
    `CWS_PUBLISHER_ID`, `CWS_EXTENSION_ID`. Add yourself as required reviewer, and limit
-   deployments to tags `v*`.
+   deployments to tags `v*` (the reason a run starts from the tag, not from `main`).
 
 The upload action receives the client secret and the refresh token, which can publish
 every item of the developer account. That is why it is pinned to a commit and runs in a
@@ -104,7 +111,9 @@ PRs (`.github/dependabot.yml`).
 > page in front, take screenshots, and record what should change. Changes it wants to
 > make are shown to you first, every time.
 >
-> Everything stays in your browser unless you export a case or connect an AI app.
+> Your cases stay in your browser unless you export one or connect an AI app. Overmark
+> works inside the page, so that page's own scripts can see what it shows there and the
+> keys you press there.
 
 **Single purpose:** Annotating web pages and reviewing the annotations on other builds
 of the same pages, alone or with an AI app the user connects.
@@ -116,6 +125,7 @@ of the same pages, alone or with an AI app the user connects.
 | `activeTab` | Add the annotation toolbar to the tab where the user clicked the icon, read the marked elements' details, and take screenshots of that tab. |
 | `scripting` | Inject the toolbar and outlines into that tab. |
 | `sidePanel` | The side panel lists cases, loads them onto the tab and connects the AI app. |
+| `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
 | `<all_urls>` (optional) | Only when the user turns on "allow on all sites", so Overmark works without clicking its icon on each tab. |
 
 **Remote code:** No. All code is in the package; the connection to the relay carries
@@ -132,7 +142,9 @@ data only, and no tool runs code an AI app sends.
 - Stored locally in the browser. Transmitted only to the relay and AI app the user
   configures and pairs, and only while connected. Every screenshot blurs password
   fields, and all form fields when the user turns that on, except fields inside
-  embedded frames. Text typed into fields and editors is never recorded.
+  embedded frames. Text typed into form fields and editable regions is not recorded; of
+  the editors that draw their text as ordinary page content, only Monaco, CodeMirror 5
+  and Ace are recognised.
 - Not sold, not used for anything but the extension's purpose, not used to determine
   creditworthiness.
 
@@ -142,3 +154,7 @@ panel with a case; a case loaded onto another build with green and amber outline
 # Citations
 
 - [Chrome Web Store program policies](https://developer.chrome.com/docs/webstore/program-policies)
+- [Storage and cookies](https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies):
+  `unlimitedStorage` "exempts extensions from both quota restrictions and eviction".
+- [Permissions list](https://developer.chrome.com/docs/extensions/reference/permissions-list):
+  `unlimitedStorage` shows no warning. `test/e2e/shipped.test.ts` asks Chrome itself.

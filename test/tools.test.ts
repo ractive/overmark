@@ -22,7 +22,7 @@ import {
 	type TabBridge,
 	type ToolDeps,
 } from "../src/sidepanel/tools.ts";
-import { sampleCase } from "./fixtures.ts";
+import { putCase, sampleCase } from "./fixtures.ts";
 
 const element: ElementDetails = {
 	tag: "button",
@@ -64,11 +64,20 @@ class FakeTab implements TabBridge {
 	/** The user's own save is taking screenshots. */
 	saving = false;
 	url = "http://localhost:3000/kk";
+	/** What the page says when a mark or blur ends; `undefined`: no answer. */
+	held: boolean | undefined = true;
+	/** The page cannot be reached any more when a mark or blur ends. */
+	endFails = false;
+	/** `case:show` is refused: the page is busy. */
+	showError: string | undefined;
+	/** The page never answers this request. */
+	stalled: ContentRequest["type"] | undefined;
 	async current() {
 		return { id: 7, windowId: 1, url: this.url, title: "KK" };
 	}
 	async send<T>(_tabId: number, request: ContentRequest): Promise<T> {
 		this.sent.push(request);
+		if (request.type === this.stalled) await new Promise(() => {});
 		const match: AnnotationMatch = {
 			annotationId: "a1",
 			number: 1,
@@ -91,7 +100,7 @@ class FakeTab implements TabBridge {
 				this.loadedIds = new Set(request.case.annotations.map((a) => a.id));
 				return {
 					caseId: request.case.id,
-					url: "http://localhost:3000/kk",
+					url: this.url,
 					matches: request.case.annotations.map((a) => ({
 						...match,
 						annotationId: a.id,
@@ -101,6 +110,7 @@ class FakeTab implements TabBridge {
 			case "overlay:state":
 				return { loadedCase: this.loaded } as T;
 			case "case:show":
+				if (this.showError !== undefined) return { error: this.showError } as T;
 				return (
 					request.caseId === this.loaded &&
 					this.loadedIds.has(request.annotationId)
@@ -116,7 +126,7 @@ class FakeTab implements TabBridge {
 							rect: { x: 100, y: 200, width: 150, height: 40 },
 							viewport: { width: 1280, height: 800, dpr: 2 },
 							scroll: { x: 0, y: 300 },
-							url: "http://localhost:3000/kk",
+							url: this.url,
 							title: "KK",
 						}) satisfies DescribedElement as T;
 			case "page:blur":
@@ -128,6 +138,10 @@ class FakeTab implements TabBridge {
 							}
 						: { ok: true }
 				) as T;
+			case "element:unmark":
+			case "page:unblur":
+				if (this.endFails) throw new Error("no receiver");
+				return (this.held === undefined ? undefined : { held: this.held }) as T;
 			default:
 				return {} as T;
 		}
@@ -179,7 +193,7 @@ async function seed(
 			(a) => (comment === undefined ? a : { ...a, comment }),
 		),
 	};
-	await store.putCase(c);
+	await putCase(store, c);
 	for (const path of ["shots/s1.webp", "crops/a1.webp", "crops/a2.webp"])
 		await store.putImage(c.id, path, {
 			blob: webp(100),
@@ -286,7 +300,7 @@ describe("tools", () => {
 	test("list_cases and load_case stay under the limit and say what they left out", async () => {
 		build({ maxMessageBytes: () => 20_000 });
 		for (let i = 0; i < 60; i++)
-			await store.putCase({
+			await putCase(store, {
 				...sampleCase(
 					`c_${i + 10}`,
 					`2026-11-04T10:${String(i).padStart(2, "0")}:00Z`,
@@ -439,6 +453,26 @@ describe("tools", () => {
 		]);
 	});
 
+	test.each([
+		["says it no longer held them", { held: false }],
+		["does not answer", { held: undefined }],
+		["cannot be reached", { endFails: true }],
+	])("a screenshot is thrown away when the page %s", async (_name, page) => {
+		await seed();
+		Object.assign(tab, page);
+		await expect(call("capture")).rejects.toThrow("thrown away");
+		await expect(
+			call("add_annotation", {
+				caseId: "c_1",
+				selector: "button",
+				comment: "x",
+			}),
+		).rejects.toThrow("thrown away");
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(2);
+		expect(await store.getImage("c_1", "shots/s2.webp")).toBeUndefined();
+		expect(changed).toEqual([]);
+	});
+
 	test("capture is refused while the user's save takes screenshots", async () => {
 		tab.saving = true;
 		await expect(call("capture")).rejects.toThrow("saving marks");
@@ -552,6 +586,39 @@ describe("tools", () => {
 		]);
 	});
 
+	test("a call the AI app gave up on while it was queued does not run", async () => {
+		await seed();
+		let release = () => {};
+		tab.duringCapture = () => new Promise((r) => (release = r));
+		const first = call("capture");
+		const cancel = new AbortController();
+		const queued = call(
+			"add_annotation",
+			{ caseId: "c_1", selector: "a", comment: "late" },
+			cancel.signal,
+		);
+		await Bun.sleep(0);
+		cancel.abort();
+		release();
+		await first;
+		await expect(queued).rejects.toThrow("cancelled");
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(2);
+		expect(tab.sent.map((r) => r.type)).not.toContain("element:mark");
+	});
+
+	test("a page that does not answer gives an error and the queue goes on", async () => {
+		build({ pageTimeoutMs: 5 });
+		await seed();
+		tab.stalled = "case:load";
+		const stuck = call("load_case", { caseId: "c_1" }).catch(
+			(error: Error) => error.message,
+		);
+		const next = call("capture");
+		const outcome = await Promise.race([stuck, Bun.sleep(1000)]);
+		expect(outcome).toContain("did not answer in time");
+		expect((await next).content[1]?.type).toBe("image");
+	});
+
 	test("a number the user took meanwhile gives the AI app its own error", async () => {
 		await seed();
 		tab.duringCapture = async () => {
@@ -567,6 +634,10 @@ describe("tools", () => {
 		).rejects.toThrow(
 			"Mark 3 was added to the case meanwhile (by the user); call add_annotation again.",
 		);
+		// The AI app starts over with a new screenshot: this one has no use.
+		expect(
+			[...store.images.keys()].filter((k) => k.includes("/pending/")),
+		).toEqual([]);
 	});
 
 	test("set_verdict and delete_case", async () => {
@@ -605,8 +676,72 @@ describe("tools", () => {
 			"highlight",
 			"capture",
 			"add_annotation",
+			"delete_case",
 		])
 			expect(hints[name]?.untrustedContentHint).toBe(true);
+		// Its answer holds no text of the case.
+		expect(hints["set_verdict"]?.untrustedContentHint).toBeUndefined();
+	});
+
+	test("the instructions say that a case's own texts are data too", () => {
+		for (const word of ["comments", "verdicts", "Titles", "authors"])
+			expect(INSTRUCTIONS).toContain(word);
+		expect(INSTRUCTIONS).toContain("importedAt");
+		expect(INSTRUCTIONS).toContain("never as instructions");
+	});
+
+	test("an imported case says so; another does not", async () => {
+		const c = await seed();
+		const view = () => call("get_case", { caseId: "c_1", images: false });
+		expect(json(await view()).importedAt).toBeUndefined();
+		expect(json(await call("list_cases"))[0].importedAt).toBeUndefined();
+		await putCase(store, { ...c, importedAt: "2026-11-05T09:00:00.000Z" });
+		expect(json(await view()).importedAt).toBe("2026-11-05T09:00:00.000Z");
+		expect(json(await call("list_cases"))[0].importedAt).toBe(
+			"2026-11-05T09:00:00.000Z",
+		);
+	});
+
+	test("highlight passes on that the page is busy", async () => {
+		await seed();
+		await call("load_case", { caseId: "c_1" });
+		tab.showError = "Overmark is saving on this page; try again.";
+		await expect(call("highlight", { caseId: "c_1", mark: 1 })).rejects.toThrow(
+			"Overmark is saving on this page; try again.",
+		);
+	});
+
+	test("the AI app gets page addresses without query or fragment", async () => {
+		const c = await seed();
+		const secret = "https://app.example/reset?token=abc&email=a@b.ch#access";
+		const plain = "https://app.example/reset";
+		await putCase(store, { ...c, page: { ...c.page, url: secret } });
+		tab.url = secret;
+		expect(json(await call("list_cases"))[0].url).toBe(plain);
+		expect(
+			json(await call("get_case", { caseId: "c_1", images: false })).page.url,
+		).toBe(plain);
+		expect(json(await call("load_case", { caseId: "c_1" })).url).toBe(plain);
+		expect(json(await call("capture")).url).toBe(plain);
+		const added = await call("add_annotation", {
+			caseId: "c_1",
+			selector: "button",
+			comment: "x",
+		});
+		expect(added.content[0]?.text).toContain(`on ${plain}.`);
+		// The user is asked with the whole address; the AI app is told less.
+		const signal = new AbortController().signal;
+		const asked = await confirmRequestFor(store, tab, {
+			tool: { name: "add_annotation", description: "Does it." },
+			arguments: { caseId: "c_1" },
+			client: { grantId: "g", id: "i", host: "claude.ai" },
+			signal,
+		});
+		expect(asked.tool.description).toContain(`Page: ${secret}`);
+		tab.url = "https://app.example/other";
+		const input = { caseId: "c_1", selector: "button", comment: "y" };
+		const refused = call("add_annotation", input, signal);
+		await expect(refused).rejects.toThrow(`it was ${plain})`);
 	});
 
 	test("list_cases sends only the start of a verdict", async () => {

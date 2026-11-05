@@ -1,14 +1,24 @@
 /**
  * Annotating a page: the tools (element, box, arrow, pen, note), a comment for
- * each mark, undo, and saving the marks as a case with screenshots.
+ * each mark, undo, and saving the marks as a case.
  *
- * Marks are kept in document coordinates while drawing, so the page can
- * scroll; saving translates them into the coordinates of their screenshot.
+ * A mark's screenshot is taken when the mark is drawn (DEC-012): the page as
+ * the user sees it then is the record, whatever it does afterwards. Marks drawn
+ * while nothing moved or changed share one screenshot. Screenshots show the
+ * page alone; saving draws the marks onto them, so undoing a mark or
+ * renumbering marks never touches an image.
+ *
+ * On the screen a mark follows its element, wherever that scrolls or moves.
  */
 
 import {
 	type ElementDetails,
+	imageScale,
 	LANGUAGE,
+	MAX_COMMENT,
+	MAX_PAGE_TITLE,
+	MAX_PEN_POINTS,
+	MAX_TITLE,
 	newId,
 	type PageInfo,
 	type Point,
@@ -33,10 +43,15 @@ import type {
 	WorkerResponse,
 } from "../lib/messages.ts";
 import { type AnnotationDraft, cropRectFor } from "../lib/save.ts";
+import { parentOf, shadowTrees } from "../lib/shadow.ts";
+import {
+	AI_TIMEOUT_MS,
+	type PageActivity,
+	type ShowOptions,
+} from "./activity.ts";
 import { elementAt, elementForRect } from "./anchor.ts";
 import type { PageBlur } from "./blur.ts";
 import type { Overlay } from "./overlay.ts";
-import { planShots } from "./plan.ts";
 
 export type Tool = "element" | "box" | "arrow" | "pen" | "note";
 
@@ -54,6 +69,23 @@ interface Draft {
 	shape: Shape;
 	comment: string;
 	element: Element | null;
+	/** Read when the mark was drawn: the element may be gone by saving. */
+	details: ElementDetails | null;
+	/** The element's box then, in document coordinates. */
+	anchor: Rect | null;
+	/** The page's address then. */
+	url: string;
+	/** The window's scroll position then. */
+	scroll: Point;
+	/** Its screenshot and its place on it, once taken. */
+	shot?: { view: View; shape: Shape };
+}
+
+/** One screenshot, and the marks that share it. */
+interface View {
+	shot: Shot;
+	page: PageInfo;
+	marks: Draft[];
 }
 
 interface Drag {
@@ -71,8 +103,30 @@ async function ask<T extends object>(request: WorkerRequest): Promise<T> {
 	return response;
 }
 
-const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** The next frame; a tab in the background has none, and then time decides. */
+const frame = () =>
+	Promise.race([
+		new Promise<void>((r) => requestAnimationFrame(() => r())),
+		sleep(250),
+	]);
+
+/** Chrome allows two screenshots a second; the overlay stays up meanwhile. */
+const SHOT_GAP_MS = 620;
+
+const errorText = (error: unknown) =>
+	error instanceof Error ? error.message : String(error);
+
+/** At most `MAX_PEN_POINTS` points of a stroke, evenly spread. */
+function thin(points: Point[]): Point[] {
+	if (points.length <= MAX_PEN_POINTS) return points;
+	const step = points.length / MAX_PEN_POINTS;
+	return Array.from(
+		{ length: MAX_PEN_POINTS },
+		(_, i) => points[Math.floor(i * step)] as Point,
+	);
+}
 
 function normalizeRect(a: Point, b: Point): Rect {
 	return {
@@ -93,20 +147,36 @@ export class Annotator {
 	#editing: Draft | null = null;
 	#target: AnnotateTarget | undefined;
 	#blurForms = false;
-	#saving = false;
-	/** "Stop annotating" arrived during a save: hide once it is done (if it worked). */
-	#hideAfterSave = false;
-	/** "Add marks" for another case arrived during a save: switch once it is done. */
-	#showAfterSave: { target?: AnnotateTarget; blurForms?: boolean } | undefined;
 	#saveForm = false;
+	#title = "";
 	#message = "";
 	#frame = 0;
+	#views: View[] = [];
+	/** The screenshot the page still looks like, if any: a new mark can share it. */
+	#shown: View | undefined;
+	/** Screenshots run one after the other; this never rejects. */
+	#shots: Promise<void> = Promise.resolve();
+	#lastShot = 0;
+	/** Where pending screenshots are stored until a save takes them. */
+	#pendingCase: string | undefined;
+	/** Since the last screenshot, something scrolled or the window changed. */
+	#scrolled = true;
+	/** Since the last screenshot, the page's DOM changed. */
+	#mutated = true;
+	#observer: MutationObserver | undefined;
+	/** Lets go of the blur while a screenshot is taken. */
+	#unblur: (() => void) | undefined;
+	/** The last screenshot's page scrolled while it was taken. */
+	#shotMoved = false;
+	#saveCalled = false;
 
 	readonly #pageBlur: PageBlur;
+	readonly #activity: PageActivity;
 
-	constructor(overlay: Overlay, blur: PageBlur) {
+	constructor(overlay: Overlay, blur: PageBlur, activity: PageActivity) {
 		this.overlay = overlay;
 		this.#pageBlur = blur;
+		this.#activity = activity;
 		const capture = overlay.capture;
 		capture.addEventListener("pointermove", (e) => this.#move(e));
 		capture.addEventListener("pointerdown", (e) => this.#down(e));
@@ -116,19 +186,52 @@ export class Annotator {
 			this.#preview = null;
 			this.#render();
 		});
-		const win = overlay.doc.defaultView;
-		win?.addEventListener("scroll", () => this.#schedule(), { passive: true });
-		win?.addEventListener("resize", () => this.#schedule());
+		capture.addEventListener("wheel", (e) => this.#wheel(e), {
+			passive: false,
+		});
+		const doc = overlay.doc;
+		const win = doc.defaultView;
+		const moved = () => {
+			this.#scrolled = true;
+			this.#schedule();
+		};
+		// Capture phase: scrolling inside a container moves elements too.
+		doc.addEventListener("scroll", moved, { capture: true, passive: true });
+		win?.addEventListener("resize", moved);
+		// What no mutation shows: typed values, checkboxes, a canvas redrawn.
+		for (const type of ["input", "change", "click", "keydown"])
+			win?.addEventListener(
+				type,
+				(e) => {
+					if (e.target !== overlay.host) this.#mutated = true;
+				},
+				true,
+			);
 		win?.addEventListener(
 			"keydown",
 			(e) => {
 				if (!overlay.annotating || e.key !== "Escape") return;
 				if (this.#editing !== null) this.#commitComment();
 				else if (this.#saveForm) this.#setSaveForm(false);
-				else this.setTool(null);
+				else if (this.#tool !== null) this.setTool(null);
+				else return;
+				// It was for Overmark, not for a dialog the page has open.
+				e.preventDefault();
+				e.stopImmediatePropagation();
 			},
 			true,
 		);
+		win?.addEventListener("beforeunload", (e) => {
+			if (this.#drafts.length > 0) e.preventDefault();
+		});
+		win?.addEventListener("pagehide", (e) => {
+			if (!e.persisted) this.#discard(this.#views.map((v) => v.shot.id));
+		});
+		overlay.onTick = () => this.#render();
+		if (win !== null && typeof win.MutationObserver === "function")
+			this.#observer = new win.MutationObserver(() => {
+				this.#mutated = true;
+			});
 		this.#renderToolbar();
 	}
 
@@ -138,41 +241,56 @@ export class Annotator {
 			url: location.href,
 			title: document.title,
 			drafts: this.#drafts.length,
-			saving: this.#saving,
+			saving: this.#activity.saving,
 		};
 		if (this.#target) state.target = this.#target;
 		return state;
 	}
 
-	show(options: { target?: AnnotateTarget; blurForms?: boolean }): void {
-		if (this.#saving) {
-			// The running save keeps its case; the new one applies when it is done.
-			this.#showAfterSave = options;
-		} else {
+	show(options: ShowOptions): void {
+		// During a save its case stays; the new one applies when it is over.
+		if (!this.#activity.defer({ kind: "show", options })) {
 			this.#target = options.target;
 			this.#blurForms = options.blurForms ?? false;
 			this.#message = "";
 			this.#renumber();
 		}
-		this.#hideAfterSave = false;
 		this.overlay.setAnnotating(true);
+		// What happened while the toolbar was away is not known.
+		this.#mutated = true;
+		this.#watch();
 		this.#renderToolbar();
 		this.#render();
 	}
 
 	hide(): void {
-		if (this.#saving) {
-			// The remaining screenshots still need the marks.
-			this.#hideAfterSave = true;
-			return;
-		}
+		// A save still running finishes first.
+		if (this.#activity.defer({ kind: "hide" })) return;
 		if (this.#editing !== null) this.#commitComment();
 		this.setTool(null);
 		this.overlay.setAnnotating(false);
+		this.#observer?.disconnect();
+	}
+
+	/** The side panel's "Blur form fields in screenshots". */
+	setBlurForms(on: boolean): void {
+		this.#blurForms = on;
+	}
+
+	#watch(): void {
+		if (!this.overlay.annotating) return;
+		// Shadow roots too: a mutation inside one is not reported outside it.
+		for (const root of shadowTrees(this.overlay.doc, this.overlay.host))
+			this.#observer?.observe(root, {
+				subtree: true,
+				childList: true,
+				attributes: true,
+				characterData: true,
+			});
 	}
 
 	setTool(tool: Tool | null): void {
-		if (!this.#saving) this.#message = "";
+		if (!this.#activity.saving) this.#message = "";
 		this.#tool = tool;
 		this.#hover = null;
 		this.#drag = null;
@@ -185,6 +303,27 @@ export class Annotator {
 	}
 
 	// --- pointer -------------------------------------------------------------
+
+	/** The layer that takes the pointer covers the page: pass the wheel on. */
+	#wheel(e: WheelEvent): void {
+		const win = this.overlay.doc.defaultView;
+		const root = this.overlay.doc.scrollingElement;
+		let at = elementAt(e.clientX, e.clientY, this.overlay.host);
+		for (; at !== null && at !== root; at = parentOf(at)) {
+			const { overflowY, overflowX } = win?.getComputedStyle(at) ?? {};
+			const scrolls = (overflow: string | undefined) =>
+				overflow === "auto" || overflow === "scroll";
+			if (
+				(scrolls(overflowY) && at.scrollHeight > at.clientHeight) ||
+				(scrolls(overflowX) && at.scrollWidth > at.clientWidth)
+			) {
+				e.preventDefault();
+				const unit = e.deltaMode === 1 ? 16 : 1;
+				at.scrollBy(e.deltaX * unit, e.deltaY * unit);
+				return;
+			}
+		}
+	}
 
 	#scroll(): Point {
 		const win = this.overlay.doc.defaultView;
@@ -263,7 +402,7 @@ export class Annotator {
 					);
 				break;
 			case "pen": {
-				const points = [...drag.points, p];
+				const points = thin([...drag.points, p]);
 				const shape: Shape = { kind: "pen", points };
 				const bounds = shapeBounds(shape);
 				if (points.length >= 2 && bounds.width + bounds.height >= 8)
@@ -304,11 +443,31 @@ export class Annotator {
 			shape,
 			comment: "",
 			element,
+			details:
+				element === null
+					? null
+					: describeElement(element, createContext(this.overlay.doc)),
+			anchor: element === null ? null : documentRect(element, this.#scroll()),
+			url: location.href,
+			scroll: this.#scroll(),
 		};
 		this.#message = "";
 		this.#drafts.push(draft);
 		this.#openComment(draft);
+		this.#shootLater(draft);
 		this.#renderToolbar();
+	}
+
+	/** Take a draft out, with its screenshot if no other mark shares it. */
+	#forget(draft: Draft): void {
+		this.#drafts = this.#drafts.filter((d) => d !== draft);
+		const view = draft.shot?.view;
+		if (view === undefined) return;
+		view.marks = view.marks.filter((d) => d !== draft);
+		if (view.marks.length > 0) return;
+		this.#views = this.#views.filter((v) => v !== view);
+		if (this.#shown === view) this.#shown = undefined;
+		this.#discard([view.shot.id]);
 	}
 
 	#openComment(draft: Draft): void {
@@ -320,14 +479,11 @@ export class Annotator {
 		label.textContent = `Comment for mark ${draft.number}`;
 		const field = doc.createElement("textarea");
 		field.placeholder = "What is wrong, or what should change?";
+		field.maxLength = MAX_COMMENT;
 		field.value = draft.comment;
 		field.addEventListener("keydown", (e) => {
-			e.stopPropagation();
 			if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) this.#commitComment();
-			if (e.key === "Escape") this.#commitComment();
 		});
-		field.addEventListener("keyup", (e) => e.stopPropagation());
-		field.addEventListener("keypress", (e) => e.stopPropagation());
 		const done = doc.createElement("button");
 		done.type = "button";
 		done.className = "primary";
@@ -339,7 +495,7 @@ export class Annotator {
 		remove.dataset["action"] = "comment-remove";
 		remove.textContent = "Remove mark";
 		remove.addEventListener("click", () => {
-			this.#drafts = this.#drafts.filter((d) => d !== draft);
+			this.#forget(draft);
 			this.#closeComment();
 		});
 		const row = doc.createElement("div");
@@ -353,15 +509,14 @@ export class Annotator {
 
 	#placePopover(draft: Draft): void {
 		const win = this.overlay.doc.defaultView;
-		const s = this.#scroll();
-		const b = shapeBounds(draft.shape);
+		const b = shapeBounds(this.#onWindow(draft));
 		const vw = win?.innerWidth ?? 1024;
 		const vh = win?.innerHeight ?? 768;
 		const width = 296;
 		const height = 150;
-		let x = b.x - s.x;
-		let y = b.y - s.y + b.height + 12;
-		if (y + height > vh) y = b.y - s.y - height - 12;
+		let x = b.x;
+		let y = b.y + b.height + 12;
+		if (y + height > vh) y = b.y - height - 12;
 		x = Math.min(Math.max(8, x), vw - width - 8);
 		y = Math.min(Math.max(8, y), vh - height - 70);
 		this.overlay.popover.style.left = `${x}px`;
@@ -385,7 +540,8 @@ export class Annotator {
 
 	undo(): void {
 		this.#message = "";
-		const last = this.#drafts.pop();
+		const last = this.#drafts.at(-1);
+		if (last !== undefined) this.#forget(last);
 		if (last !== undefined && last === this.#editing) this.#closeComment();
 		this.#renderToolbar();
 		this.#render();
@@ -401,6 +557,36 @@ export class Annotator {
 		});
 	}
 
+	/** A mark in window coordinates: with its element, if that is still there. */
+	#onWindow(draft: Draft): Shape {
+		const s = this.#scroll();
+		const box = draft.element?.isConnected
+			? draft.element.getBoundingClientRect()
+			: undefined;
+		if (
+			box === undefined ||
+			draft.anchor === null ||
+			(box.width === 0 && box.height === 0)
+		)
+			return translateShape(draft.shape, -s.x, -s.y);
+		if (draft.shape.kind === "element") {
+			const { x, y, width, height } = box;
+			return { kind: "element", rect: { x, y, width, height } };
+		}
+		return translateShape(
+			draft.shape,
+			box.x - draft.anchor.x,
+			box.y - draft.anchor.y,
+		);
+	}
+
+	/** Marks whose element left (another route, a menu that closed) stay off the page. */
+	#onPage(draft: Draft): boolean {
+		return draft.element === null
+			? draft.url === location.href
+			: draft.element.isConnected;
+	}
+
 	#render(): void {
 		if (!this.overlay.annotating) return;
 		const s = this.#scroll();
@@ -410,7 +596,9 @@ export class Annotator {
 				? this.#hover.getBoundingClientRect()
 				: null;
 		this.overlay.render(
-			this.#drafts.map((d) => ({ number: d.number, shape: toWindow(d.shape) })),
+			this.#drafts
+				.filter((d) => this.#onPage(d))
+				.map((d) => ({ number: d.number, shape: this.#onWindow(d) })),
 			this.#preview === null ? null : toWindow(this.#preview),
 			hover === null
 				? null
@@ -452,7 +640,7 @@ export class Annotator {
 			return s;
 		};
 		const count = this.#drafts.length;
-		if (this.#saving) {
+		if (this.#activity.saving) {
 			status.textContent = this.#message || "Saving…";
 			bar.replaceChildren(brand, status);
 			return;
@@ -467,20 +655,28 @@ export class Annotator {
 			let title: HTMLInputElement | undefined;
 			const parts: HTMLElement[] = [brand];
 			if (this.#target) {
-				status.textContent = `Add ${count} mark${count === 1 ? "" : "s"} to “${this.#target.title}”`;
+				status.textContent =
+					this.#message ||
+					`Add ${count} mark${count === 1 ? "" : "s"} to “${this.#target.title}”`;
 				parts.push(status);
 			} else {
 				title = doc.createElement("input");
 				title.type = "text";
 				title.placeholder = "Case title";
 				title.setAttribute("aria-label", "Case title");
-				title.value = doc.title.slice(0, 120);
+				title.maxLength = MAX_TITLE;
+				title.value = this.#title;
+				title.addEventListener("input", () => {
+					this.#title = title?.value ?? "";
+				});
 				title.addEventListener("keydown", (e) => {
-					e.stopPropagation();
 					if (e.key === "Enter") void this.save(title?.value ?? "");
-					if (e.key === "Escape") this.#setSaveForm(false);
 				});
 				parts.push(title);
+				if (this.#message) {
+					status.textContent = this.#message;
+					parts.push(status);
+				}
 			}
 			parts.push(
 				save,
@@ -504,6 +700,7 @@ export class Annotator {
 		const save = this.#button("Save…", "save", () => {
 			if (this.#editing !== null) this.#commitComment();
 			this.setTool(null);
+			this.#title = doc.title.slice(0, 120);
 			this.#setSaveForm(true);
 		});
 		save.disabled = count === 0;
@@ -533,125 +730,281 @@ export class Annotator {
 		);
 	}
 
-	// --- saving --------------------------------------------------------------
+	// --- screenshots ---------------------------------------------------------
 
-	#blur(): () => void {
-		return this.#pageBlur.hold(this.#blurForms);
+	#pendingId(): string {
+		this.#pendingCase ??= newId("c");
+		return this.#pendingCase;
 	}
 
-	/** Save the marks as a new case, or add them to the target case. */
-	async save(title: string): Promise<SaveResult | undefined> {
-		if (this.#saving || this.#drafts.length === 0) return undefined;
-		if (this.overlay.marking || this.#pageBlur.held > 0) {
-			// An AI app is taking a screenshot of this page right now.
-			this.#message =
-				"An AI app is taking a screenshot; save again in a moment.";
-			this.#renderToolbar();
-			return undefined;
-		}
-		if (this.#editing !== null) this.#commitComment();
-		const win = this.overlay.doc.defaultView as Window;
-		const doc = this.overlay.doc;
-		const target = this.#target;
-		const caseId = target?.caseId ?? newId("c");
-		const drafts = [...this.#drafts];
-		const start = this.#scroll();
-		this.#saving = true;
-		this.#saveForm = false;
-		this.setTool(null);
-		const captured: string[] = [];
-		let saved = false;
-		try {
-			// Element details are read first, while the page is as the user saw it.
-			const context = createContext(doc);
-			const details: (ElementDetails | null)[] = drafts.map((d) =>
-				d.element?.isConnected ? describeElement(d.element, context) : null,
-			);
-			const viewport = {
-				width: win.innerWidth,
-				height: win.innerHeight,
-				dpr: win.devicePixelRatio || 1,
-			};
-			const plan = planShots(
-				drafts.map((d) => shapeBounds(d.shape)),
-				viewport,
-				context.page,
-				start,
-			);
-			const shots: Shot[] = [];
-			const annotations: AnnotationDraft[] = [];
-			for (const [i, window] of plan.entries()) {
-				this.#message = `Taking screenshot ${i + 1} of ${plan.length}…`;
+	#discard(shotIds: string[]): void {
+		if (shotIds.length === 0) return;
+		const caseId = this.#pendingId();
+		ask({ type: "images:discard", caseId, shotIds }).catch(() => undefined);
+	}
+
+	/**
+	 * Give a mark a screenshot, after the ones already on their way. Whether it
+	 * shares the last one is decided now: by its turn the page may have moved on.
+	 */
+	#shootLater(draft: Draft): void {
+		const same = !this.#scrolled && !this.#mutated;
+		const shape = this.#onWindow(draft);
+		this.#shots = this.#shots
+			.then(() => this.#shoot(draft, same, shape))
+			.catch((error: unknown) => {
+				this.#message = `No screenshot of mark ${draft.number} yet: ${errorText(error)}`;
 				this.#renderToolbar();
-				win.scrollTo({
-					left: window.scrollX,
-					top: window.scrollY,
-					behavior: "instant",
-				});
-				await frame();
-				await frame();
-				await sleep(150);
-				const actual = this.#scroll();
-				// Provisional: the saved case gives the shot its final id (save.ts).
-				const shotId = newId("p");
-				this.overlay.setCapturing(true);
-				this.#render();
-				const restore = this.#blur();
-				await frame();
-				try {
-					captured.push(shotId);
-					await ask<CaptureResult>({ type: "capture", caseId, shotId });
-				} finally {
-					restore();
-					this.overlay.setCapturing(false);
-				}
-				shots.push({
-					id: shotId,
-					image: pendingImage(shotId),
-					scrollX: actual.x,
-					scrollY: actual.y,
-					viewport,
-					capturedAt: new Date().toISOString(),
-				});
-				for (const index of window.marks) {
-					const draft = drafts[index] as Draft;
-					const shape = translateShape(draft.shape, -actual.x, -actual.y);
-					annotations.push({
-						id: `a${draft.number}`,
-						number: draft.number,
-						shot: shotId,
-						comment: draft.comment,
-						author: "user",
-						shape,
-						element: details[index] ?? null,
-						cropRect: cropRectFor(shapeBounds(shape), viewport),
-					});
-				}
+			});
+	}
+
+	async #shoot(draft: Draft, same: boolean, drawn: Shape): Promise<void> {
+		if (draft.shot !== undefined || !this.#drafts.includes(draft)) return;
+		const shown = this.#shown;
+		if (same && shown !== undefined && shown.shot.url === draft.url) {
+			shown.marks.push(draft);
+			draft.shot = { view: shown, shape: drawn };
+			return;
+		}
+		await this.#take(draft, drawn);
+	}
+
+	/** Wait for the page: an AI app's screenshot is over soon, or times out. */
+	async #hold(): Promise<void> {
+		for (let waited = 0; ; waited += 200) {
+			const started = this.#activity.begin("shot");
+			if (started.ok) return;
+			if (waited > AI_TIMEOUT_MS) throw new Error(started.error);
+			await sleep(200);
+		}
+	}
+
+	#scrollTo(to: Point): void {
+		const now = this.#scroll();
+		if (now.x !== to.x || now.y !== to.y)
+			this.overlay.doc.defaultView?.scrollTo({
+				left: to.x,
+				top: to.y,
+				behavior: "instant",
+			});
+	}
+
+	/** The screenshot is taken: the page and the overlay are back. */
+	captured(): void {
+		if (this.#unblur === undefined) return;
+		this.#unblur();
+		this.#unblur = undefined;
+		this.#shotMoved = this.#scrolled;
+		this.overlay.setCapturing(false);
+		this.#watch();
+	}
+
+	/**
+	 * A new screenshot of the page as it is, for `draft`. With `drawn`, where the
+	 * mark was drawn, it is given up when the page moved on: the image would not
+	 * show the mark, and the page is not moved while the user works. Saving then
+	 * takes it, without `drawn`.
+	 */
+	async #take(draft: Draft, drawn?: Shape): Promise<void> {
+		await this.#hold();
+		try {
+			const gap = this.#lastShot + SHOT_GAP_MS - Date.now();
+			if (gap > 0) await sleep(gap);
+			if (drawn !== undefined) {
+				const now = shapeBounds(this.#onWindow(draft));
+				const then = shapeBounds(drawn);
+				if (now.x !== then.x || now.y !== then.y || location.href !== draft.url)
+					return;
 			}
-			annotations.sort((a, b) => a.number - b.number);
-			const page: PageInfo = {
+			const win = this.overlay.doc.defaultView as Window;
+			const shotId = newId("p");
+			this.#shown = undefined;
+			// The blur changes the page's DOM, which is no change of the page.
+			this.#observer?.disconnect();
+			this.overlay.setCapturing(true);
+			this.#unblur = this.#pageBlur.hold(this.#blurForms);
+			let image: CaptureResult;
+			let shape: Shape;
+			let scroll: Point;
+			let viewport: PageInfo["viewport"];
+			try {
+				// Two frames: the first paints what was just changed.
+				await frame();
+				await frame();
+				shape = this.#onWindow(draft);
+				scroll = this.#scroll();
+				viewport = {
+					width: win.innerWidth,
+					height: win.innerHeight,
+					dpr: win.devicePixelRatio || 1,
+				};
+				this.#scrolled = false;
+				this.#mutated = false;
+				image = await ask<CaptureResult>({
+					type: "capture",
+					caseId: this.#pendingId(),
+					shotId,
+				});
+			} finally {
+				this.captured();
+				this.#lastShot = Date.now();
+			}
+			// The coordinates are from before: the image may be from after.
+			if (this.#shotMoved && drawn !== undefined) {
+				this.#discard([shotId]);
+				return;
+			}
+			const view = this.#view(shotId, scroll, viewport, image);
+			view.marks.push(draft);
+			this.#views.push(view);
+			this.#shown = view;
+			draft.shot = { view, shape };
+			// Undone while it was being taken.
+			if (!this.#drafts.includes(draft)) this.#forget(draft);
+		} finally {
+			this.#activity.end("shot");
+		}
+	}
+
+	/** At saving, nobody is using the page: back to where a mark was drawn. */
+	async #takeBack(draft: Draft): Promise<void> {
+		const win = this.overlay.doc.defaultView as Window;
+		const here = this.#scroll();
+		this.#scrollTo(draft.scroll);
+		const at = shapeBounds(this.#onWindow(draft));
+		if (
+			at.x + at.width < 0 ||
+			at.y + at.height < 0 ||
+			at.x > win.innerWidth ||
+			at.y > win.innerHeight
+		)
+			draft.element?.scrollIntoView({
+				block: "center",
+				inline: "nearest",
+				behavior: "instant",
+			});
+		try {
+			await this.#take(draft);
+		} finally {
+			this.#scrollTo(here);
+		}
+	}
+
+	#view(
+		shotId: string,
+		scroll: Point,
+		viewport: PageInfo["viewport"],
+		image: CaptureResult,
+	): View {
+		const doc = this.overlay.doc;
+		return {
+			shot: {
+				id: shotId,
+				image: pendingImage(shotId),
+				scrollX: scroll.x,
+				scrollY: scroll.y,
+				viewport: {
+					...viewport,
+					dpr: imageScale(image.width, viewport.width, viewport.dpr),
+				},
+				capturedAt: new Date().toISOString(),
 				url: location.href,
-				title: doc.title,
+			},
+			page: {
+				url: location.href,
+				title: doc.title.slice(0, MAX_PAGE_TITLE),
 				lang: LANGUAGE.test(doc.documentElement.lang)
 					? doc.documentElement.lang
 					: "",
 				viewport,
 				userAgent: navigator.userAgent,
-			};
-			this.#message = "Saving…";
+			},
+			marks: [],
+		};
+	}
+
+	// --- saving --------------------------------------------------------------
+
+	/** Save the marks as a new case, or add them to the target case. */
+	async save(title: string): Promise<SaveResult | undefined> {
+		// A second click must not start over while screenshots are still awaited.
+		if (this.#saveCalled) return undefined;
+		this.#saveCalled = true;
+		try {
+			return await this.#save(title);
+		} finally {
+			this.#saveCalled = false;
+		}
+	}
+
+	async #save(title: string): Promise<SaveResult | undefined> {
+		if (this.#activity.saving || this.#drafts.length === 0) return undefined;
+		this.#title = title;
+		if (this.#editing !== null) this.#commitComment();
+		await this.#shots;
+		try {
+			for (const draft of this.#drafts) {
+				if (draft.shot !== undefined) continue;
+				if (draft.url !== location.href) {
+					// Its page is gone: a screenshot of this one would show something else.
+					this.#message = `Mark ${draft.number} has no screenshot and was drawn on another page. Go back there, or undo it.`;
+					this.#renderToolbar();
+					return undefined;
+				}
+				await this.#takeBack(draft);
+			}
+		} catch (error) {
+			this.#message = `Not saved: ${errorText(error)}`;
 			this.#renderToolbar();
+			return undefined;
+		}
+		const started = this.#activity.begin("saving");
+		if (!started.ok) {
+			this.#message = started.error;
+			this.#renderToolbar();
+			return undefined;
+		}
+		const drafts = [...this.#drafts];
+		const first = (v: View) => Math.min(...v.marks.map((d) => d.number));
+		const views = this.#views
+			.filter((v) => v.marks.some((d) => drafts.includes(d)))
+			.sort((a, b) => first(a) - first(b));
+		const target = this.#target;
+		const imagesFrom = this.#pendingId();
+		this.#saveForm = false;
+		this.#message = "Saving…";
+		this.setTool(null);
+		let saved = false;
+		try {
+			const annotations: AnnotationDraft[] = drafts.map((d) => {
+				const { view, shape } = d.shot as NonNullable<Draft["shot"]>;
+				return {
+					id: `a${d.number}`,
+					number: d.number,
+					shot: view.shot.id,
+					comment: d.comment,
+					author: "user",
+					shape,
+					element: d.details,
+					cropRect: cropRectFor(shapeBounds(shape), view.shot.viewport),
+				};
+			});
+			annotations.sort((a, b) => a.number - b.number);
 			const result = await ask<SaveResult>({
 				type: "case:save",
 				request: {
-					caseId,
+					caseId: target?.caseId ?? imagesFrom,
+					imagesFrom,
 					isNew: target === undefined,
 					title: target?.title ?? title,
-					page,
-					shots,
+					page: (views[0] as View).page,
+					shots: views.map((v) => v.shot),
 					annotations,
 				},
 			});
 			this.#drafts = this.#drafts.filter((d) => !drafts.includes(d));
+			this.#views = this.#views.filter((v) => !views.includes(v));
+			this.#pendingCase = undefined;
 			this.#target = {
 				caseId: result.caseId,
 				title: result.title,
@@ -661,24 +1014,17 @@ export class Annotator {
 			saved = true;
 			return result;
 		} catch (error) {
-			if (captured.length > 0)
-				await ask({ type: "images:discard", caseId, shotIds: captured }).catch(
-					() => undefined,
-				);
-			this.#message = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
+			// The marks and their screenshots stay: the save can be tried again.
+			this.#message = `Not saved: ${errorText(error)}`;
 			return undefined;
 		} finally {
-			win.scrollTo({ left: start.x, top: start.y, behavior: "instant" });
-			this.#saving = false;
-			const next = this.#showAfterSave;
-			this.#showAfterSave = undefined;
-			if (this.#hideAfterSave) {
-				this.#hideAfterSave = false;
+			const afterwards = this.#activity.end("saving");
+			if (afterwards?.kind === "hide") {
 				// A failed save stays up with its error, or its marks would be lost.
 				if (saved) this.hide();
-			} else if (next !== undefined) {
+			} else if (afterwards?.kind === "show") {
 				const message = this.#message;
-				this.show(next);
+				this.show(afterwards.options);
 				this.#message = message;
 			}
 			this.#renderToolbar();

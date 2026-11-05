@@ -78,3 +78,26 @@ describe("PageBlur", () => {
 		expect(filter($("name"))).toBe("");
 	});
 });
+
+test("a field's own transition cannot fade the blur in late, and comes back", () => {
+	const field = doc.getElementById("name") as HTMLElement;
+	field.style.setProperty("transition", "all 2s");
+	const blur = new PageBlur(doc);
+	const release = blur.hold(true);
+	expect(field.style.getPropertyValue("transition")).toBe("none");
+	expect(field.style.getPropertyPriority("transition")).toBe("important");
+	release();
+	expect(field.style.getPropertyValue("transition")).toBe("all 2s");
+	expect(field.style.getPropertyPriority("transition")).toBe("");
+});
+
+test("code editors count as form fields: what they show was typed", () => {
+	doc.body.insertAdjacentHTML(
+		"beforeend",
+		`<div id="editor" class="monaco-editor">typed</div>`,
+	);
+	const release = new PageBlur(doc).hold(true);
+	expect(filter(doc.getElementById("editor"))).toBe("blur(6px)");
+	release();
+	expect(filter(doc.getElementById("editor"))).toBe("");
+});

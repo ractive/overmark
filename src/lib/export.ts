@@ -8,6 +8,7 @@ import {
 	caseImages,
 	MAX_TITLE,
 	newId,
+	plainUrl,
 	validateCase,
 } from "./case.ts";
 import { caseMarkdown } from "./markdown.ts";
@@ -161,30 +162,28 @@ export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
 
 /**
  * Store a read export: replacing a case with the same id, or as a copy with
- * a new id. Either everything is stored or nothing changes.
+ * a new id. Either everything is stored or nothing changes. It is marked as
+ * imported, whatever the file says, and keeps no more of the page's address
+ * than a saved case does.
  */
 export async function storeImport(
 	store: CaseStore,
 	parsed: ParsedExport,
-	options: { copy?: boolean } = {},
+	options: { copy?: boolean; now?: Date } = {},
 ): Promise<Case> {
-	const c: Case = options.copy
-		? {
-				...parsed.case,
-				id: newId("c"),
-				title: `${parsed.case.title.slice(0, MAX_TITLE - COPY.length)}${COPY}`,
-			}
-		: parsed.case;
+	const c: Case = {
+		...parsed.case,
+		...(options.copy
+			? {
+					id: newId("c"),
+					title: `${parsed.case.title.slice(0, MAX_TITLE - COPY.length)}${COPY}`,
+				}
+			: {}),
+		page: { ...parsed.case.page, url: plainUrl(parsed.case.page.url) },
+		importedAt: (options.now ?? new Date()).toISOString(),
+	};
 	await store.replaceCase(c, parsed.images);
 	return c;
 }
 
 const COPY = " (copy)";
-
-/** Read an export and store it, replacing a case with the same id. */
-export async function importCase(
-	store: CaseStore,
-	zip: Uint8Array,
-): Promise<Case> {
-	return storeImport(store, await readExport(zip));
-}

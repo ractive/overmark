@@ -26,6 +26,18 @@ export const MAX_NUMBER = 99_999;
 /** The longest verdict a case may hold, in characters. */
 export const MAX_VERDICT = 50_000;
 
+/** The longest comment on a mark, in characters. */
+export const MAX_COMMENT = 20_000;
+
+/** The most points a freehand mark may have. */
+export const MAX_PEN_POINTS = 5000;
+
+/** The longest page address a case may hold. */
+export const MAX_URL = 8000;
+
+/** The longest page title a case may hold. */
+export const MAX_PAGE_TITLE = 2000;
+
 export interface Point {
 	x: number;
 	y: number;
@@ -92,6 +104,8 @@ export interface Shot {
 	scrollY: number;
 	viewport: Viewport;
 	capturedAt: string;
+	/** The page's address when it was taken; a case can span an app's routes. */
+	url?: string;
 }
 
 export interface Annotation {
@@ -127,6 +141,8 @@ export interface Case {
 	shots: Shot[];
 	annotations: Annotation[];
 	verdict: string | null;
+	/** When this copy came in from a file: its texts are whoever wrote the file's. */
+	importedAt?: string;
 }
 
 /** The longest case title. */
@@ -136,9 +152,14 @@ export class CaseError extends Error {
 	override name = "CaseError";
 }
 
-/** A new random id with a prefix, e.g. `c_8f3k…`. */
+/**
+ * A new random id with a prefix, e.g. `c_8f3k…`. `crypto.randomUUID` does not
+ * exist in a content script on a plain http: page; this does.
+ */
 export function newId(prefix: string): string {
-	return `${prefix}_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+	const bytes = crypto.getRandomValues(new Uint8Array(8));
+	const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+	return `${prefix}_${hex}`;
 }
 
 export const shotImage = (shotId: string) => `shots/${shotId}.webp`;
@@ -152,6 +173,41 @@ export function caseImages(c: Case): Set<string> {
 		...c.shots.map((s) => s.image),
 		...c.annotations.map((a) => a.crop),
 	]);
+}
+
+/**
+ * The screenshot's real pixels per CSS pixel. `devicePixelRatio` can differ
+ * from what `captureVisibleTab` delivers (browser zoom, device emulation), so
+ * the image's own width decides; `fallback` when it cannot.
+ */
+export function imageScale(
+	imageWidth: number,
+	viewportWidth: number,
+	fallback: number,
+): number {
+	return imageWidth > 0 && viewportWidth > 0
+		? imageWidth / viewportWidth
+		: fallback;
+}
+
+/**
+ * A page's address as Overmark keeps it and tells an AI app: origin and path,
+ * since a query or a fragment can carry personal data or tokens, as for links
+ * (DEC-009). A hash route (`#/path`, `#!/path`) names the page, so it stays,
+ * up to the first character that starts parameters.
+ */
+export function plainUrl(href: string): string {
+	try {
+		const url = new URL(href);
+		const route = /^#!?\/[^?#&=]*/.exec(url.hash)?.[0] ?? "";
+		url.username = "";
+		url.password = "";
+		url.search = "";
+		url.hash = route;
+		return url.href.slice(0, MAX_URL);
+	} catch {
+		return href.slice(0, MAX_URL);
+	}
 }
 
 /** The IndexedDB key of a case's image. */
@@ -282,7 +338,7 @@ function shape(v: unknown, path: string): Shape {
 		case "pen":
 			return {
 				kind: "pen",
-				points: arr(o["points"], `${path}.points`, 5000).map((p, i) =>
+				points: arr(o["points"], `${path}.points`, MAX_PEN_POINTS).map((p, i) =>
 					point(p, `${path}.points[${i}]`),
 				),
 			};
@@ -378,6 +434,9 @@ export function validateCase(value: unknown): Case {
 			scrollY: num(s["scrollY"], `case.shots[${i}].scrollY`),
 			viewport: viewport(s["viewport"], `case.shots[${i}].viewport`),
 			capturedAt: str(s["capturedAt"], `case.shots[${i}].capturedAt`, 64),
+			...(s["url"] === undefined
+				? {}
+				: { url: str(s["url"], `case.shots[${i}].url`, MAX_URL) }),
 		};
 	});
 	const numbers = new Set<number>();
@@ -413,7 +472,7 @@ export function validateCase(value: unknown): Case {
 				id: annotationId,
 				number,
 				shot,
-				comment: str(a["comment"], `${p}.comment`, 20_000),
+				comment: str(a["comment"], `${p}.comment`, MAX_COMMENT),
 				author,
 				shape: shape(a["shape"], `${p}.shape`),
 				crop,
@@ -422,6 +481,7 @@ export function validateCase(value: unknown): Case {
 		},
 	);
 	const verdict = o["verdict"];
+	const importedAt = o["importedAt"];
 	return {
 		format: CASE_FORMAT,
 		id: id(o["id"], "case.id"),
@@ -429,8 +489,8 @@ export function validateCase(value: unknown): Case {
 		createdAt: str(o["createdAt"], "case.createdAt", 64),
 		updatedAt: str(o["updatedAt"], "case.updatedAt", 64),
 		page: {
-			url: str(page["url"], "case.page.url", 8000),
-			title: str(page["title"], "case.page.title", 2000),
+			url: str(page["url"], "case.page.url", MAX_URL),
+			title: str(page["title"], "case.page.title", MAX_PAGE_TITLE),
 			lang: language(page["lang"], "case.page.lang"),
 			viewport: viewport(page["viewport"], "case.page.viewport"),
 			userAgent: str(page["userAgent"], "case.page.userAgent", 2000),
@@ -441,5 +501,8 @@ export function validateCase(value: unknown): Case {
 			verdict === null || verdict === undefined
 				? null
 				: str(verdict, "case.verdict", MAX_VERDICT),
+		...(importedAt === undefined
+			? {}
+			: { importedAt: str(importedAt, "case.importedAt", 64) }),
 	};
 }

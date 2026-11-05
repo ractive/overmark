@@ -132,7 +132,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.type("Say how much exactly");
 		await page.click(shadow('[data-action="comment-done"]'));
 
-		// 3: far below, the contact paragraph picked as an element
+		// 3: far below, the contact paragraph picked as an element. A person takes
+		// longer to get there: the screenshot of the two marks above is done.
+		await Bun.sleep(1000);
 		await page.eval(
 			`window.scrollTo(0, document.querySelector("[data-truth=contact]").getBoundingClientRect().top + scrollY - 200)`,
 		);
@@ -542,3 +544,130 @@ describe.skipIf(browserBinary === undefined)(
 		}, 90_000);
 	},
 );
+
+describe.skipIf(browserBinary === undefined)("screenshot scale", () => {
+	let h: Harness;
+
+	beforeAll(async () => {
+		h = await startHarness(browserBinary as string);
+	}, 60_000);
+
+	afterAll(async () => {
+		await h?.stop();
+	});
+
+	test("crops follow the captured image, not devicePixelRatio", async () => {
+		const { page, tabId } = await h.open("v1");
+		// devicePixelRatio 2, while Chrome still captures at 1×: like browser
+		// zoom or DevTools' device mode.
+		await page.send("Emulation.setDeviceMetricsOverride", {
+			width: 1280,
+			height: 800,
+			deviceScaleFactor: 2,
+			mobile: false,
+		});
+		await showToolbar(h, page, tabId);
+		await markElement(page, "[data-truth=submit]", "Too pale");
+		await saveAs(page, "Scale");
+		const sizes = await h.control.eval<
+			Record<string, { width: number; height: number }>
+		>(
+			`new Promise((resolve) => { const o = indexedDB.open("overmark"); o.onsuccess = () => { const tx = o.result.transaction(["cases", "images"]); const cases = tx.objectStore("cases").getAll(); const images = tx.objectStore("images").getAll(); const keys = tx.objectStore("images").getAllKeys(); tx.oncomplete = () => { const id = cases.result.find((c) => c.title === "Scale").id; const out = {}; keys.result.forEach((k, i) => { if (k.startsWith(id + "/")) out[k.slice(id.length + 1)] = { width: images.result[i].width, height: images.result[i].height }; }); resolve(out); }; }; })`,
+		);
+		const shot = sizes["shots/s1.webp"];
+		const crop = sizes["crops/a1.webp"];
+		const button = await page.eval<{ width: number; height: number }>(
+			`(() => { const r = document.querySelector("[data-truth=submit]").getBoundingClientRect(); return { width: r.width, height: r.height }; })()`,
+		);
+		expect(shot).toBeDefined();
+		expect(crop).toBeDefined();
+		const scale = (shot?.width ?? 0) / 1280;
+		// The button plus a 40 px margin on each side, at the image's scale:
+		// not at devicePixelRatio's, which would double it.
+		const pad = 2 * 40 + 2;
+		expect(crop?.width ?? 0).toBeGreaterThanOrEqual(
+			Math.floor(button.width * scale),
+		);
+		expect(crop?.width ?? 0).toBeLessThanOrEqual(
+			Math.ceil((button.width + pad) * scale),
+		);
+		expect(crop?.height ?? 0).toBeGreaterThanOrEqual(
+			Math.floor(button.height * scale),
+		);
+		expect(crop?.height ?? 0).toBeLessThanOrEqual(
+			Math.ceil((button.height + pad) * scale),
+		);
+		await page.send("Page.close");
+	}, 60_000);
+});
+
+describe.skipIf(browserBinary === undefined)("the side panel", () => {
+	let h: Harness;
+
+	beforeAll(async () => {
+		h = await startHarness(browserBinary as string);
+	}, 60_000);
+
+	afterAll(async () => {
+		await h?.stop();
+	});
+
+	test("a verdict being typed survives the case changing; delete asks twice", async () => {
+		const { page, tabId } = await h.open("v1");
+		await showToolbar(h, page, tabId);
+		await markElement(page, "h1", "Too long");
+		await saveAs(page, "Panel test");
+		await page.click(shadow('[data-action="close"]'));
+
+		await h.control.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
+		await h.control.waitFor(`document.querySelector("[data-case]")`);
+		await h.control.eval(`document.querySelector("[data-case]").click()`);
+		await h.control.waitFor(`document.getElementById("verdict")`);
+		await h.control.eval(
+			`(() => { const v = document.getElementById("verdict"); v.focus(); v.value = "Typed, not saved"; v.dispatchEvent(new Event("input")); v.setSelectionRange(5, 5); })()`,
+		);
+
+		// Another mark, added from the page, changes the open case.
+		await page.activate();
+		await h.control.eval(`document.getElementById("add-marks").click()`);
+		await page.waitFor(
+			`${shadow('[data-role="status"]')}?.textContent.includes("Panel test")`,
+		);
+		await markElement(page, "[data-truth=tip]", "Say how much");
+		await page.click(shadow('[data-action="save"]'));
+		await page.click(shadow('[data-action="save-confirm"]'));
+		await page.waitFor(
+			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+			20_000,
+		);
+		await h.control.waitFor(
+			`document.querySelectorAll(".annotation").length === 2`,
+		);
+		expect(
+			await h.control.eval<{ value: string; focused: boolean; at: number }>(
+				`(() => { const v = document.getElementById("verdict"); return { value: v.value, focused: document.activeElement === v, at: v.selectionStart }; })()`,
+			),
+		).toEqual({ value: "Typed, not saved", focused: true, at: 5 });
+
+		// Saving the verdict, then deleting: the first click only asks.
+		await h.control.eval(`document.getElementById("save-verdict").click()`);
+		await h.control.waitFor(
+			`document.getElementById("verdict-status")?.textContent === "Saved"`,
+		);
+		await h.control.eval(`document.getElementById("delete-case").click()`);
+		expect(
+			await h.control.eval<string>(
+				`document.getElementById("delete-case").textContent`,
+			),
+		).toBe("Really delete?");
+		await Bun.sleep(600);
+		await h.control.eval(`document.getElementById("delete-case").click()`);
+		await h.control.waitFor(`!document.getElementById("home").hidden`);
+		await h.control.waitFor(
+			`![...document.querySelectorAll("[data-case] .title")].some((t) => t.textContent === "Panel test")`,
+		);
+		await page.send("Page.close");
+	}, 90_000);
+});

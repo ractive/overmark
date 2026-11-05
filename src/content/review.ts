@@ -1,25 +1,24 @@
 /**
  * Loading a case onto the page in front: each annotation's element is looked
  * for by its details (match.ts) and outlined with its number, green when
- * found, amber and dashed when only probable or tied.
+ * found, amber and dashed when only probable or tied. An element that a
+ * re-render replaced afterwards is looked for again.
  */
 
-import type { Annotation, Case, ElementDetails } from "../lib/case.ts";
 import {
-	createContext,
+	type Candidate,
+	createSearch,
+	findCandidates,
+	type PageSearch,
+} from "../lib/candidates.ts";
+import type { Annotation, Case } from "../lib/case.ts";
+import {
 	cssSelector,
 	type DescribeContext,
 	describeElement,
 	summarize,
-	TEST_ID_ATTRIBUTES,
 } from "../lib/element.ts";
-import {
-	classify,
-	clearTextCache,
-	FOUND,
-	PROBABLE,
-	rank,
-} from "../lib/match.ts";
+import { clearTextCache } from "../lib/match.ts";
 import type {
 	AnnotationMatch,
 	CandidateInfo,
@@ -27,25 +26,11 @@ import type {
 } from "../lib/messages.ts";
 import type { Overlay } from "./overlay.ts";
 
-/** More candidates than this are not scored for one annotation. */
-const MAX_CANDIDATES = 8000;
-/** After this long, annotations are not searched for in the whole page. */
-const FULL_SCAN_BUDGET_MS = 4000;
-
-interface Candidate {
-	element: Element;
-	score: number;
-}
-
 interface Entry {
 	annotation: Annotation;
 	/** The best elements worth showing, best first. */
 	candidates: Candidate[];
 	match: AnnotationMatch;
-}
-
-function quote(value: string): string {
-	return `"${value.replace(/["\\]/g, "\\$&")}"`;
 }
 
 /** Let the page run between annotations: loading a big case takes a while. */
@@ -79,31 +64,7 @@ export class Reviewer {
 	async load(c: Case): Promise<LoadResult> {
 		const generation = ++this.#generation;
 		clearTextCache(); // what an abandoned load left behind
-		const doc = this.overlay.doc;
-		const host = this.overlay.host;
-		const context = createContext(doc);
-		const cache = new Map<Element, ElementDetails>();
-		const describe = (e: Element) => {
-			let d = cache.get(e);
-			if (d === undefined) {
-				d = describeElement(e, context, { selector: false });
-				cache.set(e, d);
-			}
-			return d;
-		};
-		const own = (e: Element) => e !== host && !host.contains(e);
-		let everything: { elements: Element[]; truncated: boolean } | undefined;
-		const all = () => {
-			if (everything === undefined) {
-				const list = [...doc.body.querySelectorAll("*")].filter(own);
-				everything = {
-					elements: list.slice(0, MAX_CANDIDATES),
-					truncated: list.length > MAX_CANDIDATES,
-				};
-			}
-			return everything;
-		};
-		const deadline = performance.now() + FULL_SCAN_BUDGET_MS;
+		const search = this.#search();
 		const entries: Entry[] = [];
 		for (const annotation of [...c.annotations].sort(
 			(a, b) => a.number - b.number,
@@ -111,56 +72,7 @@ export class Reviewer {
 			await yieldToPage();
 			if (generation !== this.#generation)
 				throw new Error("Loading was replaced by another one.");
-			const base = {
-				annotationId: annotation.id,
-				number: annotation.number,
-				current: 0,
-			};
-			const stored = annotation.element;
-			if (stored === null) {
-				entries.push({
-					annotation,
-					candidates: [],
-					match: { ...base, status: "no-element", score: 0, candidates: [] },
-				});
-				continue;
-			}
-			let elements = this.#likely(stored).filter(own);
-			let truncated = elements.length > MAX_CANDIDATES;
-			elements = elements.slice(0, MAX_CANDIDATES);
-			let ranked = rank(stored, elements.map(describe));
-			if ((ranked[0]?.score ?? 0) < PROBABLE) {
-				// The tag or role may have changed: score the whole page, while
-				// there is time.
-				if (performance.now() < deadline) {
-					({ elements, truncated } = all());
-					ranked = rank(stored, elements.map(describe));
-				} else {
-					truncated = true;
-				}
-			}
-			const status = classify(ranked);
-			const kept =
-				status === "lost"
-					? []
-					: ranked.filter((r, i) => i === 0 || r.score >= PROBABLE);
-			const candidates = kept.map((r) => ({
-				element: elements[r.index] as Element,
-				score: r.score,
-			}));
-			entries.push({
-				annotation,
-				candidates,
-				match: {
-					...base,
-					status,
-					score: ranked[0]?.score ?? 0,
-					candidates: candidates.map((k) =>
-						this.#info(k.element, k.score, context),
-					),
-					...(truncated ? { truncated: true } : {}),
-				},
-			});
+			entries.push(this.#find(search, annotation));
 		}
 		this.#case = c;
 		this.#entries = entries;
@@ -168,7 +80,12 @@ export class Reviewer {
 		this.overlay.setReviewing(true);
 		clearInterval(this.#timer);
 		// Layout changes (lazy content, accordions) move elements without a scroll.
-		this.#timer = setInterval(() => this.#schedule(), 500);
+		this.#timer = setInterval(() => {
+			// One search a tick: a new route replaces every element at once.
+			const replaced = this.#entries.find((e) => this.#replaced(e));
+			if (replaced !== undefined) this.#findAgain(replaced);
+			this.#schedule();
+		}, 500);
 		this.#renderBar();
 		this.#render();
 		clearTextCache();
@@ -179,23 +96,51 @@ export class Reviewer {
 		};
 	}
 
-	/** Elements likely to be the stored one: same tag, test id, id or role. */
-	#likely(stored: ElementDetails): Element[] {
-		const doc = this.overlay.doc;
-		const found = new Set<Element>(doc.getElementsByTagName(stored.tag));
-		const add = (selector: string) => {
-			try {
-				for (const e of doc.querySelectorAll(selector)) found.add(e);
-			} catch {
-				// An odd value that is no valid selector.
-			}
+	#search(): PageSearch {
+		return createSearch(this.overlay.doc, { exclude: this.overlay.host });
+	}
+
+	#find(search: PageSearch, annotation: Annotation): Entry {
+		const base = {
+			annotationId: annotation.id,
+			number: annotation.number,
+			current: 0,
 		};
-		if (stored.testId)
-			for (const name of TEST_ID_ATTRIBUTES)
-				add(`[${name}=${quote(stored.testId)}]`);
-		if (stored.id) add(`[id=${quote(stored.id)}]`);
-		if (stored.role) add(`[role=${quote(stored.role)}]`);
-		return [...found];
+		const stored = annotation.element;
+		if (stored === null)
+			return {
+				annotation,
+				candidates: [],
+				match: { ...base, status: "no-element", score: 0, candidates: [] },
+			};
+		const found = findCandidates(search, stored);
+		const { status, candidates, truncated } = found;
+		return {
+			annotation,
+			candidates,
+			match: {
+				...base,
+				status,
+				score: found.score,
+				candidates: candidates.map((k) =>
+					this.#info(k.element, k.score, search.context),
+				),
+				...(truncated ? { truncated: true } : {}),
+			},
+		};
+	}
+
+	/** The shown element left the page: a re-render, or it is gone. */
+	#replaced(entry: Entry): boolean {
+		return this.#element(entry)?.isConnected === false;
+	}
+
+	#findAgain(entry: Entry): void {
+		const fresh = this.#find(this.#search(), entry.annotation);
+		entry.candidates = fresh.candidates;
+		entry.match = fresh.match;
+		clearTextCache();
+		this.#renderBar();
 	}
 
 	#info(el: Element, score: number, context: DescribeContext): CandidateInfo {
@@ -215,6 +160,7 @@ export class Reviewer {
 		const count = entry.candidates.length;
 		if (candidate !== undefined && count > 0)
 			entry.match.current = ((candidate % count) + count) % count;
+		if (this.#replaced(entry)) this.#findAgain(entry);
 		entry.match.score = entry.candidates[entry.match.current]?.score ?? 0;
 		this.#focused = annotationId;
 		this.#element(entry)?.scrollIntoView({
@@ -261,10 +207,10 @@ export class Reviewer {
 			items.push({
 				number: entry.annotation.number,
 				rect: { x: r.x, y: r.y, width: r.width, height: r.height },
-				// The shown candidate's own score decides the colour.
+				// The shown candidate itself decides the colour.
 				found:
 					entry.match.status !== "ambiguous" &&
-					(entry.candidates[entry.match.current]?.score ?? 0) >= FOUND,
+					entry.candidates[entry.match.current]?.found === true,
 				focused: entry.annotation.id === this.#focused,
 			});
 		}

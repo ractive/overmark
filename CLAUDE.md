@@ -122,9 +122,12 @@ a tab-mcp relay. Design, plans and decisions live in `kb/` (hyalo, OKF profile):
 with `kb/design/overview.md` and `kb/iterations/`.
 
 - Layout: `src/background.ts` (service worker), `src/content/` (overlay, drawing, save,
-  highlighting), `src/sidepanel/` (case list and viewer, `TabMcp` and tools), `src/lib/`
-  (case format, element details, matching, zip, export, store, images). `scripts/build.ts`
-  builds `dist/` (load it unpacked); `scripts/icons.ts` makes the icons.
+  highlighting; `activity.ts` is the page's one state machine), `src/sidepanel/`
+  (`state.ts` the panel's one state, `view.ts` draws it, `main.ts` the actions; `mcp.ts`
+  and `tools.ts` for the AI app), `src/lib/` (case format, element details with the
+  allow-list of what is recorded, matching and `candidates.ts`, zip, export, store,
+  images, `marks.ts` how a mark looks). `scripts/build.ts` builds `dist/` (load it unpacked); `scripts/icons.ts` makes
+  the icons; `bun test/e2e/pilot.ts <url>` measures matching on a real page.
 - Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
   `bun run fix` to format; `bun run build`, `bun run zip`.
 - End-to-end tests (`test/e2e/`) need Chromium or Chrome for Testing (`CHROME_PATH`, or

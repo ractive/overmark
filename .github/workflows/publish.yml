@@ -1,11 +1,12 @@
 name: Publish to Chrome Web Store
 
 # Uploads the store zip of a GitHub release to the Chrome Web Store item and,
-# when asked, submits it for review. Run it by hand (Actions → Publish to
-# Chrome Web Store → Run workflow) after the release workflow has created the
-# release. The first version is submitted by hand in the developer dashboard:
-# the API only updates an existing item. Setup and the secrets it needs:
-# kb/operations/chrome-web-store.md.
+# when asked, submits it for review. Run it by hand after the release workflow
+# has created the release: Actions → Publish to Chrome Web Store → Run workflow,
+# and pick the release's tag under "Use workflow from". The tag it runs on is
+# the tag it uploads; a run from a branch fails. The first version is submitted
+# by hand in the developer dashboard: the API only updates an existing item.
+# Setup and the secrets it needs: kb/operations/chrome-web-store.md.
 #
 # The upload uses mnao305/chrome-extension-upload (Chrome Web Store API v2
 # through fregante's chrome-webstore-upload), pinned to a commit, because it
@@ -15,10 +16,6 @@ name: Publish to Chrome Web Store
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag, e.g. v0.1.0"
-        required: true
-        type: string
       submit:
         description: "Submit for review after the upload (otherwise it stays a draft in the dashboard)"
         type: boolean
@@ -41,15 +38,17 @@ jobs:
       - name: Download the release's store zip
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ github.ref_name }}
         run: |
+          test "$GITHUB_REF_TYPE" = tag \
+            || { echo "$TAG is no tag: pick the release's tag under \"Use workflow from\""; exit 1; }
           echo "$TAG" | grep -Eq '^v(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){0,3}$' \
             || { echo "not a version tag: $TAG"; exit 1; }
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
             --pattern "overmark-${TAG#v}-store.zip" --output store.zip
       - name: The zip is a store build of that version
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ github.ref_name }}
         run: |
           manifest="$(unzip -p store.zip manifest.json)"
           test "$(jq -r .version <<<"$manifest")" = "${TAG#v}" \

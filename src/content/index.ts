@@ -9,7 +9,9 @@ import type {
 	Broadcast,
 	ContentRequest,
 	DescribedElement,
+	Released,
 } from "../lib/messages.ts";
+import { PageActivity } from "./activity.ts";
 import { Annotator } from "./annotator.ts";
 import { PageBlur } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
@@ -20,39 +22,47 @@ declare global {
 }
 
 const pageBlur = new PageBlur(document);
+const activity = new PageActivity();
 
 /** Lets go of the blur an AI app's `element:mark` or `page:blur` holds. */
 let releaseBlur: (() => void) | undefined;
-
-function blur(allForms: boolean): void {
-	releaseBlur?.();
-	releaseBlur = pageBlur.hold(allForms);
-}
 
 function unblur(): void {
 	releaseBlur?.();
 	releaseBlur = undefined;
 }
 
-const SAVING =
-	"The user is saving marks on this page right now; try again in a few seconds.";
+/** An AI app's screenshot is over (or abandoned): its mark and blur go. */
+function endAi(overlay: Overlay): void {
+	overlay.setTemporaryMark(null);
+	unblur();
+}
 
 function mark(
 	overlay: Overlay,
-	annotator: Annotator,
 	selector: string,
 	number: number,
 	blurForms: boolean,
 ): DescribedElement {
-	if (annotator.state().saving) return { ok: false, error: SAVING };
-	let el: Element | null;
+	let matches: Element[];
 	try {
-		el = document.querySelector(selector);
+		matches = [...document.querySelectorAll(selector)].filter(
+			(e) => !overlay.host.contains(e),
+		);
 	} catch {
 		return { ok: false, error: `Not a valid CSS selector: ${selector}` };
 	}
-	if (el === null || overlay.host.contains(el))
+	if (matches.length === 0)
 		return { ok: false, error: `No element on this page matches ${selector}` };
+	// Layouts often keep a hidden copy: a mark on it would sit in the corner.
+	const el = matches.find((e) => {
+		const box = e.getBoundingClientRect();
+		return box.width > 0 && box.height > 0;
+	});
+	if (el === undefined)
+		return { ok: false, error: `Nothing that matches ${selector} is visible.` };
+	const started = activity.begin("ai-mark", () => endAi(overlay));
+	if (!started.ok) return started;
 	el.scrollIntoView({
 		block: "center",
 		inline: "nearest",
@@ -61,7 +71,7 @@ function mark(
 	const r = el.getBoundingClientRect();
 	const rect = { x: r.x, y: r.y, width: r.width, height: r.height };
 	overlay.setTemporaryMark({ number, rect });
-	blur(blurForms);
+	releaseBlur = pageBlur.hold(blurForms);
 	return {
 		ok: true,
 		details: describeElement(el),
@@ -82,7 +92,7 @@ function start(): void {
 	// behind; its script can no longer be reached, so take the page over.
 	document.getElementById(HOST_ID)?.remove();
 	const overlay = new Overlay(document);
-	const annotator = new Annotator(overlay, pageBlur);
+	const annotator = new Annotator(overlay, pageBlur, activity);
 	const reviewer = new Reviewer(overlay);
 	const state = () => {
 		const s = annotator.state();
@@ -114,7 +124,18 @@ function start(): void {
 				case "overlay:state":
 					sendResponse(state());
 					break;
+				case "overlay:settings":
+					annotator.setBlurForms(message.blurForms);
+					sendResponse(state());
+					break;
+				case "page:captured":
+					annotator.captured();
+					break;
 				case "case:load":
+					if (activity.busy !== undefined) {
+						sendResponse({ error: activity.busy });
+						break;
+					}
 					reviewer.load(message.case).then(sendResponse, (error: unknown) =>
 						sendResponse({
 							error: error instanceof Error ? error.message : String(error),
@@ -122,6 +143,10 @@ function start(): void {
 					);
 					return true; // answers asynchronously
 				case "case:show":
+					if (activity.busy !== undefined) {
+						sendResponse({ error: activity.busy });
+						break;
+					}
 					sendResponse(
 						reviewer.caseId === message.caseId
 							? (reviewer.show(message.annotationId, message.candidate) ?? null)
@@ -134,32 +159,29 @@ function start(): void {
 					break;
 				case "element:mark":
 					sendResponse(
-						mark(
-							overlay,
-							annotator,
-							message.selector,
-							message.number,
-							message.blurForms,
-						),
+						mark(overlay, message.selector, message.number, message.blurForms),
 					);
 					break;
-				case "element:unmark":
-					overlay.setTemporaryMark(null);
+				case "element:unmark": {
+					const held = activity.now.kind === "ai-mark";
+					activity.end("ai-mark");
+					endAi(overlay);
+					sendResponse({ held } satisfies Released);
+					break;
+				}
+				case "page:blur": {
+					const started = activity.begin("ai-capture", () => endAi(overlay));
+					if (started.ok) releaseBlur = pageBlur.hold(message.blurForms);
+					sendResponse(started satisfies BlurResult);
+					break;
+				}
+				case "page:unblur": {
+					const held = activity.now.kind === "ai-capture";
+					activity.end("ai-capture");
 					unblur();
-					sendResponse(state());
+					sendResponse({ held } satisfies Released);
 					break;
-				case "page:blur":
-					if (annotator.state().saving) {
-						sendResponse({ ok: false, error: SAVING } satisfies BlurResult);
-						break;
-					}
-					blur(message.blurForms);
-					sendResponse({ ok: true } satisfies BlurResult);
-					break;
-				case "page:unblur":
-					unblur();
-					sendResponse(state());
-					break;
+				}
 				default:
 					return false;
 			}

@@ -78,3 +78,62 @@ consequential tool of a `TabMcp` or for none, so Overmark turns it off: `add_ann
 `set_verdict` and `delete_case` ask in the side panel each time. The question names the
 case and the page (an `onConfirm` that adds them to the description, then hands over to
 `confirmInPage`). A per-tool "Always allow" would need a client release that offers it.
+
+## DEC-009: What is recorded about an element is an allow-list
+
+The reviews found typed text leaking into element details twice (through an editor's
+wrapper, through a textarea's text). Instead of subtracting cases from "the element's
+text", `src/lib/element.ts` names every recorded field with its source and limit, and
+`ATTRIBUTE_RULES` every recorded attribute with its rule; an attribute without a rule is
+never read. Text comes only from `pageText`, which skips fields, editors, scripts and
+styles. Links keep their path only: a query string or fragment can carry personal data
+or tokens. Matching compares link paths, which is enough to tell links apart.
+
+## DEC-010: The page's one state machine
+
+The content script guarded the user's save against an AI app's screenshot (and the
+other way round) with flags spread over three files (`#saving`, `#hideAfterSave`,
+`#showAfterSave`, the temporary mark, blur holders); every review found another race.
+`PageActivity` (`src/content/activity.ts`) holds exactly one of idle, saving, an AI
+mark or an AI capture. What arrives during a save is refused (AI) or recorded as what
+to do afterwards (toolbar: show another case, or hide if the save worked). An AI
+activity ends by itself after 10 s, so a side panel that crashed cannot block saving.
+
+## DEC-011: The side panel draws one state
+
+The panel kept its state in a dozen module variables (the tab, the overlay, the open
+case, the loaded results, object URLs, render counters) and re-rendered from several
+places; the second review found five races there. Now `PanelState` (`src/sidepanel/state.ts`)
+holds all of it, actions in `main.ts` change it only through `update`, which schedules
+one `render` (`view.ts`), and every asynchronous read goes through a `Latest`, so an
+older read never overwrites a newer one. The verdict field stays the same element while
+its case is open, so typing, focus and cursor survive every render; the other parts are
+redrawn when what they show changed.
+
+## DEC-012: A mark's screenshot is taken when the mark is drawn
+
+The full review found the same fault behind several findings: screenshots were taken at
+saving, sometimes long after the mark. By then a container had scrolled, the app had
+moved to another route, the menu the mark was about had closed, or the layout had moved,
+and the save put the mark on whatever was there. Since the screenshot is the record
+(DEC-002), it has to show what the user saw when marking.
+
+Now each mark gets its screenshot at once, under a pending path, with the element's
+details read at the same moment. Marks drawn while nothing scrolled or changed in the DOM
+share one screenshot. Screenshots show the page alone: saving draws the marks onto them
+(`paintMark`, the same shapes the overlay shows in SVG), so undoing a mark and renumbering
+marks for another case never touch an image. Saving no longer scrolls the page, which
+made the planning of screenshot windows unnecessary. A shot records the page's address,
+because one case can span an app's routes.
+
+The page is never moved while the user works: a first version went back to where a mark
+was drawn when the page had moved on before its turn, and a click in that moment hit
+the wrong element. Now such a mark waits, and saving takes its screenshot from where it
+was drawn, when nobody is using the page. That is the rare case (the screenshot waits
+for Chrome's two captures a second, or for an AI app's screenshot); what the page
+showed then is gone, but the scroll position is right.
+
+The price: every new view flashes the overlay away for about 100 ms, and pending
+screenshots live as long as their marks, so they are swept after 7 days instead of
+10 minutes.
+
