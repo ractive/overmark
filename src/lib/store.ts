@@ -34,6 +34,14 @@ export interface CaseStore {
 	deleteImages(caseId: string, paths: readonly string[]): Promise<void>;
 	/** Deletes the case's images whose paths are not in `keep`. */
 	pruneImages(caseId: string, keep: ReadonlySet<string>): Promise<void>;
+	/**
+	 * Replace a case and all its images at once (an import): either the new
+	 * case and images are stored, or the old ones are kept.
+	 */
+	replaceCase(
+		value: Case,
+		images: ReadonlyMap<string, StoredImage>,
+	): Promise<void>;
 }
 
 export type CaseChange = (current: Case | undefined) => {
@@ -111,6 +119,16 @@ export class MemoryStore implements CaseStore {
 			if (key.startsWith(prefix) && !keep.has(key.slice(prefix.length)))
 				this.images.delete(key);
 		}
+	}
+
+	async replaceCase(
+		value: Case,
+		images: ReadonlyMap<string, StoredImage>,
+	): Promise<void> {
+		await this.deleteCase(value.id);
+		for (const [path, image] of images)
+			this.images.set(imageKey(value.id, path), image);
+		this.cases.set(value.id, structuredClone(value));
 	}
 }
 
@@ -254,6 +272,20 @@ export class IdbStore implements CaseStore {
 		for (const key of keys) {
 			if (!keep.has(key.slice(caseId.length + 1))) store.delete(key);
 		}
+		await done(tx);
+	}
+
+	async replaceCase(
+		value: Case,
+		images: ReadonlyMap<string, StoredImage>,
+	): Promise<void> {
+		const db = await this.#open();
+		const tx = db.transaction(["cases", "images"], "readwrite");
+		const store = tx.objectStore("images");
+		store.delete(prefixRange(value.id));
+		for (const [path, image] of images)
+			store.put(image, imageKey(value.id, path));
+		tx.objectStore("cases").put(value);
 		await done(tx);
 	}
 }

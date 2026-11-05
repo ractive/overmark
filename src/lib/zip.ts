@@ -20,7 +20,10 @@ export interface WriteZipOptions {
 /** Limits that keep a hostile archive from exhausting memory. */
 export interface ReadZipOptions {
 	maxEntries?: number;
+	/** The most bytes all included entries may unpack to together. */
 	maxTotalBytes?: number;
+	/** Unpack only the entries this accepts (default: all). */
+	include?: (name: string) => boolean;
 }
 
 export class ZipError extends Error {
@@ -76,7 +79,9 @@ async function inflate(
 	const chunks: Uint8Array[] = [];
 	let length = 0;
 	for (;;) {
-		const { done, value } = await reader.read();
+		const { done, value } = await reader.read().catch(() => {
+			throw new ZipError(`damaged entry: ${name}`);
+		});
 		if (done) break;
 		length += value.length;
 		if (length > size) {
@@ -228,6 +233,7 @@ export async function readZip(
 		const name = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength));
 		at += 46 + nameLength + extraLength + commentLength;
 		if (name.endsWith("/")) continue;
+		if (options.include !== undefined && !options.include(name)) continue;
 		if (flags & 1) throw new ZipError(`encrypted entry: ${name}`);
 		if (compressedSize === 0xffffffff || size === 0xffffffff)
 			throw new ZipError(`zip64 entry: ${name}`);

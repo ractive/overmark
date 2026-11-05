@@ -8,6 +8,7 @@
 
 import {
 	type ElementDetails,
+	LANGUAGE,
 	newId,
 	type PageInfo,
 	type Point,
@@ -137,7 +138,7 @@ export class Annotator {
 		win?.addEventListener(
 			"keydown",
 			(e) => {
-				if (!overlay.visible || e.key !== "Escape") return;
+				if (!overlay.annotating || e.key !== "Escape") return;
 				if (this.#editing !== null) this.#commitComment();
 				else if (this.#saveForm) this.#setSaveForm(false);
 				else this.setTool(null);
@@ -149,7 +150,7 @@ export class Annotator {
 
 	state(): OverlayState {
 		const state: OverlayState = {
-			visible: this.overlay.visible,
+			visible: this.overlay.annotating,
 			url: location.href,
 			title: document.title,
 			drafts: this.#drafts.length,
@@ -167,7 +168,7 @@ export class Annotator {
 			this.#renumber();
 		}
 		this.#hideAfterSave = false;
-		this.overlay.show();
+		this.overlay.setAnnotating(true);
 		this.#renderToolbar();
 		this.#render();
 	}
@@ -180,7 +181,7 @@ export class Annotator {
 		}
 		if (this.#editing !== null) this.#commitComment();
 		this.setTool(null);
-		this.overlay.hide();
+		this.overlay.setAnnotating(false);
 	}
 
 	setTool(tool: Tool | null): void {
@@ -414,7 +415,7 @@ export class Annotator {
 	}
 
 	#render(): void {
-		if (!this.overlay.visible) return;
+		if (!this.overlay.annotating) return;
 		const s = this.#scroll();
 		const toWindow = (shape: Shape) => translateShape(shape, -s.x, -s.y);
 		const hover =
@@ -526,6 +527,13 @@ export class Annotator {
 					? `Adding to “${this.#target.title}”`
 					: "Choose a tool"
 				: `${count} mark${count === 1 ? "" : "s"}`);
+		const top = bar.classList.contains("top");
+		const move = this.#button(top ? "↓" : "↑", "move-toolbar", () => {
+			bar.classList.toggle("top");
+			this.#renderToolbar();
+		});
+		move.title = top ? "Move the toolbar down" : "Move the toolbar up";
+		move.setAttribute("aria-label", move.title);
 		bar.replaceChildren(
 			brand,
 			...tools,
@@ -533,6 +541,7 @@ export class Annotator {
 			undo,
 			save,
 			this.#button("Close", "close", () => this.hide()),
+			move,
 			status,
 		);
 	}
@@ -645,7 +654,9 @@ export class Annotator {
 			const page: PageInfo = {
 				url: location.href,
 				title: doc.title,
-				lang: doc.documentElement.lang || "",
+				lang: LANGUAGE.test(doc.documentElement.lang)
+					? doc.documentElement.lang
+					: "",
 				viewport,
 				userAgent: navigator.userAgent,
 			};

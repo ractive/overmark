@@ -4,9 +4,19 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { webpSize } from "../../src/lib/export.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
-
-const HOST = `document.getElementById("overmark-root")`;
+import {
+	countColour,
+	type Db,
+	HOST,
+	imageBytes,
+	markElement,
+	READ_DB,
+	saveAs,
+	shadow,
+	showToolbar,
+} from "./steps.ts";
 
 describe.skipIf(browserBinary === undefined)("extension", () => {
 	let h: Harness;
@@ -72,40 +82,6 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		await page.send("Page.close");
 	});
 });
-
-const shadow = (selector: string) =>
-	`${HOST}.shadowRoot.querySelector(${JSON.stringify(selector)})`;
-
-const READ_DB = `new Promise((resolve, reject) => {
-	const open = indexedDB.open("overmark");
-	open.onerror = () => reject(open.error);
-	open.onsuccess = () => {
-		const tx = open.result.transaction(["cases", "images"]);
-		const cases = tx.objectStore("cases").getAll();
-		const images = tx.objectStore("images").getAll();
-		const keys = tx.objectStore("images").getAllKeys();
-		tx.oncomplete = () => resolve({
-			cases: cases.result,
-			images: keys.result.map((key, i) => ({ key, size: images.result[i].blob.size, type: images.result[i].blob.type })),
-		});
-	};
-})`;
-
-interface Db {
-	cases: {
-		id: string;
-		title: string;
-		shots: { id: string; scrollY: number }[];
-		annotations: {
-			number: number;
-			shot: string;
-			comment: string;
-			shape: { kind: string };
-			element: { tag: string; text?: string; name?: string } | null;
-		}[];
-	}[];
-	images: { key: string; size: number; type: string }[];
-}
 
 describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 	let h: Harness;
@@ -214,6 +190,13 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			expect(image.size).toBeGreaterThan(500);
 		}
 
+		// Chrome's own WebP passes the header check imports use.
+		const shot = await imageBytes(h.control, "Prämienrechner", "shots/s1.webp");
+		expect(webpSize(Buffer.from(shot.base64, "base64"))).toEqual({
+			width: shot.width,
+			height: shot.height,
+		});
+
 		// The side panel lists it.
 		await h.control.waitFor(`document.querySelector("[data-case]")`);
 		expect(
@@ -266,3 +249,107 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.send("Page.close");
 	}, 60_000);
 });
+
+describe.skipIf(browserBinary === undefined)(
+	"loading onto another build",
+	() => {
+		let h: Harness;
+
+		beforeAll(async () => {
+			h = await startHarness(browserBinary as string);
+		}, 60_000);
+
+		afterAll(async () => {
+			await h?.stop();
+		});
+
+		test("a case from v1 finds its elements on v2 through the side panel", async () => {
+			const v1 = await h.open("v1");
+			await showToolbar(h, v1.page, v1.tabId);
+			await markElement(v1.page, "[data-truth=submit]", "Too pale");
+			await markElement(v1.page, "[data-truth=tip]", "Say how much");
+			await markElement(v1.page, "[data-truth=contact]", "Add a phone number");
+			await markElement(v1.page, "footer", "Footer is gone in v2");
+			await saveAs(v1.page, "Reload test");
+			await v1.page.send("Page.close");
+
+			const v2 = await h.open("v2");
+			await v2.page.eval(`document.querySelector("footer").remove()`);
+			await v2.page.activate();
+			await h.control.eval(
+				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
+			);
+			// The side panel (the control page) acts on the tab in front: v2.
+			// goto waits for the new document; a reload through eval would not.
+			await h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			);
+			await h.control.waitFor(`document.querySelector("[data-case]")`);
+			await h.control.eval(`document.querySelector("[data-case]").click()`);
+			await h.control.waitFor(`document.getElementById("load-case")`);
+			await h.control.eval(`document.getElementById("load-case").click()`);
+			await h.control.waitFor(
+				`document.querySelectorAll(".match").length === 4`,
+				10_000,
+			);
+
+			const statuses = await h.control.eval<string[]>(
+				`[...document.querySelectorAll(".match")].map((m) => m.dataset.status)`,
+			);
+			expect(
+				statuses.slice(0, 3).every((s) => s === "found" || s === "probable"),
+			).toBe(true);
+			expect(statuses[3]).toBe("lost");
+
+			// Each found mark is outlined on the right element of v2.
+			const db = await h.control.eval<Db>(READ_DB);
+			const saved = db.cases.find((c) => c.title === "Reload test");
+			const result = await h.control.eval<{
+				matches: { number: number; candidates: { selector: string }[] }[];
+			}>(
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "case:load", case: ${JSON.stringify(saved)} })`,
+			);
+			const truths = ["submit", "tip", "contact"];
+			for (const [i, truth] of truths.entries()) {
+				const selector = result.matches[i]?.candidates[0]?.selector ?? "";
+				expect(
+					await v2.page.eval<string | null>(
+						`document.querySelector(${JSON.stringify(selector)})?.dataset.truth ?? null`,
+					),
+				).toBe(truth);
+			}
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
+				),
+			).toBe(3);
+
+			// "Show" scrolls the page to the contact paragraph.
+			await h.control.eval(
+				`document.querySelectorAll(".match")[2].querySelector("[data-action=show]").click()`,
+			);
+			await v2.page.waitFor(
+				`Math.abs(document.querySelector("[data-truth=contact]").getBoundingClientRect().top - innerHeight / 2) < innerHeight / 2`,
+			);
+
+			// Marks drawn while a case is loaded: its outlines stay out of the screenshot.
+			await showToolbar(h, v2.page, v2.tabId);
+			await markElement(v2.page, "[data-truth=tip]", "Still unclear");
+			expect(
+				await v2.page.eval<number>(
+					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
+				),
+			).toBe(3);
+			await saveAs(v2.page, "With outlines loaded");
+			expect(
+				await countColour(
+					h.control,
+					"With outlines loaded",
+					"shots/s1.webp",
+					[0x1e, 0x8e, 0x3e],
+				),
+			).toBe(0);
+			await v2.page.send("Page.close");
+		}, 90_000);
+	},
+);

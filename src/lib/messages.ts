@@ -3,6 +3,8 @@
  * (`chrome.runtime` and `chrome.tabs` messaging).
  */
 
+import type { Case } from "./case.ts";
+import type { MatchStatus } from "./match.ts";
 import type { SaveRequest } from "./save.ts";
 
 /** Annotations go into this existing case instead of a new one. */
@@ -22,9 +24,46 @@ export type ContentRequest =
 			blurForms?: boolean;
 	  }
 	| { type: "overlay:hide" }
-	| { type: "overlay:state" };
+	| { type: "overlay:state" }
+	/** Find the case's elements on this page and outline them (`LoadResult`). */
+	| { type: "case:load"; case: Case }
+	/** Scroll to one annotation's element, or to another candidate (`AnnotationMatch`). */
+	| { type: "case:show"; annotationId: string; candidate?: number }
+	/** Remove the outlines (`OverlayState`). */
+	| { type: "case:clear" };
 
-/** The content script's answer to every `ContentRequest`. */
+/** One of the best elements for an annotation on this page. */
+export interface CandidateInfo {
+	score: number;
+	/** One line about the element (element.ts `summarize`). */
+	summary: string;
+	selector: string;
+	/** Rendered with a size; `false` for hidden elements (e.g. another layout). */
+	visible: boolean;
+}
+
+/** Where an annotation's element is on this page. */
+export interface AnnotationMatch {
+	annotationId: string;
+	number: number;
+	/** `no-element`: the annotation recorded no element. */
+	status: MatchStatus | "no-element";
+	/** The shown candidate's score (0 for lost). */
+	score: number;
+	/** Which candidate is outlined. */
+	current: number;
+	candidates: CandidateInfo[];
+	/** Only part of the page was searched (very many elements, or out of time). */
+	truncated?: boolean;
+}
+
+export interface LoadResult {
+	caseId: string;
+	url: string;
+	matches: AnnotationMatch[];
+}
+
+/** The content script's answer to the `overlay:*` and `case:clear` requests. */
 export interface OverlayState {
 	visible: boolean;
 	url: string;
@@ -33,6 +72,8 @@ export interface OverlayState {
 	drafts: number;
 	saving: boolean;
 	target?: AnnotateTarget;
+	/** The case whose elements are outlined. */
+	loadedCase?: string;
 }
 
 /** What the content script asks the service worker. */

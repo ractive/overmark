@@ -5,7 +5,7 @@
  * (`contenteditable`, `role="textbox"`).
  */
 
-import type { ElementDetails, Rect } from "./case.ts";
+import { ELEMENT_ATTRIBUTES, type ElementDetails, type Rect } from "./case.ts";
 import { isGeneratedId, readableClass, readableClasses } from "./classes.ts";
 
 export const TEST_ID_ATTRIBUTES = [
@@ -14,16 +14,6 @@ export const TEST_ID_ATTRIBUTES = [
 	"data-test",
 	"data-qa",
 	"data-cy",
-] as const;
-
-const KEPT_ATTRIBUTES = [
-	"name",
-	"type",
-	"href",
-	"src",
-	"placeholder",
-	"alt",
-	"title",
 ] as const;
 
 const HEADINGS = "h1, h2, h3, h4, h5, h6, [role='heading']";
@@ -279,7 +269,7 @@ export function ancestorsOf(el: Element, depth = 6): string[] {
 
 function attributesOf(el: Element): Record<string, string> {
 	const out: Record<string, string> = {};
-	for (const name of KEPT_ATTRIBUTES) {
+	for (const name of ELEMENT_ATTRIBUTES) {
 		const value = el.getAttribute(name);
 		if (value === null || value === "") continue;
 		if (name === "href" || name === "src") {
@@ -390,6 +380,8 @@ export function documentRect(
 export function describeElement(
 	el: Element,
 	context: DescribeContext = createContext(el.ownerDocument),
+	/** Leave the selector out (it is slow): for scoring many candidates. */
+	options: { selector?: boolean } = {},
 ): ElementDetails {
 	const details: ElementDetails = {
 		tag: el.localName,
@@ -398,7 +390,7 @@ export function describeElement(
 		ancestors: ancestorsOf(el),
 		rect: documentRect(el, context.scroll),
 		page: context.page,
-		selector: cssSelector(el),
+		selector: options.selector === false ? "" : cssSelector(el),
 	};
 	const id = el.getAttribute("id");
 	if (id && !isGeneratedId(id)) details.id = id;

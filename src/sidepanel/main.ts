@@ -3,13 +3,27 @@
  */
 
 import {
+	type Annotation,
 	type Case,
 	MAX_VERDICT,
 	nextNumbers,
 	validateCase,
 } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
-import type { Broadcast, OverlayState } from "../lib/messages.ts";
+import {
+	exportCase,
+	exportFileName,
+	MAX_IMPORT_BYTES,
+	type ParsedExport,
+	readExport,
+	storeImport,
+} from "../lib/export.ts";
+import type {
+	AnnotationMatch,
+	Broadcast,
+	LoadResult,
+	OverlayState,
+} from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { byId, formatDate, h, samePath, shortUrl } from "./dom.ts";
@@ -23,6 +37,8 @@ const hint = byId<HTMLParagraphElement>("hint");
 const annotate = byId<HTMLButtonElement>("annotate");
 const blurForms = byId<HTMLInputElement>("blur-forms");
 const casesList = byId<HTMLDivElement>("cases");
+const importButton = byId<HTMLButtonElement>("import");
+const importFile = byId<HTMLInputElement>("import-file");
 
 const BLUR_KEY = "overmark:blur-forms";
 
@@ -34,6 +50,10 @@ let shownTabId: number | undefined;
 let generation = 0;
 let openCaseId: string | undefined;
 let objectUrls: string[] = [];
+/** The case loaded onto a tab, and where its marks were found there. */
+let loaded:
+	| { caseId: string; tabId: number; matches: Map<string, AnnotationMatch> }
+	| undefined;
 
 function readSetting(key: string): string | null {
 	try {
@@ -147,9 +167,107 @@ async function refreshTab(): Promise<void> {
 	const state = tab?.id === undefined ? undefined : await overlayState(tab.id);
 	if (mine !== generation) return;
 	overlay = state;
+	if (
+		loaded !== undefined &&
+		(tab?.id !== loaded.tabId || overlay?.loadedCase !== loaded.caseId)
+	)
+		forgetLoaded();
 	renderOverlay();
 	await renderCases();
 }
+
+/** The loaded case's results no longer describe the tab: drop them. */
+function forgetLoaded(): void {
+	const caseId = loaded?.caseId;
+	loaded = undefined;
+	if (caseId !== undefined && openCaseId === caseId) void openCase(caseId);
+}
+
+importButton.addEventListener("click", () => importFile.click());
+const importPrompt = h("div", {
+	class: "hint",
+	id: "import-prompt",
+	hidden: true,
+});
+importButton.parentElement?.after(importPrompt);
+
+async function finishImport(
+	parsed: ParsedExport,
+	options: { copy?: boolean } = {},
+): Promise<void> {
+	importPrompt.hidden = true;
+	importPrompt.replaceChildren();
+	const c = await storeImport(store, parsed, options);
+	await openCase(c.id);
+}
+
+/** Ask before an import replaces a case that is here already. */
+function askReplace(parsed: ParsedExport, existing: Case): void {
+	const fail = (error: unknown) =>
+		showHint(
+			`Could not import: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	importPrompt.replaceChildren(
+		h(
+			"p",
+			{},
+			`“${existing.title}” is here already (changed ${formatDate(existing.updatedAt)}); the file's copy was changed ${formatDate(parsed.case.updatedAt)}.`,
+		),
+		h(
+			"div",
+			{ class: "row" },
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "import-replace",
+					onclick: () => void finishImport(parsed).catch(fail),
+				},
+				"Replace it",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "import-copy",
+					onclick: () => void finishImport(parsed, { copy: true }).catch(fail),
+				},
+				"Keep both",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					onclick: () => {
+						importPrompt.hidden = true;
+						importPrompt.replaceChildren();
+					},
+				},
+				"Cancel",
+			),
+		),
+	);
+	importPrompt.hidden = false;
+}
+
+importFile.addEventListener("change", async () => {
+	const file = importFile.files?.[0];
+	importFile.value = "";
+	if (file === undefined) return;
+	showHint(undefined);
+	try {
+		if (file.size > MAX_IMPORT_BYTES)
+			throw new Error(`it is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB`);
+		const parsed = await readExport(new Uint8Array(await file.arrayBuffer()));
+		const existing = await store.getCase(parsed.case.id);
+		if (existing !== undefined) askReplace(parsed, existing);
+		else await finishImport(parsed);
+	} catch (error) {
+		showHint(
+			`Could not import ${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+});
 
 // --- cases -----------------------------------------------------------------
 
@@ -226,6 +344,151 @@ async function imageUrl(
 	const url = URL.createObjectURL(image.blob);
 	objectUrls.push(url);
 	return url;
+}
+
+const percent = (score: number) => `${Math.round(score * 100)}%`;
+
+function matchText(m: AnnotationMatch): string {
+	if (m.current > 0)
+		return `Candidate ${m.current + 1} of ${m.candidates.length} (${percent(m.score)})`;
+	switch (m.status) {
+		case "found":
+			return `Found here (${percent(m.score)})`;
+		case "probable":
+			return `Probably here (${percent(m.score)})`;
+		case "ambiguous":
+			return `Unsure: candidate ${m.current + 1} of ${m.candidates.length}`;
+		case "lost":
+			return m.truncated
+				? "Not found in the part of the page searched"
+				: "Not found on this page";
+		case "no-element":
+			return "No element recorded";
+	}
+}
+
+function matchView(a: Annotation): HTMLElement | null {
+	if (loaded === undefined) return null;
+	const m = loaded.matches.get(a.id);
+	if (m === undefined) return null;
+	const shown = m.candidates[m.current];
+	const box = h(
+		"div",
+		{
+			class: `match ${m.status}`,
+			id: `match-${a.id}`,
+			"data-status": m.status,
+		},
+		h("span", { class: "status" }, matchText(m)),
+		shown
+			? h(
+					"p",
+					{ class: "meta" },
+					`${shown.summary}${shown.visible ? "" : " · hidden at this width"}`,
+				)
+			: null,
+	);
+	const buttons = h("div", { class: "row" });
+	if (m.candidates.length > 0)
+		buttons.append(
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "show",
+					onclick: () => void showMatch(a, m.current),
+				},
+				"Show",
+			),
+		);
+	if (m.candidates.length > 1)
+		buttons.append(
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "next",
+					onclick: () => void showMatch(a, m.current + 1),
+				},
+				"Next candidate",
+			),
+		);
+	if (buttons.childElementCount > 0) box.append(buttons);
+	return box;
+}
+
+async function showMatch(a: Annotation, candidate: number): Promise<void> {
+	if (loaded === undefined) return;
+	try {
+		const m = (await chrome.tabs.sendMessage(loaded.tabId, {
+			type: "case:show",
+			annotationId: a.id,
+			candidate,
+		})) as AnnotationMatch | null;
+		if (m === null) {
+			forgetLoaded();
+			showCaseHint(
+				"The case is no longer loaded on that tab. Load it again to see its marks there.",
+			);
+			return;
+		}
+		loaded.matches.set(a.id, m);
+		const view = matchView(a);
+		if (view) document.getElementById(`match-${a.id}`)?.replaceWith(view);
+	} catch (error) {
+		showCaseHint(describeError(error));
+	}
+}
+
+function showCaseHint(text: string | undefined): void {
+	const hintEl = document.getElementById("case-hint");
+	if (hintEl === null) return;
+	hintEl.hidden = text === undefined;
+	hintEl.textContent = text ?? "";
+}
+
+async function loadOntoTab(c: Case): Promise<void> {
+	const tab = await activeTab();
+	if (tab?.id === undefined) return;
+	try {
+		const result = await sendToTab<LoadResult | { error: string }>(tab.id, {
+			type: "case:load",
+			case: c,
+		});
+		if ("error" in result) throw new Error(result.error);
+		loaded = {
+			caseId: c.id,
+			tabId: tab.id,
+			matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+		};
+		await openCase(c.id);
+		const found = result.matches.filter(
+			(m) => m.status !== "lost" && m.status !== "no-element",
+		).length;
+		showCaseHint(
+			`${found} of ${result.matches.length} marks found on ${shortUrl(result.url)}. Outlines: green found, amber dashed probable or unsure.`,
+		);
+	} catch (error) {
+		showCaseHint(describeError(error));
+	}
+}
+
+async function download(c: Case): Promise<void> {
+	try {
+		const zip = await exportCase(store, c);
+		const url = URL.createObjectURL(
+			new Blob([zip as Uint8Array<ArrayBuffer>], { type: "application/zip" }),
+		);
+		const link = h("a", { href: url, download: exportFileName(c) });
+		document.body.append(link);
+		link.click();
+		link.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 30_000);
+	} catch (error) {
+		showCaseHint(
+			`Could not export: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 async function openCase(id: string): Promise<void> {
@@ -318,6 +581,7 @@ async function openCase(id: string): Promise<void> {
 				),
 				crop ? h("img", { src: crop, alt: `Mark ${a.number}` }) : null,
 				a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
+				loaded?.caseId === c.id ? matchView(a) : null,
 			),
 		);
 	}
@@ -344,13 +608,32 @@ async function openCase(id: string): Promise<void> {
 					{
 						type: "button",
 						class: "primary",
+						id: "load-case",
+						onclick: () => void loadOntoTab(c),
+					},
+					"Load onto this tab",
+				),
+				h(
+					"button",
+					{
+						type: "button",
 						id: "add-marks",
 						onclick: () => void startAnnotating(c),
 					},
-					"Add marks on this tab",
+					"Add marks",
+				),
+				h(
+					"button",
+					{
+						type: "button",
+						id: "export-case",
+						onclick: () => void download(c),
+					},
+					"Export",
 				),
 				del,
 			),
+			h("p", { class: "hint", id: "case-hint", hidden: true }),
 		),
 		h(
 			"section",
@@ -378,6 +661,13 @@ function closeCase(): void {
 chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
 	if (sender.id !== chrome.runtime.id) return false;
 	if (message?.type === "overlay:changed") {
+		// The page's own Hide removed the loaded case's outlines.
+		if (
+			loaded !== undefined &&
+			sender.tab?.id === loaded.tabId &&
+			message.state.loadedCase !== loaded.caseId
+		)
+			forgetLoaded();
 		// From a content script; only the tab the panel shows matters.
 		if (sender.tab?.id === undefined || sender.tab.id !== shownTabId)
 			return false;
@@ -393,8 +683,12 @@ chrome.runtime.onMessage.addListener((message: Broadcast, sender) => {
 });
 
 chrome.tabs.onActivated.addListener(() => void refreshTab());
-chrome.tabs.onUpdated.addListener((_id, info) => {
+chrome.tabs.onUpdated.addListener((id, info) => {
+	if (id === loaded?.tabId && info.status === "loading") forgetLoaded();
 	if (info.status === "complete" || info.url !== undefined) void refreshTab();
+});
+chrome.tabs.onRemoved.addListener((id) => {
+	if (id === loaded?.tabId) forgetLoaded();
 });
 
 void refreshTab();

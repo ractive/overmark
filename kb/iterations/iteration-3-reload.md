@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 3: export, import and loading onto another build"
-status: planned
+status: in-progress
 description: "Export a case as a zip with case.json, case.md and WebP images; import it; load a case onto the tab in front, find each annotation's element by a weighted similarity score, and highlight it with its confidence."
 timestamp: 2026-11-04T17:00:00+01:00
 tags: [iteration, matching, export]
@@ -26,9 +26,9 @@ tags: [iteration, matching, export]
 
 ## Tasks
 
-- [ ] `src/lib/export.ts` and `src/lib/markdown.ts` with tests (round trip through the zip)
-- [ ] `src/lib/match.ts` with tests: changed CSS module hashes, generated ids, reordered layout, changed text, missing element
-- [ ] Content script: describe candidates, highlight, step through candidates
-- [ ] Side panel: export, import, load onto this tab, results
-- [ ] End-to-end: a case from test page v1 loads onto v2 (other classes, ids, order) and finds its element
+- [x] `src/lib/export.ts` and `src/lib/markdown.ts` with tests (round trip through the zip)
+- [x] `src/lib/match.ts` with tests: changed CSS module hashes, generated ids, reordered layout, changed text, missing element
+- [x] Content script: describe candidates, highlight, step through candidates
+- [x] Side panel: export, import, load onto this tab, results
+- [x] End-to-end: a case from test page v1 loads onto v2 (other classes, ids, order) and finds its element
 - [ ] Review, PR

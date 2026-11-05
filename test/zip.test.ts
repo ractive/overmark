@@ -77,6 +77,18 @@ describe("writeZip and readZip", () => {
 		await expect(readZip(zip)).rejects.toThrow("damaged entry");
 	});
 
+	test("unpacks only the entries asked for", async () => {
+		const zip = await writeZip([
+			{ name: "case.json", data: text("{}") },
+			{ name: "big.bin", data: new Uint8Array(1000) },
+		]);
+		const files = await readZip(zip, {
+			include: (name) => name === "case.json",
+			maxTotalBytes: 10,
+		});
+		expect([...files.keys()]).toEqual(["case.json"]);
+	});
+
 	test("stops inflating an entry that is larger than it says", async () => {
 		const data = new Uint8Array(1024 * 1024); // zeros deflate to ~1 KB
 		const zip = await writeZip([{ name: "bomb", data }]);

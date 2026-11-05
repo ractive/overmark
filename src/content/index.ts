@@ -6,6 +6,7 @@
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import { Annotator } from "./annotator.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
+import { Reviewer } from "./review.ts";
 
 declare global {
 	var __overmark: boolean | undefined;
@@ -17,11 +18,14 @@ function start(): void {
 	document.getElementById(HOST_ID)?.remove();
 	const overlay = new Overlay(document);
 	const annotator = new Annotator(overlay);
+	const reviewer = new Reviewer(overlay);
+	const state = () => {
+		const s = annotator.state();
+		const loaded = reviewer.caseId;
+		return loaded === undefined ? s : { ...s, loadedCase: loaded };
+	};
 	overlay.onChange = () => {
-		const message: Broadcast = {
-			type: "overlay:changed",
-			state: annotator.state(),
-		};
+		const message: Broadcast = { type: "overlay:changed", state: state() };
 		// Nobody may be listening (side panel closed): that is fine.
 		chrome.runtime.sendMessage(message).catch(() => {});
 	};
@@ -36,16 +40,34 @@ function start(): void {
 							? { blurForms: message.blurForms }
 							: {}),
 					});
+					sendResponse(state());
 					break;
 				case "overlay:hide":
 					annotator.hide();
+					sendResponse(state());
 					break;
 				case "overlay:state":
+					sendResponse(state());
+					break;
+				case "case:load":
+					reviewer.load(message.case).then(sendResponse, (error: unknown) =>
+						sendResponse({
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					);
+					return true; // answers asynchronously
+				case "case:show":
+					sendResponse(
+						reviewer.show(message.annotationId, message.candidate) ?? null,
+					);
+					break;
+				case "case:clear":
+					reviewer.clear();
+					sendResponse(state());
 					break;
 				default:
 					return false;
 			}
-			sendResponse(annotator.state());
 			return false;
 		},
 	);

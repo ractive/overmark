@@ -11,6 +11,8 @@ import type { Point, Rect, Shape } from "../lib/case.ts";
 export const HOST_ID = "overmark-root";
 export const MARK_COLOUR = "#e5195f";
 export const HOVER_COLOUR = "#1f6feb";
+export const FOUND_COLOUR = "#1e8e3e";
+export const PROBABLE_COLOUR = "#d97706";
 const SVG = "http://www.w3.org/2000/svg";
 
 const STYLE = `
@@ -34,6 +36,7 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 	pointer-events: auto;
 }
+.toolbar.top { top: 16px; bottom: auto; }
 .toolbar .brand { padding: 0 8px; font-weight: 600; color: #ffb000; }
 .toolbar .status { padding: 0 8px; color: #b8c0d0; }
 .toolbar .sep { width: 1px; align-self: stretch; margin: 2px 4px; background: #3a4560; }
@@ -67,7 +70,22 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 }
 .popover button.primary { background: ${MARK_COLOUR}; border-color: ${MARK_COLOUR}; color: #fff; }
 .popover .label { font-weight: 600; margin-bottom: 4px; }
-.capturing .toolbar, .capturing .popover, .capturing .hover { display: none !important; }
+.reviewbar {
+	position: fixed; right: 16px; top: 16px;
+	display: flex; gap: 8px; align-items: center;
+	padding: 6px 6px 6px 12px; border-radius: 10px;
+	background: #1d2433; color: #fff;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+	pointer-events: auto; max-width: min(420px, calc(100vw - 32px));
+}
+.reviewbar .brand { font-weight: 600; color: #ffb000; }
+.reviewbar .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reviewbar button {
+	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 6px; color: #fff; font: inherit;
+}
+.reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
+.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar,
+.capturing .review { display: none !important; }
 [hidden] { display: none !important; }
 `;
 
@@ -80,6 +98,16 @@ function svg<K extends keyof SVGElementTagNameMap>(
 	for (const [k, v] of Object.entries(attributes))
 		el.setAttribute(k, String(v));
 	return el;
+}
+
+/** A loaded case's mark, outlined where its element was found. */
+export interface ReviewItem {
+	number: number;
+	/** The element's box in window coordinates. */
+	rect: Rect;
+	/** The shown candidate is a confident, unambiguous match. */
+	found: boolean;
+	focused: boolean;
 }
 
 export interface RenderedMark {
@@ -97,8 +125,16 @@ export class Overlay {
 	readonly capture: HTMLDivElement;
 	readonly toolbar: HTMLDivElement;
 	readonly popover: HTMLDivElement;
-	/** Called after `show()` and `hide()`, including the toolbar's Close. */
-	onChange: ((visible: boolean) => void) | undefined;
+	readonly reviewBar: HTMLDivElement;
+	readonly #drafts: SVGGElement;
+	readonly #review: SVGGElement;
+	#annotating = false;
+	#reviewing = false;
+	/**
+	 * Called after the toolbar or the outlines are shown or hidden, including
+	 * by the overlay's own Close and Hide buttons.
+	 */
+	onChange: (() => void) | undefined;
 
 	constructor(doc: Document = document) {
 		this.doc = doc;
@@ -113,6 +149,9 @@ export class Overlay {
 		this.layer.className = "layer";
 		this.layer.hidden = true;
 		this.marks = svg(doc, "svg", { class: "marks" });
+		this.#review = svg(doc, "g", { class: "review" });
+		this.#drafts = svg(doc, "g", { class: "drafts" });
+		this.marks.append(this.#review, this.#drafts);
 		this.capture = doc.createElement("div");
 		this.capture.className = "capture";
 		this.popover = doc.createElement("div");
@@ -122,26 +161,53 @@ export class Overlay {
 		this.toolbar.className = "toolbar";
 		this.toolbar.setAttribute("role", "toolbar");
 		this.toolbar.setAttribute("aria-label", "Overmark");
-		this.layer.append(this.marks, this.capture, this.popover, this.toolbar);
+		this.reviewBar = doc.createElement("div");
+		this.reviewBar.className = "reviewbar";
+		this.layer.append(
+			this.marks,
+			this.capture,
+			this.popover,
+			this.toolbar,
+			this.reviewBar,
+		);
 		this.root.append(this.layer);
 		doc.documentElement.append(this.host);
+		this.#update();
 	}
 
-	get visible(): boolean {
-		return !this.layer.hidden;
+	/** The toolbar is up: the user is drawing marks. */
+	get annotating(): boolean {
+		return this.#annotating;
 	}
 
-	show(): void {
-		this.layer.hidden = false;
+	/** A loaded case's elements are outlined. */
+	get reviewing(): boolean {
+		return this.#reviewing;
+	}
+
+	setAnnotating(on: boolean): void {
+		this.#annotating = on;
+		this.#update();
+		this.onChange?.();
+	}
+
+	setReviewing(on: boolean): void {
+		this.#reviewing = on;
+		this.#update();
+		this.onChange?.();
+	}
+
+	#update(): void {
+		const shown = this.#annotating || this.#reviewing;
+		this.layer.hidden = !shown;
+		this.toolbar.hidden = !this.#annotating;
+		this.capture.hidden = !this.#annotating;
+		this.#drafts.style.display = this.#annotating ? "" : "none";
+		this.reviewBar.hidden = !this.#reviewing;
+		this.#review.style.display = this.#reviewing ? "" : "none";
 		// Stay on top of elements the page appended later.
-		if (this.host.nextElementSibling !== null)
+		if (shown && this.host.nextElementSibling !== null)
 			this.doc.documentElement.append(this.host);
-		this.onChange?.(true);
-	}
-
-	hide(): void {
-		this.layer.hidden = true;
-		this.onChange?.(false);
 	}
 
 	/** Hide everything but the marks while a screenshot is taken. */
@@ -175,7 +241,36 @@ export class Overlay {
 		for (const mark of marks)
 			children.push(...this.#shape(mark.shape), this.#badge(mark));
 		if (preview !== null) children.push(...this.#shape(preview));
-		this.marks.replaceChildren(...children);
+		this.#drafts.replaceChildren(...children);
+	}
+
+	/** Outline a loaded case's elements (window coordinates). */
+	renderReview(items: readonly ReviewItem[]): void {
+		const doc = this.doc;
+		const children: SVGElement[] = [];
+		for (const item of items) {
+			const colour = item.found ? FOUND_COLOUR : PROBABLE_COLOUR;
+			const r = item.rect;
+			children.push(
+				svg(doc, "rect", {
+					x: r.x - 3,
+					y: r.y - 3,
+					width: r.width + 6,
+					height: r.height + 6,
+					rx: 4,
+					fill: item.focused ? "rgba(229, 25, 95, 0.08)" : "none",
+					stroke: colour,
+					"stroke-width": item.focused ? 4 : 2.5,
+					"stroke-dasharray": item.found ? "" : "8 5",
+					"data-review": item.number,
+				}),
+				this.#badge(
+					{ number: item.number, shape: { kind: "box", rect: r } },
+					colour,
+				),
+			);
+		}
+		this.#review.replaceChildren(...children);
 	}
 
 	#shape(shape: Shape): SVGElement[] {
@@ -235,7 +330,7 @@ export class Overlay {
 		}
 	}
 
-	#badge(mark: RenderedMark): SVGElement {
+	#badge(mark: RenderedMark, colour = MARK_COLOUR): SVGElement {
 		const doc = this.doc;
 		const at = badgePosition(mark.shape);
 		const g = svg(doc, "g", { "data-number": mark.number });
@@ -245,7 +340,7 @@ export class Overlay {
 				cx: at.x,
 				cy: at.y,
 				r,
-				fill: MARK_COLOUR,
+				fill: colour,
 				stroke: "#fff",
 				"stroke-width": 2,
 			}),
