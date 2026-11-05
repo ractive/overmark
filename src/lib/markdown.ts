@@ -23,7 +23,7 @@ function inline(text: string): string {
 /** A quote; `<` is escaped so a comment cannot open HTML (and hide the rest). */
 function block(text: string): string {
 	return text
-		.split(/\r?\n/)
+		.split(/\r\n?|\n/)
 		.map((line) => `> ${line.replaceAll("<", "\\<")}`)
 		.join("\n");
 }

@@ -5,12 +5,13 @@
 
 import { describeElement } from "../lib/element.ts";
 import type {
+	BlurResult,
 	Broadcast,
 	ContentRequest,
 	DescribedElement,
 } from "../lib/messages.ts";
 import { Annotator } from "./annotator.ts";
-import { blurFields } from "./blur.ts";
+import { PageBlur } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
 import { Reviewer } from "./review.ts";
 
@@ -18,18 +19,23 @@ declare global {
 	var __overmark: boolean | undefined;
 }
 
-/** Undoes the blur of `element:mark` or `page:blur`. */
-let restoreBlur: (() => void) | undefined;
+const pageBlur = new PageBlur(document);
+
+/** Lets go of the blur an AI app's `element:mark` or `page:blur` holds. */
+let releaseBlur: (() => void) | undefined;
 
 function blur(allForms: boolean): void {
-	restoreBlur?.();
-	restoreBlur = blurFields(document, allForms);
+	releaseBlur?.();
+	releaseBlur = pageBlur.hold(allForms);
 }
 
 function unblur(): void {
-	restoreBlur?.();
-	restoreBlur = undefined;
+	releaseBlur?.();
+	releaseBlur = undefined;
 }
+
+const SAVING =
+	"The user is saving marks on this page right now; try again in a few seconds.";
 
 function mark(
 	overlay: Overlay,
@@ -38,12 +44,7 @@ function mark(
 	number: number,
 	blurForms: boolean,
 ): DescribedElement {
-	if (annotator.state().saving)
-		return {
-			ok: false,
-			error:
-				"The user is saving marks on this page right now; try again in a few seconds.",
-		};
+	if (annotator.state().saving) return { ok: false, error: SAVING };
 	let el: Element | null;
 	try {
 		el = document.querySelector(selector);
@@ -81,7 +82,7 @@ function start(): void {
 	// behind; its script can no longer be reached, so take the page over.
 	document.getElementById(HOST_ID)?.remove();
 	const overlay = new Overlay(document);
-	const annotator = new Annotator(overlay);
+	const annotator = new Annotator(overlay, pageBlur);
 	const reviewer = new Reviewer(overlay);
 	const state = () => {
 		const s = annotator.state();
@@ -148,8 +149,12 @@ function start(): void {
 					sendResponse(state());
 					break;
 				case "page:blur":
+					if (annotator.state().saving) {
+						sendResponse({ ok: false, error: SAVING } satisfies BlurResult);
+						break;
+					}
 					blur(message.blurForms);
-					sendResponse(state());
+					sendResponse({ ok: true } satisfies BlurResult);
 					break;
 				case "page:unblur":
 					unblur();

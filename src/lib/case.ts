@@ -129,6 +129,9 @@ export interface Case {
 	verdict: string | null;
 }
 
+/** The longest case title. */
+export const MAX_TITLE = 500;
+
 export class CaseError extends Error {
 	override name = "CaseError";
 }
@@ -395,6 +398,9 @@ export function validateCase(value: unknown): Case {
 			)
 				fail(`${p}.number`, `must be a unique integer from 1 to ${MAX_NUMBER}`);
 			numbers.add(number);
+			// Saving names new marks a<number>: another scheme would collide later.
+			if (annotationId !== `a${number}`)
+				fail(`${p}.id`, `must be a${number}, after its number`);
 			const shot = str(a["shot"], `${p}.shot`, 64);
 			if (!shotIds.has(shot)) fail(`${p}.shot`, "names no shot of the case");
 			const crop = str(a["crop"], `${p}.crop`);
@@ -419,7 +425,7 @@ export function validateCase(value: unknown): Case {
 	return {
 		format: CASE_FORMAT,
 		id: id(o["id"], "case.id"),
-		title: str(o["title"], "case.title", 500),
+		title: str(o["title"], "case.title", MAX_TITLE),
 		createdAt: str(o["createdAt"], "case.createdAt", 64),
 		updatedAt: str(o["updatedAt"], "case.updatedAt", 64),
 		page: {

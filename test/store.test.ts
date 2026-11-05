@@ -72,3 +72,33 @@ describe("MemoryStore", () => {
 		expect([...store.images.keys()]).toEqual(["c_1/shots/s1.webp"]);
 	});
 });
+
+describe("sweepPending", () => {
+	test("deletes old and undated pending screenshots only", async () => {
+		const store = new MemoryStore();
+		const blob = new Blob(["x"]);
+		await store.putImage("c_1", "pending/p_old.webp", {
+			blob,
+			width: 1,
+			height: 1,
+			storedAt: 1000,
+		});
+		await store.putImage("c_1", "pending/p_new.webp", {
+			blob,
+			width: 1,
+			height: 1,
+			storedAt: 9000,
+		});
+		await store.putImage("c_2", "pending/p_undated.webp", {
+			blob,
+			width: 1,
+			height: 1,
+		});
+		await store.putImage("c_1", "shots/s1.webp", { blob, width: 1, height: 1 });
+		expect(await store.sweepPending(5000)).toBe(2);
+		expect([...store.images.keys()].sort()).toEqual([
+			"c_1/pending/p_new.webp",
+			"c_1/shots/s1.webp",
+		]);
+	});
+});

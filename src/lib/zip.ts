@@ -86,7 +86,7 @@ async function inflate(
 		length += value.length;
 		if (length > size) {
 			await reader.cancel();
-			throw new ZipError(`damaged entry: ${name}`);
+			throw new ZipError(`entry ${name} unpacks to more than it says`);
 		}
 		chunks.push(value);
 	}

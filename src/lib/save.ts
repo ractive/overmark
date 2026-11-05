@@ -99,14 +99,19 @@ export async function saveCase(
 				finalIds.set(shot.id, id);
 				shots.push({ ...shot, id, image: shotImage(id) });
 				const image = screenshots.get(shot.id);
-				if (image !== undefined) images.set(shotImage(id), image);
+				if (image !== undefined)
+					images.set(shotImage(id), {
+						blob: image.blob,
+						width: image.width,
+						height: image.height,
+					});
 			}
 			const taken = new Set(current?.annotations.map((a) => a.number));
 			const annotations: Annotation[] = [...(current?.annotations ?? [])];
 			for (const draft of request.annotations) {
 				if (taken.has(draft.number))
 					throw new SaveError(
-						`mark ${draft.number} exists in the case already (it changed meanwhile). Click "Add marks on this tab" in the side panel again, then save.`,
+						`mark ${draft.number} exists in the case already (it changed meanwhile). Click "Add marks" in the side panel again, then save.`,
 					);
 				taken.add(draft.number);
 				const { cropRect: _, ...rest } = draft;

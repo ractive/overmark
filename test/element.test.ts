@@ -139,6 +139,31 @@ describe("describeElement", () => {
 		expect(describeElement($("#after")).heading).toBe("Tipps zum Sparen");
 	});
 
+	test("never records typed text through an element around an editor", () => {
+		doc.body.insertAdjacentHTML(
+			"beforeend",
+			`<div id="box" class="comment-box"><div class="toolbar">B I U</div><div contenteditable>my unsent private reply</div></div>
+			<label id="wrap" role="button">Reply <textarea>typed answer</textarea> <input value="typed value" /></label>
+			<h4 id="heading">Title <span contenteditable="true">typed heading</span></h4>
+			<p id="below">Below</p>
+			<div id="scripted">Visible<script>var secret = 1;</script><style>.x{}</style></div>`,
+		);
+		const textarea = doc.querySelector("#wrap textarea") as HTMLTextAreaElement;
+		// React sets the value through defaultValue, which becomes the text.
+		textarea.defaultValue = "typed through React";
+		const box = describeElement($("#box"));
+		expect(box.text).toBe("B I U");
+		expect(JSON.stringify(box)).not.toContain("private reply");
+		const wrap = describeElement($("#wrap"));
+		expect(wrap.name).toBe("Reply");
+		expect(JSON.stringify(wrap)).not.toContain("typed");
+		const area = describeElement(textarea);
+		expect(area.text).toBeUndefined();
+		expect(JSON.stringify(area)).not.toContain("React");
+		expect(describeElement($("#below")).heading).toBe("Title");
+		expect(describeElement($("#scripted")).text).toBe("Visible");
+	});
+
 	test("summary", () => {
 		expect(summarize(describeElement($("form button")))).toBe(
 			'button "Prämien berechnen" · Button_primary · under "Krankenkassen vergleichen"',

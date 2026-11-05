@@ -11,7 +11,7 @@ import type {
 	WorkerResponse,
 } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
-import { sendToTab } from "../lib/tabs.ts";
+import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import {
 	confirmRequestFor,
 	createTools,
@@ -68,7 +68,15 @@ export const chromeTab: TabBridge = {
 			title: tab.title ?? "",
 		};
 	},
-	send: (tabId, request) => sendToTab(tabId, request),
+	async send(tabId, request) {
+		try {
+			return await sendToTab(tabId, request);
+		} catch (error) {
+			throw error instanceof NoAccessError
+				? captureError(error.message)
+				: error;
+		}
+	},
 	async capture(tab) {
 		// Through the worker: its queue keeps to Chrome's two captures a second,
 		// and it checks that the tab is in front before and after.

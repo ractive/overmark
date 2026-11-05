@@ -26,12 +26,13 @@ The side panel also keeps its settings in the extension's local storage: the rel
 address, "Blur form fields in screenshots", "Keep AI access on", and the secret from
 which the tab-mcp library derives the address an AI app connects to.
 
-Overmark never reads what is typed into form fields or text editors. A screenshot shows
-what was on the screen, though, form fields included. Whenever Overmark takes a
-screenshot (when you save marks, and when an AI app asks for one, see below), password
-fields are blurred, and with "Blur form fields in screenshots" all form fields are.
-This covers fields in the page itself, not fields inside embedded frames (for example a
-payment form from another site).
+Overmark never records what is typed into form fields or text editors: the text it keeps
+about an element leaves out every field and editor inside it. A screenshot shows what
+was on the screen, though, form fields included. Whenever Overmark takes a screenshot
+(when you save marks, and when an AI app asks for one, see below), password fields are
+blurred, and with "Blur form fields in screenshots" all form fields and text editors
+are. This covers fields in the page itself and inside its web components, not fields
+inside embedded frames (for example a payment form from another site).
 
 ## When data leaves your computer
 

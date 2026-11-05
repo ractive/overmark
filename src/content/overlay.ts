@@ -187,6 +187,11 @@ export class Overlay {
 	}
 
 	/** A loaded case's elements are outlined. */
+	/** An AI app's temporary mark is up for its screenshot. */
+	get marking(): boolean {
+		return this.#marking;
+	}
+
 	get reviewing(): boolean {
 		return this.#reviewing;
 	}

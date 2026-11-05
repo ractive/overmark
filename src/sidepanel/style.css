@@ -313,3 +313,8 @@ button.link {
 .field input:invalid {
 	border-color: var(--danger);
 }
+
+/* The confirmation names the case and the page on lines of their own. */
+.tab-mcp-description {
+	white-space: pre-line;
+}

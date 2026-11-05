@@ -17,6 +17,7 @@ import {
 import { summarize } from "../lib/element.ts";
 import type {
 	AnnotationMatch,
+	BlurResult,
 	ContentRequest,
 	DescribedElement,
 	LoadResult,
@@ -159,8 +160,31 @@ function matchView(m: AnnotationMatch) {
 		status: m.status,
 		score: Math.round(m.score * 100) / 100,
 		shownCandidate: m.current,
-		candidates: m.candidates,
+		candidates: m.candidates.map((c) => ({
+			...c,
+			summary: cut(c.summary, 300),
+			selector: cut(c.selector, 500),
+		})),
 	};
+}
+
+/**
+ * As many of `items` (in order) as fit `room` bytes in one text block, and
+ * how many were left out.
+ */
+function fittingList<T>(
+	items: readonly T[],
+	room: number,
+	wrap: (items: T[]) => unknown,
+): { block: Content; left: number } {
+	let count = items.length;
+	let block = text(wrap(items.slice(0, count)));
+	while (count > 0 && sizeOf(block) > room) {
+		const shrink = Math.min(0.9, room / sizeOf(block));
+		count = Math.floor(count * shrink);
+		block = text(wrap(items.slice(0, count)));
+	}
+	return { block, left: items.length - count };
 }
 
 export function createTools(deps: ToolDeps): Tool[] {
@@ -218,19 +242,25 @@ export function createTools(deps: ToolDeps): Tool[] {
 		},
 		annotations: { readOnlyHint: true, untrustedContentHint: true },
 		execute: async () => {
-			const cases = await store.listCases();
+			const cases = (await store.listCases()).map((c) => ({
+				caseId: c.id,
+				title: c.title,
+				url: c.page.url,
+				marks: c.annotations.length,
+				verdict: c.verdict === null ? null : cut(c.verdict, LIST_VERDICT),
+				updatedAt: c.updatedAt,
+			}));
+			const { block, left } = fittingList(cases, budget() - 200, (l) => l);
 			return {
 				content: [
-					text(
-						cases.map((c) => ({
-							caseId: c.id,
-							title: c.title,
-							url: c.page.url,
-							marks: c.annotations.length,
-							verdict: c.verdict === null ? null : cut(c.verdict, LIST_VERDICT),
-							updatedAt: c.updatedAt,
-						})),
-					),
+					block,
+					...(left > 0
+						? [
+								text(
+									`${left} older cases are left out to stay under the size limit.`,
+								),
+							]
+						: []),
 				],
 			};
 		},
@@ -358,9 +388,21 @@ export function createTools(deps: ToolDeps): Tool[] {
 			serial(async () => {
 				const c = await mustGet(caseId);
 				const result = await load(await tab.current(), c);
+				const { block, left } = fittingList(
+					result.matches.map(matchView),
+					budget() - 200,
+					(marks) => ({ url: result.url, marks }),
+				);
 				return {
 					content: [
-						text({ url: result.url, marks: result.matches.map(matchView) }),
+						block,
+						...(left > 0
+							? [
+									text(
+										`The last ${left} marks are left out to stay under the size limit; highlight shows any mark.`,
+									),
+								]
+							: []),
 					],
 				};
 			}),
@@ -433,10 +475,11 @@ export function createTools(deps: ToolDeps): Tool[] {
 				const current = await tab.current();
 				// Password fields (and form fields, if the user says so) blurred,
 				// as in the user's own screenshots.
-				await tab.send(current.id, {
+				const blurred = await tab.send<BlurResult>(current.id, {
 					type: "page:blur",
 					blurForms: blurForms(),
 				});
+				if (!blurred.ok) throw new CaseError(blurred.error);
 				let png: Blob;
 				try {
 					await settle();
@@ -453,14 +496,26 @@ export function createTools(deps: ToolDeps): Tool[] {
 			}),
 	};
 
-	async function addMark(input: {
-		caseId: string;
-		selector: string;
-		comment: string;
-	}) {
+	async function addMark(
+		input: {
+			caseId: string;
+			selector: string;
+			comment: string;
+		},
+		signal: AbortSignal,
+	) {
 		const c = await mustGet(input.caseId);
 		const next = nextNumbers(c);
 		const current = await tab.current();
+		// The user allowed a mark on the page the question named; not on another.
+		const allowed = confirmedPages.get(signal);
+		if (
+			allowed !== undefined &&
+			(allowed.id !== current.id || allowed.url !== current.url)
+		)
+			throw new CaseError(
+				`The page in front changed since the user allowed this (it was ${allowed.url}); ask again.`,
+			);
 		const described = await tab.send<DescribedElement>(current.id, {
 			type: "element:mark",
 			selector: input.selector,
@@ -559,7 +614,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 			additionalProperties: false,
 		},
 		annotations: { consequentialHint: true, untrustedContentHint: true },
-		execute: (input) => serial(() => addMark(input)),
+		execute: (input, { signal }) => serial(() => addMark(input, signal)),
 	};
 
 	const setVerdict: Tool<{ caseId: string; verdict: string }> = {
@@ -630,6 +685,9 @@ export function createTools(deps: ToolDeps): Tool[] {
 	] as Tool[];
 }
 
+/** The page a confirmation for add_annotation named, by the call's signal. */
+const confirmedPages = new WeakMap<AbortSignal, { id: number; url: string }>();
+
 /**
  * A confirmation that names the case (and for add_annotation, the page) the
  * call is about, next to the raw arguments the dialog shows.
@@ -652,7 +710,10 @@ export async function confirmRequestFor(
 	}
 	if (request.tool.name === "add_annotation") {
 		const current = await tab.current().catch(() => undefined);
-		if (current !== undefined) lines.push(`Page: ${current.url}`);
+		if (current !== undefined) {
+			lines.push(`Page: ${current.url}`);
+			confirmedPages.set(request.signal, { id: current.id, url: current.url });
+		}
 	}
 	if (lines.length === 0) return request;
 	return {

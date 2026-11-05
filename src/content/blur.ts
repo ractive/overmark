@@ -2,17 +2,50 @@
  * Blurring form fields while a screenshot is taken: password fields always,
  * every form field when the user turned on "Blur form fields in screenshots".
  * Inline style through the CSSOM, which a page's CSP does not block.
+ *
+ * One `PageBlur` per page serves the user's saves and an AI app's screenshots
+ * alike: each holds the blur while it captures, and the fields get their own
+ * style back only when the last holder lets go, whatever the order.
  */
 
-const FORM_FIELDS =
-	"input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select, [contenteditable='true'], [contenteditable='']";
+const PASSWORDS = "input[type=password]";
 
-/** Blur the fields; the returned function restores them. */
+const FORM_FIELDS =
+	"input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]), textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox']";
+
+/** An element's shadow root, open or (from an extension) closed. */
+function shadowOf(el: Element): ShadowRoot | null {
+	try {
+		const closed =
+			typeof chrome === "undefined"
+				? undefined
+				: chrome.dom?.openOrClosedShadowRoot?.(el as HTMLElement);
+		return closed ?? el.shadowRoot;
+	} catch {
+		// Not an element that can have one.
+		return el.shadowRoot;
+	}
+}
+
+/** The document and every shadow root in it. */
+function roots(doc: Document): (Document | ShadowRoot)[] {
+	const out: (Document | ShadowRoot)[] = [doc];
+	for (let i = 0; i < out.length; i++) {
+		for (const el of (out[i] as Document | ShadowRoot).querySelectorAll("*")) {
+			const root = shadowOf(el);
+			if (root !== null) out.push(root);
+		}
+	}
+	return out;
+}
+
+/** Blur the fields of a document now; the returned function restores them. */
 export function blurFields(doc: Document, allForms: boolean): () => void {
-	const fields = doc.querySelectorAll<HTMLElement>(
-		allForms ? FORM_FIELDS : "input[type=password]",
-	);
-	const before = [...fields].map((f) => ({
+	const selector = allForms ? FORM_FIELDS : PASSWORDS;
+	const fields = roots(doc).flatMap((root) => [
+		...root.querySelectorAll<HTMLElement>(selector),
+	]);
+	const before = fields.map((f) => ({
 		f,
 		value: f.style.getPropertyValue("filter"),
 		priority: f.style.getPropertyPriority("filter"),
@@ -25,4 +58,39 @@ export function blurFields(doc: Document, allForms: boolean): () => void {
 			else f.style.removeProperty("filter");
 		}
 	};
+}
+
+/** The page's one blur, held by whoever is taking a screenshot. */
+export class PageBlur {
+	readonly #doc: Document;
+	readonly #holders = new Map<symbol, boolean>();
+	#restore: (() => void) | undefined;
+
+	constructor(doc: Document) {
+		this.#doc = doc;
+	}
+
+	/** How many screenshots are being taken. */
+	get held(): number {
+		return this.#holders.size;
+	}
+
+	/** Blur (all form fields when `allForms`); call the result when done. */
+	hold(allForms: boolean): () => void {
+		const token = Symbol("blur");
+		this.#holders.set(token, allForms);
+		this.#apply();
+		return () => {
+			if (this.#holders.delete(token)) this.#apply();
+		};
+	}
+
+	#apply(): void {
+		// Back to the page's own styles first, so the next blur records those.
+		this.#restore?.();
+		this.#restore = undefined;
+		if (this.#holders.size === 0) return;
+		const allForms = [...this.#holders.values()].some(Boolean);
+		this.#restore = blurFields(this.#doc, allForms);
+	}
 }

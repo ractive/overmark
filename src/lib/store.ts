@@ -11,7 +11,14 @@ export interface StoredImage {
 	/** Pixels. */
 	width: number;
 	height: number;
+	/** For a screenshot waiting for its save: when it was taken (ms since the epoch). */
+	storedAt?: number;
 }
+
+/** A screenshot waiting for its save (`pending/`) older than this was abandoned. */
+export const PENDING_MAX_AGE_MS = 10 * 60_000;
+
+const isPendingKey = (key: string) => key.includes("/pending/");
 
 export interface CaseStore {
 	/** All cases, newest change first. */
@@ -34,6 +41,12 @@ export interface CaseStore {
 	deleteImages(caseId: string, paths: readonly string[]): Promise<void>;
 	/** Deletes the case's images whose paths are not in `keep`. */
 	pruneImages(caseId: string, keep: ReadonlySet<string>): Promise<void>;
+	/**
+	 * Deletes screenshots of saves that never finished (the tab closed while
+	 * saving): pending images stored before `before` (ms), or undated.
+	 * Returns how many.
+	 */
+	sweepPending(before: number): Promise<number>;
 	/**
 	 * Replace a case and all its images at once (an import): either the new
 	 * case and images are stored, or the old ones are kept.
@@ -119,6 +132,17 @@ export class MemoryStore implements CaseStore {
 			if (key.startsWith(prefix) && !keep.has(key.slice(prefix.length)))
 				this.images.delete(key);
 		}
+	}
+
+	async sweepPending(before: number): Promise<number> {
+		let swept = 0;
+		for (const [key, image] of [...this.images]) {
+			if (isPendingKey(key) && (image.storedAt ?? 0) < before) {
+				this.images.delete(key);
+				swept++;
+			}
+		}
+		return swept;
 	}
 
 	async replaceCase(
@@ -273,6 +297,25 @@ export class IdbStore implements CaseStore {
 			if (!keep.has(key.slice(caseId.length + 1))) store.delete(key);
 		}
 		await done(tx);
+	}
+
+	async sweepPending(before: number): Promise<number> {
+		const db = await this.#open();
+		const tx = db.transaction("images", "readwrite");
+		let swept = 0;
+		const cursor = tx.objectStore("images").openCursor();
+		cursor.onsuccess = () => {
+			const at = cursor.result;
+			if (at === null) return;
+			const image = at.value as StoredImage;
+			if (isPendingKey(String(at.key)) && (image.storedAt ?? 0) < before) {
+				at.delete();
+				swept++;
+			}
+			at.continue();
+		};
+		await done(tx);
+		return swept;
 	}
 
 	async replaceCase(

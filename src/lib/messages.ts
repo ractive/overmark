@@ -51,10 +51,13 @@ export type ContentRequest =
 	  }
 	/** Remove that mark and the blur again (`OverlayState`). */
 	| { type: "element:unmark" }
-	/** Blur form fields for a screenshot of the page as it is (`OverlayState`). */
+	/** Blur form fields for a screenshot of the page as it is (`BlurResult`). */
 	| { type: "page:blur"; blurForms: boolean }
 	/** Undo `page:blur` (`OverlayState`). */
 	| { type: "page:unblur" };
+
+/** The answer to `page:blur`: refused while the user's own save takes screenshots. */
+export type BlurResult = { ok: true } | { ok: false; error: string };
 
 /** The answer to `element:mark`. */
 export type DescribedElement =

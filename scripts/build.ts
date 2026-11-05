@@ -110,8 +110,13 @@ export async function checkOutdir(outdir: string): Promise<void> {
 	let names: string[];
 	try {
 		names = await readdir(target);
-	} catch {
-		return; // does not exist yet
+	} catch (error) {
+		// Only a folder that does not exist yet is fine; a file there (ENOTDIR)
+		// or one we may not read must not be deleted.
+		if ((error as { code?: string }).code === "ENOENT") return;
+		throw new Error(
+			`refusing to use ${target}: ${(error as { code?: string }).code === "ENOTDIR" ? "it is a file" : String(error)}`,
+		);
 	}
 	if (names.length > 0 && !names.includes("manifest.json"))
 		throw new Error(

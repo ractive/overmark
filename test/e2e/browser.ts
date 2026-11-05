@@ -169,15 +169,30 @@ export class Browser {
 
 	/** The next event `method` (optionally for one session). */
 	event(method: string, sessionId?: string): Promise<Record<string, unknown>> {
-		return new Promise((resolve) => {
-			const listener: Listener = (m, params, s) => {
+		return this.waitForEvent(method, sessionId).promise;
+	}
+
+	/** The next event `method`, and a way to stop waiting for it. */
+	waitForEvent(
+		method: string,
+		sessionId?: string,
+	): { promise: Promise<Record<string, unknown>>; cancel: () => void } {
+		let listener: Listener | undefined;
+		const promise = new Promise<Record<string, unknown>>((resolve) => {
+			listener = (m, params, s) => {
 				if (m === method && (sessionId === undefined || s === sessionId)) {
-					this.#listeners.delete(listener);
+					if (listener) this.#listeners.delete(listener);
 					resolve(params);
 				}
 			};
 			this.#listeners.add(listener);
 		});
+		return {
+			promise,
+			cancel: () => {
+				if (listener) this.#listeners.delete(listener);
+			},
+		};
 	}
 
 	/** Open `url` in a new tab. */
@@ -228,15 +243,18 @@ export class Page {
 	}
 
 	async goto(url: string, timeoutMs = 15_000): Promise<void> {
-		const loaded = this.#browser.event("Page.loadEventFired", this.sessionId);
-		const { errorText } = (await this.send("Page.navigate", { url })) as {
-			errorText?: string;
-		};
-		if (errorText) throw new Error(`cannot open ${url}: ${errorText}`);
+		const loaded = this.#browser.waitForEvent(
+			"Page.loadEventFired",
+			this.sessionId,
+		);
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
+			const { errorText } = (await this.send("Page.navigate", { url })) as {
+				errorText?: string;
+			};
+			if (errorText) throw new Error(`cannot open ${url}: ${errorText}`);
 			await Promise.race([
-				loaded,
+				loaded.promise,
 				new Promise((_, reject) => {
 					timer = setTimeout(
 						() => reject(new Error(`${url} did not load`)),
@@ -246,6 +264,7 @@ export class Page {
 			]);
 		} finally {
 			clearTimeout(timer);
+			loaded.cancel(); // a navigation that failed leaves no listener behind
 		}
 	}
 

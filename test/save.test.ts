@@ -170,7 +170,11 @@ describe("saveCase", () => {
 				crop,
 			),
 		).rejects.toThrow("mark 1 exists in the case already");
-		expect(store.images).toEqual(before);
+		// The very same image objects: an overwrite with equal-looking crops
+		// would pass a deep comparison.
+		for (const [key, image] of before)
+			expect(store.images.get(key)).toBe(image);
+		expect([...store.images.keys()].sort()).toEqual([...before.keys()].sort());
 		expect((await store.getCase("c_1"))?.annotations).toHaveLength(2);
 	});
 

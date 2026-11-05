@@ -36,7 +36,8 @@ interface Grams {
 
 /**
  * Normalised text and its bigrams, remembered: loading a case compares the
- * same strings thousands of times. The cache is emptied when it grows large.
+ * same strings thousands of times. Loading empties it when it is done
+ * (`clearTextCache`), and it is emptied when it grows large.
  */
 const gramCache = new Map<string, Grams>();
 
@@ -49,11 +50,16 @@ function grams(s: string): Grams {
 			const g = text.slice(i, i + 2);
 			out.set(g, (out.get(g) ?? 0) + 1);
 		}
-		if (gramCache.size > 50_000) gramCache.clear();
+		if (gramCache.size > 20_000) gramCache.clear();
 		found = { text, grams: out };
 		gramCache.set(s, found);
 	}
 	return found;
+}
+
+/** Forget the remembered bigrams (they can hold megabytes of page text). */
+export function clearTextCache(): void {
+	gramCache.clear();
 }
 
 /** Dice coefficient of character bigrams, ignoring case and spacing (0 to 1). */
