@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 1: skeleton"
-status: planned
+status: in-progress
 description: "The repository's tooling, a build that produces the unpacked extension with a fixed ID, the service worker that opens the side panel and injects the content script on a click, icons, CI, and an end-to-end harness that loads the extension into Chromium."
 timestamp: 2026-11-04T17:00:00+01:00
 tags: [iteration, build, ci]
@@ -31,10 +31,10 @@ tags: [iteration, build, ci]
 
 ## Tasks
 
-- [ ] package.json, tsconfig, biome.json, .gitignore, CLAUDE.md, README
-- [ ] `src/lib/zip.ts` (write and read, store and deflate) with tests
-- [ ] `scripts/build.ts`, `scripts/icons.ts`, manifest, extension ID check
-- [ ] Service worker, side panel, content script overlay
-- [ ] End-to-end harness (`test/e2e/`): Chromium with the extension, test pages, the overlay injected
-- [ ] CI workflow
+- [x] package.json, tsconfig, biome.json, .gitignore, CLAUDE.md, README
+- [x] `src/lib/zip.ts` (write and read, store and deflate) with tests
+- [x] `scripts/build.ts`, `scripts/icons.ts`, manifest, extension ID check
+- [x] Service worker, side panel, content script overlay
+- [x] End-to-end harness (`test/e2e/`): Chromium with the extension, test pages, the overlay injected
+- [x] CI workflow
 - [ ] Review, PR

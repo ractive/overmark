@@ -1,0 +1,33 @@
+{
+	"name": "overmark",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Annotate any web page, load the annotations onto another build of the page, and talk them through with your AI app",
+	"type": "module",
+	"license": "MIT",
+	"author": "Jean-Pierre Bergamin <james@ractive.ch>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ractive/overmark.git"
+	},
+	"scripts": {
+		"build": "bun scripts/build.ts",
+		"zip": "bun scripts/build.ts --zip",
+		"icons": "bun scripts/icons.ts",
+		"verify": "biome ci . && bun run typecheck && bun test",
+		"typecheck": "bun check -p tsconfig.json && bun check -p tsconfig.test.json",
+		"lint": "biome check .",
+		"fix": "biome check --write .",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@ractive-ch/tab-mcp-client": "0.10.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.6.5",
+		"@types/bun": "1.4.4",
+		"@types/chrome": "0.3.7",
+		"happy-dom": "21.0.4",
+		"typescript": "7.0.2"
+	}
+}
