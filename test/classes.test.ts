@@ -41,6 +41,12 @@ describe("isGeneratedId", () => {
 		":r1:",
 		"«r3»",
 		"radix-:r5:",
+		"_r_1_",
+		"_r_12_",
+		"_R_15cl_",
+		"_R_2abH1_",
+		"radix-_r_5_",
+		"_r_3_-form-item",
 		"3f2a9c1e-77aa-4c1b-9d55-0123456789ab",
 		"ember123",
 		"mui-42",
@@ -50,10 +56,14 @@ describe("isGeneratedId", () => {
 		expect(isGeneratedId(id)).toBe(true);
 	});
 
-	test.each(["main", "search-input", "login-form", "step2"])(
-		"%s is hand-written",
-		(id) => {
-			expect(isGeneratedId(id)).toBe(false);
-		},
-	);
+	test.each([
+		"main",
+		"search-input",
+		"login-form",
+		"step2",
+		"_private_",
+		"r_1",
+	])("%s is hand-written", (id) => {
+		expect(isGeneratedId(id)).toBe(false);
+	});
 });

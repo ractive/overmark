@@ -318,6 +318,16 @@ describe("second review", () => {
 		expect(md).not.toMatch(/^## Injected/m);
 	});
 
+	test("an element without a selector gets no selector line", async () => {
+		const { c } = await stored();
+		const inShadow = annotation(1);
+		if (inShadow.element !== null) inShadow.element.selector = "";
+		expect(caseMarkdown(c)).toContain("- Selector:");
+		expect(caseMarkdown({ ...c, annotations: [inShadow] })).not.toContain(
+			"- Selector:",
+		);
+	});
+
 	test("case.json may not unpack to more than 20 MB", async () => {
 		const huge = new TextEncoder().encode(`${" ".repeat(21 * 1024 * 1024)}{}`);
 		const zip = await writeZip([{ name: "case.json", data: huge }]);

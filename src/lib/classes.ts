@@ -59,12 +59,14 @@ export function readableClasses(classAttribute: string): string[] {
 }
 
 /**
- * An id that a framework or library generated: React `:r1:` and `«r1»`,
- * UUIDs, long numbers or hex, `ember123`, `mui-42`, `headlessui-menu-button-3`.
+ * An id that a framework or library generated: React `:r1:`, `«r1»` and
+ * `_r_1_` (also inside a longer id, `_R_2abH1_-label`), UUIDs, long numbers or
+ * hex, `ember123`, `mui-42`, `headlessui-menu-button-3`.
  */
 export function isGeneratedId(id: string): boolean {
 	if (id === "" || id.length > 100) return true;
 	if (/[:«»]/.test(id)) return true;
+	if (/_[rR]_[0-9a-z]+(H[0-9a-z]+)?_/.test(id)) return true;
 	if (/\d{3,}/.test(id)) return true;
 	if (/[0-9a-f]{8,}/i.test(id) && /\d/.test(id)) return true;
 	if (/^[a-z]+-[a-z0-9-]*-\d+$/i.test(id)) return true;
