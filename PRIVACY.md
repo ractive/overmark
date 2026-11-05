@@ -30,13 +30,16 @@ The side panel also keeps its settings in the extension's local storage: the rel
 address, "Blur form fields in screenshots", "Keep AI access on", and the secret from
 which the tab-mcp library derives the address an AI app connects to.
 
-Overmark never records what is typed into form fields or text editors: the text it keeps
-about an element leaves out every field and editor inside it. A screenshot shows what
-was on the screen, though, form fields included. Whenever Overmark takes a screenshot
-(when you save marks, and when an AI app asks for one, see below), password fields are
-blurred, and with "Blur form fields in screenshots" all form fields and text editors
-are. This covers fields in the page itself and inside its web components, not fields
-inside embedded frames (for example a payment form from another site).
+Overmark does not record what is typed into form fields and editable regions: the text
+it keeps about an element leaves them out. Of the editors that draw their text as
+ordinary page content, it recognises only Monaco, CodeMirror 5 and Ace; to Overmark the
+text of any other such editor is page text, and it is kept when you mark it. A
+screenshot shows what was on the screen, though, form fields included. Whenever Overmark
+takes a screenshot (when you save marks, and when an AI app asks for one, see below),
+password fields are blurred, and with "Blur form fields in screenshots" all form fields
+and text editors are. This covers fields in the page itself and inside its web
+components, not fields inside embedded frames (for example a payment form from another
+site).
 
 ## When data leaves your computer
 
@@ -64,6 +67,10 @@ Only in two cases, both started by you:
    when the relay ended a session that was idle or too old. Disconnect, next to the app
    in the AI connection dialog, removes the app.
 
+Overmark itself sends nothing else. It does work inside the page you annotate, though, so
+that page's own scripts can see what Overmark shows there and the keys you press there,
+such as a comment while you type it. What they do with that is up to the site.
+
 Overmark does not sell data, use it for advertising, or pass it to anyone else.
 
 ## Permissions
@@ -72,6 +79,8 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   its shortcut), and only until that tab navigates elsewhere.
 - **scripting:** to add its toolbar and outlines to that tab.
 - **sidePanel:** for its side panel.
+- **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
+  free disk space, and they may grow beyond its usual limit. They stay in your browser.
 - **All sites (optional, off by default):** only if you choose "allow on all sites", so
   that Overmark works on a tab without clicking its icon first.
 

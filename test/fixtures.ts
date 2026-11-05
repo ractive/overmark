@@ -1,4 +1,5 @@
 import { CASE_FORMAT, type Case } from "../src/lib/case.ts";
+import type { CaseStore } from "../src/lib/store.ts";
 
 /** A case without shots or annotations. */
 export function sampleCase(
@@ -22,4 +23,9 @@ export function sampleCase(
 		annotations: [],
 		verdict: null,
 	};
+}
+
+/** Store a case as the worker and the side panel do; images go separately. */
+export function putCase(store: CaseStore, value: Case): Promise<Case> {
+	return store.updateCase(value.id, () => ({ value }));
 }

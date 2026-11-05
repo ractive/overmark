@@ -132,18 +132,6 @@ export async function cropImages(
 	}
 }
 
-/** One part of a screenshot (see `cropImages`). */
-export async function cropImage(
-	image: Blob,
-	rect: Rect,
-	dpr: number,
-	maxSide = MAX_SIDE,
-): Promise<StoredImage> {
-	const [crop] = await cropImages(image, [rect], dpr, maxSide);
-	if (crop === undefined) throw new Error("no crop");
-	return crop;
-}
-
 /**
  * The whole image, scaled down to at most `maxSide`: for images handed to AI
  * apps (iteration 4's `get_image` and `capture`).

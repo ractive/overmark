@@ -1,7 +1,8 @@
 /**
  * A small Chrome DevTools Protocol driver for the end-to-end tests, after
  * tab-mcp's `test/cdp.ts`: launch Chromium with the unpacked extension, open
- * pages, evaluate, click and type. Uses Bun's WebSocket; no Playwright.
+ * pages, evaluate, click and type. Uses Bun's WebSocket; no Playwright. Over
+ * a pipe it can also load an extension and click its icon (`launchPiped`).
  *
  * Branded Google Chrome ignores `--load-extension` (since Chrome 137), so the
  * tests need Chrome for Testing or Chromium: `CHROME_PATH`, else Playwright's
@@ -59,24 +60,83 @@ type Listener = (
 	sessionId?: string,
 ) => void;
 
+/** How CDP messages get to Chrome; what comes back goes to `receive`. */
+interface Transport {
+	send(message: string): void;
+	close(): void;
+}
+
+type Connect = (receive: (message: string) => void) => Transport;
+
+const webSocket =
+	(ws: WebSocket): Connect =>
+	(receive) => {
+		ws.addEventListener("message", (e) => receive(String(e.data)));
+		return { send: (message) => ws.send(message), close: () => ws.close() };
+	};
+
+/** `--remote-debugging-pipe`: Chrome reads fd 3 and writes fd 4, each message ends in NUL. */
+const pipe =
+	(toChrome: number, fromChrome: number): Connect =>
+	(receive) => {
+		const writer = Bun.file(toChrome).writer();
+		void (async () => {
+			const decoder = new TextDecoder();
+			let text = "";
+			for await (const chunk of Bun.file(fromChrome).stream()) {
+				text += decoder.decode(chunk, { stream: true });
+				const messages = text.split("\0");
+				text = messages.pop() ?? "";
+				for (const message of messages) receive(message);
+			}
+		})();
+		return {
+			send(message) {
+				writer.write(`${message}\0`);
+				void writer.flush();
+			},
+			close: () => void writer.end(),
+		};
+	};
+
+function chromeArguments(profile: string): string[] {
+	return [
+		"--headless=new",
+		`--user-data-dir=${profile}`,
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-gpu",
+		"--disable-background-networking",
+		"--window-size=1280,800",
+		// A plain http: host that is no secure context, as 127.0.0.1 is.
+		"--host-resolver-rules=MAP overmark.test 127.0.0.1",
+		...(process.platform === "linux" ? ["--no-sandbox"] : []),
+	];
+}
+
+interface TargetInfo {
+	targetId: string;
+	type: string;
+	url: string;
+}
+
 export class Browser {
-	readonly #proc: Subprocess<"ignore", "ignore", "pipe">;
+	readonly #proc: Subprocess<"ignore", "ignore", "ignore" | "pipe">;
 	readonly #profile: string;
-	readonly #ws: WebSocket;
+	readonly #transport: Transport;
 	readonly #pending = new Map<number, Pending>();
 	readonly #listeners = new Set<Listener>();
 	#nextId = 0;
 
 	private constructor(
-		proc: Subprocess<"ignore", "ignore", "pipe">,
+		proc: Subprocess<"ignore", "ignore", "ignore" | "pipe">,
 		profile: string,
-		ws: WebSocket,
+		connect: Connect,
 	) {
 		this.#proc = proc;
 		this.#profile = profile;
-		this.#ws = ws;
-		ws.addEventListener("message", (e) => {
-			const msg = JSON.parse(String(e.data)) as {
+		this.#transport = connect((message) => {
+			const msg = JSON.parse(message) as {
 				id?: number;
 				result?: Record<string, unknown>;
 				error?: { message: string };
@@ -101,19 +161,10 @@ export class Browser {
 		const proc = Bun.spawn(
 			[
 				binary,
-				"--headless=new",
+				...chromeArguments(profile),
 				"--remote-debugging-port=0",
-				`--user-data-dir=${profile}`,
-				"--no-first-run",
-				"--no-default-browser-check",
-				"--disable-gpu",
-				"--disable-background-networking",
-				"--window-size=1280,800",
-				// A plain http: host that is no secure context, as 127.0.0.1 is.
-				"--host-resolver-rules=MAP overmark.test 127.0.0.1",
 				`--disable-extensions-except=${extensionDir}`,
 				`--load-extension=${extensionDir}`,
-				...(process.platform === "linux" ? ["--no-sandbox"] : []),
 				"about:blank",
 			],
 			{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
@@ -147,7 +198,31 @@ export class Browser {
 				{ once: true },
 			);
 		});
-		return new Browser(proc, profile, ws);
+		return new Browser(proc, profile, webSocket(ws));
+	}
+
+	/**
+	 * Launch without an extension, over a pipe: only there does Chrome offer
+	 * the `Extensions` domain, for `loadExtension` and `clickIcon`.
+	 */
+	static async launchPiped(binary: string): Promise<Browser> {
+		const profile = mkdtempSync(join(tmpdir(), "overmark-chrome-"));
+		const proc = Bun.spawn(
+			[
+				binary,
+				...chromeArguments(profile),
+				"--remote-debugging-pipe",
+				"--enable-unsafe-extension-debugging",
+				"about:blank",
+			],
+			{ stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
+		);
+		const [, , , toChrome, fromChrome] = proc.stdio as unknown as number[];
+		return new Browser(
+			proc,
+			profile,
+			pipe(toChrome as number, fromChrome as number),
+		);
 	}
 
 	send(
@@ -156,7 +231,7 @@ export class Browser {
 		sessionId?: string,
 	): Promise<Record<string, unknown>> {
 		const id = ++this.#nextId;
-		this.#ws.send(
+		this.#transport.send(
 			JSON.stringify({
 				id,
 				method,
@@ -202,15 +277,67 @@ export class Browser {
 		const { targetId } = (await this.send("Target.createTarget", {
 			url: "about:blank",
 		})) as { targetId: string };
+		const page = await this.attachPage(targetId);
+		if (url !== "about:blank") await page.goto(url);
+		return page;
+	}
+
+	/** A page that is there already, such as a side panel. */
+	async attachPage(targetId: string): Promise<Page> {
+		const page = await this.attach(targetId);
+		await page.send("Page.enable");
+		await page.send("Runtime.enable");
+		return page;
+	}
+
+	/** A session on any target; on a service worker only `eval` makes sense. */
+	async attach(targetId: string): Promise<Page> {
 		const { sessionId } = (await this.send("Target.attachToTarget", {
 			targetId,
 			flatten: true,
 		})) as { sessionId: string };
-		const page = new Page(this, sessionId, targetId);
-		await page.send("Page.enable");
-		await page.send("Runtime.enable");
-		if (url !== "about:blank") await page.goto(url);
-		return page;
+		return new Page(this, sessionId, targetId);
+	}
+
+	/** Every target; tabs are targets of their own, beside the page they show. */
+	async targets(): Promise<TargetInfo[]> {
+		const { targetInfos } = (await this.send("Target.getTargets", {
+			filter: [{}],
+		})) as { targetInfos: TargetInfo[] };
+		return targetInfos;
+	}
+
+	/** The first target `matches` accepts, once there is one. */
+	async waitForTarget(
+		matches: (target: TargetInfo) => boolean,
+		timeoutMs = 5000,
+	): Promise<TargetInfo> {
+		const end = Date.now() + timeoutMs;
+		for (;;) {
+			const target = (await this.targets()).find(matches);
+			if (target !== undefined) return target;
+			if (Date.now() > end) throw new Error("timed out waiting for a target");
+			await Bun.sleep(50);
+		}
+	}
+
+	/** Load an unpacked extension and return its id. */
+	async loadExtension(path: string): Promise<string> {
+		const { id } = (await this.send("Extensions.loadUnpacked", {
+			path,
+		})) as { id: string };
+		return id;
+	}
+
+	/** Click the extension's icon on the tab showing `url`, with all a person's click grants. */
+	async clickIcon(extensionId: string, url: string): Promise<void> {
+		const tab = await this.waitForTarget(
+			(t) => t.type === "tab" && t.url === url,
+		);
+		await this.send("Extensions.triggerAction", {
+			id: extensionId,
+			targetId: tab.targetId,
+		});
 	}
 
 	async close(): Promise<void> {
@@ -219,7 +346,7 @@ export class Browser {
 		} catch {
 			// already gone
 		}
-		this.#ws.close();
+		this.#transport.close();
 		if (this.#proc.exitCode === null) this.#proc.kill("SIGKILL");
 		await this.#proc.exited;
 		rmSync(this.#profile, { recursive: true, force: true });
@@ -242,6 +369,11 @@ export class Page {
 		params: Record<string, unknown> = {},
 	): Promise<Record<string, unknown>> {
 		return this.#browser.send(method, params, this.sessionId);
+	}
+
+	/** The next event `method` of this page. */
+	event(method: string): Promise<Record<string, unknown>> {
+		return this.#browser.event(method, this.sessionId);
 	}
 
 	async goto(url: string, timeoutMs = 15_000): Promise<void> {

@@ -3,15 +3,18 @@ import type { Annotation, Case } from "../src/lib/case.ts";
 import {
 	exportCase,
 	exportFileName,
-	importCase,
 	readExport,
 	storeImport,
 	webpSize,
 } from "../src/lib/export.ts";
 import { caseMarkdown } from "../src/lib/markdown.ts";
-import { MemoryStore } from "../src/lib/store.ts";
+import { type CaseStore, MemoryStore } from "../src/lib/store.ts";
 import { readZip, writeZip } from "../src/lib/zip.ts";
-import { sampleCase } from "./fixtures.ts";
+import { putCase, sampleCase } from "./fixtures.ts";
+
+/** What the side panel does with a file: read it, then store it. */
+const importCase = async (store: CaseStore, zip: Uint8Array) =>
+	storeImport(store, await readExport(zip));
 
 /** A WebP header (VP8X) declaring `width`×`height`, and some bytes. */
 function webpBytes(width = 10, height = 10, tag = ""): Uint8Array {
@@ -76,7 +79,7 @@ async function stored(): Promise<{ store: MemoryStore; c: Case }> {
 		],
 		verdict: "Use the dark button.",
 	};
-	await store.putCase(c);
+	await putCase(store, c);
 	for (const path of ["shots/s1.webp", "crops/a1.webp", "crops/a2.webp"])
 		await store.putImage(c.id, path, {
 			blob: webp(path),
@@ -161,7 +164,7 @@ describe("import", () => {
 		const { store, c } = await stored();
 		const zip = await exportCase(store, c);
 		const target = new MemoryStore();
-		await target.putCase({ ...c, title: "old" });
+		await putCase(target, { ...c, title: "old" });
 		await target.putImage(c.id, "crops/a9.webp", {
 			blob: webp("x"),
 			width: 1,
@@ -300,7 +303,7 @@ describe("second review", () => {
 	test("a copy's title stays within the limit and the copy validates", async () => {
 		const { store, c } = await stored();
 		const long = { ...c, title: "T".repeat(500) };
-		await store.putCase(long);
+		await putCase(store, long);
 		const parsed = await readExport(await exportCase(store, long));
 		const copy = await storeImport(store, parsed, { copy: true });
 		expect(copy.title.length).toBeLessThanOrEqual(500);

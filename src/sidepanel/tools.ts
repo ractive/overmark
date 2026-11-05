@@ -179,7 +179,8 @@ function matchView(m: AnnotationMatch) {
 		candidates: m.candidates.map((c) => ({
 			...c,
 			summary: cut(c.summary, 300),
-			selector: cut(c.selector, 500),
+			// None reaches into a component's shadow root.
+			selector: c.selector ? cut(c.selector, 500) : null,
 		})),
 	};
 }

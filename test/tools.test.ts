@@ -22,7 +22,7 @@ import {
 	type TabBridge,
 	type ToolDeps,
 } from "../src/sidepanel/tools.ts";
-import { sampleCase } from "./fixtures.ts";
+import { putCase, sampleCase } from "./fixtures.ts";
 
 const element: ElementDetails = {
 	tag: "button",
@@ -193,7 +193,7 @@ async function seed(
 			(a) => (comment === undefined ? a : { ...a, comment }),
 		),
 	};
-	await store.putCase(c);
+	await putCase(store, c);
 	for (const path of ["shots/s1.webp", "crops/a1.webp", "crops/a2.webp"])
 		await store.putImage(c.id, path, {
 			blob: webp(100),
@@ -300,7 +300,7 @@ describe("tools", () => {
 	test("list_cases and load_case stay under the limit and say what they left out", async () => {
 		build({ maxMessageBytes: () => 20_000 });
 		for (let i = 0; i < 60; i++)
-			await store.putCase({
+			await putCase(store, {
 				...sampleCase(
 					`c_${i + 10}`,
 					`2026-11-04T10:${String(i).padStart(2, "0")}:00Z`,
@@ -695,7 +695,7 @@ describe("tools", () => {
 		const view = () => call("get_case", { caseId: "c_1", images: false });
 		expect(json(await view()).importedAt).toBeUndefined();
 		expect(json(await call("list_cases"))[0].importedAt).toBeUndefined();
-		await store.putCase({ ...c, importedAt: "2026-11-05T09:00:00.000Z" });
+		await putCase(store, { ...c, importedAt: "2026-11-05T09:00:00.000Z" });
 		expect(json(await view()).importedAt).toBe("2026-11-05T09:00:00.000Z");
 		expect(json(await call("list_cases"))[0].importedAt).toBe(
 			"2026-11-05T09:00:00.000Z",
@@ -715,7 +715,7 @@ describe("tools", () => {
 		const c = await seed();
 		const secret = "https://app.example/reset?token=abc&email=a@b.ch#access";
 		const plain = "https://app.example/reset";
-		await store.putCase({ ...c, page: { ...c.page, url: secret } });
+		await putCase(store, { ...c, page: { ...c.page, url: secret } });
 		tab.url = secret;
 		expect(json(await call("list_cases"))[0].url).toBe(plain);
 		expect(

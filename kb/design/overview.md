@@ -9,7 +9,7 @@ description: >-
 tags:
   - design
   - architecture
-timestamp: 2026-11-04T17:00:00+01:00
+timestamp: 2026-11-05T08:00:00+01:00
 ---
 
 # Overmark design
@@ -59,8 +59,8 @@ is what a case is about, and finding the element again is a best-effort extra:
 
 | Part | Job |
 |---|---|
-| Content script (`src/content/`) | Toolbar and drawing overlay in a shadow DOM, element picker, element details, the save pipeline (scroll, capture, shapes), highlighting a loaded case |
-| Service worker (`src/background.ts`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion and crops; writes cases |
+| Content script (`src/content/`) | Toolbar and drawing overlay in a shadow DOM, element picker, element details, a screenshot per mark as it is drawn, highlighting a loaded case |
+| Service worker (`src/background.ts`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases |
 | Side panel (`src/sidepanel/`) | Case list, case viewer, verdict, export and import, and `TabMcp` (connect dialog, tools, confirmations) |
 | Library (`src/lib/`) | Case format, element details, matching, zip, export, IndexedDB store, images |
 
@@ -73,6 +73,9 @@ the page's origin and never touches it directly.
 - `activeTab`: clicking the icon (or the keyboard shortcut) on a tab allows Overmark on
   that tab until it navigates: injecting the content script and `captureVisibleTab`.
 - `scripting`, `sidePanel`.
+- `unlimitedStorage`: IndexedDB holds the only copy of the cases, so the browser must not
+  evict it when disk space runs low. Chrome documents the permission as exempt from quota
+  and eviction, and it adds no install warning, which keeps DEC-003's small warning.
 - Optional `<all_urls>`, asked for in the side panel ("Allow on all sites") only when the
   user wants Overmark without clicking the icon on each tab. `captureVisibleTab` accepts
   `activeTab` or `<all_urls>`, not a single site's permission.
@@ -168,7 +171,10 @@ part (`Button_primary__x7Yz2` → `Button_primary`); random ones (`sc-…`, `css
 `kLmNoP`) and generated ids (React `:r1:`, UUIDs, long numbers) are ignored. A best
 score of 0.75 or more is "found", 0.5 or more "probable"; when the second-best score is
 within 0.03 of the best, the result is "ambiguous" and the side panel steps through the
-candidates.
+candidates. Of tied candidates, the only visible one wins. A test id, id,
+image file or link address counts as identity only when it is unique on the page, and an
+element without identity is at most "probable". An element the page replaces after
+loading is searched for again.
 
 ## Tools for the AI app
 

@@ -1,13 +1,18 @@
 /**
- * The end-to-end setup: a test build of the extension, a server for the test
- * pages, Chromium with the extension loaded, and an extension page to call
- * `chrome.*` APIs from (it stays alive, unlike the service worker).
+ * The end-to-end setup: a test build of the extension (or the store package,
+ * `startShipped`), a server for the test pages, Chromium with the extension
+ * loaded, and an extension page to call `chrome.*` APIs from (it stays alive,
+ * unlike the service worker).
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { build } from "../../scripts/build.ts";
+import {
+	type BuildOptions,
+	type BuildResult,
+	build,
+} from "../../scripts/build.ts";
 import { Browser, findBrowser, type Page } from "./browser.ts";
 
 export const browserBinary = findBrowser();
@@ -22,6 +27,7 @@ export interface Harness {
 	/** `http://127.0.0.1:<port>` serving `test/e2e/pages/`. */
 	base: string;
 	extensionId: string;
+	manifest: BuildResult["manifest"];
 	/** An extension page for calling `chrome.*` (the side panel's document, in a tab). */
 	control: Page;
 	/** Open a test page in a new tab and return it with its tab id. */
@@ -55,7 +61,38 @@ export async function openControl(
 	}
 }
 
-export async function startHarness(binary: string): Promise<Harness> {
+function servePages(): ReturnType<typeof Bun.serve> {
+	const pages = join(import.meta.dir, "pages");
+	return Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		async fetch(req) {
+			const path = new URL(req.url).pathname.replace(/^\/+/, "") || "v1";
+			const file = Bun.file(
+				join(pages, path.endsWith(".html") ? path : `${path}.html`),
+			);
+			if (!(await file.exists()) || path.includes(".."))
+				return new Response("not found", { status: 404 });
+			return new Response(file, {
+				headers: { "content-type": "text/html; charset=utf-8" },
+			});
+		},
+	});
+}
+
+/** What differs between the test build and the store package. */
+interface Launch {
+	options: BuildOptions;
+	browser(outdir: string): Promise<Browser>;
+	extensionId(
+		browser: Browser,
+		outdir: string,
+		built: BuildResult,
+	): Promise<string>;
+	tabIdOf(control: Page, page: Page, url: string): Promise<number>;
+}
+
+async function start(binary: string, launch: Launch): Promise<Harness> {
 	const outdir = mkdtempSync(join(tmpdir(), "overmark-dist-"));
 	let server: ReturnType<typeof Bun.serve> | undefined;
 	let browser: Browser | undefined;
@@ -65,44 +102,30 @@ export async function startHarness(binary: string): Promise<Harness> {
 		rmSync(outdir, { recursive: true, force: true });
 	};
 	try {
-		const { id } = await build({ outdir, test: true, minify: false });
-		if (id === undefined) throw new Error("test build without a key");
-		const pages = join(import.meta.dir, "pages");
-		server = Bun.serve({
-			hostname: "127.0.0.1",
-			port: 0,
-			async fetch(req) {
-				const path = new URL(req.url).pathname.replace(/^\/+/, "") || "v1";
-				const file = Bun.file(
-					join(pages, path.endsWith(".html") ? path : `${path}.html`),
-				);
-				if (!(await file.exists()) || path.includes(".."))
-					return new Response("not found", { status: 404 });
-				return new Response(file, {
-					headers: { "content-type": "text/html; charset=utf-8" },
-				});
-			},
-		});
+		const built = await build({ outdir, ...launch.options });
+		server = servePages();
 		const base = `http://127.0.0.1:${server.port}`;
-		const launched = await Browser.launch(binary, outdir);
+		const launched = await launch.browser(outdir);
 		browser = launched;
-		const control = await openControl(launched, id).catch((error: unknown) => {
-			throw new Error(
-				`the extension did not load; is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
-				{ cause: error },
-			);
-		});
+		const extensionId = await launch.extensionId(launched, outdir, built);
+		const control = await openControl(launched, extensionId).catch(
+			(error: unknown) => {
+				throw new Error(
+					`the extension did not load; is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
+					{ cause: error },
+				);
+			},
+		);
 		return {
 			browser: launched,
 			base,
-			extensionId: id,
+			extensionId,
+			manifest: built.manifest,
 			control,
 			async open(path) {
-				const page = await launched.newPage(`${base}/${path}`);
-				const tabId = await control.eval<number>(
-					`chrome.tabs.query({}).then((tabs) => tabs.find((t) => t.url === ${JSON.stringify(`${base}/${path}`)})?.id)`,
-				);
-				return { page, tabId };
+				const url = `${base}/${path}`;
+				const page = await launched.newPage(url);
+				return { page, tabId: await launch.tabIdOf(control, page, url) };
 			},
 			stop: cleanUp,
 		};
@@ -110,4 +133,37 @@ export async function startHarness(binary: string): Promise<Harness> {
 		await cleanUp();
 		throw error;
 	}
+}
+
+export function startHarness(binary: string): Promise<Harness> {
+	return start(binary, {
+		options: { test: true, minify: false },
+		browser: (outdir) => Browser.launch(binary, outdir),
+		async extensionId(_browser, _outdir, built) {
+			if (built.id === undefined) throw new Error("test build without a key");
+			return built.id;
+		},
+		tabIdOf: (control, _page, url) =>
+			control.eval<number>(
+				`chrome.tabs.query({}).then((tabs) => tabs.find((t) => t.url === ${JSON.stringify(url)})?.id)`,
+			),
+	});
+}
+
+/**
+ * The store package as it ships: minified, the real manifest, no host access.
+ * Extension pages see no tab's address, so `open` brings the tab to the front.
+ */
+export function startShipped(binary: string): Promise<Harness> {
+	return start(binary, {
+		options: { store: true },
+		browser: () => Browser.launchPiped(binary),
+		extensionId: (browser, outdir) => browser.loadExtension(outdir),
+		async tabIdOf(control, page) {
+			await page.activate();
+			return control.eval<number>(
+				`chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => tab.id)`,
+			);
+		},
+	});
 }

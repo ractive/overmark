@@ -41,11 +41,6 @@ export function relayProblem(value: string): string | undefined {
 		: "Plain http: works only for localhost; use https: for other hosts.";
 }
 
-/** Is `value` a relay address the library accepts? */
-export function validRelay(value: string): boolean {
-	return relayProblem(value) === undefined;
-}
-
 /** An access problem gets a hint for the AI app; other errors stay as they are. */
 function captureError(message: string): Error {
 	return /permission|cannot access|activeTab|all_urls/i.test(message)

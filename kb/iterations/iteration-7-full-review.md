@@ -22,7 +22,7 @@ be fixed and the result tested in the browser.
 
 - [x] Review of the whole codebase
 - [x] Screenshots at the mark; marks follow their element; unsaved marks ask before leaving
-- [ ] Matching, side panel and AI tools, build and documents
+- [x] Matching, side panel and AI tools, build and documents
 - [ ] Review of the fixes, merge
 - [ ] More testing in the browser
 

@@ -8,6 +8,8 @@ import {
 	checkOutdir,
 	createManifest,
 	extensionId,
+	NOTICES_FILE,
+	notices,
 	readKey,
 	zipBuild,
 } from "../scripts/build.ts";
@@ -25,6 +27,19 @@ afterAll(() => {
 	for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * A classic script with everything inside one function: module syntax does not
+ * parse, and injecting it twice into a page declares nothing twice.
+ */
+function isWrappedScript(code: string): boolean {
+	try {
+		new Function(code); // only parses it
+	} catch {
+		return false;
+	}
+	return /^\(\(\)=>\{[\s\S]*\}\)\(\);\s*(\/\/#.*\s*)*$/.test(code);
+}
+
 describe("extension ID", () => {
 	test("the committed key gives the documented ID", async () => {
 		expect(extensionId(await readKey())).toBe(
@@ -39,7 +54,12 @@ describe("manifest", () => {
 		expect(m["manifest_version"]).toBe(3);
 		expect(m["version"]).toBe("1.2.3");
 		expect(m["key"]).toBe("abc");
-		expect(m["permissions"]).toEqual(["activeTab", "scripting", "sidePanel"]);
+		expect(m["permissions"]).toEqual([
+			"activeTab",
+			"scripting",
+			"sidePanel",
+			"unlimitedStorage",
+		]);
 		expect(m["optional_host_permissions"]).toEqual(["<all_urls>"]);
 		expect(m["host_permissions"]).toBeUndefined();
 	});
@@ -69,9 +89,27 @@ describe("build", () => {
 		expect(html).not.toContain("main.ts");
 		const manifest = await Bun.file(join(outdir, "manifest.json")).json();
 		expect(manifest.key).toBe(await readKey());
-		// The content script is a classic script: no module syntax at the top level.
 		const content = await Bun.file(join(outdir, "content.js")).text();
-		expect(content).not.toMatch(/^\s*(import|export)\s/m);
+		expect(isWrappedScript(content)).toBe(true);
+	});
+
+	test("the content script's check tells a module from a wrapped script", async () => {
+		for (const code of [
+			"export{a as b};",
+			'import{x}from"./y.js";',
+			'import"./y.js";',
+			"(()=>{export{a as b};})();",
+			"(()=>{console.log(import.meta.url)})();",
+		])
+			expect(isWrappedScript(code)).toBe(false);
+		// The real entry as a module: it exports nothing, so only the wrapper differs.
+		const esm = await Bun.build({
+			entrypoints: [join(import.meta.dir, "../src/content/index.ts")],
+			target: "browser",
+			format: "esm",
+			minify: true,
+		});
+		expect(isWrappedScript(await (esm.outputs[0] as Blob).text())).toBe(false);
 	});
 
 	test("a store build has no key, and its zip holds no source maps", async () => {
@@ -87,6 +125,32 @@ describe("build", () => {
 		expect(files.has("manifest.json")).toBe(true);
 		expect(files.has("content.js")).toBe(true);
 		expect([...files.keys()].some((n) => n.endsWith(".map"))).toBe(false);
+	});
+
+	test("every build and its zip carry the licences of what they bundle", async () => {
+		for (const options of [{}, { store: true }, { test: true }]) {
+			const outdir = tempDir();
+			await build({ outdir, ...options });
+			const target = join(tempDir(), "x.zip");
+			await zipBuild(outdir, target);
+			const files = await readZip(
+				new Uint8Array(await Bun.file(target).arrayBuffer()),
+			);
+			const text = new TextDecoder().decode(files.get(NOTICES_FILE));
+			expect(text).toBe(await Bun.file(join(outdir, NOTICES_FILE)).text());
+			expect(text).toContain("Copyright (c) 2026 Jean-Pierre Bergamin");
+			expect(text).toContain("AI-GENERATED CODE NOTICE");
+			expect(text).toContain("@ractive-ch/tab-mcp-client\n\nMIT License");
+			expect(text).toContain("@cfworker/json-schema\n\nMIT License");
+			expect(text).toContain("Copyright (c) 2020 Jeremy Danyow");
+			expect(text).not.toContain("CDN build");
+		}
+	});
+
+	test("a bundled package without a known licence stops the build", async () => {
+		await expect(notices(["left-pad"])).rejects.toThrow(
+			"no licence known for the bundled package left-pad",
+		);
 	});
 });
 
