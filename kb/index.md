@@ -6,6 +6,7 @@
 
 * [design](design/index.md)
 * [iterations](iterations/index.md)
+* [operations](operations/index.md)
 * [research](research/index.md)
 
 ## decision-log

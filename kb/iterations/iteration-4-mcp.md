@@ -28,4 +28,4 @@ tags: [iteration, mcp]
 - [x] `src/sidepanel/mcp.ts` and the side panel's AI section
 - [x] Test through `startTestRelay` and the MCP client
 - [x] README: relay and Claude Code
-- [ ] Review, PR
+- [x] Review, PR

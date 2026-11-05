@@ -31,4 +31,4 @@ tags: [iteration, matching, export]
 - [x] Content script: describe candidates, highlight, step through candidates
 - [x] Side panel: export, import, load onto this tab, results
 - [x] End-to-end: a case from test page v1 loads onto v2 (other classes, ids, order) and finds its element
-- [ ] Review, PR
+- [x] Review, PR

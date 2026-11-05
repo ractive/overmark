@@ -4,3 +4,4 @@ dist/
 overmark-*.zip
 .DS_Store
 .hyalo-index
+dist-store/

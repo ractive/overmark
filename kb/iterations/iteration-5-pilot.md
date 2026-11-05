@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 5: pilot and store"
-status: planned
+status: in-progress
 description: "A first pilot with a PO and a dev on real Acme pages, measuring how often elements are found; the privacy policy and the store listing; the extension unlisted in the Chrome Web Store and the store's key in the manifest."
 timestamp: 2026-11-04T17:00:00+01:00
 tags: [iteration, release]
@@ -22,7 +22,7 @@ tags: [iteration, release]
 
 ## Tasks
 
-- [ ] `PRIVACY.md`, store listing in `kb/operations/`
-- [ ] Release workflow (zip as a release asset)
+- [x] `PRIVACY.md`, store listing in `kb/operations/`
+- [x] Release workflow (zip as a release asset)
 - [ ] Pilot and matching measurement (owner, with a PO and a dev)
 - [ ] Store submission (owner's developer account) and the store key

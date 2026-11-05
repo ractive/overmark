@@ -35,4 +35,4 @@ tags: [iteration, content-script, storage]
 - [x] Save pipeline and the service worker's capture and crops
 - [x] Side panel list and case view
 - [x] End-to-end: draw a box and save; the case and its images are in IndexedDB
-- [ ] Review, PR
+- [x] Review, PR
