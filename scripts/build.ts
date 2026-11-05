@@ -46,6 +46,36 @@ export async function readKey(): Promise<string> {
 
 const ICON_SIZES = [16, 32, 48, 128] as const;
 
+/** The licences of all that a build contains, in the build and so in its zips. */
+export const NOTICES_FILE = "LICENSES.txt";
+
+const CLIENT = "node_modules/@ractive-ch/tab-mcp-client";
+
+/**
+ * Where each bundled package's licence is, from the repository's root.
+ * `@cfworker/json-schema` publishes none; tab-mcp-client passes on its notice.
+ */
+const LICENCES: Readonly<Record<string, string>> = {
+	"@cfworker/json-schema": `${CLIENT}/THIRD-PARTY-NOTICES.txt`,
+	"@ractive-ch/tab-mcp-client": `${CLIENT}/LICENSE`,
+};
+
+/** Overmark's licence and those of `packages`; a package without one stops the build. */
+export async function notices(packages: Iterable<string>): Promise<string> {
+	const text = (path: string) => Bun.file(join(ROOT, path)).text();
+	const parts = [
+		`Overmark\n\n${await text("LICENSE")}\n${await text("AI_NOTICE")}`,
+	];
+	for (const name of [...packages].sort()) {
+		const path = LICENCES[name];
+		if (path === undefined)
+			throw new Error(`no licence known for the bundled package ${name}`);
+		const licence = await text(path);
+		parts.push(`${name}\n\n${licence.slice(licence.indexOf("MIT License"))}`);
+	}
+	return parts.join(`\n${"-".repeat(78)}\n\n`);
+}
+
 export function createManifest(
 	version: string,
 	options: { key?: string; test?: boolean },
@@ -64,7 +94,7 @@ export function createManifest(
 		action: { default_title: "Overmark", default_icon: icons },
 		background: { service_worker: "background.js", type: "module" },
 		side_panel: { default_path: "sidepanel/index.html" },
-		permissions: ["activeTab", "scripting", "sidePanel"],
+		permissions: ["activeTab", "scripting", "sidePanel", "unlimitedStorage"],
 		optional_host_permissions: ["<all_urls>"],
 		...(options.test ? { host_permissions: ["<all_urls>"] } : {}),
 		commands: {
@@ -83,7 +113,7 @@ async function bundle(
 	format: "esm" | "iife",
 	minify: boolean,
 	naming?: string,
-): Promise<void> {
+): Promise<string[]> {
 	const result = await Bun.build({
 		entrypoints: [join(ROOT, entrypoint)],
 		outdir,
@@ -93,10 +123,14 @@ async function bundle(
 		minify,
 		splitting: format === "esm" && entrypoint.endsWith(".html"),
 		sourcemap: "linked",
+		metafile: true,
 	});
 	if (!result.success) {
 		throw new AggregateError(result.logs, `build of ${entrypoint} failed`);
 	}
+	return Object.keys(result.metafile?.inputs ?? {}).flatMap(
+		(path) => /node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(path)?.[1] ?? [],
+	);
 }
 
 /**
@@ -132,14 +166,23 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 		version: string;
 	};
 	await rm(outdir, { recursive: true, force: true });
-	await bundle("src/background.ts", outdir, "esm", minify);
-	await bundle("src/content/index.ts", outdir, "iife", minify, CONTENT_SCRIPT);
-	await bundle(
-		"src/sidepanel/index.html",
-		join(outdir, "sidepanel"),
-		"esm",
-		minify,
-	);
+	const packages = new Set([
+		...(await bundle("src/background.ts", outdir, "esm", minify)),
+		...(await bundle(
+			"src/content/index.ts",
+			outdir,
+			"iife",
+			minify,
+			CONTENT_SCRIPT,
+		)),
+		...(await bundle(
+			"src/sidepanel/index.html",
+			join(outdir, "sidepanel"),
+			"esm",
+			minify,
+		)),
+	]);
+	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));
 	for (const size of ICON_SIZES) {
 		const name = `icon-${size}.png`;
 		await Bun.write(

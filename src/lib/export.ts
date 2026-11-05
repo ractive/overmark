@@ -180,11 +180,3 @@ export async function storeImport(
 }
 
 const COPY = " (copy)";
-
-/** Read an export and store it, replacing a case with the same id. */
-export async function importCase(
-	store: CaseStore,
-	zip: Uint8Array,
-): Promise<Case> {
-	return storeImport(store, await readExport(zip));
-}

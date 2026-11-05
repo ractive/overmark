@@ -3,5 +3,8 @@ dist/
 *.overmark.zip
 overmark-*.zip
 .DS_Store
+.env
+.env.*
+!.env.example
 .hyalo-index
 dist-store/

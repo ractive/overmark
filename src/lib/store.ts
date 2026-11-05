@@ -24,7 +24,6 @@ export interface CaseStore {
 	/** All cases, newest change first. */
 	listCases(): Promise<Case[]>;
 	getCase(id: string): Promise<Case | undefined>;
-	putCase(value: Case): Promise<void>;
 	/** Deletes the case and its images. */
 	deleteCase(id: string): Promise<void>;
 	getImage(caseId: string, path: string): Promise<StoredImage | undefined>;
@@ -39,8 +38,6 @@ export interface CaseStore {
 	updateCase(id: string, change: CaseChange): Promise<Case>;
 	/** Deletes these images of the case. */
 	deleteImages(caseId: string, paths: readonly string[]): Promise<void>;
-	/** Deletes the case's images whose paths are not in `keep`. */
-	pruneImages(caseId: string, keep: ReadonlySet<string>): Promise<void>;
 	/**
 	 * Deletes screenshots of saves that never finished (the tab closed while
 	 * saving): pending images stored before `before` (ms), or undated.
@@ -85,10 +82,6 @@ export class MemoryStore implements CaseStore {
 		return found === undefined ? undefined : structuredClone(found);
 	}
 
-	async putCase(value: Case): Promise<void> {
-		this.cases.set(value.id, structuredClone(value));
-	}
-
 	async deleteCase(id: string): Promise<void> {
 		this.cases.delete(id);
 		for (const key of [...this.images.keys()])
@@ -116,22 +109,15 @@ export class MemoryStore implements CaseStore {
 			current === undefined ? undefined : structuredClone(current),
 		);
 		checkId(id, value);
-		this.cases.set(id, structuredClone(value));
-		for (const [path, image] of images ?? [])
+		const copy = structuredClone({ value, images }); // a failure changes nothing
+		this.cases.set(id, copy.value);
+		for (const [path, image] of copy.images ?? [])
 			this.images.set(imageKey(id, path), image);
 		return structuredClone(value);
 	}
 
 	async deleteImages(caseId: string, paths: readonly string[]): Promise<void> {
 		for (const path of paths) this.images.delete(imageKey(caseId, path));
-	}
-
-	async pruneImages(caseId: string, keep: ReadonlySet<string>): Promise<void> {
-		const prefix = `${caseId}/`;
-		for (const key of [...this.images.keys()]) {
-			if (key.startsWith(prefix) && !keep.has(key.slice(prefix.length)))
-				this.images.delete(key);
-		}
 	}
 
 	async sweepPending(before: number): Promise<number> {
@@ -149,10 +135,11 @@ export class MemoryStore implements CaseStore {
 		value: Case,
 		images: ReadonlyMap<string, StoredImage>,
 	): Promise<void> {
+		const copy = structuredClone({ value, images }); // a failure changes nothing
 		await this.deleteCase(value.id);
-		for (const [path, image] of images)
+		for (const [path, image] of copy.images)
 			this.images.set(imageKey(value.id, path), image);
-		this.cases.set(value.id, structuredClone(value));
+		this.cases.set(value.id, copy.value);
 	}
 }
 
@@ -206,13 +193,6 @@ export class IdbStore implements CaseStore {
 		return (await request(
 			db.transaction("cases").objectStore("cases").get(id),
 		)) as Case | undefined;
-	}
-
-	async putCase(value: Case): Promise<void> {
-		const db = await this.#open();
-		const tx = db.transaction("cases", "readwrite");
-		tx.objectStore("cases").put(value);
-		await done(tx);
 	}
 
 	async deleteCase(id: string): Promise<void> {
@@ -286,34 +266,27 @@ export class IdbStore implements CaseStore {
 		await done(tx);
 	}
 
-	async pruneImages(caseId: string, keep: ReadonlySet<string>): Promise<void> {
-		const db = await this.#open();
-		const tx = db.transaction("images", "readwrite");
-		const store = tx.objectStore("images");
-		const keys = (await request(
-			store.getAllKeys(prefixRange(caseId)),
-		)) as string[];
-		for (const key of keys) {
-			if (!keep.has(key.slice(caseId.length + 1))) store.delete(key);
-		}
-		await done(tx);
-	}
-
 	async sweepPending(before: number): Promise<number> {
 		const db = await this.#open();
+		// Keys only: reading every image would hold up the store at each worker start.
+		const keys = (await request(
+			db.transaction("images").objectStore("images").getAllKeys(),
+		)) as string[];
+		const pending = keys.filter(isPendingKey);
+		if (pending.length === 0) return 0;
 		const tx = db.transaction("images", "readwrite");
+		const store = tx.objectStore("images");
 		let swept = 0;
-		const cursor = tx.objectStore("images").openCursor();
-		cursor.onsuccess = () => {
-			const at = cursor.result;
-			if (at === null) return;
-			const image = at.value as StoredImage;
-			if (isPendingKey(String(at.key)) && (image.storedAt ?? 0) < before) {
-				at.delete();
-				swept++;
-			}
-			at.continue();
-		};
+		for (const key of pending) {
+			const read = store.get(key);
+			read.onsuccess = () => {
+				const image = read.result as StoredImage | undefined;
+				if (image !== undefined && (image.storedAt ?? 0) < before) {
+					store.delete(key);
+					swept++;
+				}
+			};
+		}
 		await done(tx);
 		return swept;
 	}
@@ -324,11 +297,17 @@ export class IdbStore implements CaseStore {
 	): Promise<void> {
 		const db = await this.#open();
 		const tx = db.transaction(["cases", "images"], "readwrite");
-		const store = tx.objectStore("images");
-		store.delete(prefixRange(value.id));
-		for (const [path, image] of images)
-			store.put(image, imageKey(value.id, path));
-		tx.objectStore("cases").put(value);
+		try {
+			const store = tx.objectStore("images");
+			store.delete(prefixRange(value.id));
+			for (const [path, image] of images)
+				store.put(image, imageKey(value.id, path));
+			tx.objectStore("cases").put(value);
+		} catch (error) {
+			// Left alone, the transaction would commit what was asked of it so far.
+			tx.abort();
+			throw error;
+		}
 		await done(tx);
 	}
 }

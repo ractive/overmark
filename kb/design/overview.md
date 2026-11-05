@@ -9,7 +9,7 @@ description: >-
 tags:
   - design
   - architecture
-timestamp: 2026-11-04T17:00:00+01:00
+timestamp: 2026-11-05T08:00:00+01:00
 ---
 
 # Overmark design
@@ -73,6 +73,9 @@ the page's origin and never touches it directly.
 - `activeTab`: clicking the icon (or the keyboard shortcut) on a tab allows Overmark on
   that tab until it navigates: injecting the content script and `captureVisibleTab`.
 - `scripting`, `sidePanel`.
+- `unlimitedStorage`: IndexedDB holds the only copy of the cases, so the browser must not
+  evict it when disk space runs low. Chrome documents the permission as exempt from quota
+  and eviction, and it adds no install warning, which keeps DEC-003's small warning.
 - Optional `<all_urls>`, asked for in the side panel ("Allow on all sites") only when the
   user wants Overmark without clicking the icon on each tab. `captureVisibleTab` accepts
   `activeTab` or `<all_urls>`, not a single site's permission.
