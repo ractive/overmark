@@ -4,8 +4,28 @@
  */
 
 import type { Rect } from "../lib/case.ts";
+import { shadowOf } from "../lib/shadow.ts";
 
 const IGNORED = new Set(["html", "body"]);
+
+/**
+ * The elements at a point of one tree, each shadow root's before its host. A
+ * document only reports the host; a root also repeats the elements around it.
+ */
+function hitsIn(
+	root: Document | ShadowRoot,
+	x: number,
+	y: number,
+	host: Element,
+	seen: Set<Element>,
+): Element[] {
+	const hits = root.elementsFromPoint(x, y).filter((e) => !seen.has(e));
+	for (const e of hits) seen.add(e);
+	return hits.flatMap((e) => {
+		const inner = e === host ? null : shadowOf(e);
+		return inner === null ? [e] : [...hitsIn(inner, x, y, host, seen), e];
+	});
+}
 
 /** Page elements at a point of the window, deepest first, without Overmark's own. */
 export function pageElementsAt(
@@ -14,11 +34,9 @@ export function pageElementsAt(
 	host: Element,
 	doc: Document = document,
 ): Element[] {
-	return doc
-		.elementsFromPoint(x, y)
-		.filter(
-			(e) => e !== host && !host.contains(e) && !IGNORED.has(e.localName),
-		);
+	return hitsIn(doc, x, y, host, new Set()).filter(
+		(e) => e !== host && !host.contains(e) && !IGNORED.has(e.localName),
+	);
 }
 
 export function elementAt(

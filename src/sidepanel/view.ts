@@ -1,16 +1,15 @@
 /**
  * Drawing the side panel from its state (DEC-011). `render` is the only code
- * that touches the panel's DOM. Parts that hold what the user types (the
- * verdict) stay the same elements while their case is open, so typing, focus
- * and cursor survive every render; the other parts are redrawn when what they
- * show changed.
+ * that touches the panel's DOM. The open case's verdict and buttons stay the
+ * same elements while it is open, so typing, focus and clicks survive every
+ * render; the other parts are redrawn when what they show changed.
  */
 
 import { type Annotation, type Case, MAX_VERDICT } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch } from "../lib/messages.ts";
 import { byId, formatDate, h, samePath, shortUrl } from "./dom.ts";
-import type { PanelState } from "./state.ts";
+import type { AiCall, PanelState } from "./state.ts";
 
 /** What the user can do; main.ts carries it out and updates the state. */
 export interface Actions {
@@ -21,6 +20,7 @@ export interface Actions {
 	addMarks(c: Case): void;
 	exportCase(c: Case): void;
 	deleteCase(c: Case): void;
+	typeVerdict(caseId: string, text: string): void;
 	saveVerdict(caseId: string, text: string): void;
 	showMatch(caseId: string, a: Annotation, candidate: number): void;
 	importReplace(): void;
@@ -34,12 +34,24 @@ const pageText = byId<HTMLParagraphElement>("page");
 const hint = byId<HTMLParagraphElement>("hint");
 const annotate = byId<HTMLButtonElement>("annotate");
 const casesList = byId<HTMLDivElement>("cases");
+const allSites = byId<HTMLInputElement>("all-sites");
+const aiStatus = byId<HTMLSpanElement>("ai-status");
+const aiCall = byId<HTMLParagraphElement>("ai-call");
+const stopAi = byId<HTMLButtonElement>("stop-ai");
+const connectButton = byId<HTMLButtonElement>("connect");
+const keepOn = byId<HTMLInputElement>("keep-on");
+const importError = byId<HTMLDivElement>("import-error");
+const importErrorText = byId<HTMLParagraphElement>("import-error-text");
 const importPrompt = h("div", {
 	class: "hint",
 	id: "import-prompt",
 	hidden: true,
 });
 byId<HTMLButtonElement>("import").parentElement?.after(importPrompt);
+
+/** Why Overmark does not work on a tab yet, and what to do about it. */
+export const NO_ACCESS =
+	"Overmark may not run on this tab yet. Click the Overmark icon in the toolbar (or press Alt+Shift+O) while this tab is in front.";
 
 const percent = (score: number) => `${Math.round(score * 100)}%`;
 
@@ -75,51 +87,63 @@ function caseItem(c: Case, actions: Actions): HTMLLIElement {
 	);
 }
 
-function renderHome(state: PanelState, actions: Actions): void {
-	const tab = state.tab;
-	pageText.textContent = tab?.url
-		? shortUrl(tab.url)
-		: (tab?.title ?? "This page");
-	setHint(hint, state.hint);
-	annotate.textContent = state.overlay?.visible
-		? "Stop annotating"
-		: "Annotate this page";
+/** What the case list and the import prompt show now. */
+let casesKey: string | undefined;
+let importKey: string | undefined;
+
+function renderCases(state: PanelState, actions: Actions): void {
+	const url = state.tab?.url ?? "";
+	const key = JSON.stringify([
+		url,
+		state.cases.map((c) => [c.id, c.updatedAt, c.importedAt]),
+	]);
+	if (key === casesKey) return;
+	casesKey = key;
 	if (state.cases.length === 0) {
 		casesList.replaceChildren(
 			h("p", { class: "empty" }, "No cases yet. Annotate a page and save it."),
 		);
-	} else {
-		const url = tab?.url ?? "";
-		const here = state.cases.filter((c) => url && samePath(c.page.url, url));
-		const other = state.cases.filter((c) => !here.includes(c));
-		casesList.replaceChildren(
-			...(here.length > 0
-				? [
-						h("p", { class: "group-title" }, "For this page"),
-						h(
-							"ul",
-							{ class: "cases", "data-group": "here" },
-							...here.map((c) => caseItem(c, actions)),
-						),
-					]
-				: []),
-			...(other.length > 0
-				? [
-						h(
-							"p",
-							{ class: "group-title" },
-							here.length > 0 ? "Other pages" : "All cases",
-						),
-						h(
-							"ul",
-							{ class: "cases", "data-group": "other" },
-							...other.map((c) => caseItem(c, actions)),
-						),
-					]
-				: []),
-		);
+		return;
 	}
+	const here = state.cases.filter((c) => url && samePath(c.page.url, url));
+	const other = state.cases.filter((c) => !here.includes(c));
+	casesList.replaceChildren(
+		...(here.length > 0
+			? [
+					h("p", { class: "group-title" }, "For this page"),
+					h(
+						"ul",
+						{ class: "cases", "data-group": "here" },
+						...here.map((c) => caseItem(c, actions)),
+					),
+				]
+			: []),
+		...(other.length > 0
+			? [
+					h(
+						"p",
+						{ class: "group-title" },
+						here.length > 0 ? "Other pages" : "All cases",
+					),
+					h(
+						"ul",
+						{ class: "cases", "data-group": "other" },
+						...other.map((c) => caseItem(c, actions)),
+					),
+				]
+			: []),
+	);
+}
+
+function renderImportPrompt(state: PanelState, actions: Actions): void {
 	const importing = state.importing;
+	const key = JSON.stringify([
+		importing?.existing.id,
+		importing?.existing.updatedAt,
+		importing?.parsed.case.updatedAt,
+	]);
+	if (key === importKey) return;
+	importKey = key;
 	if (importing === undefined) {
 		importPrompt.hidden = true;
 		importPrompt.replaceChildren();
@@ -160,6 +184,23 @@ function renderHome(state: PanelState, actions: Actions): void {
 		),
 	);
 	importPrompt.hidden = false;
+}
+
+function renderHome(state: PanelState, actions: Actions): void {
+	const tab = state.tab;
+	pageText.textContent = tab?.url
+		? shortUrl(tab.url)
+		: tab?.title || "This page";
+	// Chrome tells the address only of a tab Overmark may run on.
+	setHint(hint, state.hint ?? (tab && !tab.url ? NO_ACCESS : undefined));
+	annotate.textContent = state.overlay?.visible
+		? "Stop annotating"
+		: "Annotate this page";
+	allSites.checked = state.allSites;
+	importError.hidden = state.importError === undefined;
+	importErrorText.textContent = state.importError ?? "";
+	renderCases(state, actions);
+	renderImportPrompt(state, actions);
 }
 
 // --- one case ------------------------------------------------------------------
@@ -237,8 +278,13 @@ function matchView(
 
 /** The parts of the open case's view, kept between renders. */
 interface CaseParts {
-	caseId: string;
-	header: HTMLElement;
+	/** The case as last drawn, for the buttons. */
+	current: Case;
+	title: HTMLElement;
+	meta: HTMLElement;
+	origin: HTMLElement;
+	deleteButton: HTMLButtonElement;
+	hint: HTMLElement;
 	verdict: HTMLTextAreaElement;
 	verdictStatus: HTMLSpanElement;
 	marks: HTMLElement;
@@ -250,18 +296,26 @@ interface CaseParts {
 let parts: CaseParts | undefined;
 
 function createParts(c: Case, actions: Actions): CaseParts {
-	const verdict = h("textarea", {
+	const verdict: HTMLTextAreaElement = h("textarea", {
 		id: "verdict",
 		placeholder: "What should change, as agreed?",
 		maxlength: String(MAX_VERDICT),
 		"data-case": c.id,
+		oninput: () => actions.typeVerdict(c.id, verdict.value),
 	});
-	verdict.value = c.verdict ?? "";
-	verdict.dataset["saved"] = c.verdict ?? "";
 	const verdictStatus = h("span", { class: "meta", id: "verdict-status" });
 	const created: CaseParts = {
-		caseId: c.id,
-		header: h("section"),
+		current: c,
+		title: h("h2"),
+		meta: h("p", { class: "meta" }),
+		origin: h("p", { class: "hint", id: "case-origin", hidden: true }),
+		deleteButton: h("button", {
+			type: "button",
+			class: "danger",
+			id: "delete-case",
+			onclick: () => actions.deleteCase(created.current),
+		}),
+		hint: h("p", { class: "hint", id: "case-hint", hidden: true }),
 		verdict,
 		verdictStatus,
 		marks: h("section"),
@@ -269,6 +323,52 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		shots: h("section"),
 		shotsKey: "",
 	};
+	const header = h(
+		"section",
+		{ class: "case-header" },
+		h(
+			"button",
+			{ type: "button", class: "link", onclick: () => actions.closeCase() },
+			"← All cases",
+		),
+		created.title,
+		created.meta,
+		created.origin,
+		h(
+			"div",
+			{ class: "row" },
+			h(
+				"button",
+				{
+					type: "button",
+					class: "primary",
+					id: "load-case",
+					onclick: () => actions.loadOntoTab(created.current),
+				},
+				"Load onto this tab",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					id: "add-marks",
+					onclick: () => actions.addMarks(created.current),
+				},
+				"Add marks",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					id: "export-case",
+					onclick: () => actions.exportCase(created.current),
+				},
+				"Export",
+			),
+			created.deleteButton,
+		),
+		created.hint,
+	);
 	const verdictSection = h(
 		"section",
 		{},
@@ -290,7 +390,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		),
 	);
 	caseView.replaceChildren(
-		created.header,
+		header,
 		verdictSection,
 		created.marks,
 		created.shots,
@@ -305,75 +405,28 @@ function renderCase(state: PanelState, actions: Actions): void {
 		caseView.replaceChildren(h("p", { class: "meta" }, "Loading…"));
 		return;
 	}
-	if (parts?.caseId !== c.id) parts = createParts(c, actions);
+	if (parts?.current.id !== c.id) parts = createParts(c, actions);
 	const p = parts;
-	// The verdict: what the store has, unless the user is typing another.
-	const typing = p.verdict.value !== p.verdict.dataset["saved"];
-	p.verdict.dataset["saved"] = c.verdict ?? "";
-	if (!typing) p.verdict.value = c.verdict ?? "";
-	p.verdictStatus.textContent = state.verdictStatus ?? "";
+	p.current = c;
+	// The verdict: what the store has, unless the user typed another.
+	const draft = state.verdictDrafts.get(c.id);
+	const verdict = draft ?? c.verdict ?? "";
+	if (p.verdict.value !== verdict) p.verdict.value = verdict;
+	p.verdictStatus.textContent =
+		state.verdictStatus ?? (draft === undefined ? "" : "Not saved yet");
 
-	const header = h(
-		"section",
-		{ class: "case-header" },
-		h(
-			"button",
-			{ type: "button", class: "link", onclick: () => actions.closeCase() },
-			"← All cases",
-		),
-		h("h2", {}, c.title),
-		h(
-			"p",
-			{ class: "meta" },
-			`${shortUrl(c.page.url)} · ${c.page.viewport.width}×${c.page.viewport.height} · ${formatDate(c.createdAt)}`,
-		),
-		h(
-			"div",
-			{ class: "row" },
-			h(
-				"button",
-				{
-					type: "button",
-					class: "primary",
-					id: "load-case",
-					onclick: () => actions.loadOntoTab(c),
-				},
-				"Load onto this tab",
-			),
-			h(
-				"button",
-				{ type: "button", id: "add-marks", onclick: () => actions.addMarks(c) },
-				"Add marks",
-			),
-			h(
-				"button",
-				{
-					type: "button",
-					id: "export-case",
-					onclick: () => actions.exportCase(c),
-				},
-				"Export",
-			),
-			h(
-				"button",
-				{
-					type: "button",
-					class: "danger",
-					id: "delete-case",
-					"data-armed": state.deleteArmed ? "true" : false,
-					onclick: () => actions.deleteCase(c),
-				},
-				state.deleteArmed ? "Really delete?" : "Delete",
-			),
-		),
-		h(
-			"p",
-			{ class: "hint", id: "case-hint", hidden: state.caseHint === undefined },
-			state.caseHint ?? "",
-		),
+	p.title.textContent = c.title;
+	p.meta.textContent = `${shortUrl(c.page.url)} · ${c.page.viewport.width}×${c.page.viewport.height} · ${formatDate(c.createdAt)}`;
+	setHint(
+		p.origin,
+		c.importedAt === undefined
+			? undefined
+			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments and verdict are whoever wrote the file's, whatever author they name.`,
 	);
-	p.header.replaceWith(header);
-	p.header = header;
+	const armed = state.deleteArmedAt !== undefined;
+	p.deleteButton.toggleAttribute("data-armed", armed);
+	p.deleteButton.textContent = armed ? "Really delete?" : "Delete";
+	setHint(p.hint, state.caseHint);
 
 	const images = state.images?.caseId === c.id ? state.images : undefined;
 	const loaded = state.loaded?.caseId === c.id ? state.loaded : undefined;
@@ -434,8 +487,26 @@ function renderCase(state: PanelState, actions: Actions): void {
 	}
 }
 
+// --- the AI app ------------------------------------------------------------------
+
+function callText(call: AiCall): string {
+	const time = new Date(call.at).toLocaleTimeString();
+	return `Last AI call: ${call.tool}, by ${call.app}, at ${time}`;
+}
+
+function renderAi({ ai }: PanelState): void {
+	aiStatus.textContent = ai.status;
+	stopAi.hidden = !ai.active;
+	keepOn.checked = ai.keepOn;
+	setHint(aiCall, ai.lastCall && callText(ai.lastCall));
+	connectButton.textContent = ai.connected
+		? "AI connection…"
+		: "Connect AI app";
+}
+
 /** Draw the panel from `state`. */
 export function render(state: PanelState, actions: Actions): void {
+	renderAi(state);
 	const onCase = state.view.kind === "case";
 	home.hidden = onCase;
 	caseView.hidden = !onCase;

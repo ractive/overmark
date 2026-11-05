@@ -9,26 +9,28 @@
  *
  * | Field | From | Limit |
  * |---|---|---|
- * | `tag` | the element's name | |
+ * | `tag` | the element's name | 64 |
  * | `id` | `id`, when it looks hand-written (classes.ts) | 100 |
  * | `testId` | the first of `TEST_ID_ATTRIBUTES` | 300 |
- * | `role` | `role`, else the role the tag implies | |
+ * | `role` | `role`, else the role the tag implies | 64 |
  * | `name` | accessible name: `aria-label`, `aria-labelledby`, `alt`, a label's text, `placeholder`, `title`, or the text for buttons, links, headings | 200 |
  * | `text` | rendered text without fields, editors, scripts and styles (`pageText`) | 200 |
  * | `classes` | the readable part of each class (classes.ts) | 20 |
  * | `attributes` | `ATTRIBUTE_RULES`: name, type, href (path), src (file name), placeholder, alt, title | 300 each |
  * | `heading` | the text of the nearest heading before it | 200 |
  * | `landmark` | role and name of the landmark around it | 200 |
- * | `ancestors` | up to six: tag plus test id or first readable class | |
+ * | `ancestors` | up to six, also outside a shadow root: tag plus test id or first readable class | 300 each |
  * | `rect`, `page` | position and size, the page's size | |
- * | `selector` | a CSS selector built from the above | |
+ * | `selector` | a CSS selector built from the above; empty when none finds exactly this element (inside a shadow root, or too long) | 2000 |
  *
  * The text of an editable element itself is not recorded either, and neither
- * its name from content.
+ * its name from content. `withinLimits` applies the limits that the page's
+ * markup could otherwise exceed.
  */
 
 import { ELEMENT_ATTRIBUTES, type ElementDetails, type Rect } from "./case.ts";
 import { isGeneratedId, readableClass, readableClasses } from "./classes.ts";
+import { closestAcross, hostOf, inDocument, parentOf } from "./shadow.ts";
 
 export const TEST_ID_ATTRIBUTES = [
 	"data-testid",
@@ -59,9 +61,15 @@ export interface DescribeContext {
 	scroll: { x: number; y: number };
 }
 
+/**
+ * Regions somebody types into. Monaco, CodeMirror 5 and Ace type into a hidden
+ * textarea and draw the text as plain page content.
+ */
+const EDIT_REGIONS =
+	'[contenteditable]:not([contenteditable="false"]), [role="textbox"], .monaco-editor, .CodeMirror, .ace_editor';
+
 /** Where somebody types: the text inside is theirs, not the page's. */
-const EDITORS =
-	'textarea, select, input, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+const EDITORS = `textarea, select, input, ${EDIT_REGIONS}`;
 
 /** Text that is no text on the page. */
 const HIDDEN_TEXT = new Set(["script", "style", "noscript", "template"]);
@@ -71,10 +79,15 @@ export function isEditable(el: Element): boolean {
 	return (
 		(el as HTMLElement).isContentEditable === true ||
 		el.localName === "textarea" ||
-		el.closest(
-			'[contenteditable]:not([contenteditable="false"]), [role="textbox"]',
-		) !== null
+		closestAcross(el, EDIT_REGIONS) !== null
 	);
+}
+
+/** What an element shows inside it: for a slot, what is slotted into it. */
+function contentOf(el: Element): Iterable<Node> {
+	return el.localName === "slot"
+		? (el as HTMLSlotElement).assignedNodes({ flatten: true })
+		: el.childNodes;
 }
 
 /**
@@ -88,12 +101,8 @@ export function pageText(
 ): string {
 	const max = options.max ?? 600;
 	let text = "";
-	const walk = (node: Node): void => {
-		for (
-			let child = node.firstChild;
-			child !== null;
-			child = child.nextSibling
-		) {
+	const walk = (parent: Element): void => {
+		for (const child of contentOf(parent)) {
 			if (text.length >= max) return;
 			if (child === options.skip) continue;
 			if (child.nodeType === 3) {
@@ -234,11 +243,11 @@ export function accessibleName(
 	if (label?.trim()) return normalizeText(label);
 	const labelledBy = el.getAttribute("aria-labelledby");
 	if (labelledBy) {
-		const doc = el.ownerDocument;
+		const root = el.getRootNode() as Document | ShadowRoot;
 		const text = labelledBy
 			.split(/\s+/)
 			.map((id) => {
-				const target = doc.getElementById(id);
+				const target = root.getElementById(id);
 				return target === null || isEditable(target) ? "" : pageText(target);
 			})
 			.join(" ");
@@ -278,6 +287,8 @@ export function headingAbove(
 	el: Element,
 	headings: readonly Element[],
 ): string | undefined {
+	// Order only holds between elements of the document, not of a shadow root.
+	const at = inDocument(el);
 	let lo = 0;
 	let hi = headings.length - 1;
 	let found = -1;
@@ -285,9 +296,9 @@ export function headingAbove(
 		const mid = (lo + hi) >> 1;
 		const h = headings[mid] as Element;
 		const precedes =
-			h !== el &&
-			!h.contains(el) &&
-			(h.compareDocumentPosition(el) & 4) /* FOLLOWING */ !== 0;
+			h !== at &&
+			!h.contains(at) &&
+			(h.compareDocumentPosition(at) & 4) /* FOLLOWING */ !== 0;
 		if (precedes) {
 			found = mid;
 			lo = mid + 1;
@@ -300,7 +311,7 @@ export function headingAbove(
 }
 
 export function landmarkOf(el: Element): string | undefined {
-	const landmark = el.closest(LANDMARKS);
+	const landmark = closestAcross(el, LANDMARKS);
 	if (landmark === null) return undefined;
 	const role = roleOf(landmark) ?? landmark.localName;
 	const name =
@@ -317,11 +328,11 @@ function step(el: Element): string {
 
 export function ancestorsOf(el: Element, depth = 6): string[] {
 	const out: string[] = [];
-	let at = el.parentElement;
+	let at = parentOf(el);
 	while (at !== null && out.length < depth) {
 		if (at.localName === "body" || at.localName === "html") break;
 		out.push(step(at));
-		at = at.parentElement;
+		at = parentOf(at);
 	}
 	return out;
 }
@@ -384,15 +395,20 @@ function attributesOf(el: Element): Record<string, string> {
 	return out;
 }
 
-function escapeCss(value: string): string {
+export function escapeCss(value: string): string {
 	return typeof CSS !== "undefined" && typeof CSS.escape === "function"
 		? CSS.escape(value)
 		: value.replace(/[^A-Za-z0-9_-]/g, (c) => `\\${c}`);
 }
 
-function unique(doc: Document, selector: string): boolean {
+const SELECTOR_LIMIT = 2000;
+
+/** `selector` fits a case and finds `el` and nothing else. */
+function findsOnly(el: Element, selector: string): boolean {
+	if (selector.length > SELECTOR_LIMIT) return false;
 	try {
-		return doc.querySelectorAll(selector).length === 1;
+		const all = el.ownerDocument.querySelectorAll(selector);
+		return all.length === 1 && all[0] === el;
 	} catch {
 		return false;
 	}
@@ -426,14 +442,18 @@ function ownSelector(el: Element): string[] {
 }
 
 export function cssSelector(el: Element): string {
-	const doc = el.ownerDocument;
+	// No selector reaches from the document into a shadow root.
+	if (hostOf(el) !== null) return "";
 	for (const candidate of ownSelector(el))
-		if (unique(doc, candidate)) return candidate;
+		if (findsOnly(el, candidate)) return candidate;
 	const path: string[] = [];
 	let at: Element | null = el;
-	while (at !== null && at.localName !== "html" && path.length < 10) {
-		const own = path.length === 0 ? [] : ownSelector(at);
-		const anchor = own.find((s) => unique(doc, s));
+	while (at !== null && at.localName !== "html") {
+		// Ten levels do, unless the subtree around the element repeats.
+		if (path.length >= 10 && findsOnly(el, path.join(" > "))) break;
+		const current: Element = at;
+		const own = path.length === 0 ? [] : ownSelector(current);
+		const anchor = own.find((s) => findsOnly(current, s));
 		if (anchor !== undefined) {
 			path.unshift(anchor);
 			break;
@@ -449,7 +469,8 @@ export function cssSelector(el: Element): string {
 		);
 		at = parent;
 	}
-	return path.join(" > ");
+	const selector = path.join(" > ");
+	return findsOnly(el, selector) ? selector : "";
 }
 
 export function documentRect(
@@ -464,6 +485,33 @@ export function documentRect(
 		width: round(r.width),
 		height: round(r.height),
 	};
+}
+
+/** The limits of the table above that the page's markup could exceed. */
+export const LIMITS = {
+	tag: 64,
+	testId: 300,
+	role: 64,
+	landmark: 200,
+	ancestor: 300,
+} as const;
+
+/**
+ * Details cut to `LIMITS`. Every description goes through this, and so does a
+ * stored element before it is compared: a case from before these limits holds
+ * longer values, and a cut value only equals a value cut the same way.
+ */
+export function withinLimits(details: ElementDetails): ElementDetails {
+	const out: ElementDetails = {
+		...details,
+		tag: details.tag.slice(0, LIMITS.tag),
+		ancestors: details.ancestors.map((a) => a.slice(0, LIMITS.ancestor)),
+	};
+	if (details.testId) out.testId = details.testId.slice(0, LIMITS.testId);
+	if (details.role) out.role = details.role.slice(0, LIMITS.role);
+	if (details.landmark)
+		out.landmark = details.landmark.slice(0, LIMITS.landmark);
+	return out;
 }
 
 /** Everything Overmark records about an element. */
@@ -497,7 +545,7 @@ export function describeElement(
 	if (heading) details.heading = heading;
 	const landmark = landmarkOf(el);
 	if (landmark) details.landmark = landmark;
-	return details;
+	return withinLimits(details);
 }
 
 /** A one-line summary, e.g. `button "Prämien berechnen" · Button_primary · under "Krankenkassen vergleichen"`. */

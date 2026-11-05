@@ -25,9 +25,17 @@ export type ContentRequest =
 	  }
 	| { type: "overlay:hide" }
 	| { type: "overlay:state" }
-	/** Find the case's elements on this page and outline them (`LoadResult`). */
+	/** The side panel's "Blur form fields" changed (`OverlayState`). */
+	| { type: "overlay:settings"; blurForms: boolean }
+	/**
+	 * Find the case's elements on this page and outline them (`LoadResult`, or
+	 * `{ error }`, also while the page is busy).
+	 */
 	| { type: "case:load"; case: Case }
-	/** Scroll to one annotation's element, or to another candidate (`AnnotationMatch`). */
+	/**
+	 * Scroll to one annotation's element, or to another candidate
+	 * (`AnnotationMatch`, or `{ error }` while the page is busy).
+	 */
 	| {
 			type: "case:show";
 			/** `null` comes back when another case (or none) is loaded. */
@@ -41,7 +49,7 @@ export type ContentRequest =
 	 * Scroll to the element `selector` and mark it with `number` for a
 	 * screenshot (`DescribedElement`); the overlay's own bars and the user's
 	 * unsaved marks are hidden, form fields blurred as for a save. Refused
-	 * while the user's own save is taking screenshots.
+	 * while the page is busy.
 	 */
 	| {
 			type: "element:mark";
@@ -49,15 +57,26 @@ export type ContentRequest =
 			number: number;
 			blurForms: boolean;
 	  }
-	/** Remove that mark and the blur again (`OverlayState`). */
+	/** Remove that mark and the blur again (`Released`). */
 	| { type: "element:unmark" }
 	/** Blur form fields for a screenshot of the page as it is (`BlurResult`). */
 	| { type: "page:blur"; blurForms: boolean }
-	/** Undo `page:blur` (`OverlayState`). */
-	| { type: "page:unblur" };
+	/** Undo `page:blur` (`Released`). */
+	| { type: "page:unblur" }
+	/** The screenshot a mark asked for is taken: the overlay can come back. */
+	| { type: "page:captured" };
 
-/** The answer to `page:blur`: refused while the user's own save takes screenshots. */
+/** The answer to `page:blur`: refused while the page is busy. */
 export type BlurResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * The answer to `element:unmark` and `page:unblur`. `held: false`: the page no
+ * longer held that activity (it timed out, or a navigation replaced the page),
+ * so a screenshot taken for it may show the page without mark or blur.
+ */
+export interface Released {
+	held: boolean;
+}
 
 /** The answer to `element:mark`. */
 export type DescribedElement =

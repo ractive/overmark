@@ -7,10 +7,16 @@
  */
 
 import { isSafeId, pendingImage } from "./lib/case.ts";
-import { cropImages, screenshotToWebp } from "./lib/images.ts";
+import {
+	cropImages,
+	drawMarks,
+	PENDING_QUALITY,
+	screenshotToWebp,
+} from "./lib/images.ts";
 import type {
 	Broadcast,
 	CaptureResult,
+	ContentRequest,
 	SaveResult,
 	TabCapture,
 	WorkerRequest,
@@ -44,6 +50,9 @@ const CAPTURE_GAP_MS = 600;
 let lastCapture = 0;
 let captureQueue: Promise<unknown> = Promise.resolve();
 
+/** Chrome can leave a capture unanswered, and the next ones wait in the queue. */
+const CAPTURE_TIMEOUT_MS = 8000;
+
 /** The tab must still be the one in front of its window, or the capture would show another. */
 async function ensureInFront(tabId: number, windowId: number): Promise<void> {
 	const tab = await chrome.tabs.get(tabId);
@@ -60,9 +69,16 @@ function capture(tabId: number, windowId: number): Promise<string> {
 		if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 		try {
 			await ensureInFront(tabId, windowId);
-			const image = await chrome.tabs.captureVisibleTab(windowId, {
-				format: "png",
-			});
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const image = await Promise.race([
+				chrome.tabs.captureVisibleTab(windowId, { format: "png" }),
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(
+						() => reject(new Error("Chrome did not deliver the screenshot.")),
+						CAPTURE_TIMEOUT_MS,
+					);
+				}),
+			]).finally(() => clearTimeout(timer));
 			await ensureInFront(tabId, windowId);
 			return image;
 		} finally {
@@ -92,7 +108,11 @@ async function handle(
 			if (tab?.id === undefined) throw new Error("not sent from a tab");
 			if (!isSafeId(request.caseId) || !isSafeId(request.shotId))
 				throw new Error("invalid id");
-			const image = await screenshotToWebp(await capture(tab.id, tab.windowId));
+			const png = await capture(tab.id, tab.windowId);
+			// Encoding takes a while; the page need not stay blurred for it.
+			const taken: ContentRequest = { type: "page:captured" };
+			void chrome.tabs.sendMessage(tab.id, taken).catch(() => undefined);
+			const image = await screenshotToWebp(png, PENDING_QUALITY);
 			await store.putImage(request.caseId, pendingImage(request.shotId), {
 				...image,
 				storedAt: Date.now(),
@@ -103,7 +123,15 @@ async function handle(
 			} satisfies CaptureResult;
 		}
 		case "case:save": {
-			const saved = await saveCase(store, request.request, cropImages);
+			const from = request.request.imagesFrom;
+			if (from !== undefined && !isSafeId(from)) throw new Error("invalid id");
+			const saved = await saveCase(
+				store,
+				request.request,
+				cropImages,
+				new Date(),
+				drawMarks,
+			);
 			await broadcast({ type: "cases:changed", caseId: saved.id });
 			return {
 				caseId: saved.id,
@@ -120,6 +148,7 @@ async function handle(
 			} satisfies TabCapture;
 		}
 		case "images:discard":
+			if (!isSafeId(request.caseId)) throw new Error("invalid id");
 			await store.deleteImages(
 				request.caseId,
 				request.shotIds.filter(isSafeId).map(pendingImage),

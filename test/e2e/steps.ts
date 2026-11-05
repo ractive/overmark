@@ -1,5 +1,6 @@
 /** Steps the end-to-end tests share: the toolbar, saving, reading the database. */
 
+import { join } from "node:path";
 import type { Page } from "./browser.ts";
 import type { Harness } from "./harness.ts";
 
@@ -39,6 +40,62 @@ export interface Db {
 		}[];
 	}[];
 	images: { key: string; size: number; type: string }[];
+}
+
+/** Read until `done` holds for the answer. */
+export async function until<T>(
+	read: () => Promise<T>,
+	done: (value: T) => boolean,
+	timeoutMs = 5000,
+): Promise<T> {
+	const end = Date.now() + timeoutMs;
+	for (;;) {
+		const value = await read();
+		if (done(value)) return value;
+		if (Date.now() > end)
+			throw new Error(`timed out; last: ${JSON.stringify(value)}`);
+		await Bun.sleep(50);
+	}
+}
+
+interface DomNode {
+	backendNodeId: number;
+	attributes?: string[];
+	children?: DomNode[];
+	shadowRoots?: DomNode[];
+}
+
+function hostNode(node: DomNode): DomNode | undefined {
+	const at = node.attributes?.indexOf("id") ?? -1;
+	if (at >= 0 && node.attributes?.[at + 1] === "overmark-root") return node;
+	for (const child of node.children ?? []) {
+		const found = hostNode(child);
+		if (found !== undefined) return found;
+	}
+	return undefined;
+}
+
+/**
+ * Let `shadow` reach the overlay of a build that ships: its shadow root is
+ * closed to the page, but not to CDP. Afterwards the host's `shadowRoot`
+ * answers, for the page's world only.
+ */
+export async function reachOverlay(page: Page): Promise<void> {
+	await page.waitFor(HOST);
+	const { root } = (await page.send("DOM.getDocument", {
+		depth: -1,
+		pierce: true,
+	})) as { root: DomNode };
+	const shadowRoot = hostNode(root)?.shadowRoots?.[0];
+	if (shadowRoot === undefined)
+		throw new Error("the overlay has no shadow root");
+	const { object } = (await page.send("DOM.resolveNode", {
+		backendNodeId: shadowRoot.backendNodeId,
+	})) as { object: { objectId: string } };
+	await page.send("Runtime.callFunctionOn", {
+		objectId: object.objectId,
+		functionDeclaration: `function () { Object.defineProperty(this.host, "shadowRoot", { value: this }); }`,
+	});
 }
 
 /** Inject the content script if needed and show the toolbar. */
@@ -93,10 +150,15 @@ export async function saveAs(page: Page, title: string): Promise<void> {
 	);
 	await page.type(title);
 	await page.click(shadow('[data-action="save-confirm"]'));
-	await page.waitFor(
-		`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
-		20_000,
-	);
+	await page
+		.waitFor(
+			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+			20_000,
+		)
+		.catch(async (error: unknown) => {
+			const said = await page.eval(`${shadow(".toolbar")}.textContent`);
+			throw new Error(`no save; the toolbar says: ${said}`, { cause: error });
+		});
 }
 
 /** Run `body` (an expression using `image`, the stored `{ blob, width, height }`) on a case's image. */
@@ -158,3 +220,111 @@ export function countColour(
 		),
 	);
 }
+
+/** A session on the extension's service worker, which starts it if needed. */
+export async function worker(h: Harness): Promise<Page> {
+	await h.control.eval(WAKE_WORKER);
+	const { targetId } = await workerTarget(h);
+	return h.browser.attach(targetId);
+}
+
+/** A message the worker answers without doing anything: it starts it, though. */
+const WAKE_WORKER = `chrome.runtime.sendMessage({ type: "images:discard", caseId: "c_none", shotIds: [] })`;
+
+const workerTarget = (h: Harness) =>
+	h.browser.waitForTarget(
+		(t) =>
+			t.type === "service_worker" &&
+			t.url === `chrome-extension://${h.extensionId}/background.js`,
+	);
+
+/** Stop the service worker, as Chrome does when it is idle, and wake it again. */
+export async function restartWorker(h: Harness): Promise<void> {
+	await h.control.eval(WAKE_WORKER);
+	const { targetId } = await workerTarget(h);
+	await h.browser.send("Target.closeTarget", { targetId });
+	await until(
+		() => h.browser.targets(),
+		(targets) => !targets.some((t) => t.targetId === targetId),
+	);
+	await h.control.eval(WAKE_WORKER);
+	await until(
+		() => workerTarget(h),
+		(target) => target.targetId !== targetId,
+	);
+}
+
+/** The side panel's document in the control page, in front, on its home view. */
+export async function panelHome(h: Harness): Promise<Page> {
+	await h.control.goto(
+		`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+	);
+	await h.control.activate();
+	// The list moves what is below it when it arrives.
+	const { cases } = await h.control.eval<Db>(READ_DB);
+	await h.control.waitFor(
+		cases.length === 0
+			? `document.getElementById("cases").childElementCount > 0`
+			: `document.querySelectorAll("[data-case]").length === ${cases.length}`,
+	);
+	return h.control;
+}
+
+/** Open the case `title` from the side panel's list. */
+export async function openCase(panel: Page, title: string): Promise<void> {
+	const item = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes(${JSON.stringify(title)}))`;
+	await panel.waitFor(item);
+	await panel.click(item);
+	await panel.waitFor(`document.getElementById("export-case")`);
+}
+
+/** Click Export on the open case; answers the path of the file in `folder`. */
+export async function exportOpenCase(
+	h: Harness,
+	panel: Page,
+	folder: string,
+): Promise<string> {
+	await h.browser.send("Browser.setDownloadBehavior", {
+		behavior: "allow",
+		downloadPath: folder,
+		eventsEnabled: true,
+	});
+	const begun = h.browser.event("Browser.downloadWillBegin");
+	await panel.click(`document.getElementById("export-case")`);
+	const { suggestedFilename } = (await begun) as { suggestedFilename: string };
+	const path = join(folder, suggestedFilename);
+	// Chrome may still be writing it: it is done when it has stopped growing.
+	let size = -1;
+	await until(
+		async () => {
+			const before = size;
+			size = Bun.file(path).size;
+			await Bun.sleep(200);
+			return before;
+		},
+		(before) => before > 0 && before === size,
+	);
+	return path;
+}
+
+/** Choose `file` through the side panel's Import button and file input. */
+export async function importFile(panel: Page, file: string): Promise<void> {
+	await panel.send("Page.setInterceptFileChooserDialog", { enabled: true });
+	const chooser = panel.event("Page.fileChooserOpened");
+	await panel.click(`document.getElementById("import")`);
+	const { backendNodeId } = (await Promise.race([
+		chooser,
+		Bun.sleep(5000).then(() => {
+			throw new Error("the Import button opened no file chooser");
+		}),
+	])) as { backendNodeId: number };
+	await panel.send("DOM.setFileInputFiles", { files: [file], backendNodeId });
+	await panel.send("Page.setInterceptFileChooserDialog", { enabled: false });
+}
+
+/** Keys of the images store under a case. */
+export const imagesOf = (db: Db, caseId: string) =>
+	db.images
+		.filter((i) => i.key.startsWith(`${caseId}/`))
+		.map((i) => i.key.slice(caseId.length + 1))
+		.sort();

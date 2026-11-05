@@ -1,8 +1,9 @@
 /**
- * Looking for a stored element on a page: first among the elements likely to
- * be it (same tag, test id, id or role), then, when none is even probable,
- * in the whole page while the search has time left. Shared by loading a case
- * (content/review.ts) and the matching measurement (test/e2e/pilot.ts).
+ * Looking for a stored element on a page and in its shadow roots: first among
+ * the elements likely to be it (same test id, id, role or tag), then, when none
+ * is even probable, in the whole page while the search has time left. Shared by
+ * loading a case (content/review.ts) and the matching measurement
+ * (test/e2e/pilot.ts).
  */
 
 import type { ElementDetails } from "./case.ts";
@@ -10,17 +11,21 @@ import {
 	createContext,
 	type DescribeContext,
 	describeElement,
+	escapeCss,
+	LIMITS,
 	TEST_ID_ATTRIBUTES,
+	withinLimits,
 } from "./element.ts";
 import {
 	classify,
-	FOUND,
+	isFound,
 	type MatchStatus,
 	PROBABLE,
 	type Ranked,
 	rank,
 	TIE,
 } from "./match.ts";
+import { shadowTrees } from "./shadow.ts";
 
 /** More candidates than this are not scored for one element. */
 export const MAX_CANDIDATES = 8000;
@@ -35,6 +40,8 @@ export interface PageSearch {
 	describe(el: Element): ElementDetails;
 	/** Elements the search may return (not Overmark's own). */
 	own(el: Element): boolean;
+	/** The page's body and every shadow root, collected once. */
+	trees(): ParentNode[];
 	/** The whole page's elements, collected once. */
 	all(): { elements: Element[]; truncated: boolean };
 	/** Whole-page scans stop after this moment (`performance.now()`). */
@@ -51,6 +58,11 @@ export function createSearch(
 	const own = (e: Element) =>
 		exclude === undefined || (e !== exclude && !exclude.contains(e));
 	let everything: { elements: Element[]; truncated: boolean } | undefined;
+	let collected: ParentNode[] | undefined;
+	const trees = () => {
+		collected ??= shadowTrees(doc.body, exclude);
+		return collected;
+	};
 	return {
 		doc,
 		context,
@@ -63,9 +75,12 @@ export function createSearch(
 			return d;
 		},
 		own,
+		trees,
 		all() {
 			if (everything === undefined) {
-				const list = [...doc.body.querySelectorAll("*")].filter(own);
+				const list = trees()
+					.flatMap((tree) => [...tree.querySelectorAll("*")])
+					.filter(own);
 				everything = {
 					elements: list.slice(0, MAX_CANDIDATES),
 					truncated: list.length > MAX_CANDIDATES,
@@ -83,27 +98,37 @@ function quote(value: string): string {
 	return `"${value.replace(/["\\]/g, "\\$&")}"`;
 }
 
-/** Elements likely to be the stored one: same tag, test id, id or role. */
-function likely(doc: Document, stored: ElementDetails): Element[] {
-	const found = new Set<Element>(doc.getElementsByTagName(stored.tag));
+/**
+ * Elements likely to be the stored one, strongest reason first (the cut to
+ * `MAX_CANDIDATES` keeps the start): same test id, id, role, then tag.
+ */
+function likely(search: PageSearch, stored: ElementDetails): Element[] {
+	const found = new Set<Element>();
 	const add = (selector: string) => {
 		try {
-			for (const e of doc.querySelectorAll(selector)) found.add(e);
+			for (const tree of search.trees())
+				for (const e of tree.querySelectorAll(selector)) found.add(e);
 		} catch {
 			// An odd value that is no valid selector.
 		}
 	};
-	if (stored.testId)
+	if (stored.testId) {
+		// A value at the limit was cut: the page's own may go on.
+		const equal = stored.testId.length < LIMITS.testId ? "=" : "^=";
 		for (const name of TEST_ID_ATTRIBUTES)
-			add(`[${name}=${quote(stored.testId)}]`);
+			add(`[${name}${equal}${quote(stored.testId)}]`);
+	}
 	if (stored.id) add(`[id=${quote(stored.id)}]`);
 	if (stored.role) add(`[role=${quote(stored.role)}]`);
+	add(escapeCss(stored.tag));
 	return [...found];
 }
 
 export interface Candidate {
 	element: Element;
 	score: number;
+	/** Sure enough to be outlined as found (match.ts `isFound`). */
+	found: boolean;
 }
 
 export interface Found {
@@ -124,9 +149,10 @@ function isVisible(el: Element): boolean {
 
 export function findCandidates(
 	search: PageSearch,
-	stored: ElementDetails,
+	details: ElementDetails,
 ): Found {
-	let elements = likely(search.doc, stored).filter(search.own);
+	const stored = withinLimits(details);
+	let elements = likely(search, stored).filter(search.own);
 	let truncated = elements.length > MAX_CANDIDATES;
 	elements = elements.slice(0, MAX_CANDIDATES);
 	let ranked = rank(stored, elements.map(search.describe));
@@ -150,7 +176,7 @@ export function findCandidates(
 		if (visible.length === 1) {
 			const winner = visible[0] as Ranked;
 			ranked = [winner, ...ranked.filter((r) => r !== winner)];
-			status = winner.score >= FOUND ? "found" : "probable";
+			status = isFound(winner) ? "found" : "probable";
 		}
 	}
 	const kept =
@@ -163,6 +189,7 @@ export function findCandidates(
 		candidates: kept.map((r) => ({
 			element: elements[r.index] as Element,
 			score: r.score,
+			found: isFound(r),
 		})),
 		truncated,
 	};

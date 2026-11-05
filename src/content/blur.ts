@@ -8,54 +8,39 @@
  * style back only when the last holder lets go, whatever the order.
  */
 
+import { shadowTrees } from "../lib/shadow.ts";
+
 const PASSWORDS = "input[type=password]";
 
 const FORM_FIELDS =
-	"input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]), textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox']";
-
-/** An element's shadow root, open or (from an extension) closed. */
-function shadowOf(el: Element): ShadowRoot | null {
-	try {
-		const closed =
-			typeof chrome === "undefined"
-				? undefined
-				: chrome.dom?.openOrClosedShadowRoot?.(el as HTMLElement);
-		return closed ?? el.shadowRoot;
-	} catch {
-		// Not an element that can have one.
-		return el.shadowRoot;
-	}
-}
-
-/** The document and every shadow root in it. */
-function roots(doc: Document): (Document | ShadowRoot)[] {
-	const out: (Document | ShadowRoot)[] = [doc];
-	for (let i = 0; i < out.length; i++) {
-		for (const el of (out[i] as Document | ShadowRoot).querySelectorAll("*")) {
-			const root = shadowOf(el);
-			if (root !== null) out.push(root);
-		}
-	}
-	return out;
-}
+	"input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]), textarea, select, [contenteditable]:not([contenteditable='false']), [role='textbox'], .monaco-editor, .CodeMirror, .ace_editor";
 
 /** Blur the fields of a document now; the returned function restores them. */
 export function blurFields(doc: Document, allForms: boolean): () => void {
 	const selector = allForms ? FORM_FIELDS : PASSWORDS;
-	const fields = roots(doc).flatMap((root) => [
+	const fields = shadowTrees(doc).flatMap((root) => [
 		...root.querySelectorAll<HTMLElement>(selector),
 	]);
+	const inline = (f: HTMLElement, name: string) => ({
+		name,
+		value: f.style.getPropertyValue(name),
+		priority: f.style.getPropertyPriority(name),
+	});
 	const before = fields.map((f) => ({
 		f,
-		value: f.style.getPropertyValue("filter"),
-		priority: f.style.getPropertyPriority("filter"),
+		styles: [inline(f, "filter"), inline(f, "transition")],
 	}));
-	for (const { f } of before)
+	for (const { f } of before) {
+		// A page's `transition: all` would fade the blur in after the screenshot.
+		f.style.setProperty("transition", "none", "important");
 		f.style.setProperty("filter", "blur(6px)", "important");
+	}
 	return () => {
-		for (const { f, value, priority } of before) {
-			if (value) f.style.setProperty("filter", value, priority);
-			else f.style.removeProperty("filter");
+		for (const { f, styles } of before) {
+			for (const { name, value, priority } of styles) {
+				if (value) f.style.setProperty(name, value, priority);
+				else f.style.removeProperty(name);
+			}
 		}
 	};
 }

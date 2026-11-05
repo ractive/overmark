@@ -110,3 +110,30 @@ older read never overwrites a newer one. The verdict field stays the same elemen
 its case is open, so typing, focus and cursor survive every render; the other parts are
 redrawn when what they show changed.
 
+## DEC-012: A mark's screenshot is taken when the mark is drawn
+
+The full review found the same fault behind several findings: screenshots were taken at
+saving, sometimes long after the mark. By then a container had scrolled, the app had
+moved to another route, the menu the mark was about had closed, or the layout had moved,
+and the save put the mark on whatever was there. Since the screenshot is the record
+(DEC-002), it has to show what the user saw when marking.
+
+Now each mark gets its screenshot at once, under a pending path, with the element's
+details read at the same moment. Marks drawn while nothing scrolled or changed in the DOM
+share one screenshot. Screenshots show the page alone: saving draws the marks onto them
+(`paintMark`, the same shapes the overlay shows in SVG), so undoing a mark and renumbering
+marks for another case never touch an image. Saving no longer scrolls the page, which
+made the planning of screenshot windows unnecessary. A shot records the page's address,
+because one case can span an app's routes.
+
+The page is never moved while the user works: a first version went back to where a mark
+was drawn when the page had moved on before its turn, and a click in that moment hit
+the wrong element. Now such a mark waits, and saving takes its screenshot from where it
+was drawn, when nobody is using the page. That is the rare case (the screenshot waits
+for Chrome's two captures a second, or for an AI app's screenshot); what the page
+showed then is gone, but the scroll position is right.
+
+The price: every new view flashes the overlay away for about 100 ms, and pending
+screenshots live as long as their marks, so they are swept after 7 days instead of
+10 minutes.
+

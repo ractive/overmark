@@ -95,8 +95,9 @@ claude mcp add --transport http overmark <address>
 ```
 
 Your browser opens the relay's page; type the code from the side panel. "Keep AI access
-on" connects again whenever the side panel opens. Closing the side panel ends the
-connection, as closing a tab does for a web page.
+on" connects again whenever the side panel opens, and when the relay ended an idle
+session. "Stop AI access" ends the connection and keeps the pairing, as closing the side
+panel does; closing a tab does the same for a web page.
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
 relay with a public HTTPS address that allows Overmark's ID.

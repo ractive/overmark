@@ -132,7 +132,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.type("Say how much exactly");
 		await page.click(shadow('[data-action="comment-done"]'));
 
-		// 3: far below, the contact paragraph picked as an element
+		// 3: far below, the contact paragraph picked as an element. A person takes
+		// longer to get there: the screenshot of the two marks above is done.
+		await Bun.sleep(1000);
 		await page.eval(
 			`window.scrollTo(0, document.querySelector("[data-truth=contact]").getBoundingClientRect().top + scrollY - 200)`,
 		);
@@ -624,7 +626,7 @@ describe.skipIf(browserBinary === undefined)("the side panel", () => {
 		await h.control.eval(`document.querySelector("[data-case]").click()`);
 		await h.control.waitFor(`document.getElementById("verdict")`);
 		await h.control.eval(
-			`(() => { const v = document.getElementById("verdict"); v.focus(); v.value = "Typed, not saved"; v.setSelectionRange(5, 5); })()`,
+			`(() => { const v = document.getElementById("verdict"); v.focus(); v.value = "Typed, not saved"; v.dispatchEvent(new Event("input")); v.setSelectionRange(5, 5); })()`,
 		);
 
 		// Another mark, added from the page, changes the open case.
@@ -660,6 +662,7 @@ describe.skipIf(browserBinary === undefined)("the side panel", () => {
 				`document.getElementById("delete-case").textContent`,
 			),
 		).toBe("Really delete?");
+		await Bun.sleep(600);
 		await h.control.eval(`document.getElementById("delete-case").click()`);
 		await h.control.waitFor(`!document.getElementById("home").hidden`);
 		await h.control.waitFor(

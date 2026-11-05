@@ -1,13 +1,15 @@
 /**
  * Loading a case onto the page in front: each annotation's element is looked
  * for by its details (match.ts) and outlined with its number, green when
- * found, amber and dashed when only probable or tied.
+ * found, amber and dashed when only probable or tied. An element that a
+ * re-render replaced afterwards is looked for again.
  */
 
 import {
 	type Candidate,
 	createSearch,
 	findCandidates,
+	type PageSearch,
 } from "../lib/candidates.ts";
 import type { Annotation, Case } from "../lib/case.ts";
 import {
@@ -16,7 +18,7 @@ import {
 	describeElement,
 	summarize,
 } from "../lib/element.ts";
-import { clearTextCache, FOUND } from "../lib/match.ts";
+import { clearTextCache } from "../lib/match.ts";
 import type {
 	AnnotationMatch,
 	CandidateInfo,
@@ -62,10 +64,7 @@ export class Reviewer {
 	async load(c: Case): Promise<LoadResult> {
 		const generation = ++this.#generation;
 		clearTextCache(); // what an abandoned load left behind
-		const search = createSearch(this.overlay.doc, {
-			exclude: this.overlay.host,
-		});
-		const context = search.context;
+		const search = this.#search();
 		const entries: Entry[] = [];
 		for (const annotation of [...c.annotations].sort(
 			(a, b) => a.number - b.number,
@@ -73,35 +72,7 @@ export class Reviewer {
 			await yieldToPage();
 			if (generation !== this.#generation)
 				throw new Error("Loading was replaced by another one.");
-			const base = {
-				annotationId: annotation.id,
-				number: annotation.number,
-				current: 0,
-			};
-			const stored = annotation.element;
-			if (stored === null) {
-				entries.push({
-					annotation,
-					candidates: [],
-					match: { ...base, status: "no-element", score: 0, candidates: [] },
-				});
-				continue;
-			}
-			const found = findCandidates(search, stored);
-			const { status, candidates, truncated } = found;
-			entries.push({
-				annotation,
-				candidates,
-				match: {
-					...base,
-					status,
-					score: found.score,
-					candidates: candidates.map((k) =>
-						this.#info(k.element, k.score, context),
-					),
-					...(truncated ? { truncated: true } : {}),
-				},
-			});
+			entries.push(this.#find(search, annotation));
 		}
 		this.#case = c;
 		this.#entries = entries;
@@ -109,7 +80,12 @@ export class Reviewer {
 		this.overlay.setReviewing(true);
 		clearInterval(this.#timer);
 		// Layout changes (lazy content, accordions) move elements without a scroll.
-		this.#timer = setInterval(() => this.#schedule(), 500);
+		this.#timer = setInterval(() => {
+			// One search a tick: a new route replaces every element at once.
+			const replaced = this.#entries.find((e) => this.#replaced(e));
+			if (replaced !== undefined) this.#findAgain(replaced);
+			this.#schedule();
+		}, 500);
 		this.#renderBar();
 		this.#render();
 		clearTextCache();
@@ -118,6 +94,53 @@ export class Reviewer {
 			url: location.href,
 			matches: entries.map((e) => e.match),
 		};
+	}
+
+	#search(): PageSearch {
+		return createSearch(this.overlay.doc, { exclude: this.overlay.host });
+	}
+
+	#find(search: PageSearch, annotation: Annotation): Entry {
+		const base = {
+			annotationId: annotation.id,
+			number: annotation.number,
+			current: 0,
+		};
+		const stored = annotation.element;
+		if (stored === null)
+			return {
+				annotation,
+				candidates: [],
+				match: { ...base, status: "no-element", score: 0, candidates: [] },
+			};
+		const found = findCandidates(search, stored);
+		const { status, candidates, truncated } = found;
+		return {
+			annotation,
+			candidates,
+			match: {
+				...base,
+				status,
+				score: found.score,
+				candidates: candidates.map((k) =>
+					this.#info(k.element, k.score, search.context),
+				),
+				...(truncated ? { truncated: true } : {}),
+			},
+		};
+	}
+
+	/** The shown element left the page: a re-render, or it is gone. */
+	#replaced(entry: Entry): boolean {
+		return this.#element(entry)?.isConnected === false;
+	}
+
+	#findAgain(entry: Entry): void {
+		const fresh = this.#find(this.#search(), entry.annotation);
+		entry.candidates = fresh.candidates;
+		entry.match = fresh.match;
+		clearTextCache();
+		this.#renderBar();
 	}
 
 	#info(el: Element, score: number, context: DescribeContext): CandidateInfo {
@@ -137,6 +160,7 @@ export class Reviewer {
 		const count = entry.candidates.length;
 		if (candidate !== undefined && count > 0)
 			entry.match.current = ((candidate % count) + count) % count;
+		if (this.#replaced(entry)) this.#findAgain(entry);
 		entry.match.score = entry.candidates[entry.match.current]?.score ?? 0;
 		this.#focused = annotationId;
 		this.#element(entry)?.scrollIntoView({
@@ -183,10 +207,10 @@ export class Reviewer {
 			items.push({
 				number: entry.annotation.number,
 				rect: { x: r.x, y: r.y, width: r.width, height: r.height },
-				// The shown candidate's own score decides the colour.
+				// The shown candidate itself decides the colour.
 				found:
 					entry.match.status !== "ambiguous" &&
-					(entry.candidates[entry.match.current]?.score ?? 0) >= FOUND,
+					entry.candidates[entry.match.current]?.found === true,
 				focused: entry.annotation.id === this.#focused,
 			});
 		}

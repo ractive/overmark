@@ -1,9 +1,10 @@
 /**
  * The page's one state machine (DEC-010): what is happening to the page now.
- * The user's save and an AI app's screenshot both scroll, blur and capture the
+ * A mark's screenshot and an AI app's screenshot both blur and capture the
  * page, so only one of them runs at a time; whatever arrives meanwhile is
- * refused, or (for the toolbar) done once the save is over.
+ * refused, or (for the toolbar) done once it is over.
  *
+ *   idle ──mark drawn──▶ shot ──end──▶ idle
  *   idle ──save──▶ saving ──end──▶ idle   (then: stay, hide if saved, or show another case)
  *   idle ──AI mark / AI capture──▶ ai-mark / ai-capture ──end or 10 s──▶ idle
  */
@@ -26,6 +27,7 @@ export type Afterwards =
 export type Activity =
 	| { kind: "idle" }
 	| { kind: "saving"; afterwards: Afterwards }
+	| { kind: "shot" }
 	| { kind: "ai-mark" }
 	| { kind: "ai-capture" };
 
@@ -35,8 +37,9 @@ export type Exclusive = Exclude<Activity["kind"], "idle">;
 export const BUSY: Record<Exclusive, string> = {
 	saving:
 		"The user is saving marks on this page right now; try again in a few seconds.",
-	"ai-mark": "An AI app is taking a screenshot; save again in a moment.",
-	"ai-capture": "An AI app is taking a screenshot; save again in a moment.",
+	shot: "The user is marking this page right now; try again in a moment.",
+	"ai-mark": "An AI app is taking a screenshot; try again in a moment.",
+	"ai-capture": "An AI app is taking a screenshot; try again in a moment.",
 };
 
 /** An AI app's screenshot never takes longer: one that did was abandoned. */
@@ -55,6 +58,11 @@ export class PageActivity {
 		return this.#now.kind === "saving";
 	}
 
+	/** Why the page cannot be touched now, if it cannot. */
+	get busy(): string | undefined {
+		return this.#now.kind === "idle" ? undefined : BUSY[this.#now.kind];
+	}
+
 	/**
 	 * Start an activity, or say why not. An AI activity ends by itself after
 	 * `AI_TIMEOUT_MS`, calling `onTimeout` (to remove its mark and blur).
@@ -68,7 +76,7 @@ export class PageActivity {
 			return { ok: false, error: BUSY[this.#now.kind] };
 		this.#now =
 			kind === "saving" ? { kind, afterwards: { kind: "stay" } } : { kind };
-		if (kind !== "saving") {
+		if (kind === "ai-mark" || kind === "ai-capture") {
 			this.#onTimeout = onTimeout;
 			this.#timer = setTimeout(() => {
 				const cleanup = this.#onTimeout;

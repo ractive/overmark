@@ -6,10 +6,18 @@
  * block, and neither leak in nor out.
  */
 
-import type { Point, Rect, Shape } from "../lib/case.ts";
+import type { Rect, Shape } from "../lib/case.ts";
+import {
+	arrowHead,
+	badgePosition,
+	badgeRadius,
+	MARK_COLOUR,
+	type RenderedMark,
+} from "../lib/marks.ts";
+
+declare const OVERMARK_TEST_BUILD: boolean | undefined;
 
 export const HOST_ID = "overmark-root";
-export const MARK_COLOUR = "#e5195f";
 export const HOVER_COLOUR = "#1f6feb";
 export const FOUND_COLOUR = "#1e8e3e";
 export const PROBABLE_COLOUR = "#d97706";
@@ -84,11 +92,11 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 6px; color: #fff; font: inherit;
 }
 .reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
-.capturing .toolbar, .capturing .popover, .capturing .hover, .capturing .reviewbar,
-.capturing .review { display: none !important; }
+/* Screenshots show the page alone. Invisible, not gone: a field keeps its focus. */
+.capturing { opacity: 0 !important; }
 /* An AI app's screenshot of one element: only its temporary mark shows. */
-.marking .toolbar, .marking .popover, .marking .hover, .marking .reviewbar,
-.marking .review, .marking .drafts { display: none !important; }
+.marking .toolbar, .marking .popover, .marking .reviewbar { opacity: 0 !important; }
+.marking .hover, .marking .review, .marking .drafts { display: none !important; }
 [hidden] { display: none !important; }
 `;
 
@@ -113,10 +121,33 @@ export interface ReviewItem {
 	focused: boolean;
 }
 
-export interface RenderedMark {
-	number: number;
-	/** In window coordinates. */
-	shape: Shape;
+/** What the page must not see: a click on the overlay is no click outside its menu. */
+const OWN_EVENTS = [
+	"pointerdown",
+	"pointerup",
+	"mousedown",
+	"mouseup",
+	"click",
+	"dblclick",
+	"auxclick",
+	"contextmenu",
+	"touchstart",
+	"touchend",
+	"keydown",
+	"keyup",
+	"keypress",
+];
+
+/** A page's focus trap takes focus back from anything outside its modal. */
+const FOCUS_EVENTS = ["focus", "blur", "focusin", "focusout"];
+
+/** The page's open modal dialog: everything outside it is inert. */
+function modalDialog(doc: Document): Element | null {
+	try {
+		return doc.querySelector("dialog:modal");
+	} catch {
+		return null; // The selector is not known here.
+	}
 }
 
 export class Overlay {
@@ -135,18 +166,27 @@ export class Overlay {
 	#annotating = false;
 	#reviewing = false;
 	#marking = false;
+	#timer: ReturnType<typeof setInterval> | undefined;
 	/**
 	 * Called after the toolbar or the outlines are shown or hidden, including
 	 * by the overlay's own Close and Hide buttons.
 	 */
 	onChange: (() => void) | undefined;
+	/** Called twice a second while something shows: layouts change without a scroll. */
+	onTick: (() => void) | undefined;
 
 	constructor(doc: Document = document) {
 		this.doc = doc;
 		this.host = doc.createElement("div");
 		this.host.id = HOST_ID;
-		// Open, so tests can reach in; the page could anyway, through the DOM.
-		this.root = this.host.attachShadow({ mode: "open" });
+		// Closed, so a page's scripts cannot read or drive the overlay. The
+		// end-to-end tests reach in through a test build's open root.
+		this.root = this.host.attachShadow({
+			mode:
+				typeof OVERMARK_TEST_BUILD !== "undefined" && OVERMARK_TEST_BUILD
+					? "open"
+					: "closed",
+		});
 		const sheet = new CSSStyleSheet();
 		sheet.replaceSync(STYLE);
 		this.root.adoptedStyleSheets = [sheet];
@@ -177,6 +217,17 @@ export class Overlay {
 			this.reviewBar,
 		);
 		this.root.append(this.layer);
+		for (const type of OWN_EVENTS)
+			this.layer.addEventListener(type, (e) => e.stopPropagation());
+		for (const type of FOCUS_EVENTS)
+			doc.defaultView?.addEventListener(
+				type,
+				(e) => {
+					if (e.target === this.host) e.stopImmediatePropagation();
+				},
+				true,
+			);
+		doc.addEventListener("fullscreenchange", () => this.#place());
 		doc.documentElement.append(this.host);
 		this.#update();
 	}
@@ -239,11 +290,31 @@ export class Overlay {
 		this.reviewBar.hidden = !this.#reviewing;
 		this.#review.style.display = this.#reviewing ? "" : "none";
 		// Stay on top of elements the page appended later.
-		if (shown && this.host.nextElementSibling !== null)
-			this.doc.documentElement.append(this.host);
+		if (shown && this.host.nextElementSibling !== null) this.#place(true);
+		if (shown && this.#timer === undefined) {
+			this.#timer = setInterval(() => {
+				this.#place();
+				this.onTick?.();
+			}, 500);
+		} else if (!shown) {
+			clearInterval(this.#timer);
+			this.#timer = undefined;
+		}
 	}
 
-	/** Hide everything but the marks while a screenshot is taken. */
+	/**
+	 * The top layer covers even this overlay: go inside a modal dialog or a
+	 * fullscreen element while there is one. `last` also moves the host to the
+	 * end of its parent; that costs a field its focus, so not on every tick.
+	 */
+	#place(last = false): void {
+		const doc = this.doc;
+		const parent =
+			doc.fullscreenElement ?? modalDialog(doc) ?? doc.documentElement;
+		if (last || this.host.parentElement !== parent) parent.append(this.host);
+	}
+
+	/** Hide all of Overmark while a screenshot is taken. */
 	setCapturing(on: boolean): void {
 		this.layer.classList.toggle("capturing", on);
 	}
@@ -330,13 +401,7 @@ export class Overlay {
 				];
 			case "arrow": {
 				const { from, to } = shape;
-				const angle = Math.atan2(to.y - from.y, to.x - from.x);
-				const head = (a: number): Point => ({
-					x: to.x - 14 * Math.cos(angle + a),
-					y: to.y - 14 * Math.sin(angle + a),
-				});
-				const l = head(0.45);
-				const r = head(-0.45);
+				const [l, r] = arrowHead(from, to);
 				return [
 					svg(doc, "line", {
 						x1: from.x,
@@ -367,12 +432,11 @@ export class Overlay {
 		const doc = this.doc;
 		const at = badgePosition(mark.shape);
 		const g = svg(doc, "g", { "data-number": mark.number });
-		const r = mark.shape.kind === "note" ? 13 : 11;
 		g.append(
 			svg(doc, "circle", {
 				cx: at.x,
 				cy: at.y,
-				r,
+				r: badgeRadius(mark.shape),
 				fill: colour,
 				stroke: "#fff",
 				"stroke-width": 2,
@@ -391,19 +455,5 @@ export class Overlay {
 		text.textContent = String(mark.number);
 		g.append(text);
 		return g;
-	}
-}
-
-export function badgePosition(shape: Shape): Point {
-	switch (shape.kind) {
-		case "element":
-		case "box":
-			return { x: shape.rect.x, y: shape.rect.y };
-		case "arrow":
-			return shape.from;
-		case "pen":
-			return shape.points[0] ?? { x: 0, y: 0 };
-		case "note":
-			return shape.at;
 	}
 }
