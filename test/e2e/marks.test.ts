@@ -82,6 +82,35 @@ describe.skipIf(browserBinary === undefined)(
 			await close(page);
 		}, 60_000);
 
+		test("a mark the page moved away from gets its screenshot at saving, and the page comes back", async () => {
+			const { page, tabId } = await open("long");
+			await showToolbar(h, page, tabId);
+			// An AI app holds the page, so the mark's screenshot has to wait.
+			await sendToTab(tabId, { type: "page:blur", blurForms: false });
+			await markElement(page, "#near", "drawn at the top");
+			await page.eval("window.scrollTo(0, 2400)");
+			await markElement(page, "#far", "drawn further down");
+			const down = await page.eval<number>("scrollY");
+			await sendToTab(tabId, { type: "page:unblur" });
+			await Bun.sleep(1800);
+			// The page is left alone while the user works.
+			expect(await page.eval<number>("scrollY")).toBe(down);
+			await saveAs(page, "Waited");
+			expect(await page.eval<number>("scrollY")).toBe(down);
+			const { c } = await saved("Waited");
+			expect(c.annotations.map((a) => a.shot)).toEqual(["s1", "s2"]);
+			expect(
+				await countColour(h.control, "Waited", "crops/a1.webp", BLUE),
+			).toBeGreaterThan(1000);
+			expect(
+				await countColour(h.control, "Waited", "crops/a2.webp", GREEN),
+			).toBeGreaterThan(1000);
+			expect(
+				await countColour(h.control, "Waited", "shots/s1.webp", GREEN),
+			).toBe(0);
+			await close(page);
+		}, 60_000);
+
 		test("the wheel scrolls a container while a tool is active", async () => {
 			const { page, tabId } = await open("app");
 			await showToolbar(h, page, tabId);
@@ -181,7 +210,9 @@ describe.skipIf(browserBinary === undefined)(
 			expect(c.shots).toHaveLength(1);
 			expect(c.annotations.map((a) => a.shot)).toEqual(["s1", "s1"]);
 			expect(
-				images.map((i) => i.key).filter((k) => k.includes("/pending/")),
+				images
+					.map((i) => i.key)
+					.filter((k) => k.startsWith(`${c.id}/pending/`)),
 			).toEqual([]);
 			// Both marks are on the image, drawn at saving, and the overlay is not.
 			expect(
@@ -374,7 +405,9 @@ describe.skipIf(browserBinary === undefined)(
 			await saveAs(page, "Fast");
 			const { c, images } = await saved("Fast");
 			expect(c.annotations.map((a) => a.comment)).toEqual(["one", "two"]);
-			expect(images.some((i) => i.key.includes("/pending/"))).toBe(false);
+			expect(images.some((i) => i.key.startsWith(`${c.id}/pending/`))).toBe(
+				false,
+			);
 			await close(page);
 		}, 60_000);
 	},

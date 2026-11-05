@@ -41,9 +41,9 @@ change, generated ids change, content differs between environments, layouts diff
 window size, and the fix itself changes the element. So the **annotated screenshot**
 is what a case is about, and finding the element again is a best-effort extra:
 
-- When saving, Overmark captures the visible part of the page with the drawings on it
-  (one screenshot per scroll position that holds annotations) and a crop per
-  annotation.
+- When a mark is drawn, Overmark captures the visible part of the page as the user sees
+  it (DEC-012); marks drawn while nothing scrolled or changed share that screenshot.
+  Saving draws the marks onto the screenshots and cuts a crop per annotation.
 - Shapes are stored in the screenshot's own coordinates (CSS pixels of that viewport).
   They never have to follow the live page.
 - Each annotation also stores the details of its element (tag, role, accessible name,

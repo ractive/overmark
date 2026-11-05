@@ -74,6 +74,8 @@ interface Draft {
 	anchor: Rect | null;
 	/** The page's address then. */
 	url: string;
+	/** The window's scroll position then. */
+	scroll: Point;
 	/** Its screenshot and its place on it, once taken. */
 	shot?: { view: View; shape: Shape };
 }
@@ -161,6 +163,8 @@ export class Annotator {
 	#observer: MutationObserver | undefined;
 	/** Lets go of the blur while a screenshot is taken. */
 	#unblur: (() => void) | undefined;
+	/** The last screenshot's page scrolled while it was taken. */
+	#shotMoved = false;
 
 	readonly #pageBlur: PageBlur;
 	readonly #activity: PageActivity;
@@ -430,6 +434,7 @@ export class Annotator {
 					: describeElement(element, createContext(this.overlay.doc)),
 			anchor: element === null ? null : documentRect(element, this.#scroll()),
 			url: location.href,
+			scroll: this.#scroll(),
 		};
 		this.#message = "";
 		this.#drafts.push(draft);
@@ -722,35 +727,30 @@ export class Annotator {
 		ask({ type: "images:discard", caseId, shotIds }).catch(() => undefined);
 	}
 
-	/** Give a mark a screenshot, after the ones already on their way. */
+	/**
+	 * Give a mark a screenshot, after the ones already on their way. Whether it
+	 * shares the last one is decided now: by its turn the page may have moved on.
+	 */
 	#shootLater(draft: Draft): void {
+		const same = !this.#scrolled && !this.#mutated;
+		const shape = this.#onWindow(draft);
 		this.#shots = this.#shots
-			.then(() => this.#shoot(draft))
+			.then(() => this.#shoot(draft, same, shape))
 			.catch((error: unknown) => {
 				this.#message = `No screenshot of mark ${draft.number} yet: ${errorText(error)}`;
 				this.#renderToolbar();
 			});
 	}
 
-	async #shoot(draft: Draft): Promise<void> {
+	async #shoot(draft: Draft, same: boolean, drawn: Shape): Promise<void> {
 		if (draft.shot !== undefined || !this.#drafts.includes(draft)) return;
 		const last = this.#views.at(-1);
-		if (
-			last !== undefined &&
-			!this.#scrolled &&
-			!this.#mutated &&
-			last.shot.url === location.href
-		) {
+		if (same && last !== undefined && last.shot.url === draft.url) {
 			last.marks.push(draft);
-			draft.shot = { view: last, shape: this.#onWindow(draft) };
+			draft.shot = { view: last, shape: drawn };
 			return;
 		}
-		const taken = await this.#take(draft);
-		taken.view.marks.push(draft);
-		this.#views.push(taken.view);
-		draft.shot = taken;
-		// Undone while it was being taken.
-		if (!this.#drafts.includes(draft)) this.#forget(draft);
+		await this.#take(draft, drawn);
 	}
 
 	/** Wait for the page: an AI app's screenshot is over soon, or times out. */
@@ -763,59 +763,111 @@ export class Annotator {
 		}
 	}
 
+	#scrollTo(to: Point): void {
+		const now = this.#scroll();
+		if (now.x !== to.x || now.y !== to.y)
+			this.overlay.doc.defaultView?.scrollTo({
+				left: to.x,
+				top: to.y,
+				behavior: "instant",
+			});
+	}
+
 	/** The screenshot is taken: the page and the overlay are back. */
 	captured(): void {
-		this.#unblur?.();
+		if (this.#unblur === undefined) return;
+		this.#unblur();
 		this.#unblur = undefined;
+		this.#shotMoved = this.#scrolled;
 		this.overlay.setCapturing(false);
 		this.#watch();
 	}
 
-	/** A new screenshot of the page as it is, with `draft` on it. */
-	async #take(draft: Draft): Promise<NonNullable<Draft["shot"]>> {
+	/**
+	 * A new screenshot of the page as it is, for `draft`. With `drawn`, where the
+	 * mark was drawn, it is given up when the page moved on: the image would not
+	 * show the mark, and the page is not moved while the user works. Saving then
+	 * takes it, without `drawn`.
+	 */
+	async #take(draft: Draft, drawn?: Shape): Promise<void> {
 		await this.#hold();
 		try {
-			for (let attempt = 1; ; attempt++) {
-				const gap = this.#lastShot + SHOT_GAP_MS - Date.now();
-				if (gap > 0) await sleep(gap);
-				const win = this.overlay.doc.defaultView as Window;
-				const shape = this.#onWindow(draft);
-				const scroll = this.#scroll();
-				const viewport = {
+			const gap = this.#lastShot + SHOT_GAP_MS - Date.now();
+			if (gap > 0) await sleep(gap);
+			if (drawn !== undefined) {
+				const now = shapeBounds(this.#onWindow(draft));
+				const then = shapeBounds(drawn);
+				if (now.x !== then.x || now.y !== then.y) return;
+			}
+			const win = this.overlay.doc.defaultView as Window;
+			const shotId = newId("p");
+			// The blur changes the page's DOM, which is no change of the page.
+			this.#observer?.disconnect();
+			this.overlay.setCapturing(true);
+			this.#unblur = this.#pageBlur.hold(this.#blurForms);
+			let image: CaptureResult;
+			let shape: Shape;
+			let scroll: Point;
+			let viewport: PageInfo["viewport"];
+			try {
+				// Two frames: the first paints what was just changed.
+				await frame();
+				await frame();
+				shape = this.#onWindow(draft);
+				scroll = this.#scroll();
+				viewport = {
 					width: win.innerWidth,
 					height: win.innerHeight,
 					dpr: win.devicePixelRatio || 1,
 				};
-				const shotId = newId("p");
 				this.#scrolled = false;
 				this.#mutated = false;
-				// The blur changes the page's DOM, which is no change of the page.
-				this.#observer?.disconnect();
-				this.overlay.setCapturing(true);
-				this.#unblur = this.#pageBlur.hold(this.#blurForms);
-				let image: CaptureResult;
-				try {
-					// Two frames: the first paints what was just changed.
-					await frame();
-					await frame();
-					image = await ask<CaptureResult>({
-						type: "capture",
-						caseId: this.#pendingId(),
-						shotId,
-					});
-				} finally {
-					this.captured();
-					this.#lastShot = Date.now();
-				}
-				// The coordinates are from before: the image may be from after.
-				if (this.#scrolled && attempt === 1) {
-					this.#discard([shotId]);
-					continue;
-				}
-				return { view: this.#view(shotId, scroll, viewport, image), shape };
+				image = await ask<CaptureResult>({
+					type: "capture",
+					caseId: this.#pendingId(),
+					shotId,
+				});
+			} finally {
+				this.captured();
+				this.#lastShot = Date.now();
 			}
+			// The coordinates are from before: the image may be from after.
+			if (this.#shotMoved && drawn !== undefined) {
+				this.#discard([shotId]);
+				return;
+			}
+			const view = this.#view(shotId, scroll, viewport, image);
+			view.marks.push(draft);
+			this.#views.push(view);
+			draft.shot = { view, shape };
+			// Undone while it was being taken.
+			if (!this.#drafts.includes(draft)) this.#forget(draft);
 		} finally {
 			this.#activity.end("shot");
+		}
+	}
+
+	/** At saving, nobody is using the page: back to where a mark was drawn. */
+	async #takeBack(draft: Draft): Promise<void> {
+		const win = this.overlay.doc.defaultView as Window;
+		const here = this.#scroll();
+		this.#scrollTo(draft.scroll);
+		const at = shapeBounds(this.#onWindow(draft));
+		if (
+			at.x + at.width < 0 ||
+			at.y + at.height < 0 ||
+			at.x > win.innerWidth ||
+			at.y > win.innerHeight
+		)
+			draft.element?.scrollIntoView({
+				block: "center",
+				inline: "nearest",
+				behavior: "instant",
+			});
+		try {
+			await this.#take(draft);
+		} finally {
+			this.#scrollTo(here);
 		}
 	}
 
@@ -859,12 +911,12 @@ export class Annotator {
 		if (this.#activity.saving || this.#drafts.length === 0) return undefined;
 		this.#title = title;
 		if (this.#editing !== null) this.#commitComment();
-		// A mark whose screenshot failed gets another try, of the page as it is.
-		for (const draft of this.#drafts)
-			if (draft.shot === undefined) this.#shootLater(draft);
 		await this.#shots;
-		const missing = this.#drafts.find((d) => d.shot === undefined);
-		if (missing !== undefined) {
+		try {
+			for (const draft of this.#drafts)
+				if (draft.shot === undefined) await this.#takeBack(draft);
+		} catch (error) {
+			this.#message = `Not saved: ${errorText(error)}`;
 			this.#renderToolbar();
 			return undefined;
 		}
@@ -875,9 +927,10 @@ export class Annotator {
 			return undefined;
 		}
 		const drafts = [...this.#drafts];
-		const views = this.#views.filter((v) =>
-			v.marks.some((d) => drafts.includes(d)),
-		);
+		const first = (v: View) => Math.min(...v.marks.map((d) => d.number));
+		const views = this.#views
+			.filter((v) => v.marks.some((d) => drafts.includes(d)))
+			.sort((a, b) => first(a) - first(b));
 		const target = this.#target;
 		const imagesFrom = this.#pendingId();
 		this.#saveForm = false;
