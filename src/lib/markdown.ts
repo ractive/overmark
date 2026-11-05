@@ -41,7 +41,8 @@ function annotation(a: Annotation): string {
 	lines.push(a.comment ? block(a.comment) : "_No comment._", "");
 	if (a.element) {
 		lines.push(`- Element: ${inline(summarize(a.element))}`);
-		lines.push(`- Selector: ${code(a.element.selector)}`);
+		if (a.element.selector)
+			lines.push(`- Selector: ${code(a.element.selector)}`);
 		if (a.element.landmark) lines.push(`- In: ${inline(a.element.landmark)}`);
 	} else {
 		lines.push("- Element: none recorded");

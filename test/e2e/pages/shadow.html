@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de">
+	<head>
+		<meta charset="utf-8" />
+		<title>Webkomponenten</title>
+		<style>
+			body { margin: 0; font: 16px/1.5 sans-serif; }
+			app-panel, app-vault, app-send { display: block; margin: 24px; padding: 48px; background: #eef; }
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>Webkomponenten</h1>
+			<app-panel></app-panel>
+			<app-vault></app-vault>
+			<app-send>Offerte senden</app-send>
+		</main>
+		<script>
+			const button = (text) => `<style>button { padding: 8px 16px; }</style><section><button>${text}</button></section>`;
+			class Panel extends HTMLElement {
+				connectedCallback() {
+					this.attachShadow({ mode: "open" }).innerHTML = button("Offen speichern");
+				}
+			}
+			class Vault extends HTMLElement {
+				connectedCallback() {
+					this.attachShadow({ mode: "closed" }).innerHTML = button("Geschlossen speichern");
+				}
+			}
+			class Send extends HTMLElement {
+				connectedCallback() {
+					this.attachShadow({ mode: "open" }).innerHTML = button("<slot></slot>");
+				}
+			}
+			customElements.define("app-panel", Panel);
+			customElements.define("app-vault", Vault);
+			customElements.define("app-send", Send);
+		</script>
+	</body>
+</html>

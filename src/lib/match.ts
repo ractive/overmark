@@ -108,23 +108,56 @@ function centre(d: ElementDetails): { x: number; y: number } | undefined {
 	};
 }
 
+/** Values that name one element, as long as no other element has them too. */
+const NAMING = ["testId", "id", "src", "href"] as const;
+type Naming = (typeof NAMING)[number];
+
+function naming(d: ElementDetails, key: Naming): string | undefined {
+	return key === "src" || key === "href" ? d.attributes[key] : d[key];
+}
+
+const NOTHING_REPEATED: ReadonlySet<Naming> = new Set();
+
+/** Which of the stored element's naming values several candidates have. */
+function repeatedNames(
+	stored: ElementDetails,
+	candidates: readonly ElementDetails[],
+): Set<Naming> {
+	const repeated = new Set<Naming>();
+	for (const key of NAMING) {
+		const value = naming(stored, key);
+		if (!value) continue;
+		let count = 0;
+		for (const c of candidates) if (naming(c, key) === value) count++;
+		if (count > 1) repeated.add(key);
+	}
+	return repeated;
+}
+
 /**
- * How much a candidate shares what identifies the stored element (its test
- * id, id, accessible name or text), 0 to 1; `undefined` when the stored
- * element has none of these.
+ * How much a candidate shares what identifies the stored element, 0 to 1: its
+ * test id or id, else its accessible name or text, else its image or link.
+ * `undefined` when nothing tells: the stored element has none of these, or
+ * only a value repeated on the page (`repeated`) or an image or link that
+ * differs, which another build may simply have renamed.
  */
 export function identity(
 	stored: ElementDetails,
 	candidate: ElementDetails,
+	repeated: ReadonlySet<Naming> = NOTHING_REPEATED,
 ): number | undefined {
-	if (stored.testId && candidate.testId === stored.testId) return 1;
-	if (stored.id && candidate.id === stored.id) return 1;
+	const same = (key: Naming) =>
+		!!naming(stored, key) && naming(candidate, key) === naming(stored, key);
+	const names = (key: Naming) => same(key) && !repeated.has(key);
+	if (names("testId") || names("id")) return 1;
 	const texts: number[] = [];
 	if (stored.name)
 		texts.push(textSimilarity(stored.name, candidate.name ?? ""));
 	if (stored.text)
 		texts.push(textSimilarity(stored.text, candidate.text ?? ""));
 	if (texts.length > 0) return Math.max(...texts);
+	if (names("src") || names("href")) return 1;
+	if (NAMING.some(same)) return undefined;
 	return stored.testId || stored.id ? 0 : undefined;
 }
 
@@ -145,6 +178,7 @@ function identityFactor(value: number | undefined): number {
 export function score(
 	stored: ElementDetails,
 	candidate: ElementDetails,
+	repeated: ReadonlySet<Naming> = NOTHING_REPEATED,
 ): number {
 	let total = 0;
 	let weight = 0;
@@ -197,13 +231,17 @@ export function score(
 			areaB > 0 ? Math.min(areaA, areaB) / Math.max(areaA, areaB) : 0,
 		);
 	if (weight === 0) return 0;
-	return (total / weight) * identityFactor(identity(stored, candidate));
+	return (
+		(total / weight) * identityFactor(identity(stored, candidate, repeated))
+	);
 }
 
 export interface Ranked {
 	/** Index into the candidates. */
 	index: number;
 	score: number;
+	/** Something identifies it, beyond looking like the stored element. */
+	identified: boolean;
 }
 
 /** The best candidates, best first. */
@@ -212,10 +250,25 @@ export function rank(
 	candidates: readonly ElementDetails[],
 	limit = 3,
 ): Ranked[] {
+	const repeated = repeatedNames(stored, candidates);
 	return candidates
-		.map((c, index) => ({ index, score: score(stored, c) }))
+		.map((c, index) => ({ index, score: score(stored, c, repeated) }))
 		.sort((x, y) => y.score - x.score || x.index - y.index)
-		.slice(0, limit);
+		.slice(0, limit)
+		.map((r) => ({
+			...r,
+			identified:
+				identity(stored, candidates[r.index] as ElementDetails, repeated) !==
+				undefined,
+		}));
+}
+
+/**
+ * Sure enough to say "found". Without identity, only the surroundings speak
+ * for a candidate: any sibling can look the same, so it stays probable.
+ */
+export function isFound(r: Ranked): boolean {
+	return r.score >= FOUND && r.identified;
 }
 
 export function classify(ranked: readonly Ranked[]): MatchStatus {
@@ -223,5 +276,5 @@ export function classify(ranked: readonly Ranked[]): MatchStatus {
 	if (best === undefined || best.score < PROBABLE) return "lost";
 	if (second !== undefined && best.score - second.score < TIE)
 		return "ambiguous";
-	return best.score >= FOUND ? "found" : "probable";
+	return isFound(best) ? "found" : "probable";
 }
