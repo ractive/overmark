@@ -432,7 +432,7 @@ export class Overlay {
 					}),
 					svg(doc, "polygon", {
 						points: `${to.x},${to.y} ${l.x},${l.y} ${r.x},${r.y}`,
-						fill: MARK_COLOUR,
+						fill: colour,
 					}),
 				];
 			}

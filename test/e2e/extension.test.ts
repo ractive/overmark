@@ -278,6 +278,12 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			{ x: tip.x + 500, y: tip.y + 14 },
 		);
 		await comment(v1.page, "Scribble");
+		await v1.page.click(shadow('[data-action="tool-arrow"]'));
+		await v1.page.drag(
+			{ x: tip.x + 620, y: tip.y + 2 },
+			{ x: tip.x + 560, y: tip.y + 16 },
+		);
+		await comment(v1.page, "Here");
 		await saveAs(v1.page, "Drawn marks");
 		await v1.page.click(shadow('[data-action="close"]'));
 
@@ -293,7 +299,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await h.control.waitFor(load);
 		await h.control.eval(`${load}.click()`);
 		await h.control.waitFor(
-			`document.querySelectorAll(".match").length === 2`,
+			`document.querySelectorAll(".match").length === 3`,
 			10_000,
 		);
 
@@ -312,6 +318,11 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			`${shadow('[data-review="2"]')}.querySelector("polyline").points.length`,
 		);
 		expect(points).toBeGreaterThan(2);
+		// All of a mark says how sure the match is, an arrow's head too.
+		const arrow = await v2.page.eval<(string | null)[]>(
+			`(() => { const g = ${shadow('[data-review="3"]')}; return [g.querySelector("line").getAttribute("stroke"), g.querySelector("polygon").getAttribute("fill")]; })()`,
+		);
+		expect(arrow[1]).toBe(arrow[0]);
 		await v1.page.send("Page.close");
 		await v2.page.send("Page.close");
 		await h.control.goto(
