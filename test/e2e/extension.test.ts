@@ -438,6 +438,8 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 					`${shadow(".popover textarea")}.getAttribute("aria-label")`,
 				),
 			).toBe("Comment for mark 1");
+			// A draft left behind would hold the tab open with "leave this site?".
+			await page.click(shadow('[data-action="comment-remove"]'));
 			await page.send("Page.close");
 		}, 60_000);
 
