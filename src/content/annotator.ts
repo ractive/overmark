@@ -51,7 +51,7 @@ import {
 } from "./activity.ts";
 import { elementAt, elementForRect } from "./anchor.ts";
 import type { PageBlur } from "./blur.ts";
-import type { Overlay } from "./overlay.ts";
+import { type IconName, icon, type Overlay, ring } from "./overlay.ts";
 
 export type Tool = "element" | "box" | "arrow" | "pen" | "note";
 
@@ -478,10 +478,14 @@ export class Annotator {
 		this.#editing = draft;
 		const doc = this.overlay.doc;
 		const popover = this.overlay.popover;
+		const pin = doc.createElement("span");
+		pin.className = "pin";
+		pin.textContent = String(draft.number);
 		const label = doc.createElement("div");
 		label.className = "label";
-		label.textContent = `Comment for mark ${draft.number}`;
+		label.append(pin, "Comment");
 		const field = doc.createElement("textarea");
+		field.setAttribute("aria-label", `Comment for mark ${draft.number}`);
 		field.placeholder = "What is wrong, or what should change?";
 		field.maxLength = MAX_COMMENT;
 		field.value = draft.comment;
@@ -618,10 +622,13 @@ export class Annotator {
 		label: string,
 		action: string,
 		onClick: () => void,
+		image?: IconName,
 	): HTMLButtonElement {
-		const b = this.overlay.doc.createElement("button");
+		const doc = this.overlay.doc;
+		const b = doc.createElement("button");
 		b.type = "button";
-		b.textContent = label;
+		if (image !== undefined) b.append(icon(doc, image));
+		b.append(label);
 		b.dataset["action"] = action;
 		b.addEventListener("click", onClick);
 		return b;
@@ -645,9 +652,7 @@ export class Annotator {
 	#renderToolbar(): void {
 		const doc = this.overlay.doc;
 		const bar = this.overlay.toolbar;
-		const brand = doc.createElement("span");
-		brand.className = "brand";
-		brand.textContent = "Overmark";
+		const brand = ring(doc);
 		const status = doc.createElement("span");
 		status.className = "status";
 		status.dataset["role"] = "status";
@@ -670,7 +675,7 @@ export class Annotator {
 			);
 			save.className = "primary";
 			let title: HTMLInputElement | undefined;
-			const parts: HTMLElement[] = [brand];
+			const parts: Element[] = [brand];
 			if (this.#target) {
 				status.textContent =
 					this.#message ||
@@ -705,14 +710,17 @@ export class Annotator {
 			return;
 		}
 		const tools = TOOLS.map(({ tool, label, title }) => {
-			const b = this.#button(label, `tool-${tool}`, () =>
-				this.setTool(this.#tool === tool ? null : tool),
+			const b = this.#button(
+				label,
+				`tool-${tool}`,
+				() => this.setTool(this.#tool === tool ? null : tool),
+				tool,
 			);
 			b.title = title;
 			b.setAttribute("aria-pressed", String(this.#tool === tool));
 			return b;
 		});
-		const undo = this.#button("Undo", "undo", () => this.undo());
+		const undo = this.#button("Undo", "undo", () => this.undo(), "undo");
 		undo.disabled = count === 0;
 		const save = this.#button("Save…", "save", () => {
 			if (this.#editing !== null) this.#commitComment();
@@ -721,6 +729,7 @@ export class Annotator {
 			this.#setSaveForm(true);
 		});
 		save.disabled = count === 0;
+		if (count > 0) save.className = "primary";
 		status.textContent =
 			this.#message ||
 			(count === 0
@@ -729,10 +738,15 @@ export class Annotator {
 					: "Choose a tool"
 				: `${count} mark${count === 1 ? "" : "s"}`);
 		const top = bar.classList.contains("top");
-		const move = this.#button(top ? "↓" : "↑", "move-toolbar", () => {
-			bar.classList.toggle("top");
-			this.#renderToolbar();
-		});
+		const move = this.#button(
+			"",
+			"move-toolbar",
+			() => {
+				bar.classList.toggle("top");
+				this.#renderToolbar();
+			},
+			top ? "down" : "up",
+		);
 		move.title = top ? "Move the toolbar down" : "Move the toolbar up";
 		move.setAttribute("aria-label", move.title);
 		bar.replaceChildren(
@@ -744,9 +758,10 @@ export class Annotator {
 			...(this.#target
 				? [this.#button("New case", "new-case", () => this.#newCase())]
 				: []),
-			this.#button("Close", "close", () => this.hide()),
-			move,
+			sep(),
 			status,
+			this.#button("Close", "close", () => this.hide(), "close"),
+			move,
 		);
 	}
 
