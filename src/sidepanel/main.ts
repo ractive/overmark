@@ -267,6 +267,13 @@ function announce(caseId: string): void {
 	chrome.runtime.sendMessage(news).catch(() => undefined);
 }
 
+/** The case the tab's toolbar was adding to, as stored now; it may be gone. */
+async function continued(
+	overlay: OverlayState | undefined,
+): Promise<Case | undefined> {
+	return overlay?.target && store.getCase(overlay.target.caseId);
+}
+
 /** Show the overlay on the tab in front, optionally to add to a case. */
 async function startAnnotating(target?: Case): Promise<void> {
 	const tab = await activeTab();
@@ -322,7 +329,7 @@ const actions: Actions = {
 			tabWork.cancel();
 			// Ask the page: the state may have changed while no panel was listening.
 			const now = await overlayState(tab.id);
-			if (!now?.visible) return startAnnotating();
+			if (!now?.visible) return startAnnotating(await continued(now));
 			try {
 				const overlay = await sendToTab<OverlayState>(tab.id, {
 					type: "overlay:hide",

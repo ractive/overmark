@@ -10,6 +10,7 @@ import {
 } from "@modelcontextprotocol/client";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
 import { webpSize } from "../../src/lib/export.ts";
+import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
 	countColour,
@@ -255,6 +256,95 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		expect(db.images.some((i) => i.key.endsWith("/crops/a4.webp"))).toBe(true);
 		await page.send("Page.close");
 	}, 60_000);
+
+	describe("annotating again after a save", () => {
+		const annotate = `document.getElementById("annotate")`;
+		const status = `${shadow('[data-role="status"]')}?.textContent`;
+		const savedMarks = (page: Page) =>
+			page.eval<string[]>(
+				`[...${shadow("svg.marks")}.querySelectorAll(".saved g[data-number]")].map((g) => g.dataset.number)`,
+			);
+		/** "Stop annotating", as the side panel's button does it. */
+		async function stop(): Promise<void> {
+			await h.control.waitFor(`${annotate}.textContent === "Stop annotating"`);
+			await h.control.eval(`${annotate}.click()`);
+		}
+
+		test("goes on with the case, until New case", async () => {
+			const { page, tabId } = await h.open("v1");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "[data-truth=submit]", "Too pale");
+			await saveAs(page, "Going on");
+			// What was saved stays on the page, and the toolbar is still up.
+			expect(await savedMarks(page)).toEqual(["1"]);
+
+			await stop();
+			await h.control.waitFor(
+				`${annotate}.textContent === "Continue annotating"`,
+			);
+			await h.control.eval(`${annotate}.click()`);
+			await page.waitFor(`${status} === "Adding to “Going on”"`);
+			expect(await savedMarks(page)).toEqual(["1"]);
+
+			await markElement(page, "[data-truth=tip]", "Say how much");
+			await page.click(shadow('[data-action="save"]'));
+			await page.click(shadow('[data-action="save-confirm"]'));
+			await page.waitFor(`${status}?.startsWith("Saved")`, 20_000);
+			expect(await savedMarks(page)).toEqual(["1", "2"]);
+			// A screenshot shows the page alone: mark 2's has no faint mark 1. Its
+			// own edges have a few pixels of that colour, a faint mark over 1000.
+			expect(
+				await countColour(
+					h.control,
+					"Going on",
+					"shots/s2.webp",
+					[0xf2, 0x8c, 0xaf],
+				),
+			).toBeLessThan(200);
+			const titled = (db: Db, title: string) =>
+				db.cases.filter((c) => c.title === title);
+			const going = titled(await h.control.eval<Db>(READ_DB), "Going on");
+			expect(going).toHaveLength(1);
+			expect(going[0]?.annotations.map((a) => a.number)).toEqual([1, 2]);
+
+			await page.click(shadow('[data-action="new-case"]'));
+			await page.waitFor(`${status} === "Choose a tool"`);
+			expect(await savedMarks(page)).toEqual([]);
+			await markElement(page, "h1", "Larger heading");
+			await saveAs(page, "Another one");
+			const db = await h.control.eval<Db>(READ_DB);
+			expect(titled(db, "Going on")[0]?.annotations).toHaveLength(2);
+			expect(
+				titled(db, "Another one")[0]?.annotations.map((a) => a.number),
+			).toEqual([1]);
+			await page.send("Page.close");
+		}, 60_000);
+
+		test("starts a new case when that one was deleted meanwhile", async () => {
+			const { page, tabId } = await h.open("v1");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "[data-truth=submit]", "Deleted meanwhile");
+			await saveAs(page, "Deleted meanwhile");
+			const gone = (await h.control.eval<Db>(READ_DB)).cases.find(
+				(c) => c.title === "Deleted meanwhile",
+			);
+			await stop();
+			await h.control.waitFor(`${annotate}.textContent !== "Stop annotating"`);
+			await h.control.eval(`new Promise((resolve, reject) => {
+				const open = indexedDB.open("overmark");
+				open.onsuccess = () => {
+					const tx = open.result.transaction("cases", "readwrite");
+					tx.objectStore("cases").delete(${JSON.stringify(gone?.id)});
+					tx.oncomplete = () => resolve(true);
+					tx.onerror = () => reject(tx.error);
+				};
+			})`);
+			await h.control.eval(`${annotate}.click()`);
+			await page.waitFor(`${status} === "Choose a tool"`);
+			expect(await savedMarks(page)).toEqual([]);
+			await page.send("Page.close");
+		}, 60_000);
+	});
 });
 
 describe.skipIf(browserBinary === undefined)(

@@ -193,9 +193,12 @@ function renderHome(state: PanelState, actions: Actions): void {
 		: tab?.title || "This page";
 	// Chrome tells the address only of a tab Overmark may run on.
 	setHint(hint, state.hint ?? (tab && !tab.url ? NO_ACCESS : undefined));
+	const target = state.overlay?.target;
 	annotate.textContent = state.overlay?.visible
 		? "Stop annotating"
-		: "Annotate this page";
+		: state.cases.some((c) => c.id === target?.caseId)
+			? "Continue annotating"
+			: "Annotate this page";
 	allSites.checked = state.allSites;
 	importError.hidden = state.importError === undefined;
 	importErrorText.textContent = state.importError ?? "";

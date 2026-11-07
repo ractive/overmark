@@ -38,7 +38,9 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 1. Click the Overmark icon on a tab. The side panel opens there.
 2. "Annotate this page" shows the toolbar: Element (click one), Box, Arrow, Pen and Note,
    each followed by a comment. Save the marks as a case with a title. Overmark takes
-   screenshots with the marks on them and records each marked element's details.
+   screenshots with the marks on them and records each marked element's details. Saved
+   marks stay on the page, fainter, and further marks go to the same case, also after
+   stopping and annotating again on that page; New case in the toolbar starts another.
 3. On another build of the page (say `localhost:3000`), open the case in the side panel
    and click "Load onto this tab". Overmark looks for each mark's element and outlines
    it: green when found, amber and dashed when probable or unsure. Show scrolls to it;
