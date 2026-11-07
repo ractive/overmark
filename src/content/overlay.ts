@@ -19,16 +19,19 @@ declare const OVERMARK_TEST_BUILD: boolean | undefined;
 
 export const HOST_ID = "overmark-root";
 export const HOVER_COLOUR = "#1f6feb";
-export const FOUND_COLOUR = "#1e8e3e";
-export const PROBABLE_COLOUR = "#d97706";
+/** Both carry a mark's white number, here and in the side panel's list. */
+export const FOUND_COLOUR = "#1a7f37";
+export const PROBABLE_COLOUR = "#b45f06";
 const SVG = "http://www.w3.org/2000/svg";
 const INK = "#1d2433";
 const AMBER = "#ffb000";
 const SHADOW = "0 6px 24px rgba(13, 18, 30, 0.35)";
 
 const STYLE = `
-:host { all: initial; }
+/* Important: a page's own rule on the host would beat this otherwise. */
+:host { all: initial !important; }
 .layer {
+	direction: ltr;
 	position: fixed; inset: 0; z-index: 2147483647;
 	pointer-events: none;
 	font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -65,12 +68,13 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .toolbar button.primary { background: ${AMBER}; color: ${INK}; font-weight: 600; }
 .toolbar button.primary:hover, .toolbar button.primary:focus-visible { background: #eea400; }
 .toolbar button:disabled { opacity: 0.5; cursor: default; background: none; }
+.toolbar button:focus-visible, .reviewbar button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .toolbar input {
 	font: inherit; padding: 5px 8px; border-radius: 8px; border: 0; margin-right: 4px;
 	min-width: 220px; color: ${INK}; background: #fff;
 }
 .popover {
-	position: fixed; width: 288px; padding: 10px; border-radius: 12px;
+	box-sizing: border-box; position: fixed; width: 296px; padding: 10px; border-radius: 12px;
 	background: #fff; color: ${INK};
 	box-shadow: ${SHADOW}; border: 1px solid #dfe3ea;
 	pointer-events: auto;
@@ -103,6 +107,8 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	box-shadow: ${SHADOW};
 	pointer-events: auto; max-width: min(440px, calc(100vw - 32px));
 }
+/* Under a toolbar at the top: it would cover the toolbar's last buttons. */
+.toolbar.top:not([hidden]) ~ .reviewbar { top: 64px; }
 /* The count says what the bar is for: a long title gives way. */
 .reviewbar .text { display: flex; gap: 8px; min-width: 0; }
 .reviewbar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b8c0d0; }

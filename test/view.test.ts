@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
+import { FOUND_COLOUR, PROBABLE_COLOUR } from "../src/content/overlay.ts";
 import type { Annotation, Case } from "../src/lib/case.ts";
 import { summarize } from "../src/lib/element.ts";
+import { MARK_COLOUR } from "../src/lib/marks.ts";
 import { initialState, type PanelState } from "../src/sidepanel/state.ts";
 import type { Actions } from "../src/sidepanel/view.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -327,6 +329,15 @@ describe("the annotate button", () => {
 	});
 });
 
+test("the panel's mark colours are the page's", async () => {
+	const css = await Bun.file(
+		new URL("../src/sidepanel/style.css", import.meta.url),
+	).text();
+	expect(css).toContain(`--mark: ${MARK_COLOUR};`);
+	expect(css).toContain(`--mark-found: ${FOUND_COLOUR};`);
+	expect(css).toContain(`--mark-unsure: ${PROBABLE_COLOUR};`);
+});
+
 describe("a loaded mark", () => {
 	const element = {
 		tag: "button",
@@ -348,7 +359,7 @@ describe("a loaded mark", () => {
 		crop: "crops/a1.webp",
 		element,
 	} as Annotation;
-	const shownAs = (summary: string, visible = true) =>
+	const shownAs = (summary: string, visible = true, current = 0) =>
 		caseState({ ...sampleCase("c_m"), annotations: [mark] }, (s) => {
 			s.loaded = {
 				caseId: "c_m",
@@ -361,8 +372,11 @@ describe("a loaded mark", () => {
 							number: 1,
 							status: "found",
 							score: 1,
-							current: 0,
-							candidates: [{ score: 1, summary, selector: "b", visible }],
+							current,
+							candidates: [
+								{ score: 1, summary, selector: "b", visible, found: true },
+								{ score: 0.6, summary, selector: "c", visible, found: false },
+							],
 						},
 					],
 				]),
@@ -371,11 +385,18 @@ describe("a loaded mark", () => {
 	const said = () =>
 		document.querySelector(".match .meta")?.textContent ?? undefined;
 
-	test("its number takes the colour of its status", () => {
+	const colour = () =>
+		document.querySelector<HTMLElement>(".annotation")?.dataset["colour"];
+
+	test("its number has the colour of its mark on the page", () => {
 		render(shownAs(summarize(element)), noActions);
-		expect(
-			document.querySelector<HTMLElement>(".annotation")?.dataset["status"],
-		).toBe("found");
+		expect(colour()).toBe("found");
+	});
+
+	test("another candidate, not sure enough, is unsure on both", () => {
+		render(shownAs(summarize(element), true, 1), noActions);
+		expect(colour()).toBe("unsure");
+		expect(document.querySelector(".match")?.className).toContain("unsure");
 	});
 
 	test("says nothing more about the element it expected", () => {

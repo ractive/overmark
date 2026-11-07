@@ -432,9 +432,14 @@ export class Annotator {
 	#renumber(): void {
 		let next = this.#target?.nextAnnotation ?? 1;
 		for (const draft of this.#drafts) draft.number = next++;
-		const label = this.overlay.popover.querySelector(".label");
-		if (this.#editing !== null && label !== null)
-			label.textContent = `Comment for mark ${this.#editing.number}`;
+		if (this.#editing === null) return;
+		const { number } = this.#editing;
+		const { popover } = this.overlay;
+		const pin = popover.querySelector(".pin");
+		if (pin !== null) pin.textContent = String(number);
+		popover
+			.querySelector("textarea")
+			?.setAttribute("aria-label", `Comment for mark ${number}`);
 	}
 
 	#nextNumber(): number {
@@ -522,7 +527,7 @@ export class Annotator {
 		const vw = win?.innerWidth ?? 1024;
 		const vh = win?.innerHeight ?? 768;
 		const width = 296;
-		const height = 150;
+		const height = 160;
 		let x = b.x;
 		let y = b.y + b.height + 12;
 		if (y + height > vh) y = b.y - height - 12;

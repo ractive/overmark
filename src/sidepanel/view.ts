@@ -225,6 +225,13 @@ function renderHome(state: PanelState, actions: Actions): void {
 
 // --- one case ------------------------------------------------------------------
 
+/** The colour of the mark on the page: the shown candidate decides (review.ts). */
+function colourOf(m: AnnotationMatch): "found" | "unsure" | "lost" {
+	if (m.status === "lost") return "lost";
+	const sure = m.status !== "ambiguous" && m.candidates[m.current]?.found;
+	return sure ? "found" : "unsure";
+}
+
 function matchText(m: AnnotationMatch): string {
 	if (m.current > 0)
 		return `Candidate ${m.current + 1} of ${m.candidates.length} (${percent(m.score)})`;
@@ -293,7 +300,7 @@ function matchView(
 	return h(
 		"div",
 		{
-			class: `match ${m.status}`,
+			class: `match ${colourOf(m)}`,
 			id: `match-${a.id}`,
 			"data-status": m.status,
 		},
@@ -477,7 +484,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 					{
 						class: "annotation",
 						"data-annotation": a.id,
-						...(m ? { "data-status": m.status } : {}),
+						...(m ? { "data-colour": colourOf(m) } : {}),
 					},
 					h("span", { class: "number" }, String(a.number)),
 					h(

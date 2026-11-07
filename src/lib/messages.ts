@@ -28,7 +28,7 @@ export type ContentRequest =
 	/** The side panel's "Blur form fields" changed (`OverlayState`). */
 	| { type: "overlay:settings"; blurForms: boolean }
 	/**
-	 * Find the case's elements on this page and outline them (`LoadResult`, or
+	 * Find the case's elements on this page and draw its marks (`LoadResult`, or
 	 * `{ error }`, also while the page is busy).
 	 */
 	| { type: "case:load"; case: Case }
@@ -43,7 +43,7 @@ export type ContentRequest =
 			annotationId: string;
 			candidate?: number;
 	  }
-	/** Remove the outlines (`OverlayState`). */
+	/** Remove the marks (`OverlayState`). */
 	| { type: "case:clear" }
 	/**
 	 * Scroll to the element `selector` and mark it with `number` for a
@@ -100,6 +100,8 @@ export interface CandidateInfo {
 	selector: string;
 	/** Rendered with a size; `false` for hidden elements (e.g. another layout). */
 	visible: boolean;
+	/** Sure enough to be drawn as found (match.ts `isFound`). */
+	found: boolean;
 }
 
 /** Where an annotation's element is on this page. */
@@ -110,7 +112,7 @@ export interface AnnotationMatch {
 	status: MatchStatus | "no-element";
 	/** The shown candidate's score (0 for lost). */
 	score: number;
-	/** Which candidate is outlined. */
+	/** Which candidate the mark is drawn on. */
 	current: number;
 	candidates: CandidateInfo[];
 	/** Only part of the page was searched (very many elements, or out of time). */
@@ -132,7 +134,7 @@ export interface OverlayState {
 	drafts: number;
 	saving: boolean;
 	target?: AnnotateTarget;
-	/** The case whose elements are outlined. */
+	/** The case whose marks are drawn. */
 	loadedCase?: string;
 }
 

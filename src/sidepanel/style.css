@@ -13,12 +13,13 @@
 	--rule: #dfe3ea;
 	--focus: #1f6feb;
 	--danger: #c62828;
-	--ok: #1e8e3e;
+	--ok: #1a7f37;
 	--warn: #a85800;
-	/* The colours of a mark on the page, the same in light and dark. */
+	/* A mark's colours on the page (overlay.ts), in light and dark alike. */
 	--mark: #e5195f;
-	--mark-found: #1e8e3e;
+	--mark-found: #1a7f37;
 	--mark-unsure: #b45f06;
+	/* Only here: a lost mark is not drawn on the page. */
 	--mark-lost: #c62828;
 }
 
@@ -409,17 +410,15 @@ ol.annotations {
 	font-variant-numeric: tabular-nums;
 }
 
-.annotation[data-status="found"] .number {
+.annotation[data-colour="found"] .number {
 	background: var(--mark-found);
 }
 
-.annotation[data-status="probable"] .number,
-.annotation[data-status="ambiguous"] .number,
-.annotation[data-status="no-element"] .number {
+.annotation[data-colour="unsure"] .number {
 	background: var(--mark-unsure);
 }
 
-.annotation[data-status="lost"] .number {
+.annotation[data-colour="lost"] .number {
 	background: var(--mark-lost);
 }
 
@@ -466,9 +465,7 @@ ol.annotations {
 	color: var(--ok);
 }
 
-.match.probable .status,
-.match.ambiguous .status,
-.match.no-element .status {
+.match.unsure .status {
 	color: var(--warn);
 }
 

@@ -132,9 +132,7 @@ export class Reviewer {
 				...base,
 				status,
 				score: found.score,
-				candidates: candidates.map((k) =>
-					this.#info(k.element, k.score, search.context),
-				),
+				candidates: candidates.map((k) => this.#info(k, search.context)),
 				...(truncated ? { truncated: true } : {}),
 			},
 		};
@@ -153,13 +151,17 @@ export class Reviewer {
 		this.#renderBar();
 	}
 
-	#info(el: Element, score: number, context: DescribeContext): CandidateInfo {
-		const rect = el.getBoundingClientRect();
+	#info(candidate: Candidate, context: DescribeContext): CandidateInfo {
+		const { element, score, found } = candidate;
+		const rect = element.getBoundingClientRect();
 		return {
 			score: Math.round(score * 100) / 100,
-			summary: summarize(describeElement(el, context, { selector: false })),
-			selector: cssSelector(el),
+			summary: summarize(
+				describeElement(element, context, { selector: false }),
+			),
+			selector: cssSelector(element),
 			visible: rect.width > 0 && rect.height > 0,
+			found,
 		};
 	}
 

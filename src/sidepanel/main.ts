@@ -235,7 +235,7 @@ function caseHintWriter(): (text: string) => void {
 	};
 }
 
-/** The loaded case's results no longer describe the tab: drop them (and the outlines). */
+/** The loaded case's results no longer describe the tab: drop them (and the marks). */
 async function forgetLoaded(
 	options: { hint?: string; clearTab?: boolean } = {},
 ): Promise<void> {
@@ -251,7 +251,7 @@ async function forgetLoaded(
 }
 
 /**
- * A deleted case's draft goes, its outlines and bar leave the page, and a
+ * A deleted case's draft goes, its marks and bar leave the page, and a
  * toolbar adding to it starts a new case.
  */
 async function clearDeleted(caseId: string): Promise<void> {
@@ -320,7 +320,7 @@ async function finishImport(
 	update((s) => (s.importing = undefined));
 	try {
 		const c = await storeImport(store, parsed, { copy });
-		// Results (and outlines) of the version it replaced describe other marks.
+		// Results (and drawn marks) of the version it replaced describe other marks.
 		if (state.loaded?.caseId === c.id) await forgetLoaded({ clearTab: true });
 		announce(c.id);
 		openCase(c.id);
@@ -747,7 +747,7 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 	if (sender.id !== chrome.runtime.id) return false;
 	if (news?.type === "overlay:changed") {
 		const from = sender.tab?.id;
-		// The page's own Hide removed the loaded case's outlines.
+		// The page's own Hide removed the loaded case's marks.
 		if (
 			state.loaded !== undefined &&
 			from === state.loaded.tabId &&
