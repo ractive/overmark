@@ -120,7 +120,8 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 
 		await panel.click(`document.getElementById("annotate")`);
 		await reachOverlay(clicked.page);
-		await clicked.page.waitFor(shadow('[data-action="tool-box"]'));
+		// The toolbar exists, hidden, from the start: a click on it would go past.
+		await clicked.page.waitFor(`!${shadow(".toolbar")}.hidden`);
 		await markElement(clicked.page, "[data-truth=submit]", "Too pale");
 		await saveAs(clicked.page, "From the store package");
 		const db = await h.control.eval<Db>(READ_DB);
