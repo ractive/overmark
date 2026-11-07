@@ -13,6 +13,7 @@ import { webpSize } from "../../src/lib/export.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
+	comment,
 	countColour,
 	type Db,
 	HOST,
@@ -317,6 +318,56 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			expect(
 				titled(db, "Another one")[0]?.annotations.map((a) => a.number),
 			).toEqual([1]);
+			await page.send("Page.close");
+		}, 60_000);
+
+		test("marks right after a save, on the same screen, save too", async () => {
+			const { page, tabId } = await h.open("v1");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "h1", "First");
+			await saveAs(page, "Same screen");
+			// No scroll and no change to the page: nothing calls for a new shot.
+			const box = async (text: string) => {
+				await page.click(shadow('[data-action="tool-box"]'));
+				await page.drag({ x: 500, y: 100 }, { x: 640, y: 160 });
+				await comment(page, text);
+			};
+			const marksOf = async (title: string) =>
+				(await h.control.eval<Db>(READ_DB)).cases.find((c) => c.title === title)
+					?.annotations.length;
+
+			await box("Second");
+			await page.click(shadow('[data-action="save"]'));
+			await page.click(shadow('[data-action="save-confirm"]'));
+			await page.waitFor(`${status}?.startsWith("Saved")`, 20_000);
+			expect(await marksOf("Same screen")).toBe(2);
+
+			await page.click(shadow('[data-action="new-case"]'));
+			await box("Third");
+			await saveAs(page, "Same screen, new case");
+			expect(await marksOf("Same screen, new case")).toBe(1);
+			await page.send("Page.close");
+		}, 60_000);
+
+		test("a case deleted under the toolbar: the next save starts a new one", async () => {
+			const { page, tabId } = await h.open("v1");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "[data-truth=submit]", "Deleted under it");
+			await saveAs(page, "Deleted under it");
+			const row = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes("Deleted under it"))`;
+			const remove = `document.getElementById("delete-case")`;
+			await h.control.waitFor(row);
+			await h.control.eval(`${row}.click()`);
+			await h.control.waitFor(remove);
+			await h.control.eval(`${remove}.click()`);
+			await Bun.sleep(600);
+			await h.control.eval(`${remove}.click()`);
+			await h.control.waitFor(`!document.getElementById("home").hidden`);
+
+			await page.waitFor(`${status} === "Choose a tool"`);
+			expect(await savedMarks(page)).toEqual([]);
+			await markElement(page, "[data-truth=tip]", "Starts again");
+			await saveAs(page, "Started again");
 			await page.send("Page.close");
 		}, 60_000);
 

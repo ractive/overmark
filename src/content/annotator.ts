@@ -1025,6 +1025,8 @@ export class Annotator {
 			this.#drafts = this.#drafts.filter((d) => !drafts.includes(d));
 			this.#savedMarks.push(...drafts);
 			this.#views = this.#views.filter((v) => !views.includes(v));
+			// Its image went with the save: the next mark takes a new one.
+			this.#shown = undefined;
 			this.#pendingCase = undefined;
 			this.#target = {
 				caseId: result.caseId,
