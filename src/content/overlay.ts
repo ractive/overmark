@@ -111,11 +111,13 @@ function svg<K extends keyof SVGElementTagNameMap>(
 	return el;
 }
 
-/** A loaded case's mark, outlined where its element was found. */
+/** A loaded case's mark, drawn where its element was found. */
 export interface ReviewItem {
 	number: number;
-	/** The element's box in window coordinates. */
-	rect: Rect;
+	/** The mark in window coordinates. */
+	shape: Shape;
+	/** Its element's box in window coordinates; a mark may have no element. */
+	rect: Rect | null;
 	/** The shown candidate is a confident, unambiguous match. */
 	found: boolean;
 	focused: boolean;
@@ -237,12 +239,12 @@ export class Overlay {
 		return this.#annotating;
 	}
 
-	/** A loaded case's elements are outlined. */
 	/** An AI app's temporary mark is up for its screenshot. */
 	get marking(): boolean {
 		return this.#marking;
 	}
 
+	/** A loaded case's marks are drawn. */
 	get reviewing(): boolean {
 		return this.#reviewing;
 	}
@@ -355,43 +357,54 @@ export class Overlay {
 		this.#drafts.replaceChildren(...children);
 	}
 
-	/** Outline a loaded case's elements (window coordinates). */
+	/**
+	 * Draw a loaded case's marks (window coordinates). The focused one also
+	 * shows the element it belongs to; an element's mark is that outline.
+	 */
 	renderReview(items: readonly ReviewItem[]): void {
 		const doc = this.doc;
-		const children: SVGElement[] = [];
-		for (const item of items) {
+		const groups = items.map((item) => {
 			const colour = item.found ? FOUND_COLOUR : PROBABLE_COLOUR;
-			const r = item.rect;
-			children.push(
-				svg(doc, "rect", {
-					x: r.x - 3,
-					y: r.y - 3,
-					width: r.width + 6,
-					height: r.height + 6,
-					rx: 4,
-					fill: item.focused ? "rgba(229, 25, 95, 0.08)" : "none",
-					stroke: colour,
-					"stroke-width": item.focused ? 4 : 2.5,
-					"stroke-dasharray": item.found ? "" : "8 5",
-					"data-review": item.number,
-				}),
-				this.#badge(
-					{ number: item.number, shape: { kind: "box", rect: r } },
-					colour,
-				),
+			const look = {
+				"stroke-width": item.focused ? 4 : 3,
+				...(item.found ? {} : { "stroke-dasharray": "8 5" }),
+			};
+			const group = svg(doc, "g", { "data-review": item.number });
+			if (item.focused && item.rect !== null)
+				group.append(
+					svg(doc, "rect", {
+						x: item.rect.x - 3,
+						y: item.rect.y - 3,
+						width: item.rect.width + 6,
+						height: item.rect.height + 6,
+						rx: 4,
+						fill: "rgba(229, 25, 95, 0.08)",
+						stroke: colour,
+						"stroke-width": 1,
+					}),
+				);
+			group.append(
+				...this.#shape(item.shape, colour, look),
+				this.#badge(item, colour),
 			);
-		}
-		this.#review.replaceChildren(...children);
+			return group;
+		});
+		this.#review.replaceChildren(...groups);
 	}
 
-	#shape(shape: Shape): SVGElement[] {
+	#shape(
+		shape: Shape,
+		colour = MARK_COLOUR,
+		look: Record<string, string | number> = {},
+	): SVGElement[] {
 		const doc = this.doc;
 		const stroke = {
 			fill: "none",
-			stroke: MARK_COLOUR,
+			stroke: colour,
 			"stroke-width": 3,
 			"stroke-linecap": "round",
 			"stroke-linejoin": "round",
+			...look,
 		};
 		switch (shape.kind) {
 			case "element":

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { Overlay } from "../src/content/overlay.ts";
 import { Reviewer } from "../src/content/review.ts";
-import type { Annotation, Case } from "../src/lib/case.ts";
+import type { Annotation, Case, Shape } from "../src/lib/case.ts";
 import { describeElement } from "../src/lib/element.ts";
 import { sampleCase } from "./fixtures.ts";
 
@@ -12,6 +12,7 @@ let reviewer: Reviewer;
 
 interface Item {
 	number: number;
+	shape: Shape;
 	found: boolean;
 }
 
@@ -54,13 +55,26 @@ const $ = (s: string) => doc.querySelector(s) as Element;
 const bar = () =>
 	overlay.reviewBar.querySelector("[data-role=review-status]")?.textContent;
 
+const shot = (id: string, scrollY = 0, url?: string) => ({
+	id,
+	image: `shots/${id}.webp`,
+	scrollX: 0,
+	scrollY,
+	viewport: { width: 1280, height: 800, dpr: 2 },
+	capturedAt: "2026-11-04T10:00:00Z",
+	...(url ? { url } : {}),
+});
+
 function caseOf(el: Element): Case {
+	const element = describeElement(el);
 	const annotation = {
 		id: "a1",
 		number: 1,
-		element: describeElement(el),
+		shot: "s1",
+		shape: { kind: "element", rect: element.rect },
+		element,
 	} as Annotation;
-	return { ...sampleCase(), annotations: [annotation] };
+	return { ...sampleCase(), shots: [shot("s1")], annotations: [annotation] };
 }
 
 describe("elements replaced after loading", () => {
@@ -109,6 +123,73 @@ describe("elements replaced after loading", () => {
 		await reviewer.load(caseOf($("button")));
 		$("button").textContent = "Jetzt berechnen und vergleichen";
 		expect(reviewer.show("a1")?.score).toBe(1);
+	});
+});
+
+describe("a drawn mark", () => {
+	/** A case of one mark drawn on an element, which was at `rect`. */
+	function drawnOn(el: Element, shape: Shape, scrollY = 0): Case {
+		const c = caseOf(el);
+		const a = c.annotations[0] as Annotation;
+		const element = a.element as NonNullable<Annotation["element"]>;
+		const rect = { x: 500, y: 1000, width: 200, height: 40 };
+		return {
+			...c,
+			shots: [shot("s1", scrollY)],
+			annotations: [{ ...a, shape, element: { ...element, rect } }],
+		};
+	}
+
+	test("goes on its element, moved and scaled with it", async () => {
+		doc.body.innerHTML = `<button>Berechnen</button>`;
+		// In the shot, scrolled by 900: y 110 is 1010 on the page.
+		const rect = { x: 550, y: 110, width: 100, height: 20 };
+		await reviewer.load(drawnOn($("button"), { kind: "box", rect }, 900));
+		// The element is at 0, 0 and 100×20 now: half as wide and high.
+		expect(overlay.items[0]?.shape).toEqual({
+			kind: "box",
+			rect: { x: 25, y: 5, width: 50, height: 10 },
+		});
+	});
+
+	test("an element's mark stays the element's box", async () => {
+		doc.body.innerHTML = `<button>Berechnen</button>`;
+		await reviewer.load(caseOf($("button")));
+		expect(overlay.items[0]?.shape).toEqual({
+			kind: "element",
+			rect: { x: 0, y: 0, width: 100, height: 20 },
+		});
+	});
+
+	/** A case of one mark without an element, on a shot of `url`. */
+	function withoutElement(url?: string): Case {
+		const shape = { kind: "note", at: { x: 40, y: 50 } } as const;
+		const annotation = {
+			id: "a1",
+			number: 1,
+			shot: "s1",
+			shape,
+			element: null,
+		} as Annotation;
+		return {
+			...sampleCase(),
+			shots: [shot("s1", 100, url)],
+			annotations: [annotation],
+		};
+	}
+
+	test("without an element goes where it was, unconfirmed", async () => {
+		await reviewer.load(withoutElement());
+		expect(overlay.items[0]?.shape).toEqual({
+			kind: "note",
+			at: { x: 40, y: 150 },
+		});
+		expect(overlay.items[0]?.found).toBe(false);
+	});
+
+	test("without an element stays off another route's page", async () => {
+		await reviewer.load(withoutElement("https://www.example.com/hypo"));
+		expect(overlay.items.length).toBe(0);
 	});
 });
 

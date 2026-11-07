@@ -41,14 +41,16 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    screenshots with the marks on them and records each marked element's details. Saved
    marks stay on the page, fainter, and further marks go to the same case, also after
    stopping and annotating again on that page; New case in the toolbar starts another.
-3. On another build of the page (say `localhost:3000`), open the case in the side panel
-   and click "Load onto this tab". Overmark looks for each mark's element and outlines
-   it: green when found, amber and dashed when probable or unsure. Show scrolls to it;
-   Next candidate tries the next best element. The screenshots stay the record, so a
-   mark makes sense even when its element is not found.
+3. On another build of the page (say `localhost:3000`), click Load on the case in the
+   side panel. Overmark looks for each mark's element and draws the mark on it again,
+   moved and scaled with the element: green when found, amber and dashed when probable
+   or unsure. A mark drawn on a large container can land a little off when that
+   container changed its size. A mark without an element goes where it was, in amber.
+   Show scrolls to a mark; Next candidate tries the next best element. The screenshots
+   stay the record, so a mark makes sense even when its element is not found.
 4. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
-   on; Import reads one back. An AI app can read `case.md` and the images without the
-   extension.
+   on; Import reads one back and, when it is for the page in front, loads it right
+   away. An AI app can read `case.md` and the images without the extension.
 
 ## With an AI app
 

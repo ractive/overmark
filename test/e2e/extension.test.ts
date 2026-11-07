@@ -258,6 +258,67 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.send("Page.close");
 	}, 60_000);
 
+	test("the list's Load puts drawn marks back on their elements", async () => {
+		const box = (page: Page, truth: string) =>
+			page.eval<{ x: number; y: number; width: number; height: number }>(
+				`(() => { const { x, y, width, height } = document.querySelector("[data-truth=${truth}]").getBoundingClientRect(); return { x, y, width, height }; })()`,
+			);
+		const v1 = await h.open("v1");
+		await showToolbar(h, v1.page, v1.tabId);
+		await v1.page.click(shadow('[data-action="tool-box"]'));
+		const tip = await box(v1.page, "tip");
+		await v1.page.drag(
+			{ x: tip.x + 60, y: tip.y + 2 },
+			{ x: tip.x + 300, y: tip.y + tip.height - 2 },
+		);
+		await comment(v1.page, "Shorter");
+		await v1.page.click(shadow('[data-action="tool-pen"]'));
+		await v1.page.drag(
+			{ x: tip.x + 400, y: tip.y + 4 },
+			{ x: tip.x + 500, y: tip.y + 14 },
+		);
+		await comment(v1.page, "Scribble");
+		await saveAs(v1.page, "Drawn marks");
+		await v1.page.click(shadow('[data-action="close"]'));
+
+		const v2 = await h.open("v2");
+		await v2.page.eval(
+			`document.querySelector("[data-truth=tip]").style.cssText = "margin: 150px 0 0 80px; width: 400px"`,
+		);
+		await v2.page.activate();
+		await h.control.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
+		const load = `document.querySelector('[data-load][title*="Drawn marks"]')`;
+		await h.control.waitFor(load);
+		await h.control.eval(`${load}.click()`);
+		await h.control.waitFor(
+			`document.querySelectorAll(".match").length === 2`,
+			10_000,
+		);
+
+		// The paragraph is somewhere else and narrower: the box went with it.
+		const moved = await box(v2.page, "tip");
+		expect(moved.y - tip.y).toBeGreaterThan(100);
+		expect(moved.width).toBeLessThan(tip.width);
+		const drawn = await v2.page.eval<{ x: number; y: number; width: number }>(
+			`(() => { const r = ${shadow('[data-review="1"]')}.querySelector("rect"); return { x: Number(r.getAttribute("x")), y: Number(r.getAttribute("y")), width: Number(r.getAttribute("width")) }; })()`,
+		);
+		const scale = moved.width / tip.width;
+		expect(drawn.x).toBeCloseTo(moved.x + 60 * scale, 0);
+		expect(drawn.width).toBeCloseTo(240 * scale, 0);
+		expect(Math.abs(drawn.y - moved.y)).toBeLessThan(6);
+		const points = await v2.page.eval<number>(
+			`${shadow('[data-review="2"]')}.querySelector("polyline").points.length`,
+		);
+		expect(points).toBeGreaterThan(2);
+		await v1.page.send("Page.close");
+		await v2.page.send("Page.close");
+		await h.control.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
+	});
+
 	describe("annotating again after a save", () => {
 		const annotate = `document.getElementById("annotate")`;
 		const status = `${shadow('[data-role="status"]')}?.textContent`;

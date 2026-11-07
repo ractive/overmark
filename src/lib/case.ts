@@ -250,6 +250,48 @@ export function boundsOf(points: readonly Point[]): Rect {
 	return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
+/**
+ * A shape that was on the box `from`, on the box `to`: same place and size
+ * relative to the box. An element's mark is the box itself.
+ */
+export function shapeOnBox(shape: Shape, from: Rect, to: Rect): Shape {
+	const sx = from.width > 0 ? to.width / from.width : 1;
+	const sy = from.height > 0 ? to.height / from.height : 1;
+	const p = (q: Point): Point => ({
+		x: to.x + (q.x - from.x) * sx,
+		y: to.y + (q.y - from.y) * sy,
+	});
+	switch (shape.kind) {
+		case "element":
+			return { kind: "element", rect: to };
+		case "box":
+			return {
+				kind: "box",
+				rect: {
+					...p(shape.rect),
+					width: shape.rect.width * sx,
+					height: shape.rect.height * sy,
+				},
+			};
+		case "note":
+			return { kind: "note", at: p(shape.at) };
+		case "arrow":
+			return { kind: "arrow", from: p(shape.from), to: p(shape.to) };
+		case "pen":
+			return { kind: "pen", points: shape.points.map(p) };
+	}
+}
+
+/** Same path, whatever the origin: a case from prod "belongs" to localhost too. */
+export function samePath(a: string, b: string): boolean {
+	try {
+		const strip = (p: string) => p.replace(/\/+$/, "") || "/";
+		return strip(new URL(a).pathname) === strip(new URL(b).pathname);
+	} catch {
+		return false;
+	}
+}
+
 /** Move a shape by `dx`, `dy`. */
 export function translateShape(shape: Shape, dx: number, dy: number): Shape {
 	const p = (q: Point): Point => ({ x: q.x + dx, y: q.y + dy });

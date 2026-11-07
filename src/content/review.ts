@@ -1,7 +1,8 @@
 /**
  * Loading a case onto the page in front: each annotation's element is looked
- * for by its details (match.ts) and outlined with its number, green when
- * found, amber and dashed when only probable or tied. An element that a
+ * for by its details (match.ts) and its mark drawn again on that element, moved
+ * and scaled with it: green when found, amber and dashed when only probable or
+ * tied. A mark without an element goes where it was. An element that a
  * re-render replaced afterwards is looked for again.
  */
 
@@ -11,7 +12,15 @@ import {
 	findCandidates,
 	type PageSearch,
 } from "../lib/candidates.ts";
-import type { Annotation, Case } from "../lib/case.ts";
+import {
+	type Annotation,
+	type Case,
+	type Rect,
+	type Shape,
+	samePath,
+	shapeOnBox,
+	translateShape,
+} from "../lib/case.ts";
 import {
 	cssSelector,
 	type DescribeContext,
@@ -24,7 +33,7 @@ import type {
 	CandidateInfo,
 	LoadResult,
 } from "../lib/messages.ts";
-import type { Overlay } from "./overlay.ts";
+import type { Overlay, ReviewItem } from "./overlay.ts";
 
 interface Entry {
 	annotation: Annotation;
@@ -196,23 +205,74 @@ export class Reviewer {
 		});
 	}
 
+	/** A mark in document coordinates, as it was on its shot. */
+	#stored(annotation: Annotation): Shape {
+		const shot = this.#case?.shots.find((s) => s.id === annotation.shot);
+		return translateShape(
+			annotation.shape,
+			shot?.scrollX ?? 0,
+			shot?.scrollY ?? 0,
+		);
+	}
+
+	/** A mark on its element, whose box is `rect` now. */
+	#onElement(entry: Entry, rect: Rect): ReviewItem {
+		const { annotation } = entry;
+		const details = annotation.element;
+		return {
+			number: annotation.number,
+			shape: details
+				? shapeOnBox(this.#stored(annotation), details.rect, rect)
+				: annotation.shape,
+			rect,
+			// The shown candidate itself decides the colour.
+			found:
+				entry.match.status !== "ambiguous" &&
+				entry.candidates[entry.match.current]?.found === true,
+			focused: annotation.id === this.#focused,
+		};
+	}
+
+	/** A mark without an element, where it was; its page may be another route. */
+	#whereItWas(annotation: Annotation): ReviewItem | undefined {
+		const shot = this.#case?.shots.find((s) => s.id === annotation.shot);
+		const url = shot?.url ?? this.#case?.page.url ?? "";
+		if (!samePath(url, location.href)) return undefined;
+		const win = this.overlay.doc.defaultView;
+		return {
+			number: annotation.number,
+			shape: translateShape(
+				this.#stored(annotation),
+				-(win?.scrollX ?? 0),
+				-(win?.scrollY ?? 0),
+			),
+			rect: null,
+			found: false,
+			focused: false,
+		};
+	}
+
 	#render(): void {
 		if (!this.overlay.reviewing) return;
-		const items = [];
+		const items: ReviewItem[] = [];
 		for (const entry of this.#entries) {
+			if (entry.match.status === "no-element") {
+				const item = this.#whereItWas(entry.annotation);
+				if (item !== undefined) items.push(item);
+				continue;
+			}
 			const el = this.#element(entry);
 			if (el === undefined || !el.isConnected) continue;
 			const r = el.getBoundingClientRect();
 			if (r.width === 0 && r.height === 0) continue;
-			items.push({
-				number: entry.annotation.number,
-				rect: { x: r.x, y: r.y, width: r.width, height: r.height },
-				// The shown candidate itself decides the colour.
-				found:
-					entry.match.status !== "ambiguous" &&
-					entry.candidates[entry.match.current]?.found === true,
-				focused: entry.annotation.id === this.#focused,
-			});
+			items.push(
+				this.#onElement(entry, {
+					x: r.x,
+					y: r.y,
+					width: r.width,
+					height: r.height,
+				}),
+			);
 		}
 		this.overlay.renderReview(items);
 	}

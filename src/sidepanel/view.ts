@@ -5,10 +5,15 @@
  * render; the other parts are redrawn when what they show changed.
  */
 
-import { type Annotation, type Case, MAX_VERDICT } from "../lib/case.ts";
+import {
+	type Annotation,
+	type Case,
+	MAX_VERDICT,
+	samePath,
+} from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch } from "../lib/messages.ts";
-import { byId, formatDate, h, samePath, shortUrl } from "./dom.ts";
+import { byId, formatDate, h, shortUrl } from "./dom.ts";
 import type { AiCall, PanelState } from "./state.ts";
 
 /** What the user can do; main.ts carries it out and updates the state. */
@@ -17,6 +22,7 @@ export interface Actions {
 	openCase(id: string): void;
 	closeCase(): void;
 	loadOntoTab(c: Case): void;
+	openAndLoad(c: Case): void;
 	addMarks(c: Case): void;
 	exportCase(c: Case): void;
 	deleteCase(c: Case): void;
@@ -83,6 +89,17 @@ function caseItem(c: Case, actions: Actions): HTMLLIElement {
 			c.verdict
 				? h("span", { class: "meta" }, `Verdict: ${c.verdict.slice(0, 80)}`)
 				: null,
+		),
+		h(
+			"button",
+			{
+				type: "button",
+				class: "load",
+				"data-load": c.id,
+				title: `Load “${c.title}” onto this tab`,
+				onclick: () => actions.openAndLoad(c),
+			},
+			"Load",
 		),
 	);
 }
