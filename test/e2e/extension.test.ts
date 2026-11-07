@@ -258,6 +258,22 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.send("Page.close");
 	}, 60_000);
 
+	test("the toolbar stays on one line in a normal window", async () => {
+		const { page, tabId } = await h.open("v1");
+		await page.send("Emulation.setDeviceMetricsOverride", {
+			width: 1000,
+			height: 700,
+			deviceScaleFactor: 1,
+			mobile: false,
+		});
+		await showToolbar(h, page, tabId);
+		const height = await page.eval<number>(
+			`${shadow(".toolbar")}.getBoundingClientRect().height`,
+		);
+		expect(height).toBeLessThan(60);
+		await page.send("Page.close");
+	});
+
 	test("the list's Load puts drawn marks back on their elements", async () => {
 		const box = (page: Page, truth: string) =>
 			page.eval<{ x: number; y: number; width: number; height: number }>(

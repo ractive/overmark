@@ -34,7 +34,7 @@ import type {
 	CandidateInfo,
 	LoadResult,
 } from "../lib/messages.ts";
-import type { Overlay, ReviewItem } from "./overlay.ts";
+import { type Overlay, type ReviewItem, ring } from "./overlay.ts";
 
 interface Entry {
 	annotation: Annotation;
@@ -300,18 +300,21 @@ export class Reviewer {
 		const found = this.#entries.filter(
 			(e) => e.match.status !== "lost" && e.match.status !== "no-element",
 		).length;
-		const brand = doc.createElement("span");
-		brand.className = "brand";
-		brand.textContent = "Overmark";
+		const title = doc.createElement("span");
+		title.className = "title";
+		title.textContent = this.#case?.title ?? "";
+		const count = doc.createElement("span");
+		count.className = "count";
+		count.textContent = `${found} of ${total} found`;
 		const text = doc.createElement("span");
 		text.className = "text";
 		text.dataset["role"] = "review-status";
-		text.textContent = `“${this.#case?.title ?? ""}”: ${found} of ${total} found`;
+		text.append(title, count);
 		const hide = doc.createElement("button");
 		hide.type = "button";
 		hide.dataset["action"] = "review-hide";
 		hide.textContent = "Hide";
 		hide.addEventListener("click", () => this.clear());
-		this.overlay.reviewBar.replaceChildren(brand, text, hide);
+		this.overlay.reviewBar.replaceChildren(ring(doc), text, hide);
 	}
 }

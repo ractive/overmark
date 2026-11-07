@@ -7,12 +7,13 @@
 		<link rel="stylesheet" href="./style.css" />
 	</head>
 	<body>
-		<header>
-			<h1>Overmark</h1>
-			<div class="row">
-				<span id="ai-status" class="meta">Not connected</span>
-				<button id="stop-ai" type="button" hidden>Stop AI access</button>
+		<header id="bar">
+			<div class="brand">
+				<svg class="ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /></svg>
+				<h1>Overmark</h1>
 			</div>
+			<span id="ai-status" class="meta">Not connected</span>
+			<button id="stop-ai" type="button" hidden>Stop AI access</button>
 			<p id="ai-call" class="meta" hidden></p>
 		</header>
 		<main id="home">
@@ -20,17 +21,19 @@
 				<h2 id="page-heading">This tab</h2>
 				<p id="page" class="page">…</p>
 				<p id="hint" class="hint" hidden></p>
-				<div class="row">
-					<button id="annotate" type="button" class="primary">Annotate this page</button>
+				<button id="annotate" type="button" class="primary wide">Annotate this page</button>
+			</section>
+			<section aria-labelledby="cases-heading">
+				<h2 id="cases-heading">Cases</h2>
+				<div id="cases"></div>
+				<div class="row import">
+					<button id="import" type="button">Import a case…</button>
+					<input id="import-file" type="file" accept=".zip,application/zip" hidden />
 				</div>
-				<label class="check">
-					<input id="blur-forms" type="checkbox" />
-					Blur form fields in screenshots
-				</label>
-				<label class="check">
-					<input id="all-sites" type="checkbox" />
-					Allow on all sites, without clicking the icon on each tab
-				</label>
+				<div id="import-error" class="hint" hidden>
+					<p id="import-error-text"></p>
+					<button id="import-dismiss" type="button">Dismiss</button>
+				</div>
 			</section>
 			<section aria-labelledby="ai-heading">
 				<h2 id="ai-heading">AI app</h2>
@@ -46,17 +49,16 @@
 					Keep AI access on
 				</label>
 			</section>
-			<section aria-labelledby="cases-heading">
-				<h2 id="cases-heading">Cases</h2>
-				<div id="cases"></div>
-				<div class="row import">
-					<button id="import" type="button">Import a case…</button>
-					<input id="import-file" type="file" accept=".zip,application/zip" hidden />
-				</div>
-				<div id="import-error" class="hint" hidden>
-					<p id="import-error-text"></p>
-					<button id="import-dismiss" type="button">Dismiss</button>
-				</div>
+			<section aria-labelledby="options-heading">
+				<h2 id="options-heading">Options</h2>
+				<label class="check">
+					<input id="blur-forms" type="checkbox" />
+					Blur form fields in screenshots
+				</label>
+				<label class="check">
+					<input id="all-sites" type="checkbox" />
+					Allow on all sites, without clicking the icon on each tab
+				</label>
 			</section>
 		</main>
 		<main id="case-view" hidden></main>

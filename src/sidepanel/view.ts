@@ -12,7 +12,7 @@ import {
 	samePath,
 } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
-import type { AnnotationMatch } from "../lib/messages.ts";
+import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import { byId, formatDate, h, shortUrl } from "./dom.ts";
 import type { AiCall, PanelState } from "./state.ts";
 
@@ -34,6 +34,7 @@ export interface Actions {
 	importCancel(): void;
 }
 
+const bar = byId<HTMLElement>("bar");
 const home = byId<HTMLElement>("home");
 const caseView = byId<HTMLElement>("case-view");
 const pageText = byId<HTMLParagraphElement>("page");
@@ -81,10 +82,11 @@ function caseItem(c: Case, actions: Actions): HTMLLIElement {
 				onclick: () => actions.openCase(c.id),
 			},
 			h("span", { class: "title" }, c.title),
+			h("span", { class: "meta" }, shortUrl(c.page.url)),
 			h(
 				"span",
 				{ class: "meta" },
-				`${shortUrl(c.page.url)} · ${count} mark${count === 1 ? "" : "s"} · ${formatDate(c.updatedAt)}`,
+				`${count} mark${count === 1 ? "" : "s"}, ${formatDate(c.updatedAt)}`,
 			),
 			c.verdict
 				? h("span", { class: "meta" }, `Verdict: ${c.verdict.slice(0, 80)}`)
@@ -137,11 +139,9 @@ function renderCases(state: PanelState, actions: Actions): void {
 			: []),
 		...(other.length > 0
 			? [
-					h(
-						"p",
-						{ class: "group-title" },
-						here.length > 0 ? "Other pages" : "All cases",
-					),
+					here.length > 0
+						? h("p", { class: "group-title" }, "Other pages")
+						: "",
 					h(
 						"ul",
 						{ class: "cases", "data-group": "other" },
@@ -244,6 +244,19 @@ function matchText(m: AnnotationMatch): string {
 	}
 }
 
+/** What is news about the element shown: the mark names the one it expected. */
+function shownText(
+	a: Annotation,
+	shown: CandidateInfo | undefined,
+): string | undefined {
+	if (shown === undefined) return undefined;
+	const expected = a.element !== null && shown.summary === summarize(a.element);
+	if (shown.visible) return expected ? undefined : shown.summary;
+	return expected
+		? "Hidden at this width"
+		: `${shown.summary}, hidden at this width`;
+}
+
 function matchView(
 	caseId: string,
 	a: Annotation,
@@ -251,22 +264,6 @@ function matchView(
 	actions: Actions,
 ): HTMLElement {
 	const shown = m.candidates[m.current];
-	const box = h(
-		"div",
-		{
-			class: `match ${m.status}`,
-			id: `match-${a.id}`,
-			"data-status": m.status,
-		},
-		h("span", { class: "status" }, matchText(m)),
-		shown
-			? h(
-					"p",
-					{ class: "meta" },
-					`${shown.summary}${shown.visible ? "" : " · hidden at this width"}`,
-				)
-			: null,
-	);
 	const buttons = h("div", { class: "row" });
 	if (m.candidates.length > 0 || m.status === "no-element")
 		buttons.append(
@@ -292,8 +289,22 @@ function matchView(
 				"Next candidate",
 			),
 		);
-	if (buttons.childElementCount > 0) box.append(buttons);
-	return box;
+	const said = shownText(a, shown);
+	return h(
+		"div",
+		{
+			class: `match ${m.status}`,
+			id: `match-${a.id}`,
+			"data-status": m.status,
+		},
+		h(
+			"div",
+			{ class: "line" },
+			h("span", { class: "status" }, matchText(m)),
+			buttons.childElementCount > 0 ? buttons : null,
+		),
+		said ? h("p", { class: "meta" }, said) : null,
+	);
 }
 
 /** The parts of the open case's view, kept between renders. */
@@ -355,18 +366,18 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		created.meta,
 		created.origin,
 		h(
+			"button",
+			{
+				type: "button",
+				class: "primary wide",
+				id: "load-case",
+				onclick: () => actions.loadOntoTab(created.current),
+			},
+			"Load onto this tab",
+		),
+		h(
 			"div",
 			{ class: "row" },
-			h(
-				"button",
-				{
-					type: "button",
-					class: "primary",
-					id: "load-case",
-					onclick: () => actions.loadOntoTab(created.current),
-				},
-				"Load onto this tab",
-			),
 			h(
 				"button",
 				{
@@ -411,8 +422,8 @@ function createParts(c: Case, actions: Actions): CaseParts {
 	);
 	caseView.replaceChildren(
 		header,
-		verdictSection,
 		created.marks,
+		verdictSection,
 		created.shots,
 	);
 	return created;
@@ -436,7 +447,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		state.verdictStatus ?? (draft === undefined ? "" : "Not saved yet");
 
 	p.title.textContent = c.title;
-	p.meta.textContent = `${shortUrl(c.page.url)} · ${c.page.viewport.width}×${c.page.viewport.height} · ${formatDate(c.createdAt)}`;
+	p.meta.textContent = `${shortUrl(c.page.url)}, ${c.page.viewport.width}×${c.page.viewport.height}, ${formatDate(c.createdAt)}`;
 	setHint(
 		p.origin,
 		c.importedAt === undefined
@@ -463,21 +474,29 @@ function renderCase(state: PanelState, actions: Actions): void {
 			list.append(
 				h(
 					"li",
-					{ class: "annotation", "data-annotation": a.id },
+					{
+						class: "annotation",
+						"data-annotation": a.id,
+						...(m ? { "data-status": m.status } : {}),
+					},
+					h("span", { class: "number" }, String(a.number)),
 					h(
 						"div",
-						{ class: "head" },
-						h("span", { class: "number" }, String(a.number)),
+						{ class: "body" },
 						h(
-							"span",
-							{ class: a.comment ? "comment" : "comment none" },
-							a.comment || "No comment",
+							"div",
+							{ class: "head" },
+							h(
+								"span",
+								{ class: a.comment ? "comment" : "comment none" },
+								a.comment || "No comment",
+							),
+							a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
 						),
-						a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
+						crop ? h("img", { src: crop, alt: `Mark ${a.number}` }) : null,
+						a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
+						m ? matchView(c.id, a, m, actions) : null,
 					),
-					crop ? h("img", { src: crop, alt: `Mark ${a.number}` }) : null,
-					a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
-					m ? matchView(c.id, a, m, actions) : null,
 				),
 			);
 		}
@@ -516,6 +535,11 @@ function callText(call: AiCall): string {
 
 function renderAi({ ai }: PanelState): void {
 	aiStatus.textContent = ai.status;
+	bar.dataset["ai"] = ai.connected
+		? "connected"
+		: ai.active
+			? "waiting"
+			: "off";
 	stopAi.hidden = !ai.active;
 	keepOn.checked = ai.keepOn;
 	setHint(aiCall, ai.lastCall && callText(ai.lastCall));
