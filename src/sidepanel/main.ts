@@ -8,8 +8,8 @@ import type { TabMcp, ToolCallStart } from "@ractive-ch/tab-mcp-client";
 import {
 	type Annotation,
 	type Case,
+	isPageOf,
 	nextNumbers,
-	samePath,
 	validateCase,
 } from "../lib/case.ts";
 import {
@@ -324,9 +324,8 @@ async function finishImport(
 		if (state.loaded?.caseId === c.id) await forgetLoaded({ clearTab: true });
 		announce(c.id);
 		openCase(c.id);
-		// A case for the page in front: there is nothing else to do with it first.
 		const url = state.tab?.url;
-		if (url && samePath(c.page.url, url)) actions.loadOntoTab(c);
+		if (url && isPageOf(c, url)) actions.loadOntoTab(c);
 	} catch (error) {
 		update((s) => (s.importError = `Could not import: ${message(error)}`));
 	}

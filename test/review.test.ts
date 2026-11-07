@@ -14,6 +14,7 @@ interface Item {
 	number: number;
 	shape: Shape;
 	found: boolean;
+	focused: boolean;
 }
 
 /** What the reviewer uses of the overlay. */
@@ -185,6 +186,19 @@ describe("a drawn mark", () => {
 			at: { x: 40, y: 150 },
 		});
 		expect(overlay.items[0]?.found).toBe(false);
+	});
+
+	test("without an element Show scrolls to it", async () => {
+		const win = doc.defaultView as unknown as Window;
+		const scrolled: ScrollToOptions[] = [];
+		win.scrollTo = ((to: ScrollToOptions) => {
+			scrolled.push(to);
+		}) as typeof win.scrollTo;
+		await reviewer.load(withoutElement());
+		reviewer.show("a1");
+		expect(scrolled[0]?.top).toBe(150 - win.innerHeight / 2);
+		await Bun.sleep(10);
+		expect(overlay.items[0]?.focused).toBe(true);
 	});
 
 	test("without an element stays off another route's page", async () => {

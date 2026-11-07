@@ -196,10 +196,12 @@ export function imageScale(
  * (DEC-009). A hash route (`#/path`, `#!/path`) names the page, so it stays,
  * up to the first character that starts parameters.
  */
+const hashRoute = (hash: string) => /^#!?\/[^?#&=]*/.exec(hash)?.[0] ?? "";
+
 export function plainUrl(href: string): string {
 	try {
 		const url = new URL(href);
-		const route = /^#!?\/[^?#&=]*/.exec(url.hash)?.[0] ?? "";
+		const route = hashRoute(url.hash);
 		url.username = "";
 		url.password = "";
 		url.search = "";
@@ -250,29 +252,41 @@ export function boundsOf(points: readonly Point[]): Rect {
 	return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
+/** A position along one axis of a box, on the same axis of another box. */
+function along(
+	v: number,
+	start: number,
+	size: number,
+	newStart: number,
+	newSize: number,
+): number {
+	if (size <= 0 || v < start) return newStart + v - start;
+	if (v > start + size) return newStart + newSize + v - start - size;
+	return newStart + ((v - start) * newSize) / size;
+}
+
 /**
- * A shape that was on the box `from`, on the box `to`: same place and size
- * relative to the box. An element's mark is the box itself.
+ * A shape that was on the box `from`, on the box `to`. What was inside the box
+ * scales with it; what was outside keeps its distance to the edge, or a small
+ * element that grew would throw it far away. An element's mark is the box itself.
  */
 export function shapeOnBox(shape: Shape, from: Rect, to: Rect): Shape {
-	const sx = from.width > 0 ? to.width / from.width : 1;
-	const sy = from.height > 0 ? to.height / from.height : 1;
 	const p = (q: Point): Point => ({
-		x: to.x + (q.x - from.x) * sx,
-		y: to.y + (q.y - from.y) * sy,
+		x: along(q.x, from.x, from.width, to.x, to.width),
+		y: along(q.y, from.y, from.height, to.y, to.height),
 	});
 	switch (shape.kind) {
 		case "element":
 			return { kind: "element", rect: to };
-		case "box":
+		case "box": {
+			const { x, y, width, height } = shape.rect;
+			const a = p({ x, y });
+			const b = p({ x: x + width, y: y + height });
 			return {
 				kind: "box",
-				rect: {
-					...p(shape.rect),
-					width: shape.rect.width * sx,
-					height: shape.rect.height * sy,
-				},
+				rect: { ...a, width: b.x - a.x, height: b.y - a.y },
 			};
+		}
 		case "note":
 			return { kind: "note", at: p(shape.at) };
 		case "arrow":
@@ -282,14 +296,30 @@ export function shapeOnBox(shape: Shape, from: Rect, to: Rect): Shape {
 	}
 }
 
-/** Same path, whatever the origin: a case from prod "belongs" to localhost too. */
+/**
+ * The same page, whatever the origin: a case from prod "belongs" to localhost
+ * too. A hash route names a page; a plain `#section` does not.
+ */
 export function samePath(a: string, b: string): boolean {
+	const page = (href: string) => {
+		const { pathname, hash } = new URL(href);
+		return `${pathname.replace(/\/+$/, "") || "/"}${hashRoute(hash)}`;
+	};
 	try {
-		const strip = (p: string) => p.replace(/\/+$/, "") || "/";
-		return strip(new URL(a).pathname) === strip(new URL(b).pathname);
+		return page(a) === page(b);
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * The case is for `url`, sure enough to load it without a click: every site's
+ * home page has the same path.
+ */
+export function isPageOf(c: Case, url: string): boolean {
+	if (!samePath(c.page.url, url)) return false;
+	const { origin, pathname } = new URL(url);
+	return pathname !== "/" || origin === new URL(c.page.url).origin;
 }
 
 /** Move a shape by `dx`, `dy`. */

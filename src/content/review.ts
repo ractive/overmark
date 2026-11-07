@@ -18,6 +18,7 @@ import {
 	type Rect,
 	type Shape,
 	samePath,
+	shapeBounds,
 	shapeOnBox,
 	translateShape,
 } from "../lib/case.ts";
@@ -172,14 +173,30 @@ export class Reviewer {
 		if (this.#replaced(entry)) this.#findAgain(entry);
 		entry.match.score = entry.candidates[entry.match.current]?.score ?? 0;
 		this.#focused = annotationId;
-		this.#element(entry)?.scrollIntoView({
-			block: "center",
-			inline: "nearest",
-			behavior: "instant",
-		});
+		const element = this.#element(entry);
+		if (element !== undefined)
+			element.scrollIntoView({
+				block: "center",
+				inline: "nearest",
+				behavior: "instant",
+			});
+		else if (entry.match.status === "no-element")
+			this.#scrollTo(entry.annotation);
 		this.overlay.setReviewing(true);
 		this.#render();
 		return entry.match;
+	}
+
+	/** Bring a mark without an element to the middle of the window. */
+	#scrollTo(annotation: Annotation): void {
+		const win = this.overlay.doc.defaultView;
+		if (win === null || this.#whereItWas(annotation) === undefined) return;
+		const b = shapeBounds(this.#stored(annotation));
+		win.scrollTo({
+			left: b.x + b.width / 2 - win.innerWidth / 2,
+			top: b.y + b.height / 2 - win.innerHeight / 2,
+			behavior: "instant",
+		});
 	}
 
 	clear(): void {
@@ -248,7 +265,7 @@ export class Reviewer {
 			),
 			rect: null,
 			found: false,
-			focused: false,
+			focused: annotation.id === this.#focused,
 		};
 	}
 

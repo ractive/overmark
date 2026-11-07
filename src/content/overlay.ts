@@ -367,7 +367,10 @@ export class Overlay {
 			const colour = item.found ? FOUND_COLOUR : PROBABLE_COLOUR;
 			const look = {
 				"stroke-width": item.focused ? 4 : 3,
-				...(item.found ? {} : { "stroke-dasharray": "8 5" }),
+				// Round caps would close the gaps.
+				...(item.found
+					? {}
+					: { "stroke-dasharray": "8 5", "stroke-linecap": "butt" }),
 			};
 			const group = svg(doc, "g", { "data-review": item.number });
 			if (item.focused && item.rect !== null)

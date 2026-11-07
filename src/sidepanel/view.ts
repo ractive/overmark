@@ -268,7 +268,7 @@ function matchView(
 			: null,
 	);
 	const buttons = h("div", { class: "row" });
-	if (m.candidates.length > 0)
+	if (m.candidates.length > 0 || m.status === "no-element")
 		buttons.append(
 			h(
 				"button",

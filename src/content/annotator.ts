@@ -78,7 +78,8 @@ interface Draft {
 	/** The window's scroll position then. */
 	scroll: Point;
 	/** Its screenshot and its place on it, once taken. */
-	shot?: { view: View; shape: Shape };
+	/** `box`: the element in the document at the shot, if it moved since `details`. */
+	shot?: { view: View; shape: Shape; box?: Rect };
 }
 
 /** One screenshot, and the marks that share it. */
@@ -845,6 +846,7 @@ export class Annotator {
 			this.#unblur = this.#pageBlur.hold(this.#blurForms);
 			let image: CaptureResult;
 			let shape: Shape;
+			let box: Rect | undefined;
 			let scroll: Point;
 			let viewport: PageInfo["viewport"];
 			try {
@@ -853,6 +855,7 @@ export class Annotator {
 				await frame();
 				shape = this.#onWindow(draft);
 				scroll = this.#scroll();
+				box = this.#boxOn(draft, scroll);
 				viewport = {
 					width: win.innerWidth,
 					height: win.innerHeight,
@@ -878,7 +881,7 @@ export class Annotator {
 			view.marks.push(draft);
 			this.#views.push(view);
 			this.#shown = view;
-			draft.shot = { view, shape };
+			draft.shot = { view, shape, ...(box ? { box } : {}) };
 			// Undone while it was being taken.
 			if (!this.#drafts.includes(draft)) this.#forget(draft);
 		} finally {
@@ -908,6 +911,13 @@ export class Annotator {
 		} finally {
 			this.#scrollTo(here);
 		}
+	}
+
+	/** Where a mark's element is now, in the document, if it has a box. */
+	#boxOn(draft: Draft, scroll: Point): Rect | undefined {
+		if (!draft.element?.isConnected) return undefined;
+		const box = documentRect(draft.element, scroll);
+		return box.width === 0 && box.height === 0 ? undefined : box;
 	}
 
 	#view(
@@ -997,7 +1007,7 @@ export class Annotator {
 		let saved = false;
 		try {
 			const annotations: AnnotationDraft[] = drafts.map((d) => {
-				const { view, shape } = d.shot as NonNullable<Draft["shot"]>;
+				const { view, shape, box } = d.shot as NonNullable<Draft["shot"]>;
 				return {
 					id: `a${d.number}`,
 					number: d.number,
@@ -1005,7 +1015,8 @@ export class Annotator {
 					comment: d.comment,
 					author: "user",
 					shape,
-					element: d.details,
+					// Where the shot shows it: loading places the mark relative to it.
+					element: d.details && box ? { ...d.details, rect: box } : d.details,
 					cropRect: cropRectFor(shapeBounds(shape), view.shot.viewport),
 				};
 			});

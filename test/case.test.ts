@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	isPageOf,
 	MAX_URL,
 	newId,
 	nextNumbers,
@@ -291,7 +292,30 @@ describe("a shape on another box", () => {
 	test("a shape beyond its box stays beyond it", () => {
 		expect(
 			shapeOnBox({ kind: "note", at: { x: 50, y: 350 } }, from, to),
-		).toEqual({ kind: "note", at: { x: -15, y: 320 } });
+		).toEqual({ kind: "note", at: { x: -40, y: 270 } });
+	});
+
+	test("a small element that grew does not throw a far point away", () => {
+		const icon = { x: 100, y: 100, width: 16, height: 16 };
+		const grown = { x: 100, y: 100, width: 32, height: 32 };
+		const arrow = {
+			kind: "arrow",
+			from: { x: -200, y: 108 },
+			to: { x: 108, y: 108 },
+		} as const;
+		expect(shapeOnBox(arrow, icon, grown)).toEqual({
+			kind: "arrow",
+			from: { x: -200, y: 116 },
+			to: { x: 116, y: 116 },
+		});
+	});
+
+	test("a box across the edge stays in one piece", () => {
+		const rect = { x: 50, y: 225, width: 150, height: 50 };
+		expect(shapeOnBox({ kind: "box", rect }, from, to)).toEqual({
+			kind: "box",
+			rect: { x: -40, y: 70, width: 100, height: 100 },
+		});
 	});
 
 	test("an element's mark is the box itself", () => {
@@ -311,6 +335,27 @@ describe("a shape on another box", () => {
 	});
 });
 
+describe("a case for a page", () => {
+	const on = (url: string): Case => {
+		const c = sampleCase();
+		return { ...c, page: { ...c.page, url } };
+	};
+
+	test("another build of a page is that page", () => {
+		expect(isPageOf(on("https://a.ch/kk"), "http://localhost:3000/kk")).toBe(
+			true,
+		);
+	});
+
+	test("the same site's home page is that page", () => {
+		expect(isPageOf(on("https://a.ch/"), "https://a.ch/")).toBe(true);
+	});
+
+	test("another site's home page is not", () => {
+		expect(isPageOf(on("https://a.ch/"), "https://b.ch/")).toBe(false);
+	});
+});
+
 describe("the same path", () => {
 	test("whatever the origin or a last slash", () => {
 		expect(
@@ -318,5 +363,17 @@ describe("the same path", () => {
 		).toBe(true);
 		expect(samePath("https://a.ch/kk", "https://a.ch/hypo")).toBe(false);
 		expect(samePath("not an address", "https://a.ch/")).toBe(false);
+	});
+
+	test("a hash route is another page, a plain anchor is not", () => {
+		expect(samePath("https://a.ch/#/orders", "https://b.ch/#/orders")).toBe(
+			true,
+		);
+		expect(samePath("https://a.ch/#/orders", "https://a.ch/#/settings")).toBe(
+			false,
+		);
+		expect(samePath("https://a.ch/kk#top", "https://a.ch/kk#bottom")).toBe(
+			true,
+		);
 	});
 });
