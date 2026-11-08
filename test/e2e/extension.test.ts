@@ -611,8 +611,17 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			`${act("a3", "delete")}.textContent === "Really delete?"`,
 		);
 		await Bun.sleep(600);
-		await h.control.eval(`${act("a3", "delete")}.click()`);
+		// A double click: one delete, and no error about a mark already gone.
+		await h.control.eval(
+			`(() => { const b = ${act("a3", "delete")}; b.click(); b.click(); })()`,
+		);
 		await h.control.waitFor(`${row("a3")} === null`);
+		await Bun.sleep(300);
+		expect(
+			await h.control.eval<string>(
+				`document.getElementById("case-hint").textContent`,
+			),
+		).not.toContain("Not saved");
 		await v1.page.waitFor(`${review(3)} === null`);
 		expect(await v1.page.eval<string>(bar)).toBe(
 			"1 of 1 open found, 1 resolved",

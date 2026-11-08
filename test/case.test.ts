@@ -433,9 +433,12 @@ describe("settling, editing and deleting a mark", () => {
 		);
 	});
 
-	test("a comment edited", () => {
-		const edited = withComment(three(), "a3", "  Shorter  ", NOW);
+	test("a comment edited is the user's", () => {
+		const c = three();
+		c.annotations[2] = { ...(c.annotations[2] as Annotation), author: "ai" };
+		const edited = withComment(c, "a3", "  Shorter  ", NOW);
 		expect(edited.annotations[2]?.comment).toBe("Shorter");
+		expect(edited.annotations[2]?.author).toBe("user");
 	});
 
 	test("a mark gone: its crop goes, the shared screenshot stays", () => {

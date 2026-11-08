@@ -556,6 +556,28 @@ function markActions(
 	);
 }
 
+/** The form that has had its focus: a redraw does not take it again. */
+let focusedForm: string | undefined;
+
+/** Focus a mark's form when it opens, not each time the list is drawn again. */
+function focusOnOpen(form: string, field: HTMLElement): void {
+	field.dataset["form"] = form;
+	// Drawn again while typing in it: the new field takes over, caret and all.
+	const typing = document.activeElement as HTMLInputElement | null;
+	if (focusedForm === form) {
+		if (typing?.dataset["form"] !== form) return;
+		const at = typing.selectionStart;
+		queueMicrotask(() => {
+			field.focus();
+			if (at !== null && "setSelectionRange" in field)
+				(field as HTMLInputElement).setSelectionRange(at, at);
+		});
+		return;
+	}
+	focusedForm = form;
+	queueMicrotask(() => field.focus());
+}
+
 function resolveForm(
 	c: Case,
 	a: Annotation,
@@ -629,7 +651,7 @@ function resolveForm(
 			),
 		),
 	);
-	queueMicrotask(() => noteField.focus());
+	focusOnOpen(`${a.id}:resolve`, noteField);
 	return form;
 }
 
@@ -654,7 +676,7 @@ function commentForm(
 		text,
 	);
 	const save = () => actions.saveComment(c, a, field.value);
-	queueMicrotask(() => field.focus());
+	focusOnOpen(`${a.id}:comment`, field);
 	return h(
 		"div",
 		{ class: "mark-form", "data-form": "comment" },
@@ -734,6 +756,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	const images = state.images?.caseId === c.id ? state.images : undefined;
 	const loaded = state.loaded?.caseId === c.id ? state.loaded : undefined;
 	const edit = state.markEdit;
+	if (edit === undefined) focusedForm = undefined;
 	const markArmed = state.markDeleteArmed?.annotationId;
 	const marksKey = JSON.stringify([
 		c.updatedAt,

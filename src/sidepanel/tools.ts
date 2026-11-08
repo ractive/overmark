@@ -22,8 +22,6 @@ import {
 	withResolution,
 } from "../lib/case.ts";
 
-type MarkStatus = "open" | ResolutionKind;
-
 import { summarize } from "../lib/element.ts";
 import type {
 	AnnotationMatch,
@@ -37,6 +35,8 @@ import type {
 import { type Crop, cropRectFor, SaveError, saveCase } from "../lib/save.ts";
 import type { CaseStore, StoredImage } from "../lib/store.ts";
 import { shortUrl } from "./dom.ts";
+
+type MarkStatus = "open" | ResolutionKind;
 
 export interface CurrentTab {
 	id: number;

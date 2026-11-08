@@ -695,7 +695,12 @@ export function withComment(
 	return changed(
 		c,
 		annotationId,
-		(a) => ({ ...a, comment: comment.trim().slice(0, MAX_COMMENT) }),
+		// The text is the user's now, whoever wrote it first.
+		(a) => ({
+			...a,
+			comment: comment.trim().slice(0, MAX_COMMENT),
+			author: "user",
+		}),
 		now,
 	);
 }

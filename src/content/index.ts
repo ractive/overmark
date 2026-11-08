@@ -143,8 +143,17 @@ function start(): void {
 					);
 					return true; // answers asynchronously
 				case "case:update":
-					sendResponse(reviewer.update(message.case));
-					break;
+					reviewer.update(message.case).then(
+						(result) => {
+							annotator.caseChanged(
+								message.case,
+								reviewer.caseId === message.case.id,
+							);
+							sendResponse(result);
+						},
+						() => sendResponse(null),
+					);
+					return true; // answers asynchronously
 				case "case:show":
 					if (activity.busy !== undefined) {
 						sendResponse({ error: activity.busy });

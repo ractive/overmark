@@ -207,6 +207,30 @@ describe("a mark's status and actions", () => {
 		]);
 	});
 
+	test("a form takes the focus when it opens, not at each redraw", async () => {
+		const c = twoMarks();
+		const editing = (updatedAt: string) =>
+			caseState({ ...c, updatedAt }, (s) => {
+				s.markEdit = {
+					annotationId: "a1",
+					mode: "comment",
+					kind: "fixed",
+					text: "x",
+				};
+			});
+		render(editing("2026-11-08T10:00:00Z"), noActions);
+		await Promise.resolve();
+		const comment = row("a1").querySelector(
+			"textarea",
+		) as unknown as HTMLElement;
+		expect(window.document.activeElement).toBe(comment as never);
+		el<HTMLTextAreaElement>("verdict").focus();
+		// Another window or an AI app changed the case: the list is drawn again.
+		render(editing("2026-11-08T10:01:00Z"), noActions);
+		await Promise.resolve();
+		expect(window.document.activeElement).toBe(el("verdict") as never);
+	});
+
 	test("Delete asks once more", () => {
 		const c = twoMarks();
 		render(

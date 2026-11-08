@@ -61,6 +61,8 @@ export type CaseChange = (current: Case | undefined) => {
 	value: Case;
 	/** Images to write with the case, by path. */
 	images?: ReadonlyMap<string, StoredImage>;
+	/** Images to delete with it: a later save may take a freed path. */
+	deleteImages?: readonly string[];
 };
 
 function checkId(id: string, value: Case): void {
@@ -108,12 +110,14 @@ export class MemoryStore implements CaseStore {
 
 	async updateCase(id: string, change: CaseChange): Promise<Case> {
 		const current = this.cases.get(id);
-		const { value, images } = change(
+		const { value, images, deleteImages } = change(
 			current === undefined ? undefined : structuredClone(current),
 		);
 		checkId(id, value);
 		const copy = structuredClone({ value, images }); // a failure changes nothing
 		this.cases.set(id, copy.value);
+		for (const path of deleteImages ?? [])
+			this.images.delete(imageKey(id, path));
 		for (const [path, image] of copy.images ?? [])
 			this.images.set(imageKey(id, path), image);
 		return structuredClone(value);
@@ -239,10 +243,13 @@ export class IdbStore implements CaseStore {
 		const read = cases.get(id);
 		read.onsuccess = () => {
 			try {
-				const { value, images } = change(read.result as Case | undefined);
+				const { value, images, deleteImages } = change(
+					read.result as Case | undefined,
+				);
 				checkId(id, value);
 				cases.put(value);
 				const store = tx.objectStore("images");
+				for (const path of deleteImages ?? []) store.delete(imageKey(id, path));
 				for (const [path, image] of images ?? [])
 					store.put(image, imageKey(id, path));
 				result = value;

@@ -762,21 +762,21 @@ const actions: Actions = {
 
 	resolveMark(c, a, kind, note) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, (current) => ({
+		void changeMark(c.id, a.id, (current) => ({
 			value: withResolution(current, a.id, { kind, note }, now),
 		}));
 	},
 
 	reopenMark(c, a) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, (current) => ({
+		void changeMark(c.id, a.id, (current) => ({
 			value: withResolution(current, a.id, null, now),
 		}));
 	},
 
 	saveComment(c, a, text) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, (current) => ({
+		void changeMark(c.id, a.id, (current) => ({
 			value: withComment(current, a.id, text, now),
 		}));
 	},
@@ -796,10 +796,14 @@ const actions: Actions = {
 			}, DELETE_ARMED_MS);
 			return;
 		}
-		// A double click is no second thought.
+		// A double click is no second thought, nor a second delete.
 		if (Date.now() - armed.at < DELETE_CLICK_GAP_MS) return;
+		if (deleting.has(a.id)) return;
+		deleting.add(a.id);
 		const now = new Date().toISOString();
-		void changeMark(c.id, (current) => withoutAnnotation(current, a.id, now));
+		void changeMark(c.id, a.id, (current) =>
+			withoutAnnotation(current, a.id, now),
+		).finally(() => deleting.delete(a.id));
 	},
 
 	typeVerdict(caseId, text) {
@@ -1000,25 +1004,31 @@ async function redrawLoaded(c: Case): Promise<void> {
 	}
 }
 
+/** Marks being deleted now: a second click waits for the first. */
+const deleting = new Set<string>();
+
 /** Change a mark of a case in one transaction, then show and draw the result. */
 async function changeMark(
 	caseId: string,
+	annotationId: string,
 	change: (current: Case) => { value: Case; images?: string[] },
 ): Promise<void> {
 	const hint = caseHintWriter();
 	try {
-		let gone: string[] = [];
+		// The images go in the same transaction: a save may take a freed path.
 		const saved = await store.updateCase(caseId, (current) => {
 			if (current === undefined) throw new Error("The case no longer exists.");
 			const next = change(current);
-			gone = next.images ?? [];
-			return { value: validateCase(next.value) };
+			return {
+				value: validateCase(next.value),
+				deleteImages: next.images ?? [],
+			};
 		});
-		if (gone.length > 0)
-			await store.deleteImages(caseId, gone).catch(() => undefined);
 		update((s) => {
-			s.markEdit = undefined;
-			s.markDeleteArmed = undefined;
+			// Another mark's form, opened meanwhile, stays.
+			if (s.markEdit?.annotationId === annotationId) s.markEdit = undefined;
+			if (s.markDeleteArmed?.annotationId === annotationId)
+				s.markDeleteArmed = undefined;
 			if (s.current?.id === caseId) s.current = saved;
 		});
 		announce(caseId);
