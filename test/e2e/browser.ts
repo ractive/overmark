@@ -108,6 +108,8 @@ function chromeArguments(profile: string): string[] {
 		"--disable-gpu",
 		"--disable-background-networking",
 		"--window-size=1280,800",
+		// Headless Chrome's screen is 800×600 otherwise: no window could grow.
+		"--screen-info={1920x1200}",
 		// A plain http: host that is no secure context, as 127.0.0.1 is.
 		"--host-resolver-rules=MAP overmark.test 127.0.0.1",
 		...(process.platform === "linux" ? ["--no-sandbox"] : []),

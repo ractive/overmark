@@ -41,8 +41,14 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    screenshots with the marks on them and records each marked element's details. Saved
    marks stay on the page, fainter, and further marks go to the same case, also after
    stopping and annotating again on that page; New case in the toolbar starts another.
-3. On another build of the page (say `localhost:3000`), click Load on the case in the
-   side panel. Overmark looks for each mark's element and draws the mark on it again,
+3. On another build of the page (say `localhost:3000`), click the case in the side panel:
+   on the same path it loads at once; a case of another page has a Load button for this
+   tab. On a tab Overmark may not run on yet (after reloading the extension, say), Chrome
+   hides the address: click the Overmark icon there and the case loads. The case's address
+   opens its page in a new tab and loads it there (marks a script draws late are looked for
+   again for a few seconds), and when the
+   tab's size is not the one the marks were made at, Match size resizes the window to it
+   (as far as the screen allows; page zoom is counted). Overmark looks for each mark's element and draws the mark on it again,
    moved and scaled with the element: green when found, amber and dashed when probable
    or unsure. A mark drawn on a large container can land a little off when that
    container changed its size. A mark without an element goes where it was, in amber.

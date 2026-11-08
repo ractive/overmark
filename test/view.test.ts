@@ -54,30 +54,111 @@ describe("the tab", () => {
 	const text = (id: string) => el(id).textContent;
 
 	test("without an address: its title, or at least some words", () => {
-		home({ id: 1, url: "", title: "" });
+		home({ id: 1, url: "", title: "", size: undefined });
 		expect(text("page")).toBe("This page");
-		home({ id: 1, url: "", title: "Kasse" });
+		home({ id: 1, url: "", title: "Kasse", size: undefined });
 		expect(text("page")).toBe("Kasse");
 	});
 
 	test("without an address: says that a click on the icon is needed", () => {
-		home({ id: 1, url: "", title: "" });
+		home({ id: 1, url: "", title: "", size: undefined });
 		expect(el("hint").hidden).toBe(false);
 		expect(text("hint")).toContain("Click the Overmark icon");
 	});
 
 	test("with an address: no such hint", () => {
-		home({ id: 1, url: "https://www.example.com/kk", title: "KK" });
+		home({
+			id: 1,
+			url: "https://www.example.com/kk",
+			title: "KK",
+			size: undefined,
+		});
 		expect(text("page")).toBe("www.example.com/kk");
 		expect(el("hint").hidden).toBe(true);
 	});
 
 	test("a hint of its own goes first", () => {
 		const state = initialState();
-		state.tab = { id: 1, url: "", title: "" };
+		state.tab = { id: 1, url: "", title: "", size: undefined };
 		state.hint = "Saving";
 		render(state, noActions);
 		expect(text("hint")).toBe("Saving");
+	});
+});
+
+describe("the case list", () => {
+	test("a case of the page in front has no Load: opening it loads it", () => {
+		const mine = sampleCase("c_here");
+		const theirs = {
+			...sampleCase("c_there"),
+			page: { ...mine.page, url: "https://www.example.com/elsewhere" },
+		};
+		const state = initialState();
+		state.tab = { id: 1, url: mine.page.url, title: "", size: undefined };
+		state.cases = [mine, theirs];
+		const opened: string[] = [];
+		render(state, actionsWith({ openCase: (id) => opened.push(id) }));
+		const load = (id: string) =>
+			window.document.querySelector(`[data-load="${id}"]`);
+		expect(load("c_here")).toBeNull();
+		expect(load("c_there")).not.toBeNull();
+		(
+			window.document.querySelector(
+				'[data-case="c_here"]',
+			) as unknown as HTMLElement
+		).click();
+		expect(opened).toEqual(["c_here"]);
+	});
+});
+
+describe("the case's page and size", () => {
+	const at = (url: string) => {
+		const c = sampleCase("c_page");
+		return { ...c, page: { ...c.page, url } };
+	};
+
+	test("a web page's address is a link that opens it", () => {
+		const opened: Case[] = [];
+		const c = at("https://www.example.com/krankenkassen/default?x=1");
+		render(caseState(c), actionsWith({ openPage: (it) => opened.push(it) }));
+		const link = el<HTMLButtonElement>("open-page");
+		expect(link.hidden).toBe(false);
+		expect(link.textContent).toBe("www.example.com/krankenkassen/default");
+		link.click();
+		expect(opened.map((it) => it.id)).toEqual(["c_page"]);
+	});
+
+	test("any other address is only text: an imported case's is anyone's", () => {
+		for (const url of [
+			"javascript:alert(1)",
+			"file:///etc/passwd",
+			"chrome://settings",
+		]) {
+			render(caseState(at(url)), noActions);
+			expect(el("open-page").hidden).toBe(true);
+			expect(el("open-page").parentElement?.textContent).toStartWith(
+				`${url}, `,
+			);
+		}
+	});
+
+	test("a tab of another size offers the case's", () => {
+		const c = sampleCase("c_size");
+		const { width, height } = c.page.viewport;
+		const tab = (size?: { width: number; height: number }) =>
+			caseState(c, (s) => {
+				s.tab = { id: 1, url: "", title: "", size };
+			});
+		render(tab({ width: width - 300, height }), noActions);
+		expect(el("case-size").hidden).toBe(false);
+		expect(el("case-size").textContent).toContain(
+			`This tab is ${width - 300}×${height}`,
+		);
+		expect(el("match-size").textContent).toBe("Match size");
+		render(tab({ width: width + 1, height }), noActions);
+		expect(el("case-size").hidden).toBe(true);
+		render(tab(undefined), noActions);
+		expect(el("case-size").hidden).toBe(true);
 	});
 });
 

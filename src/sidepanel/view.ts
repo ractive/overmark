@@ -8,12 +8,14 @@
 import {
 	type Annotation,
 	type Case,
+	isPageOf,
 	MAX_VERDICT,
 	samePath,
 } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
-import { byId, formatDate, h, shortUrl } from "./dom.ts";
+import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
+import { type Size, sameSize } from "./size.ts";
 import type { AiCall, PanelState } from "./state.ts";
 
 /** What the user can do; main.ts carries it out and updates the state. */
@@ -23,6 +25,8 @@ export interface Actions {
 	closeCase(): void;
 	loadOntoTab(c: Case): void;
 	openAndLoad(c: Case): void;
+	openPage(c: Case): void;
+	matchSize(c: Case): void;
 	addMarks(c: Case): void;
 	exportCase(c: Case): void;
 	deleteCase(c: Case): void;
@@ -60,6 +64,8 @@ byId<HTMLButtonElement>("import").parentElement?.after(importPrompt);
 export const NO_ACCESS =
 	"Overmark may not run on this tab yet. Click the Overmark icon in the toolbar (or press Alt+Shift+O) while this tab is in front.";
 
+const sizeOf = (s: Size) => `${s.width}×${s.height}`;
+
 const percent = (score: number) => `${Math.round(score * 100)}%`;
 
 function setHint(el: HTMLElement, text: string | undefined): void {
@@ -69,7 +75,8 @@ function setHint(el: HTMLElement, text: string | undefined): void {
 
 // --- home ----------------------------------------------------------------------
 
-function caseItem(c: Case, actions: Actions): HTMLLIElement {
+/** A case of the page in front loads when it is opened: no Load of its own. */
+function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 	const count = c.annotations.length;
 	return h(
 		"li",
@@ -92,17 +99,19 @@ function caseItem(c: Case, actions: Actions): HTMLLIElement {
 				? h("span", { class: "meta" }, `Verdict: ${c.verdict.slice(0, 80)}`)
 				: null,
 		),
-		h(
-			"button",
-			{
-				type: "button",
-				class: "load",
-				"data-load": c.id,
-				title: `Load “${c.title}” onto this tab`,
-				onclick: () => actions.openAndLoad(c),
-			},
-			"Load",
-		),
+		here
+			? null
+			: h(
+					"button",
+					{
+						type: "button",
+						class: "load",
+						"data-load": c.id,
+						title: `Load “${c.title}” onto this tab`,
+						onclick: () => actions.openAndLoad(c),
+					},
+					"Load",
+				),
 	);
 }
 
@@ -133,7 +142,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 					h(
 						"ul",
 						{ class: "cases", "data-group": "here" },
-						...here.map((c) => caseItem(c, actions)),
+						...here.map((c) => caseItem(c, actions, isPageOf(c, url))),
 					),
 				]
 			: []),
@@ -145,7 +154,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 					h(
 						"ul",
 						{ class: "cases", "data-group": "other" },
-						...other.map((c) => caseItem(c, actions)),
+						...other.map((c) => caseItem(c, actions, false)),
 					),
 				]
 			: []),
@@ -320,6 +329,12 @@ interface CaseParts {
 	current: Case;
 	title: HTMLElement;
 	meta: HTMLElement;
+	/** The case's address, a link where it is a web page. */
+	page: HTMLButtonElement;
+	about: HTMLSpanElement;
+	/** The tab in front, where its size is not the case's. */
+	size: HTMLElement;
+	sizeText: HTMLSpanElement;
 	origin: HTMLElement;
 	deleteButton: HTMLButtonElement;
 	hint: HTMLElement;
@@ -342,10 +357,36 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		oninput: () => actions.typeVerdict(c.id, verdict.value),
 	});
 	const verdictStatus = h("span", { class: "meta", id: "verdict-status" });
+	const page = h("button", {
+		type: "button",
+		class: "link page-link",
+		id: "open-page",
+		title: "Open this page in a new tab and load the case there",
+		onclick: () => actions.openPage(created.current),
+	});
+	const about = h("span");
+	const sizeText = h("span");
 	const created: CaseParts = {
 		current: c,
 		title: h("h2"),
-		meta: h("p", { class: "meta" }),
+		meta: h("p", { class: "meta" }, page, about),
+		page,
+		about,
+		size: h(
+			"p",
+			{ class: "meta size", id: "case-size", hidden: true },
+			sizeText,
+			h(
+				"button",
+				{
+					type: "button",
+					id: "match-size",
+					onclick: () => actions.matchSize(created.current),
+				},
+				"Match size",
+			),
+		),
+		sizeText,
 		origin: h("p", { class: "hint", id: "case-origin", hidden: true }),
 		deleteButton: h("button", {
 			type: "button",
@@ -371,6 +412,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		),
 		created.title,
 		created.meta,
+		created.size,
 		created.origin,
 		h(
 			"button",
@@ -454,7 +496,15 @@ function renderCase(state: PanelState, actions: Actions): void {
 		state.verdictStatus ?? (draft === undefined ? "" : "Not saved yet");
 
 	p.title.textContent = c.title;
-	p.meta.textContent = `${shortUrl(c.page.url)}, ${c.page.viewport.width}×${c.page.viewport.height}, ${formatDate(c.createdAt)}`;
+	const web = isWebPage(c.page.url);
+	p.page.hidden = !web;
+	p.page.textContent = web ? shortUrl(c.page.url) : "";
+	p.about.textContent = `${web ? "" : c.page.url}, ${sizeOf(c.page.viewport)}, ${formatDate(c.createdAt)}`;
+	const size = state.tab?.size;
+	p.size.hidden = size === undefined || sameSize(size, c.page.viewport);
+	p.sizeText.textContent = size
+		? `This tab is ${sizeOf(size)}, the marks were made at ${sizeOf(c.page.viewport)}. `
+		: "";
 	setHint(
 		p.origin,
 		c.importedAt === undefined

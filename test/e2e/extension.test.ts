@@ -355,6 +355,111 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		);
 	});
 
+	describe("the case's page", () => {
+		const panel = () =>
+			h.control.goto(
+				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			);
+		const openTheCase = async (title: string) => {
+			const row = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes(${JSON.stringify(title)}))`;
+			await h.control.waitFor(row);
+			await h.control.eval(`${row}.click()`);
+			await h.control.waitFor(`document.getElementById("open-page")`);
+		};
+		const v1Tabs = () =>
+			h.control.eval<{ id: number; active: boolean }[]>(
+				`chrome.tabs.query({ url: ${JSON.stringify(`${h.base}/v1`)} }).then((tabs) => tabs.map(({ id, active }) => ({ id, active })))`,
+			);
+
+		test("its address opens it in a new tab with the case loaded", async () => {
+			const v1 = await h.open("v1");
+			await showToolbar(h, v1.page, v1.tabId);
+			await markElement(v1.page, "[data-truth=tip]", "Say how much");
+			await saveAs(v1.page, "Opened from its case");
+			await v1.page.send("Page.close");
+			await panel();
+			await openTheCase("Opened from its case");
+			expect(
+				await h.control.eval<string>(
+					`document.getElementById("open-page").textContent`,
+				),
+			).toBe(`${new URL(h.base).host}/v1`);
+			await h.control.eval(`document.getElementById("open-page").click()`);
+			await h.control.waitFor(
+				`document.querySelector(".match")?.dataset.status === "found"`,
+				15_000,
+			);
+			const tabs = await v1Tabs();
+			expect(tabs).toHaveLength(1);
+			expect(tabs[0]?.active).toBe(true);
+			await h.control.eval(`chrome.tabs.remove(${tabs[0]?.id})`);
+			await panel();
+		});
+
+		test("opening a case on its own page loads it, no Load needed", async () => {
+			const v1 = await h.open("v1");
+			await showToolbar(h, v1.page, v1.tabId);
+			await markElement(v1.page, "[data-truth=tip]", "Loaded on opening");
+			await saveAs(v1.page, "Opened on its page");
+			await v1.page.click(shadow('[data-action="close"]'));
+			await v1.page.activate();
+			await panel();
+			const row = `[...document.querySelectorAll("[data-group=here] [data-case]")].find((e) => e.textContent.includes("Opened on its page"))`;
+			await h.control.waitFor(row);
+			expect(
+				await h.control.eval<boolean>(
+					`${row}.parentElement.querySelector("[data-load]") === null`,
+				),
+			).toBe(true);
+			await h.control.eval(`${row}.click()`);
+			await h.control.waitFor(
+				`document.querySelector(".match")?.dataset.status === "found"`,
+				10_000,
+			);
+			expect(
+				await v1.page.eval<number>(
+					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
+				),
+			).toBe(1);
+			await v1.page.send("Page.close");
+			await panel();
+		});
+
+		test("Match size gives the tab the size the marks were made at", async () => {
+			const v1 = await h.open("v1");
+			await showToolbar(h, v1.page, v1.tabId);
+			await markElement(v1.page, "[data-truth=tip]", "Sized");
+			await saveAs(v1.page, "Made at one size");
+			const made = await v1.page.eval<{ width: number; height: number }>(
+				"({ width: innerWidth, height: innerHeight })",
+			);
+			const win = await h.control.eval<number>(
+				`chrome.tabs.get(${v1.tabId}).then((t) => t.windowId)`,
+			);
+			await h.control.eval(
+				`chrome.windows.update(${win}, { width: ${made.width - 200}, height: ${made.height - 100} })`,
+			);
+			await v1.page.activate();
+			await panel();
+			await openTheCase("Made at one size");
+			await h.control.waitFor(`!document.getElementById("case-size").hidden`);
+			await h.control.eval(`document.getElementById("match-size").click()`);
+			await h.control.waitFor(
+				`document.getElementById("case-hint").textContent.includes("as when the marks were made")`,
+				10_000,
+			);
+			const now = await v1.page.eval<{ width: number; height: number }>(
+				"({ width: innerWidth, height: innerHeight })",
+			);
+			expect(Math.abs(now.width - made.width)).toBeLessThanOrEqual(2);
+			expect(Math.abs(now.height - made.height)).toBeLessThanOrEqual(2);
+			await h.control.waitFor(`document.getElementById("case-size").hidden`);
+			await v1.page.click(shadow('[data-action="close"]'));
+			await v1.page.send("Page.close");
+			await panel();
+		});
+	});
+
 	describe("annotating again after a save", () => {
 		const annotate = `document.getElementById("annotate")`;
 		const status = `${shadow('[data-role="status"]')}?.textContent`;

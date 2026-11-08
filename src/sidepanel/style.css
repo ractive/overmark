@@ -12,6 +12,7 @@
 	--muted: #5b6475;
 	--rule: #dfe3ea;
 	--focus: #1f6feb;
+	--link: #1f6feb;
 	--danger: #c62828;
 	--ok: #1a7f37;
 	--warn: #a85800;
@@ -31,6 +32,7 @@
 		--muted: #9aa3b5;
 		--rule: #2e3647;
 		--focus: #6ea8ff;
+		--link: #6ea8ff;
 		--danger: #ef7070;
 		--ok: #7bc47f;
 		--warn: #f0b04a;
@@ -227,6 +229,14 @@ button.link:hover:not(:disabled) {
 	color: var(--fg);
 }
 
+button.page-link {
+	color: var(--link);
+	text-align: start;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	overflow-wrap: anywhere;
+}
+
 .row {
 	display: flex;
 	gap: 6px;
@@ -336,6 +346,16 @@ ul.cases .load {
 
 .case-header > .meta {
 	margin: 0 0 10px;
+}
+
+.case-header > .size {
+	margin: -4px 0 10px;
+}
+
+.size button {
+	margin-left: 4px;
+	padding: 2px 8px;
+	font-size: 12px;
 }
 
 .case-header .row {
