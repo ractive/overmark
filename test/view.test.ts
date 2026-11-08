@@ -111,6 +111,46 @@ describe("the case list", () => {
 	});
 });
 
+describe("Load and Hide", () => {
+	test("a case loaded on the tab in front offers to hide its marks", () => {
+		const c = sampleCase("c_loaded");
+		const called: string[] = [];
+		const actions = actionsWith({
+			loadOntoTab: () => called.push("load"),
+			hideFromTab: () => called.push("hide"),
+		});
+		render(caseState(c), actions);
+		expect(el("load-case").textContent).toBe("Show marks on this tab");
+		expect(el("load-case").classList.contains("primary")).toBe(true);
+		el("load-case").click();
+		render(
+			caseState(c, (s) => {
+				s.loaded = { caseId: c.id, tabId: 1, matches: new Map() };
+			}),
+			actions,
+		);
+		expect(el("load-case").textContent).toBe("Hide marks on this tab");
+		expect(el("load-case").classList.contains("primary")).toBe(false);
+		el("load-case").click();
+		// Loaded by an AI app: the page says so.
+		render(
+			caseState(c, (s) => {
+				s.overlay = {
+					visible: false,
+					url: "",
+					title: "",
+					drafts: 0,
+					saving: false,
+					loadedCase: c.id,
+				};
+			}),
+			actions,
+		);
+		expect(el("load-case").textContent).toBe("Hide marks on this tab");
+		expect(called).toEqual(["load", "hide"]);
+	});
+});
+
 describe("the case's page and size", () => {
 	const at = (url: string) => {
 		const c = sampleCase("c_page");

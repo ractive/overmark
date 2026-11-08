@@ -421,6 +421,18 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
 				),
 			).toBe(1);
+			// Loaded: the button hides the marks again, and then loads.
+			const button = `document.getElementById("load-case")`;
+			expect(await h.control.eval<string>(`${button}.textContent`)).toBe(
+				"Hide marks on this tab",
+			);
+			await h.control.eval(`${button}.click()`);
+			await v1.page.waitFor(
+				`${shadow("svg.marks")}.querySelectorAll("[data-review]").length === 0`,
+			);
+			await h.control.waitFor(
+				`${button}.textContent === "Show marks on this tab" && !document.querySelector(".match")`,
+			);
 			await v1.page.send("Page.close");
 			await panel();
 		});

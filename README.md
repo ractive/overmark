@@ -43,7 +43,8 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    stopping and annotating again on that page; New case in the toolbar starts another.
 3. On another build of the page (say `localhost:3000`), click the case in the side panel:
    on the same path it loads at once; a case of another page has a Load button for this
-   tab. On a tab Overmark may not run on yet (after reloading the extension, say), Chrome
+   tab. In the case, "Show marks on this tab" and "Hide marks on this tab" put its marks
+   on the page and take them off. On a tab Overmark may not run on yet (after reloading the extension, say), Chrome
    hides the address: click the Overmark icon there and the case loads. The case's address
    opens its page in a new tab and loads it there (marks a script draws late are looked for
    again for a few seconds), and when the

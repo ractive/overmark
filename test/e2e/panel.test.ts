@@ -130,6 +130,19 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		return { page, tabId, caseId: saved?.id as string };
 	}
 
+	/**
+	 * The case's marks on the tab in front: opening a case of that page loads
+	 * it already, and the button would then hide them.
+	 */
+	const showMarks = async () => {
+		await h.control.eval(
+			`${id("load-case")}.textContent === "Show marks on this tab" && ${id("load-case")}.click()`,
+		);
+		await h.control.waitFor(
+			`${id("case-hint")}.textContent.includes("marks found")`,
+		);
+	};
+
 	const overlayOf = (tabId: number) =>
 		h.control.eval<{ loadedCase?: string }>(
 			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" })`,
@@ -294,10 +307,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		await openPanel();
 		await openCase(caseId);
 		await page.activate();
-		await h.control.eval(`${id("load-case")}.click()`);
-		await h.control.waitFor(
-			`${id("case-hint")}.textContent.includes("marks found")`,
-		);
+		await showMarks();
 		expect((await overlayOf(tabId)).loadedCase).toBe(caseId);
 		await confirmDelete();
 		await until(
@@ -368,7 +378,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		await openPanel();
 		await openCase(caseId);
 		await page.activate();
-		await h.control.eval(`${id("load-case")}.click()`);
+		await showMarks();
 		const show = `document.querySelector('[data-action="show"]')`;
 		await h.control.waitFor(show);
 		await wrapSend(`(tabId, message, send) =>

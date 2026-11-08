@@ -522,6 +522,25 @@ const actions: Actions = {
 		})();
 	},
 
+	hideFromTab(c) {
+		const tabId =
+			state.loaded?.caseId === c.id ? state.loaded.tabId : state.tab?.id;
+		hintWork.cancel();
+		update((s) => {
+			s.loaded = undefined;
+			s.caseHint = undefined;
+			// The page's news would say so too, a moment later.
+			if (s.overlay?.loadedCase === c.id) {
+				const { loadedCase: _, ...rest } = s.overlay;
+				s.overlay = rest;
+			}
+		});
+		if (tabId !== undefined)
+			void chrome.tabs
+				.sendMessage(tabId, { type: "case:clear" })
+				.catch(() => undefined);
+	},
+
 	openAndLoad(c) {
 		openCase(c.id);
 		actions.loadOntoTab(c);
@@ -538,7 +557,7 @@ const actions: Actions = {
 				const tab = await loadedTab(opened.id);
 				if (tab === undefined)
 					return hint(
-						`${shortUrl(c.page.url)} did not finish loading. Press "Load onto this tab" once it has.`,
+						`${shortUrl(c.page.url)} did not finish loading. Press "Show marks on this tab" once it has.`,
 					);
 				// The user went on to another case or tab meanwhile: leave it be.
 				if (!showing(c.id) || (await activeTab())?.id !== tab.id)
