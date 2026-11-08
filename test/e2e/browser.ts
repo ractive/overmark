@@ -105,6 +105,9 @@ function chromeArguments(profile: string): string[] {
 		`--user-data-dir=${profile}`,
 		"--no-first-run",
 		"--no-default-browser-check",
+		// No "Chromium Safe Storage" keychain prompt for a throwaway profile.
+		"--use-mock-keychain",
+		"--password-store=basic",
 		"--disable-gpu",
 		"--disable-background-networking",
 		"--window-size=1280,800",
@@ -116,6 +119,69 @@ function chromeArguments(profile: string): string[] {
 	];
 }
 
+type ChromeProcess = Subprocess<"ignore", "ignore", "ignore" | "pipe">;
+
+/**
+ * Chromes still running. A run cut short (a timeout, Ctrl-C) never reaches
+ * close(); a Chrome left behind under launchd keeps asking for the keychain.
+ */
+const running = new Set<ChromeProcess>();
+function killRunning(): void {
+	for (const proc of running) proc.kill("SIGKILL");
+	running.clear();
+}
+process.on("exit", killRunning);
+for (const [signal, code] of [
+	["SIGINT", 130],
+	["SIGTERM", 143],
+] as const)
+	process.once(signal, () => {
+		killRunning();
+		process.exit(code);
+	});
+
+function started(proc: ChromeProcess): ChromeProcess {
+	running.add(proc);
+	void proc.exited.then(() => running.delete(proc));
+	return proc;
+}
+
+/** Connect to a Chrome started with `--remote-debugging-port=0`. */
+async function connectTo(
+	proc: Subprocess<"ignore", "ignore", "pipe">,
+): Promise<Connect> {
+	const endpoint = await new Promise<string>((resolve, reject) => {
+		const timer = setTimeout(
+			() => reject(new Error("Chrome did not start")),
+			20_000,
+		);
+		void (async () => {
+			const decoder = new TextDecoder();
+			let text = "";
+			for await (const chunk of proc.stderr) {
+				text += decoder.decode(chunk, { stream: true });
+				const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
+				if (m?.[1] !== undefined) {
+					clearTimeout(timer);
+					resolve(m[1]);
+					return;
+				}
+			}
+			reject(new Error(`Chrome exited: ${text.slice(-500)}`));
+		})();
+	});
+	const ws = new WebSocket(endpoint);
+	await new Promise<void>((resolve, reject) => {
+		ws.addEventListener("open", () => resolve(), { once: true });
+		ws.addEventListener(
+			"error",
+			() => reject(new Error("CDP connection failed")),
+			{ once: true },
+		);
+	});
+	return webSocket(ws);
+}
+
 interface TargetInfo {
 	targetId: string;
 	type: string;
@@ -123,18 +189,14 @@ interface TargetInfo {
 }
 
 export class Browser {
-	readonly #proc: Subprocess<"ignore", "ignore", "ignore" | "pipe">;
+	readonly #proc: ChromeProcess;
 	readonly #profile: string;
 	readonly #transport: Transport;
 	readonly #pending = new Map<number, Pending>();
 	readonly #listeners = new Set<Listener>();
 	#nextId = 0;
 
-	private constructor(
-		proc: Subprocess<"ignore", "ignore", "ignore" | "pipe">,
-		profile: string,
-		connect: Connect,
-	) {
+	private constructor(proc: ChromeProcess, profile: string, connect: Connect) {
 		this.#proc = proc;
 		this.#profile = profile;
 		this.#transport = connect((message) => {
@@ -160,47 +222,27 @@ export class Browser {
 
 	static async launch(binary: string, extensionDir: string): Promise<Browser> {
 		const profile = mkdtempSync(join(tmpdir(), "overmark-chrome-"));
-		const proc = Bun.spawn(
-			[
-				binary,
-				...chromeArguments(profile),
-				"--remote-debugging-port=0",
-				`--disable-extensions-except=${extensionDir}`,
-				`--load-extension=${extensionDir}`,
-				"about:blank",
-			],
-			{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
+		const proc = started(
+			Bun.spawn(
+				[
+					binary,
+					...chromeArguments(profile),
+					"--remote-debugging-port=0",
+					`--disable-extensions-except=${extensionDir}`,
+					`--load-extension=${extensionDir}`,
+					"about:blank",
+				],
+				{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
+			),
 		);
-		const endpoint = await new Promise<string>((resolve, reject) => {
-			const timer = setTimeout(
-				() => reject(new Error("Chrome did not start")),
-				20_000,
-			);
-			void (async () => {
-				const decoder = new TextDecoder();
-				let text = "";
-				for await (const chunk of proc.stderr) {
-					text += decoder.decode(chunk, { stream: true });
-					const m = /DevTools listening on (ws:\/\/\S+)/.exec(text);
-					if (m?.[1] !== undefined) {
-						clearTimeout(timer);
-						resolve(m[1]);
-						return;
-					}
-				}
-				reject(new Error(`Chrome exited: ${text.slice(-500)}`));
-			})();
-		});
-		const ws = new WebSocket(endpoint);
-		await new Promise<void>((resolve, reject) => {
-			ws.addEventListener("open", () => resolve(), { once: true });
-			ws.addEventListener(
-				"error",
-				() => reject(new Error("CDP connection failed")),
-				{ once: true },
-			);
-		});
-		return new Browser(proc, profile, webSocket(ws));
+		try {
+			return new Browser(proc, profile, await connectTo(proc));
+		} catch (e) {
+			proc.kill("SIGKILL");
+			await proc.exited;
+			rmSync(profile, { recursive: true, force: true });
+			throw e;
+		}
 	}
 
 	/**
@@ -209,15 +251,17 @@ export class Browser {
 	 */
 	static async launchPiped(binary: string): Promise<Browser> {
 		const profile = mkdtempSync(join(tmpdir(), "overmark-chrome-"));
-		const proc = Bun.spawn(
-			[
-				binary,
-				...chromeArguments(profile),
-				"--remote-debugging-pipe",
-				"--enable-unsafe-extension-debugging",
-				"about:blank",
-			],
-			{ stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
+		const proc = started(
+			Bun.spawn(
+				[
+					binary,
+					...chromeArguments(profile),
+					"--remote-debugging-pipe",
+					"--enable-unsafe-extension-debugging",
+					"about:blank",
+				],
+				{ stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
+			) as unknown as ChromeProcess,
 		);
 		const [, , , toChrome, fromChrome] = proc.stdio as unknown as number[];
 		return new Browser(
