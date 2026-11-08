@@ -491,7 +491,14 @@ describe("the case's page and size", () => {
 		]) {
 			render(caseState(at(url)), noActions);
 			expect(el("open-page").hidden).toBe(true);
-			expect(el("open-page").parentElement?.textContent).toStartWith(url);
+			const chips = [...(el("open-page").parentElement?.children ?? [])]
+				.filter((chip) => !(chip as unknown as HTMLElement).hidden)
+				.map((chip) => chip.textContent);
+			expect(chips).toEqual([
+				url,
+				expect.stringMatching(/^\d+×\d+$/),
+				expect.stringMatching(/\d{4}/),
+			]);
 		}
 	});
 
@@ -686,7 +693,7 @@ describe("the AI app", () => {
 		expect(el("ai-button").contains(el("ai-status"))).toBe(true);
 		expect(el("ai-action").textContent).toBe("Connect");
 		render(caseState(sampleCase("c_b1"), ai({ connected: true })), noActions);
-		expect(el("connect").textContent).toBe("AI connection…");
+		expect(el("connect").textContent).toBe("Manage AI connection");
 		expect(el("ai-action").textContent).toBe("Manage");
 	});
 });

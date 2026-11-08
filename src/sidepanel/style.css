@@ -112,23 +112,8 @@ header .meta {
 	font-size: 12px;
 }
 
-.ai-pill:hover:not(:disabled) {
-	border-color: var(--on-ink-muted);
-	background: rgba(255, 255, 255, 0.1);
-	color: var(--on-ink);
-}
-
-#ai-status {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-#ai-status::before {
+/* The connection's dot: on the pill, so the status can end in "…". */
+.ai-pill::before {
 	content: "";
 	flex: none;
 	width: 7px;
@@ -137,12 +122,26 @@ header .meta {
 	background: var(--on-ink-muted);
 }
 
-header[data-ai="waiting"] #ai-status::before {
+.ai-pill:hover:not(:disabled) {
+	border-color: var(--on-ink-muted);
+	background: rgba(255, 255, 255, 0.1);
+	color: var(--on-ink);
+}
+
+#ai-status {
+	display: block;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+header[data-ai="waiting"] .ai-pill::before {
 	background: var(--amber);
 	box-shadow: 0 0 0 3px rgba(255, 176, 0, 0.25);
 }
 
-header[data-ai="connected"] #ai-status::before {
+header[data-ai="connected"] .ai-pill::before {
 	background: #4cd07d;
 	box-shadow: 0 0 0 3px rgba(76, 208, 125, 0.22);
 }
@@ -613,10 +612,6 @@ ul.cases .load {
 	color: var(--on-ink-muted);
 }
 
-.verdict textarea + .row {
-	margin-top: 0;
-}
-
 /* --- its marks ------------------------------------------------------------- */
 
 /* Stays in view while the list scrolls under it. */
@@ -690,8 +685,13 @@ ul.cases .progress {
 	background: var(--resolved);
 }
 
+/* Striped: told apart from Won't fix without a paler, fainter grey. */
 .progress [data-kind="cantreproduce"] {
-	background: color-mix(in srgb, var(--resolved) 50%, var(--sheet));
+	background: repeating-linear-gradient(
+		-45deg,
+		var(--resolved) 0 3px,
+		transparent 3px 5px
+	);
 }
 
 .marks > .empty {

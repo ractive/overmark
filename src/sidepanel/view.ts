@@ -93,7 +93,8 @@ function setHint(el: HTMLElement, text: string | undefined): void {
 /** A case of the page in front loads when it is opened: no Load of its own. */
 function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 	const count = c.annotations.length;
-	const resolved = c.annotations.filter((a) => a.resolution).length;
+	// The bar beside it is a picture; the words say the same.
+	const counts = countsText(c);
 	return h(
 		"li",
 		{},
@@ -109,7 +110,7 @@ function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 			h(
 				"span",
 				{ class: "meta" },
-				`${count} mark${count === 1 ? "" : "s"}${resolved > 0 ? `, ${resolved} resolved` : ""}, ${formatDate(c.updatedAt)}`,
+				`${count} mark${count === 1 ? "" : "s"}${counts ? ` (${counts})` : ""}, ${formatDate(c.updatedAt)}`,
 			),
 			progress(c),
 			c.verdict
@@ -415,9 +416,9 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		title: "Open this page in a new tab and load the case there",
 		onclick: () => actions.openPage(created.current),
 	});
-	const about = h("span", { class: "chip" });
-	const madeAt = h("span", { class: "chip" });
-	const madeOn = h("span", { class: "chip" });
+	const about = h("span");
+	const madeAt = h("span");
+	const madeOn = h("span");
 	const sizeText = h("span");
 	const created: CaseParts = {
 		current: c,
@@ -534,15 +535,20 @@ function createParts(c: Case, actions: Actions): CaseParts {
 // --- a mark's status and its actions ---------------------------------------
 
 /** "5 open, 2 fixed, 1 won't fix"; nothing while every mark is open. */
-function markCounts(c: Case): HTMLElement | null {
+function countsText(c: Case): string | undefined {
 	const resolved = c.annotations.filter((a) => a.resolution);
-	if (resolved.length === 0) return null;
+	if (resolved.length === 0) return undefined;
 	const parts = [`${c.annotations.length - resolved.length} open`];
 	for (const kind of RESOLUTION_KINDS) {
 		const n = resolved.filter((a) => a.resolution?.kind === kind).length;
 		if (n > 0) parts.push(`${n} ${RESOLUTION_LABEL[kind].toLowerCase()}`);
 	}
-	return h("p", { class: "meta mark-counts" }, parts.join(", "));
+	return parts.join(", ");
+}
+
+function markCounts(c: Case): HTMLElement | null {
+	const text = countsText(c);
+	return text ? h("p", { class: "meta mark-counts" }, text) : null;
 }
 
 /** How far the case has come, as a bar: open, then each way of settling. */
@@ -1012,8 +1018,10 @@ function callText(call: AiCall): string {
 
 function renderAi({ ai }: PanelState): void {
 	aiStatus.textContent = ai.status;
-	// A long problem is cut to one line; the whole of it is the button's title.
-	aiButton.title = ai.status;
+	// A long problem is cut to one line: then its whole is the button's title.
+	aiButton.title = aiStatus.scrollWidth > aiStatus.clientWidth ? ai.status : "";
+	// Waiting for an app to pair: nothing to do but wait (a click shows how).
+	aiAction.hidden = ai.active && !ai.connected;
 	aiAction.textContent = ai.connected ? "Manage" : "Connect";
 	bar.dataset["ai"] = ai.connected
 		? "connected"
@@ -1024,7 +1032,7 @@ function renderAi({ ai }: PanelState): void {
 	keepOn.checked = ai.keepOn;
 	setHint(aiCall, ai.lastCall && callText(ai.lastCall));
 	connectButton.textContent = ai.connected
-		? "AI connection…"
+		? "Manage AI connection"
 		: "Connect AI app";
 }
 
