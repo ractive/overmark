@@ -405,6 +405,14 @@ describe("a mark's status and actions", () => {
 		expect(window.document.getElementById("marks-heading")?.textContent).toBe(
 			"Marks 2",
 		);
+		// The bar: one open, one won't fix, each its share.
+		const bar = [
+			...window.document.querySelectorAll(".marks-bar .progress > span"),
+		].map((s) => [s.getAttribute("data-kind"), s.getAttribute("style")]);
+		expect(bar).toEqual([
+			["open", "flex-grow: 1"],
+			["wontfix", "flex-grow: 1"],
+		]);
 	});
 
 	test("the panel's resolved colour is the page's", async () => {
@@ -483,9 +491,7 @@ describe("the case's page and size", () => {
 		]) {
 			render(caseState(at(url)), noActions);
 			expect(el("open-page").hidden).toBe(true);
-			expect(el("open-page").parentElement?.textContent).toStartWith(
-				`${url}, `,
-			);
+			expect(el("open-page").parentElement?.textContent).toStartWith(url);
 		}
 	});
 
@@ -676,8 +682,12 @@ describe("the AI app", () => {
 	test("the connect button says what it does now", () => {
 		render(caseState(sampleCase("c_b1")), noActions);
 		expect(el("connect").textContent).toBe("Connect AI app");
+		// The status at the top is a button too, saying what a click does.
+		expect(el("ai-button").contains(el("ai-status"))).toBe(true);
+		expect(el("ai-action").textContent).toBe("Connect");
 		render(caseState(sampleCase("c_b1"), ai({ connected: true })), noActions);
 		expect(el("connect").textContent).toBe("AI connection…");
+		expect(el("ai-action").textContent).toBe("Manage");
 	});
 });
 
@@ -812,6 +822,15 @@ describe("a loaded mark", () => {
 		});
 	const said = () =>
 		document.querySelector(".match .meta")?.textContent ?? undefined;
+
+	test("a sure match offers no other candidate, unless one is shown", () => {
+		const next = () => document.querySelector("[data-action=next]");
+		render(shownAs("button"), noActions);
+		expect(next()).toBeNull();
+		// Stepped to the second: the way back stays.
+		render(shownAs("button", true, 1), noActions);
+		expect(next()).not.toBeNull();
+	});
 
 	const colour = () =>
 		document.querySelector<HTMLElement>(".annotation")?.dataset["colour"];

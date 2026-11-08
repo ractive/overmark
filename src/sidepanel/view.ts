@@ -60,6 +60,8 @@ const annotate = byId<HTMLButtonElement>("annotate");
 const casesList = byId<HTMLDivElement>("cases");
 const allSites = byId<HTMLInputElement>("all-sites");
 const aiStatus = byId<HTMLSpanElement>("ai-status");
+const aiButton = byId<HTMLButtonElement>("ai-button");
+const aiAction = byId<HTMLSpanElement>("ai-action");
 const aiCall = byId<HTMLParagraphElement>("ai-call");
 const stopAi = byId<HTMLButtonElement>("stop-ai");
 const connectButton = byId<HTMLButtonElement>("connect");
@@ -91,6 +93,7 @@ function setHint(el: HTMLElement, text: string | undefined): void {
 /** A case of the page in front loads when it is opened: no Load of its own. */
 function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 	const count = c.annotations.length;
+	const resolved = c.annotations.filter((a) => a.resolution).length;
 	return h(
 		"li",
 		{},
@@ -106,8 +109,9 @@ function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 			h(
 				"span",
 				{ class: "meta" },
-				`${count} mark${count === 1 ? "" : "s"}, ${formatDate(c.updatedAt)}`,
+				`${count} mark${count === 1 ? "" : "s"}${resolved > 0 ? `, ${resolved} resolved` : ""}, ${formatDate(c.updatedAt)}`,
 			),
+			progress(c),
 			c.verdict
 				? h("span", { class: "meta" }, `Verdict: ${c.verdict.slice(0, 80)}`)
 				: null,
@@ -333,7 +337,8 @@ function matchView(
 ): HTMLElement {
 	const shown = m.candidates[m.current];
 	const buttons = h("div", { class: "row" });
-	if (m.candidates.length > 1)
+	// A sure match needs no other: offered where unsure, or to step back.
+	if (m.candidates.length > 1 && (colourOf(m) !== "found" || m.current > 0))
 		buttons.append(
 			h(
 				"button",
@@ -371,7 +376,10 @@ interface CaseParts {
 	meta: HTMLElement;
 	/** The case's address, a link where it is a web page. */
 	page: HTMLButtonElement;
+	/** The address where it is not a web page (only text, never a link). */
 	about: HTMLSpanElement;
+	madeAt: HTMLSpanElement;
+	madeOn: HTMLSpanElement;
 	/** The tab in front, where its size is not the case's. */
 	size: HTMLElement;
 	sizeText: HTMLSpanElement;
@@ -407,14 +415,18 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		title: "Open this page in a new tab and load the case there",
 		onclick: () => actions.openPage(created.current),
 	});
-	const about = h("span");
+	const about = h("span", { class: "chip" });
+	const madeAt = h("span", { class: "chip" });
+	const madeOn = h("span", { class: "chip" });
 	const sizeText = h("span");
 	const created: CaseParts = {
 		current: c,
 		title: h("h2"),
-		meta: h("p", { class: "meta" }, page, about),
+		meta: h("p", { class: "meta chips" }, page, about, madeAt, madeOn),
 		page,
 		about,
+		madeAt,
+		madeOn,
 		size: h(
 			"p",
 			{ class: "meta size", id: "case-size", hidden: true },
@@ -496,11 +508,11 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		h(
 			"div",
 			{ class: "verdict" },
-			h("label", { for: "verdict" }, "Verdict"),
-			verdict,
 			h(
 				"div",
-				{ class: "row" },
+				{ class: "verdict-head" },
+				h("label", { for: "verdict" }, "Verdict"),
+				verdictStatus,
 				h(
 					"button",
 					{
@@ -511,8 +523,8 @@ function createParts(c: Case, actions: Actions): CaseParts {
 					},
 					"Save verdict",
 				),
-				verdictStatus,
 			),
+			verdict,
 		),
 	);
 	caseView.replaceChildren(header, created.marks, created.shots);
@@ -531,6 +543,28 @@ function markCounts(c: Case): HTMLElement | null {
 		if (n > 0) parts.push(`${n} ${RESOLUTION_LABEL[kind].toLowerCase()}`);
 	}
 	return h("p", { class: "meta mark-counts" }, parts.join(", "));
+}
+
+/** How far the case has come, as a bar: open, then each way of settling. */
+function progress(c: Case): HTMLElement | null {
+	if (c.annotations.length === 0) return null;
+	const count = (kind?: ResolutionKind) =>
+		c.annotations.filter((a) => a.resolution?.kind === kind).length;
+	const parts: [string, number][] = [
+		["open", count()],
+		...RESOLUTION_KINDS.map((k): [string, number] => [k, count(k)]),
+	];
+	// The counts above say it in words: the bar is only a picture of them.
+	// A span: it also sits inside a case's button in the list.
+	return h(
+		"span",
+		{ class: "progress", "aria-hidden": "true" },
+		...parts
+			.filter(([, n]) => n > 0)
+			.map(([kind, n]) =>
+				h("span", { "data-kind": kind, style: `flex-grow: ${n}` }),
+			),
+	);
 }
 
 function resolutionLine(a: Annotation): HTMLElement | null {
@@ -752,7 +786,10 @@ function renderCase(state: PanelState, actions: Actions): void {
 	const web = isWebPage(c.page.url);
 	p.page.hidden = !web;
 	p.page.textContent = web ? shortUrl(c.page.url) : "";
-	p.about.textContent = `${web ? "" : c.page.url}, ${sizeOf(c.page.viewport)}, ${formatDate(c.createdAt)}`;
+	p.about.hidden = web;
+	p.about.textContent = web ? "" : c.page.url;
+	p.madeAt.textContent = sizeOf(c.page.viewport);
+	p.madeOn.textContent = formatDate(c.createdAt);
 	const size = state.tab?.size;
 	p.size.hidden = size === undefined || sameSize(size, c.page.viewport);
 	p.sizeText.textContent = size
@@ -835,6 +872,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 				),
 				toggleAll,
 				markCounts(c),
+				progress(c),
 			),
 			items.length > 0
 				? h("ol", { class: "annotations" }, ...items)
@@ -974,6 +1012,9 @@ function callText(call: AiCall): string {
 
 function renderAi({ ai }: PanelState): void {
 	aiStatus.textContent = ai.status;
+	// A long problem is cut to one line; the whole of it is the button's title.
+	aiButton.title = ai.status;
+	aiAction.textContent = ai.connected ? "Manage" : "Connect";
 	bar.dataset["ai"] = ai.connected
 		? "connected"
 		: ai.active
