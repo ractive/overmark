@@ -123,15 +123,18 @@ describe("Load and Hide", () => {
 		expect(el("load-case").textContent).toBe("Show marks on this tab");
 		expect(el("load-case").classList.contains("primary")).toBe(true);
 		el("load-case").click();
-		render(
+		const loadedOn = (front: number) =>
 			caseState(c, (s) => {
+				s.tab = { id: front, url: "", title: "", size: undefined };
 				s.loaded = { caseId: c.id, tabId: 1, matches: new Map() };
-			}),
-			actions,
-		);
+			});
+		render(loadedOn(1), actions);
 		expect(el("load-case").textContent).toBe("Hide marks on this tab");
 		expect(el("load-case").classList.contains("primary")).toBe(false);
 		el("load-case").click();
+		// Its marks are on another tab: this one can show them.
+		render(loadedOn(2), actions);
+		expect(el("load-case").textContent).toBe("Show marks on this tab");
 		// Loaded by an AI app: the page says so.
 		render(
 			caseState(c, (s) => {

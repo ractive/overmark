@@ -123,6 +123,9 @@ const sizeText = (s: Size) => `${s.width}×${s.height}`;
 const showing = (caseId: string) =>
 	state.view.kind === "case" && state.view.id === caseId;
 
+/** The newest load: Hide, or another load, makes the older ones stale. */
+const loadWork = new Latest();
+
 /** A case to load onto a tab once the icon's click there lets Overmark in. */
 let pendingLoad: { tabId: number; caseId: string } | undefined;
 
@@ -134,6 +137,7 @@ async function loadInto(
 	c: Case,
 	tabId: number,
 	hint: (text: string) => void,
+	work: { current: () => boolean },
 ): Promise<{ found: number; total: number } | undefined> {
 	try {
 		const result = await sendToTab<LoadResult | { error: string }>(tabId, {
@@ -144,6 +148,15 @@ async function loadInto(
 			hint(result.error);
 			return undefined;
 		}
+		// Hidden meanwhile: the marks this load drew go too.
+		if (!work.current()) {
+			void chrome.tabs
+				.sendMessage(tabId, { type: "case:clear", caseId: c.id })
+				.catch(() => undefined);
+			return undefined;
+		}
+		// Results describe the tab in front (see refreshTab).
+		if ((await activeTab())?.id !== tabId) return undefined;
 		const found = result.matches.filter(
 			(m) => m.status !== "lost" && m.status !== "no-element",
 		).length;
@@ -174,12 +187,14 @@ async function loadOnLoaded(
 	tabId: number,
 	hint: (text: string) => void,
 ): Promise<void> {
+	const work = loadWork.start();
 	for (const wait of [0, 1000, 2000]) {
 		if (wait > 0) {
 			await sleep(wait);
-			if (!showing(c.id) || (await activeTab())?.id !== tabId) return;
+			if (!work.current() || !showing(c.id)) return;
+			if ((await activeTab())?.id !== tabId) return;
 		}
-		const result = await loadInto(c, tabId, hint);
+		const result = await loadInto(c, tabId, hint, work);
 		if (result === undefined || result.found === result.total) return;
 	}
 }
@@ -387,7 +402,7 @@ async function forgetLoaded(
 	});
 	if (was !== undefined && options.clearTab)
 		await chrome.tabs
-			.sendMessage(was.tabId, { type: "case:clear" })
+			.sendMessage(was.tabId, { type: "case:clear", caseId: was.caseId })
 			.catch(() => undefined);
 }
 
@@ -404,7 +419,7 @@ async function clearDeleted(caseId: string): Promise<void> {
 	const overlay = await overlayState(tabId);
 	if (overlay?.loadedCase === caseId)
 		await chrome.tabs
-			.sendMessage(tabId, { type: "case:clear" })
+			.sendMessage(tabId, { type: "case:clear", caseId })
 			.catch(() => undefined);
 	if (overlay?.visible && overlay.target?.caseId === caseId)
 		await startAnnotating();
@@ -517,15 +532,20 @@ const actions: Actions = {
 	loadOntoTab(c) {
 		const hint = caseHintWriter();
 		void (async () => {
+			const work = loadWork.start();
 			const tab = await activeTab();
-			if (tab?.id !== undefined) await loadInto(c, tab.id, hint);
+			if (tab?.id !== undefined) await loadInto(c, tab.id, hint, work);
 		})();
 	},
 
 	hideFromTab(c) {
-		const tabId =
-			state.loaded?.caseId === c.id ? state.loaded.tabId : state.tab?.id;
+		loadWork.cancel();
 		hintWork.cancel();
+		// Where the panel loaded the case, and the tab in front where an AI app did.
+		const tabs = new Set<number>();
+		if (state.loaded?.caseId === c.id) tabs.add(state.loaded.tabId);
+		if (state.overlay?.loadedCase === c.id && state.tab !== undefined)
+			tabs.add(state.tab.id);
 		update((s) => {
 			s.loaded = undefined;
 			s.caseHint = undefined;
@@ -535,9 +555,9 @@ const actions: Actions = {
 				s.overlay = rest;
 			}
 		});
-		if (tabId !== undefined)
+		for (const tabId of tabs)
 			void chrome.tabs
-				.sendMessage(tabId, { type: "case:clear" })
+				.sendMessage(tabId, { type: "case:clear", caseId: c.id })
 				.catch(() => undefined);
 	},
 

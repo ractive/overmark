@@ -518,7 +518,8 @@ function renderCase(state: PanelState, actions: Actions): void {
 	);
 	// Marks the panel loaded, or an AI app (the page says so).
 	p.loadedHere =
-		state.loaded?.caseId === c.id || state.overlay?.loadedCase === c.id;
+		(state.loaded?.caseId === c.id && state.loaded.tabId === state.tab?.id) ||
+		state.overlay?.loadedCase === c.id;
 	p.loadButton.textContent = p.loadedHere
 		? "Hide marks on this tab"
 		: "Show marks on this tab";

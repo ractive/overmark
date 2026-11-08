@@ -154,7 +154,12 @@ function start(): void {
 					);
 					break;
 				case "case:clear":
-					reviewer.clear();
+					// An AI app may have loaded another case meanwhile: that one stays.
+					if (
+						message.caseId === undefined ||
+						message.caseId === reviewer.caseId
+					)
+						reviewer.clear();
 					sendResponse(state());
 					break;
 				case "element:mark":
