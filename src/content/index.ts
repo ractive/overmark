@@ -188,6 +188,9 @@ function start(): void {
 			return false;
 		},
 	);
+	// The panel learns that Overmark runs here now: after a click on the
+	// icon, a case waiting for this tab loads.
+	overlay.onChange();
 }
 
 if (!globalThis.__overmark) {

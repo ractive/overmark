@@ -47,7 +47,6 @@ export function formatDate(iso: string): string {
 			});
 }
 
-/** `www.example.com/kk` from a URL. */
 /** A web page's address, one a click may open (an imported case's is anyone's). */
 export function isWebPage(url: string): boolean {
 	try {
@@ -57,6 +56,8 @@ export function isWebPage(url: string): boolean {
 		return false;
 	}
 }
+
+/** `www.example.com/kk` from a URL. */
 
 export function shortUrl(url: string): string {
 	try {
