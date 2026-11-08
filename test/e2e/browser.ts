@@ -122,16 +122,25 @@ function chromeArguments(profile: string): string[] {
 type ChromeProcess = Subprocess<"ignore", "ignore", "ignore" | "pipe">;
 
 /**
- * Chromes still running. A run cut short (a timeout, Ctrl-C) never reaches
- * close(); a Chrome left behind under launchd keeps asking for the keychain.
+ * Chromes still running, with their profiles. A run cut short (a timeout,
+ * Ctrl-C, a closed terminal) never reaches close(); a Chrome left behind
+ * under launchd keeps asking for the keychain.
  */
-const running = new Set<ChromeProcess>();
+const running = new Map<ChromeProcess, string>();
 function killRunning(): void {
-	for (const proc of running) proc.kill("SIGKILL");
+	for (const [proc, profile] of running) {
+		proc.kill("SIGKILL");
+		try {
+			rmSync(profile, { recursive: true, force: true });
+		} catch {
+			// Chrome may still be writing as it dies; a temp dir is left.
+		}
+	}
 	running.clear();
 }
 process.on("exit", killRunning);
 for (const [signal, code] of [
+	["SIGHUP", 129],
 	["SIGINT", 130],
 	["SIGTERM", 143],
 ] as const)
@@ -140,8 +149,8 @@ for (const [signal, code] of [
 		process.exit(code);
 	});
 
-function started(proc: ChromeProcess): ChromeProcess {
-	running.add(proc);
+function started(proc: ChromeProcess, profile: string): ChromeProcess {
+	running.set(proc, profile);
 	void proc.exited.then(() => running.delete(proc));
 	return proc;
 }
@@ -234,6 +243,7 @@ export class Browser {
 				],
 				{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
 			),
+			profile,
 		);
 		try {
 			return new Browser(proc, profile, await connectTo(proc));
@@ -262,6 +272,7 @@ export class Browser {
 				],
 				{ stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"] },
 			) as unknown as ChromeProcess,
+			profile,
 		);
 		const [, , , toChrome, fromChrome] = proc.stdio as unknown as number[];
 		return new Browser(
