@@ -250,15 +250,26 @@ describe("a mark's status and actions", () => {
 		const actions = actionsWith({
 			showMatch: (_caseId, a, candidate) => shown.push([a.id, candidate]),
 		});
-		const found = {
+		const found: AnnotationMatch = {
 			annotationId: "a1",
 			number: 1,
 			status: "found",
 			score: 1,
 			current: 0,
-			candidates: [{ score: 1, summary: "p", visible: true }],
-		} as unknown as AnnotationMatch;
-		const withImages = (loaded: boolean) =>
+			candidates: [
+				{ score: 1, summary: "p", selector: "p", visible: true, found: true },
+			],
+		};
+		// A note or box: no element to find, but Show still scrolls to it.
+		const noElement: AnnotationMatch = {
+			annotationId: "a2",
+			number: 2,
+			status: "no-element",
+			score: 0,
+			current: 0,
+			candidates: [],
+		};
+		const withImages = (loaded: boolean, matches = new Map([["a1", found]])) =>
 			caseState(c, (s) => {
 				s.images = {
 					caseId: c.id,
@@ -272,7 +283,7 @@ describe("a mark's status and actions", () => {
 					s.loaded = {
 						caseId: c.id,
 						tabId: 1,
-						matches: new Map([["a1", found]]),
+						matches,
 					};
 			});
 		// Not loaded on a tab: nothing to show, only the picture.
@@ -288,6 +299,23 @@ describe("a mark's status and actions", () => {
 		expect(shown).toEqual([["a1", 0]]);
 		// A mark the page has no match for: no Show, no click on its crop.
 		expect(row("a2").querySelector("button.crop")).toBeNull();
+		render(
+			withImages(
+				true,
+				new Map([
+					["a1", found],
+					["a2", noElement],
+				]),
+			),
+			actions,
+		);
+		(
+			row("a2").querySelector("button.crop") as unknown as HTMLButtonElement
+		).click();
+		expect(shown).toEqual([
+			["a1", 0],
+			["a2", 0],
+		]);
 	});
 
 	test("the panel's resolved colour is the page's", async () => {

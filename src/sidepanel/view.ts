@@ -300,14 +300,17 @@ function cropView(
 ): HTMLElement {
 	const img = h("img", { src, alt: `Mark ${a.number}` });
 	if (!canShow(m)) return img;
+	const label = `Show mark ${a.number} on the page`;
 	return h(
 		"button",
 		{
 			type: "button",
 			class: "crop",
 			"data-action": "show-crop",
-			title: "Show on the page",
-			"aria-label": `Show mark ${a.number} on the page`,
+			title: label,
+			"aria-label": label,
+			// Show is the keyboard's way; one stop per mark is enough.
+			tabindex: "-1",
 			onclick: () => actions.showMatch(caseId, a, m.current),
 		},
 		img,
