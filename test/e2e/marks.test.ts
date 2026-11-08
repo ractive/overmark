@@ -4,9 +4,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { Annotation, Shot } from "../../src/lib/case.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
+	comment,
 	countColour,
 	type Db,
 	HOST,
@@ -109,6 +111,38 @@ describe.skipIf(browserBinary === undefined)(
 			expect(
 				await countColour(h.control, "Waited", "shots/s1.webp", GREEN),
 			).toBe(0);
+			await close(page);
+		}, 60_000);
+
+		test("a mark's element is recorded where its screenshot shows it", async () => {
+			const { page, tabId } = await open("long");
+			await showToolbar(h, page, tabId);
+			// An AI app holds the page, so the mark's screenshot has to wait.
+			await sendToTab(tabId, { type: "page:blur", blurForms: false });
+			const near = await page.eval<{ x: number; y: number }>(
+				`(() => { const { x, y } = document.querySelector("#near").getBoundingClientRect(); return { x, y }; })()`,
+			);
+			await page.click(shadow('[data-action="tool-box"]'));
+			await page.drag(
+				{ x: near.x + 10, y: near.y + 5 },
+				{ x: near.x + 60, y: near.y + 25 },
+			);
+			await comment(page, "pushed down");
+			// Something above pushes the element down before the screenshot.
+			await page.eval(
+				`document.querySelector("#near").style.marginTop = "200px"`,
+			);
+			await sendToTab(tabId, { type: "page:unblur" });
+			await Bun.sleep(1800);
+			await saveAs(page, "Pushed down");
+			const { c } = await saved("Pushed down");
+			const a = c.annotations[0] as Annotation;
+			const shot = c.shots[0] as Shot;
+			if (a.shape.kind !== "box") throw new Error("not a box");
+			expect(a.element?.selector).toContain("near");
+			expect(
+				a.shape.rect.y + shot.scrollY - (a.element?.rect.y ?? 0),
+			).toBeCloseTo(5, 0);
 			await close(page);
 		}, 60_000);
 

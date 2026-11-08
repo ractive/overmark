@@ -479,6 +479,38 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 	);
 
 	slowTest(
+		"an import for the page in front goes straight onto it",
+		async () => {
+			await fresh();
+			const { page, tabId } = await h.open("v1");
+			await page.activate();
+			const onPage = (id: string, path: string): Case => {
+				const c = sampleCase(id);
+				return { ...c, page: { ...c.page, url: `${h.base}/${path}` } };
+			};
+			await importFile(
+				"other.overmark.zip",
+				await zipOf(onPage("c_far", "v2")),
+			);
+			await h.control.waitFor(`${id("verdict")}?.dataset.case === "c_far"`);
+			await Bun.sleep(300);
+			expect(await h.control.eval(`${id("case-hint")}.hidden`)).toBe(true);
+			await h.control.eval(
+				`document.querySelector(".case-header .link").click()`,
+			);
+			await h.control.waitFor(`!${id("home")}.hidden`);
+			await importFile(
+				"here.overmark.zip",
+				await zipOf(onPage("c_here", "v1")),
+			);
+			await h.control.waitFor(
+				`${id("case-hint")}?.textContent.includes("marks found")`,
+			);
+			expect((await overlayOf(tabId)).loadedCase).toBe("c_here");
+		},
+	);
+
+	slowTest(
 		"an imported case says where it came from, also after a change",
 		async () => {
 			await fresh();

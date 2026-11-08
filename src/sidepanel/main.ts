@@ -8,6 +8,7 @@ import type { TabMcp, ToolCallStart } from "@ractive-ch/tab-mcp-client";
 import {
 	type Annotation,
 	type Case,
+	isPageOf,
 	nextNumbers,
 	validateCase,
 } from "../lib/case.ts";
@@ -323,6 +324,8 @@ async function finishImport(
 		if (state.loaded?.caseId === c.id) await forgetLoaded({ clearTab: true });
 		announce(c.id);
 		openCase(c.id);
+		const url = state.tab?.url;
+		if (url && isPageOf(c, url)) actions.loadOntoTab(c);
 	} catch (error) {
 		update((s) => (s.importError = `Could not import: ${message(error)}`));
 	}
@@ -373,12 +376,17 @@ const actions: Actions = {
 					};
 				});
 				hint(
-					`${found} of ${result.matches.length} marks found on ${shortUrl(result.url)}. Outlines: green found, amber dashed probable or unsure.`,
+					`${found} of ${result.matches.length} marks found on ${shortUrl(result.url)}. Green: found. Amber, dashed: probable or unsure.`,
 				);
 			} catch (error) {
 				hint(describeError(error));
 			}
 		})();
+	},
+
+	openAndLoad(c) {
+		openCase(c.id);
+		actions.loadOntoTab(c);
 	},
 
 	addMarks: (c) => void startAnnotating(c),

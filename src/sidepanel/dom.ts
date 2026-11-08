@@ -56,13 +56,3 @@ export function shortUrl(url: string): string {
 		return url;
 	}
 }
-
-/** Same path, whatever the origin: a case from prod "belongs" to localhost too. */
-export function samePath(a: string, b: string): boolean {
-	try {
-		const strip = (p: string) => p.replace(/\/+$/, "") || "/";
-		return strip(new URL(a).pathname) === strip(new URL(b).pathname);
-	} catch {
-		return false;
-	}
-}
