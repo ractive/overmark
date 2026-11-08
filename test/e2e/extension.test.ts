@@ -18,6 +18,7 @@ import {
 	type Db,
 	HOST,
 	imageBytes,
+	imagesOf,
 	markElement,
 	READ_DB,
 	saveAs,
@@ -530,6 +531,116 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await v1.page.send("Page.close");
 			await panel();
 		});
+	});
+
+	test("a mark resolved, edited and deleted in the panel; the page follows", async () => {
+		const v1 = await h.open("v1");
+		await showToolbar(h, v1.page, v1.tabId);
+		await markElement(v1.page, "[data-truth=tip]", "One");
+		await markElement(v1.page, "[data-truth=submit]", "Two");
+		await markElement(v1.page, "[data-truth=contact]", "Three");
+		await saveAs(v1.page, "Settled marks");
+		await v1.page.click(shadow('[data-action="close"]'));
+		await v1.page.activate();
+		await h.control.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
+		const caseRow = `[...document.querySelectorAll("[data-group=here] [data-case]")].find((e) => e.textContent.includes("Settled marks"))`;
+		await h.control.waitFor(caseRow);
+		await h.control.eval(`${caseRow}.click()`);
+		await h.control.waitFor(
+			`document.querySelectorAll(".match").length === 3`,
+			10_000,
+		);
+		const row = (id: string) =>
+			`document.querySelector('[data-annotation="${id}"]')`;
+		const act = (id: string, name: string) =>
+			`${row(id)}.querySelector('[data-mark-action="${name}"]')`;
+		const review = (n: number) =>
+			`${shadow("svg.marks")}.querySelector('[data-review="${n}"]')`;
+		const bar = `${shadow('[data-role="review-status"] .count')}.textContent`;
+
+		// Resolve 2 as won't fix, with a note.
+		await h.control.eval(`${act("a2", "resolve")}.click()`);
+		await h.control.waitFor(
+			`${row("a2")}.querySelector("[data-form=resolve]")`,
+		);
+		await h.control.eval(`(() => {
+			const form = ${row("a2")}.querySelector("[data-form=resolve]");
+			form.querySelector('input[value="wontfix"]').click();
+			const note = form.querySelector("input.note");
+			note.value = "Legal wants it";
+			note.dispatchEvent(new Event("input"));
+			form.querySelector('[data-mark-action="resolve-done"]').click();
+		})()`);
+		await h.control.waitFor(`${row("a2")}?.dataset.resolved === "wontfix"`);
+		expect(
+			await h.control.eval<string>(
+				`${row("a2")}.querySelector(".resolution").textContent`,
+			),
+		).toBe("Won't fixLegal wants it");
+		await v1.page.waitFor(`${review(2)}?.hasAttribute("data-resolved")`);
+		expect(await v1.page.eval<string>(bar)).toBe(
+			"2 of 2 open found, 1 resolved",
+		);
+		// The panel's results stay: the page kept its matches.
+		expect(
+			await h.control.eval<number>(
+				`document.querySelectorAll(".match").length`,
+			),
+		).toBe(3);
+
+		// Edit 1's comment.
+		await h.control.eval(`${act("a1", "comment")}.click()`);
+		await h.control.waitFor(
+			`${row("a1")}.querySelector("[data-form=comment] textarea")`,
+		);
+		await h.control.eval(`(() => {
+			const field = ${row("a1")}.querySelector("[data-form=comment] textarea");
+			field.value = "One, shorter";
+			field.dispatchEvent(new Event("input"));
+			${row("a1")}.querySelector('[data-mark-action="comment-done"]').click();
+		})()`);
+		await h.control.waitFor(
+			`${row("a1")}.querySelector(".comment").textContent === "One, shorter"`,
+		);
+
+		// Delete 3: twice, the second a moment later.
+		await h.control.eval(`${act("a3", "delete")}.click()`);
+		await h.control.waitFor(
+			`${act("a3", "delete")}.textContent === "Really delete?"`,
+		);
+		await Bun.sleep(600);
+		// A double click: one delete, and no error about a mark already gone.
+		await h.control.eval(
+			`(() => { const b = ${act("a3", "delete")}; b.click(); b.click(); })()`,
+		);
+		await h.control.waitFor(`${row("a3")} === null`);
+		await Bun.sleep(300);
+		expect(
+			await h.control.eval<string>(
+				`document.getElementById("case-hint").textContent`,
+			),
+		).not.toContain("Not saved");
+		await v1.page.waitFor(`${review(3)} === null`);
+		expect(await v1.page.eval<string>(bar)).toBe(
+			"1 of 1 open found, 1 resolved",
+		);
+		const db = await h.control.eval<Db>(READ_DB);
+		const saved = db.cases.find((c) => c.title === "Settled marks");
+		expect(saved?.annotations.map((a) => a.id)).toEqual(["a1", "a2"]);
+		expect(saved?.lastNumber).toBe(3);
+		expect(saved?.annotations[0]?.comment).toBe("One, shorter");
+		expect(imagesOf(db, saved?.id ?? "")).not.toContain("crops/a3.webp");
+
+		// Open again.
+		await h.control.eval(`${act("a2", "reopen")}.click()`);
+		await v1.page.waitFor(`!${review(2)}?.hasAttribute("data-resolved")`);
+		expect(await v1.page.eval<string>(bar)).toBe("2 of 2 found");
+		await v1.page.send("Page.close");
+		await h.control.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
 	});
 
 	describe("annotating again after a save", () => {

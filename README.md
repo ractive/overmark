@@ -55,7 +55,11 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    container changed its size. A mark without an element goes where it was, in amber.
    Show scrolls to a mark; Next candidate tries the next best element. The screenshots
    stay the record, so a mark makes sense even when its element is not found.
-4. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
+4. Each mark in the side panel can be resolved (Fixed, Won't fix or Can't reproduce, with
+   an optional note), opened again, have its comment edited, or be deleted. A resolved
+   mark is drawn grey on a loaded page and no longer counted as open. A deleted mark's
+   number is not given again, and its pin stays on screenshots that other marks share.
+5. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
    on; Import reads one back and, when it is for the page in front, loads it right
    away. An AI app can read `case.md` and the images without the extension.
 

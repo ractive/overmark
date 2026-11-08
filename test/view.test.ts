@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import { FOUND_COLOUR, PROBABLE_COLOUR } from "../src/content/overlay.ts";
+import {
+	FOUND_COLOUR,
+	PROBABLE_COLOUR,
+	RESOLVED_COLOUR,
+} from "../src/content/overlay.ts";
 import type { Annotation, Case } from "../src/lib/case.ts";
 import { summarize } from "../src/lib/element.ts";
 import { MARK_COLOUR } from "../src/lib/marks.ts";
@@ -108,6 +112,142 @@ describe("the case list", () => {
 			) as unknown as HTMLElement
 		).click();
 		expect(opened).toEqual(["c_here"]);
+	});
+});
+
+describe("a mark's status and actions", () => {
+	const mark = (
+		n: number,
+		resolution?: Annotation["resolution"],
+	): Annotation => ({
+		id: `a${n}`,
+		number: n,
+		shot: "s1",
+		comment: `Comment ${n}`,
+		author: "user",
+		shape: { kind: "note", at: { x: 1, y: 1 } },
+		crop: `crops/a${n}.webp`,
+		element: null,
+		...(resolution ? { resolution } : {}),
+	});
+	// Its own case each: rows of a case unchanged are kept, with their handlers.
+	let n = 0;
+	const twoMarks = (): Case => ({
+		...sampleCase(`c_marks${++n}`),
+		annotations: [
+			mark(1),
+			mark(2, {
+				kind: "wontfix",
+				note: "Legal wants it",
+				at: "2026-11-08T10:00:00Z",
+			}),
+		],
+	});
+	const row = (id: string) =>
+		window.document.querySelector(
+			`[data-annotation="${id}"]`,
+		) as unknown as HTMLElement;
+	const action = (id: string, name: string) =>
+		row(id).querySelector(
+			`[data-mark-action="${name}"]`,
+		) as unknown as HTMLButtonElement;
+
+	test("a resolved mark says how, with its note, and the counts sum up", () => {
+		render(caseState(twoMarks()), noActions);
+		expect(row("a2").dataset["resolved"]).toBe("wontfix");
+		expect(row("a2").querySelector(".resolution")?.textContent).toBe(
+			"Won't fixLegal wants it",
+		);
+		expect(row("a1").querySelector(".resolution")).toBeNull();
+		expect(window.document.querySelector(".mark-counts")?.textContent).toBe(
+			"1 open, 1 won't fix",
+		);
+		expect(action("a1", "resolve").textContent).toBe("Resolve…");
+		expect(action("a2", "reopen").textContent).toBe("Reopen");
+	});
+
+	test("Resolve opens its form; the choice and note go to resolveMark", () => {
+		const c = twoMarks();
+		const calls: unknown[] = [];
+		const actions = actionsWith({
+			editMark: (_c, a, mode) => calls.push(["edit", a.id, mode]),
+			resolveMark: (_c, a, kind, note) =>
+				calls.push(["resolve", a.id, kind, note]),
+		});
+		render(caseState(c), actions);
+		action("a1", "resolve").click();
+		render(
+			caseState(c, (s) => {
+				s.markEdit = {
+					annotationId: "a1",
+					mode: "resolve",
+					kind: "fixed",
+					text: "",
+				};
+			}),
+			actions,
+		);
+		const form = row("a1").querySelector(
+			"[data-form=resolve]",
+		) as unknown as HTMLElement;
+		const radio = form.querySelector(
+			'input[value="cantreproduce"]',
+		) as unknown as HTMLInputElement;
+		radio.checked = true;
+		(form.querySelector("input.note") as unknown as HTMLInputElement).value =
+			"Not on dev";
+		(
+			form.querySelector(
+				'[data-mark-action="resolve-done"]',
+			) as unknown as HTMLElement
+		).click();
+		expect(calls).toEqual([
+			["edit", "a1", "resolve"],
+			["resolve", "a1", "cantreproduce", "Not on dev"],
+		]);
+	});
+
+	test("a form takes the focus when it opens, not at each redraw", async () => {
+		const c = twoMarks();
+		const editing = (updatedAt: string) =>
+			caseState({ ...c, updatedAt }, (s) => {
+				s.markEdit = {
+					annotationId: "a1",
+					mode: "comment",
+					kind: "fixed",
+					text: "x",
+				};
+			});
+		render(editing("2026-11-08T10:00:00Z"), noActions);
+		await Promise.resolve();
+		const comment = row("a1").querySelector(
+			"textarea",
+		) as unknown as HTMLElement;
+		expect(window.document.activeElement).toBe(comment as never);
+		el<HTMLTextAreaElement>("verdict").focus();
+		// Another window or an AI app changed the case: the list is drawn again.
+		render(editing("2026-11-08T10:01:00Z"), noActions);
+		await Promise.resolve();
+		expect(window.document.activeElement).toBe(el("verdict") as never);
+	});
+
+	test("Delete asks once more", () => {
+		const c = twoMarks();
+		render(
+			caseState(c, (s) => {
+				s.markDeleteArmed = { annotationId: "a1", at: 1 };
+			}),
+			noActions,
+		);
+		expect(action("a1", "delete").textContent).toBe("Really delete?");
+		expect(action("a2", "delete").textContent).toBe("Delete");
+	});
+
+	test("the panel's resolved colour is the page's", async () => {
+		const css = await Bun.file(
+			new URL("../src/sidepanel/style.css", import.meta.url),
+		).text();
+		expect(css).toContain(`--resolved: ${RESOLVED_COLOUR};`);
 	});
 });
 

@@ -12,6 +12,7 @@
  */
 
 import {
+	type Case,
 	type ElementDetails,
 	imageScale,
 	LANGUAGE,
@@ -643,6 +644,19 @@ export class Annotator {
 	#setSaveForm(on: boolean): void {
 		this.#saveForm = on;
 		this.#renderToolbar();
+	}
+
+	/**
+	 * The case the toolbar adds to changed: deleted marks leave the saved ones
+	 * drawn faintly, and where its marks are loaded those draw them instead.
+	 */
+	caseChanged(c: Case, loaded: boolean): void {
+		if (this.#target?.caseId !== c.id) return;
+		const numbers = new Set(c.annotations.map((x) => x.number));
+		this.#savedMarks = loaded
+			? []
+			: this.#savedMarks.filter((d) => numbers.has(d.number));
+		this.#render();
 	}
 
 	/** Stop adding to the case: the next save starts another one. */

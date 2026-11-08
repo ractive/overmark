@@ -43,6 +43,11 @@ export type ContentRequest =
 			annotationId: string;
 			candidate?: number;
 	  }
+	/**
+	 * The loaded case changed: draw its marks as they are now, keeping the
+	 * candidates chosen (`LoadResult`, or `null` where another case is loaded).
+	 */
+	| { type: "case:update"; case: Case }
 	/** Remove the marks (`OverlayState`): only that case's, where it is named. */
 	| { type: "case:clear"; caseId?: string }
 	/**

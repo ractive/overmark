@@ -69,6 +69,28 @@ export const storeContract: Record<
 		same(await store.getCase("c_3"), undefined);
 	},
 
+	"an update deletes images with the case, and may write a freed path anew":
+		async (store) => {
+			await putCase(store, sampleCase("c_1"));
+			await store.putImage("c_1", "shots/s2.webp", image("old"));
+			await store.putImage("c_1", "crops/a3.webp", image("crop"));
+			await store.updateCase("c_1", (c) => ({
+				value: c as Case,
+				deleteImages: ["shots/s2.webp", "crops/a3.webp"],
+			}));
+			same(await store.getImage("c_1", "shots/s2.webp"), undefined);
+			same(await store.getImage("c_1", "crops/a3.webp"), undefined);
+			await store.updateCase("c_1", (c) => ({
+				value: c as Case,
+				deleteImages: ["shots/s2.webp"],
+				images: new Map([["shots/s2.webp", image("new")]]),
+			}));
+			same(
+				await (await store.getImage("c_1", "shots/s2.webp"))?.blob.text(),
+				"new",
+			);
+		},
+
 	"an image comes back with its bytes, type and sizes": async (store) => {
 		await store.putImage("c_1", "shots/s1.webp", image("bytes", 1000));
 		const stored = await store.getImage("c_1", "shots/s1.webp");

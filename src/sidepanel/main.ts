@@ -11,6 +11,9 @@ import {
 	isPageOf,
 	nextNumbers,
 	validateCase,
+	withComment,
+	withoutAnnotation,
+	withResolution,
 } from "../lib/case.ts";
 import {
 	exportCase,
@@ -362,6 +365,8 @@ function openCase(id: string, caseHint?: string): void {
 		s.view = { kind: "case", id };
 		s.caseHint = caseHint;
 		s.deleteArmedAt = undefined;
+		s.markEdit = undefined;
+		s.markDeleteArmed = undefined;
 	});
 	void refreshCase();
 }
@@ -733,6 +738,74 @@ const actions: Actions = {
 		);
 	},
 
+	editMark(_c, a, mode) {
+		update((s) => {
+			s.markDeleteArmed = undefined;
+			s.markEdit = {
+				annotationId: a.id,
+				mode,
+				kind: a.resolution?.kind ?? "fixed",
+				text: mode === "comment" ? a.comment : (a.resolution?.note ?? ""),
+			};
+		});
+	},
+
+	typeMark(change) {
+		update((s) => {
+			if (s.markEdit !== undefined) s.markEdit = { ...s.markEdit, ...change };
+		});
+	},
+
+	cancelMarkEdit() {
+		update((s) => (s.markEdit = undefined));
+	},
+
+	resolveMark(c, a, kind, note) {
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) => ({
+			value: withResolution(current, a.id, { kind, note }, now),
+		}));
+	},
+
+	reopenMark(c, a) {
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) => ({
+			value: withResolution(current, a.id, null, now),
+		}));
+	},
+
+	saveComment(c, a, text) {
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) => ({
+			value: withComment(current, a.id, text, now),
+		}));
+	},
+
+	deleteMark(c, a) {
+		const armed = state.markDeleteArmed;
+		if (armed?.annotationId !== a.id) {
+			const at = Date.now();
+			update((s) => {
+				s.markEdit = undefined;
+				s.markDeleteArmed = { annotationId: a.id, at };
+			});
+			setTimeout(() => {
+				update((s) => {
+					if (s.markDeleteArmed?.at === at) s.markDeleteArmed = undefined;
+				});
+			}, DELETE_ARMED_MS);
+			return;
+		}
+		// A double click is no second thought, nor a second delete.
+		if (Date.now() - armed.at < DELETE_CLICK_GAP_MS) return;
+		if (deleting.has(a.id)) return;
+		deleting.add(a.id);
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) =>
+			withoutAnnotation(current, a.id, now),
+		).finally(() => deleting.delete(a.id));
+	},
+
 	typeVerdict(caseId, text) {
 		update((s) => {
 			if (s.current?.id === caseId && text === (s.current.verdict ?? ""))
@@ -902,7 +975,68 @@ function caseChanged(caseId: string): void {
 	void refreshCases();
 	void store.getCase(caseId).then((c) => {
 		if (c === undefined) return clearDeleted(caseId);
+		// A mark settled or deleted elsewhere (an AI app, another window).
+		return redrawLoaded(c);
 	});
+}
+
+/**
+ * The case changed while its marks are on a page: they follow, and the
+ * candidates chosen there stay.
+ */
+async function redrawLoaded(c: Case): Promise<void> {
+	const tabs = new Set<number>();
+	if (state.loaded?.caseId === c.id) tabs.add(state.loaded.tabId);
+	if (state.overlay?.loadedCase === c.id && state.tab !== undefined)
+		tabs.add(state.tab.id);
+	for (const tabId of tabs) {
+		const result = (await chrome.tabs
+			.sendMessage(tabId, { type: "case:update", case: c })
+			.catch(() => null)) as LoadResult | null;
+		if (result === null) continue;
+		update((s) => {
+			if (s.loaded?.caseId === c.id && s.loaded.tabId === tabId)
+				s.loaded = {
+					...s.loaded,
+					matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+				};
+		});
+	}
+}
+
+/** Marks being deleted now: a second click waits for the first. */
+const deleting = new Set<string>();
+
+/** Change a mark of a case in one transaction, then show and draw the result. */
+async function changeMark(
+	caseId: string,
+	annotationId: string,
+	change: (current: Case) => { value: Case; images?: string[] },
+): Promise<void> {
+	const hint = caseHintWriter();
+	try {
+		// The images go in the same transaction: a save may take a freed path.
+		const saved = await store.updateCase(caseId, (current) => {
+			if (current === undefined) throw new Error("The case no longer exists.");
+			const next = change(current);
+			return {
+				value: validateCase(next.value),
+				deleteImages: next.images ?? [],
+			};
+		});
+		update((s) => {
+			// Another mark's form, opened meanwhile, stays.
+			if (s.markEdit?.annotationId === annotationId) s.markEdit = undefined;
+			if (s.markDeleteArmed?.annotationId === annotationId)
+				s.markDeleteArmed = undefined;
+			if (s.current?.id === caseId) s.current = saved;
+		});
+		announce(caseId);
+		await refreshCase();
+		await redrawLoaded(saved);
+	} catch (error) {
+		hint(`Not saved: ${message(error)}`);
+	}
 }
 
 function connectTo(relay: string): TabMcp {

@@ -10,6 +10,9 @@ import {
 	samePath,
 	shapeOnBox,
 	validateCase,
+	withComment,
+	withoutAnnotation,
+	withResolution,
 } from "../src/lib/case.ts";
 import { sampleCase } from "./fixtures.ts";
 
@@ -374,6 +377,99 @@ describe("the same path", () => {
 		);
 		expect(samePath("https://a.ch/kk#top", "https://a.ch/kk#bottom")).toBe(
 			true,
+		);
+	});
+});
+
+describe("settling, editing and deleting a mark", () => {
+	const NOW = "2026-11-08T16:00:00.000Z";
+	/** Marks 1 and 2 on s1, mark 3 alone on s2. */
+	function three(): Case {
+		const c = withMarks();
+		const [first] = c.annotations as [Annotation];
+		c.annotations = [
+			first,
+			{ ...first, id: "a2", number: 2, crop: "crops/a2.webp" },
+			{ ...first, id: "a3", number: 3, shot: "s2", crop: "crops/a3.webp" },
+		];
+		return c;
+	}
+
+	test("a resolution with a note, then open again", () => {
+		const c = three();
+		const done = withResolution(
+			c,
+			"a2",
+			{ kind: "wontfix", note: "  Legal wants it  " },
+			NOW,
+		);
+		expect(done.annotations[1]?.resolution).toEqual({
+			kind: "wontfix",
+			note: "Legal wants it",
+			at: NOW,
+		});
+		expect(done.updatedAt).toBe(NOW);
+		expect(validateCase(JSON.parse(JSON.stringify(done)))).toEqual(done);
+		const open = withResolution(done, "a2", null, NOW);
+		expect("resolution" in (open.annotations[1] as object)).toBe(false);
+	});
+
+	test("an empty note is no note", () => {
+		const done = withResolution(
+			three(),
+			"a1",
+			{ kind: "fixed", note: " " },
+			NOW,
+		);
+		expect(done.annotations[0]?.resolution).toEqual({ kind: "fixed", at: NOW });
+	});
+
+	test("a resolution of another kind is refused on import", () => {
+		const c = three();
+		const bad = JSON.parse(JSON.stringify(c));
+		bad.annotations[0].resolution = { kind: "duplicate", at: NOW };
+		expect(() => validateCase(bad)).toThrow(
+			"case.annotations[0].resolution.kind",
+		);
+	});
+
+	test("a comment edited is the user's", () => {
+		const c = three();
+		c.annotations[2] = { ...(c.annotations[2] as Annotation), author: "ai" };
+		const edited = withComment(c, "a3", "  Shorter  ", NOW);
+		expect(edited.annotations[2]?.comment).toBe("Shorter");
+		expect(edited.annotations[2]?.author).toBe("user");
+	});
+
+	test("a mark gone: its crop goes, the shared screenshot stays", () => {
+		const { value, images } = withoutAnnotation(three(), "a2", NOW);
+		expect(value.annotations.map((a) => a.id)).toEqual(["a1", "a3"]);
+		expect(value.shots.map((s) => s.id)).toEqual(["s1", "s2"]);
+		expect(images).toEqual(["crops/a2.webp"]);
+		expect(validateCase(JSON.parse(JSON.stringify(value)))).toEqual(value);
+	});
+
+	test("the last mark on a screenshot takes the screenshot with it", () => {
+		const { value, images } = withoutAnnotation(three(), "a3", NOW);
+		expect(value.shots.map((s) => s.id)).toEqual(["s1"]);
+		expect(images).toEqual(["crops/a3.webp", "shots/s2.webp"]);
+	});
+
+	test("a deleted mark's number is not given again", () => {
+		const { value } = withoutAnnotation(three(), "a3", NOW);
+		expect(value.lastNumber).toBe(3);
+		expect(nextNumbers(value).annotation).toBe(4);
+		const bad = JSON.parse(JSON.stringify(three()));
+		bad.lastNumber = 2;
+		expect(() => validateCase(bad)).toThrow("case.lastNumber");
+	});
+
+	test("a mark that is gone already says so", () => {
+		expect(() => withoutAnnotation(three(), "a9", NOW)).toThrow(
+			"The mark no longer exists.",
+		);
+		expect(() => withComment(three(), "a9", "x", NOW)).toThrow(
+			"The mark no longer exists.",
 		);
 	});
 });

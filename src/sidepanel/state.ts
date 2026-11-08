@@ -5,10 +5,19 @@
  * of work for the same thing makes an older one drop its result (`Latest`).
  */
 
-import type { Case } from "../lib/case.ts";
+import type { Case, ResolutionKind } from "../lib/case.ts";
 import type { ParsedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
 import type { Size } from "./size.ts";
+
+export interface MarkEdit {
+	annotationId: string;
+	mode: "resolve" | "comment";
+	/** The resolution chosen (resolve). */
+	kind: ResolutionKind;
+	/** The note (resolve) or the comment (comment), as typed. */
+	text: string;
+}
 
 export interface TabInfo {
 	id: number;
@@ -60,6 +69,10 @@ export interface PanelState {
 	importError: string | undefined;
 	/** When "Delete" was clicked once. */
 	deleteArmedAt: number | undefined;
+	/** A mark of the open case being resolved or its comment edited. */
+	markEdit: MarkEdit | undefined;
+	/** A mark's Delete, clicked once: the second click deletes. */
+	markDeleteArmed: { annotationId: string; at: number } | undefined;
 	/** Next to "Save verdict": "Saved", or why not. */
 	verdictStatus: string | undefined;
 	/** Verdicts typed and not saved yet, by case. */
@@ -90,6 +103,8 @@ export const initialState = (): PanelState => ({
 	importing: undefined,
 	importError: undefined,
 	deleteArmedAt: undefined,
+	markEdit: undefined,
+	markDeleteArmed: undefined,
 	verdictStatus: undefined,
 	verdictDrafts: new Map(),
 	allSites: false,

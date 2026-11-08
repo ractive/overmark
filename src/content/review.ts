@@ -46,6 +46,15 @@ interface Entry {
 /** Let the page run between annotations: loading a big case takes a while. */
 const yieldToPage = () => new Promise<void>((r) => setTimeout(r, 0));
 
+/** The same mark, as far as the page is concerned: where and on what. */
+function sameMark(a: Annotation, b: Annotation): boolean {
+	return (
+		a.shot === b.shot &&
+		JSON.stringify(a.shape) === JSON.stringify(b.shape) &&
+		JSON.stringify(a.element) === JSON.stringify(b.element)
+	);
+}
+
 export class Reviewer {
 	readonly overlay: Overlay;
 	#case: Case | undefined;
@@ -55,6 +64,9 @@ export class Reviewer {
 	#timer: ReturnType<typeof setInterval> | undefined;
 	/** A newer load or a clear stops a load that is still running. */
 	#generation = 0;
+	/** The case a load is finding marks for now, and a newer version of it. */
+	#loading: string | undefined;
+	#newer: Case | undefined;
 
 	constructor(overlay: Overlay) {
 		this.overlay = overlay;
@@ -72,6 +84,22 @@ export class Reviewer {
 	}
 
 	async load(c: Case): Promise<LoadResult> {
+		this.#loading = c.id;
+		this.#newer = undefined;
+		try {
+			const result = await this.#load(c);
+			const newer = this.#newer;
+			this.#newer = undefined;
+			this.#loading = undefined;
+			return newer === undefined
+				? result
+				: ((await this.update(newer)) ?? result);
+		} finally {
+			if (this.#loading === c.id) this.#loading = undefined;
+		}
+	}
+
+	async #load(c: Case): Promise<LoadResult> {
 		const generation = ++this.#generation;
 		clearTextCache(); // what an abandoned load left behind
 		const search = this.#search();
@@ -103,6 +131,55 @@ export class Reviewer {
 			caseId: c.id,
 			url: location.href,
 			matches: entries.map((e) => e.match),
+		};
+	}
+
+	/**
+	 * The loaded case changed (a mark settled, edited, deleted or added): its
+	 * marks follow, and the candidates chosen stay for marks still the same.
+	 * `null` when another case, or none, is loaded. A load of the case still
+	 * running takes the newer version when it is done.
+	 */
+	async update(c: Case): Promise<LoadResult | null> {
+		if (this.#loading === c.id) {
+			this.#newer = c;
+			return null;
+		}
+		if (this.#case?.id !== c.id) return null;
+		const generation = this.#generation;
+		const byId = new Map(c.annotations.map((a) => [a.id, a]));
+		const kept: Entry[] = [];
+		const search: Annotation[] = [];
+		for (const e of this.#entries) {
+			const annotation = byId.get(e.annotation.id);
+			if (annotation === undefined) continue;
+			// A replaced copy (an import) may give the id to another mark.
+			if (sameMark(annotation, e.annotation)) kept.push({ ...e, annotation });
+			else search.push(annotation);
+		}
+		const known = new Set(this.#entries.map((e) => e.annotation.id));
+		search.push(...c.annotations.filter((a) => !known.has(a.id)));
+		if (search.length > 0) {
+			const page = this.#search();
+			for (const annotation of search) {
+				await yieldToPage();
+				if (generation !== this.#generation || this.#case?.id !== c.id)
+					return null;
+				kept.push(this.#find(page, annotation));
+			}
+			kept.sort((a, b) => a.annotation.number - b.annotation.number);
+			clearTextCache();
+		}
+		this.#case = c;
+		this.#entries = kept;
+		if (this.#focused !== undefined && !byId.has(this.#focused))
+			this.#focused = undefined;
+		this.#renderBar();
+		this.#render();
+		return {
+			caseId: c.id,
+			url: location.href,
+			matches: kept.map((e) => e.match),
 		};
 	}
 
@@ -249,6 +326,7 @@ export class Reviewer {
 				entry.match.status !== "ambiguous" &&
 				entry.candidates[entry.match.current]?.found === true,
 			focused: annotation.id === this.#focused,
+			resolved: annotation.resolution !== undefined,
 		};
 	}
 
@@ -268,6 +346,7 @@ export class Reviewer {
 			rect: null,
 			found: false,
 			focused: annotation.id === this.#focused,
+			resolved: annotation.resolution !== undefined,
 		};
 	}
 
@@ -298,8 +377,11 @@ export class Reviewer {
 
 	#renderBar(): void {
 		const doc = this.overlay.doc;
-		const total = this.#entries.length;
-		const found = this.#entries.filter(
+		// Resolved marks are drawn, faded, but no longer counted.
+		const open = this.#entries.filter((e) => !e.annotation.resolution);
+		const total = open.length;
+		const resolved = this.#entries.length - total;
+		const found = open.filter(
 			(e) => e.match.status !== "lost" && e.match.status !== "no-element",
 		).length;
 		const title = doc.createElement("span");
@@ -307,7 +389,10 @@ export class Reviewer {
 		title.textContent = this.#case?.title ?? "";
 		const count = doc.createElement("span");
 		count.className = "count";
-		count.textContent = `${found} of ${total} found`;
+		count.textContent =
+			resolved === 0
+				? `${found} of ${total} found`
+				: `${found} of ${total} open found, ${resolved} resolved`;
 		const text = doc.createElement("span");
 		text.className = "text";
 		text.dataset["role"] = "review-status";

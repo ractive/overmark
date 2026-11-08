@@ -121,6 +121,25 @@ export interface Annotation {
 	/** `crops/<id>.webp` */
 	crop: string;
 	element: ElementDetails | null;
+	/** How the mark was settled; none: still open. */
+	resolution?: Resolution;
+}
+
+/** What became of a mark: fixed, or left as it is and why. */
+export const RESOLUTION_KINDS = ["fixed", "wontfix", "cantreproduce"] as const;
+export type ResolutionKind = (typeof RESOLUTION_KINDS)[number];
+
+export const RESOLUTION_LABEL: Record<ResolutionKind, string> = {
+	fixed: "Fixed",
+	wontfix: "Won't fix",
+	cantreproduce: "Can't reproduce",
+};
+
+export interface Resolution {
+	kind: ResolutionKind;
+	/** Why, in the user's words; none when it says nothing. */
+	note?: string;
+	at: string;
 }
 
 export interface PageInfo {
@@ -143,6 +162,11 @@ export interface Case {
 	verdict: string | null;
 	/** When this copy came in from a file: its texts are whoever wrote the file's. */
 	importedAt?: string;
+	/**
+	 * The highest mark number used, a deleted mark's too: its pin stays on the
+	 * screenshots, so no new mark takes its number.
+	 */
+	lastNumber?: number;
 }
 
 /** The longest case title. */
@@ -223,7 +247,8 @@ export function nextNumbers(c: Case | undefined): {
 	if (c === undefined) return { annotation: 1, shot: 1 };
 	const max = (values: number[]) => values.reduce((a, b) => Math.max(a, b), 0);
 	return {
-		annotation: max(c.annotations.map((a) => a.number)) + 1,
+		annotation:
+			max([...c.annotations.map((a) => a.number), c.lastNumber ?? 0]) + 1,
 		shot: max(c.shots.map((s) => Number(s.id.slice(1)) || 0)) + 1,
 	};
 }
@@ -549,11 +574,15 @@ export function validateCase(value: unknown): Case {
 				shape: shape(a["shape"], `${p}.shape`),
 				crop,
 				element: element(a["element"], `${p}.element`),
+				...(a["resolution"] === undefined
+					? {}
+					: { resolution: resolution(a["resolution"], `${p}.resolution`) }),
 			};
 		},
 	);
 	const verdict = o["verdict"];
 	const importedAt = o["importedAt"];
+	const lastNumber = o["lastNumber"];
 	return {
 		format: CASE_FORMAT,
 		id: id(o["id"], "case.id"),
@@ -576,5 +605,134 @@ export function validateCase(value: unknown): Case {
 		...(importedAt === undefined
 			? {}
 			: { importedAt: str(importedAt, "case.importedAt", 64) }),
+		...(lastNumber === undefined
+			? {}
+			: { lastNumber: highest(lastNumber, annotations) }),
+	};
+}
+
+function resolution(value: unknown, path: string): Resolution {
+	const o = obj(value, path);
+	const kind = o["kind"];
+	if (!RESOLUTION_KINDS.includes(kind as ResolutionKind))
+		fail(`${path}.kind`, `must be one of ${RESOLUTION_KINDS.join(", ")}`);
+	const note = o["note"];
+	return {
+		kind: kind as ResolutionKind,
+		...(note === undefined || note === ""
+			? {}
+			: { note: str(note, `${path}.note`, MAX_COMMENT) }),
+		at: str(o["at"], `${path}.at`, 64),
+	};
+}
+
+function highest(value: unknown, annotations: readonly Annotation[]): number {
+	const n = num(value, "case.lastNumber");
+	if (
+		!Number.isInteger(n) ||
+		n > MAX_NUMBER ||
+		annotations.some((a) => a.number > n)
+	)
+		fail(
+			"case.lastNumber",
+			"must be an integer no lower than any mark's number",
+		);
+	return n;
+}
+
+// --- changes to one mark ------------------------------------------------------
+
+function changed(
+	c: Case,
+	annotationId: string,
+	change: (a: Annotation) => Annotation,
+	now: string,
+): Case {
+	if (!c.annotations.some((a) => a.id === annotationId))
+		throw new CaseError("The mark no longer exists.");
+	return {
+		...c,
+		annotations: c.annotations.map((a) =>
+			a.id === annotationId ? change(a) : a,
+		),
+		updatedAt: now,
+	};
+}
+
+/** The case with the mark settled as `resolution`, or open again (`null`). */
+export function withResolution(
+	c: Case,
+	annotationId: string,
+	resolution: { kind: ResolutionKind; note?: string } | null,
+	now: string,
+): Case {
+	return changed(
+		c,
+		annotationId,
+		(a) => {
+			const { resolution: _, ...open } = a;
+			if (resolution === null) return open;
+			const note = resolution.note?.trim().slice(0, MAX_COMMENT) ?? "";
+			return {
+				...open,
+				resolution: {
+					kind: resolution.kind,
+					...(note ? { note } : {}),
+					at: now,
+				},
+			};
+		},
+		now,
+	);
+}
+
+export function withComment(
+	c: Case,
+	annotationId: string,
+	comment: string,
+	now: string,
+): Case {
+	return changed(
+		c,
+		annotationId,
+		// The text is the user's now, whoever wrote it first.
+		(a) => ({
+			...a,
+			comment: comment.trim().slice(0, MAX_COMMENT),
+			author: "user",
+		}),
+		now,
+	);
+}
+
+/**
+ * The case without the mark, and the images that go with it: its crop, and its
+ * screenshot when no other mark is on it.
+ */
+export function withoutAnnotation(
+	c: Case,
+	annotationId: string,
+	now: string,
+): { value: Case; images: string[] } {
+	const gone = c.annotations.find((a) => a.id === annotationId);
+	if (gone === undefined) throw new CaseError("The mark no longer exists.");
+	const annotations = c.annotations.filter((a) => a.id !== annotationId);
+	const shotUsed = annotations.some((a) => a.shot === gone.shot);
+	const shot = c.shots.find((s) => s.id === gone.shot);
+	return {
+		value: {
+			...c,
+			annotations,
+			shots: shotUsed ? c.shots : c.shots.filter((s) => s.id !== gone.shot),
+			lastNumber: Math.max(
+				c.lastNumber ?? 0,
+				...c.annotations.map((a) => a.number),
+			),
+			updatedAt: now,
+		},
+		images: [
+			gone.crop,
+			...(shotUsed || shot === undefined ? [] : [shot.image]),
+		],
 	};
 }

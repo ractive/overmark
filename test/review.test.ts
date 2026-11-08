@@ -223,3 +223,102 @@ describe("the outline", () => {
 		expect(overlay.items[0]?.found).toBe(true);
 	});
 });
+
+describe("a loaded case that changes", () => {
+	const PAGE = `<main><h1>Prämien</h1><button>Berechnen</button><p>Kontakt</p></main>`;
+	function twoMarks(): Case {
+		const mark = (id: string, n: number, el: Element): Annotation => {
+			const element = describeElement(el);
+			return {
+				id,
+				number: n,
+				shot: "s1",
+				comment: "",
+				author: "user",
+				shape: { kind: "element", rect: element.rect },
+				crop: `crops/${id}.webp`,
+				element,
+			};
+		};
+		return {
+			...sampleCase(),
+			shots: [shot("s1")],
+			annotations: [mark("a1", 1, $("button")), mark("a2", 2, $("p"))],
+		};
+	}
+
+	test("a resolved mark is drawn resolved, no longer counted, its candidate kept", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = twoMarks();
+		await reviewer.load(c);
+		reviewer.show("a1", 0);
+		const settled = {
+			...c,
+			annotations: c.annotations.map((a) =>
+				a.id === "a2"
+					? { ...a, resolution: { kind: "fixed" as const, at: "now" } }
+					: a,
+			),
+		};
+		const result = await reviewer.update(settled);
+		expect(result?.matches.map((m) => m.annotationId)).toEqual(["a1", "a2"]);
+		expect(
+			(overlay.items as unknown as { resolved: boolean }[]).map(
+				(i) => i.resolved,
+			),
+		).toEqual([false, true]);
+		expect(bar()).toContain("1 of 1 open found, 1 resolved");
+	});
+
+	test("a deleted mark leaves; another case is not touched", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = twoMarks();
+		await reviewer.load(c);
+		const result = await reviewer.update({
+			...c,
+			annotations: [c.annotations[0] as Annotation],
+		});
+		expect(result?.matches.length).toBe(1);
+		expect(overlay.items.length).toBe(1);
+		expect(await reviewer.update({ ...c, id: "c_other" })).toBeNull();
+	});
+
+	test("a replaced copy giving an id to another mark: that one is looked for anew", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = twoMarks();
+		await reviewer.load(c);
+		const [first, second] = c.annotations as [Annotation, Annotation];
+		// a2 now marks the heading, as a file imported over it says.
+		const h1 = describeElement($("h1"));
+		const replaced = {
+			...c,
+			annotations: [
+				first,
+				{
+					...second,
+					element: h1,
+					shape: { kind: "element" as const, rect: h1.rect },
+				},
+			],
+		};
+		const result = await reviewer.update(replaced);
+		expect(result?.matches[1]?.candidates[0]?.selector).toBe(
+			describeElement($("h1")).selector,
+		);
+	});
+
+	test("a change while the case still loads is drawn once the load ends", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = twoMarks();
+		const loading = reviewer.load(c);
+		expect(
+			await reviewer.update({
+				...c,
+				annotations: [c.annotations[0] as Annotation],
+			}),
+		).toBeNull();
+		const result = await loading;
+		expect(result.matches.length).toBe(1);
+		expect(overlay.items.length).toBe(1);
+	});
+});
