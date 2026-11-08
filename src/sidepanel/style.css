@@ -215,8 +215,15 @@ button.danger {
 	color: var(--danger);
 }
 
-button.danger[data-armed] {
+/*
+ * "Really delete?": the one filled button, so the second click is meant.
+ * After the hover rules, so the pointer still over it leaves it filled.
+ */
+button.danger[data-armed],
+button.danger[data-armed]:hover:not(:disabled) {
 	border-color: var(--danger);
+	background: var(--danger);
+	color: var(--sheet);
 }
 
 button.link {
@@ -487,26 +494,16 @@ ol.annotations {
 .mark-actions {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 2px 14px;
+	gap: 6px;
 }
 
-/* Quiet: a list of ten marks is not a wall of buttons. */
-.mark-actions button.small {
-	padding: 2px 0;
-	border: 0;
-	background: none;
-	color: var(--muted);
+.mark-actions button.danger:not([data-armed]) {
+	border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
 
-.mark-actions button.small:hover:not(:disabled) {
-	background: none;
-	color: var(--fg);
-	text-decoration: underline;
-}
-
-.mark-actions button.danger {
-	margin-left: auto;
-	color: var(--danger);
+.mark-actions button.danger:not([data-armed]):hover:not(:disabled) {
+	border-color: var(--danger);
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 button.small {
