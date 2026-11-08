@@ -71,7 +71,7 @@ the tools say so to the model.
 ### A relay on your computer, for Claude Code
 
 The relay must allow Overmark's origin, `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`.
-Relays from tab-mcp's next release on take it as a site:
+Relay 0.7.0 and later take it as a site:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
@@ -79,12 +79,8 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_STORE=memory \
   -e TAB_MCP_SITES='[{"origin":"chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg","name":"Overmark"}]' \
-  ractive/tab-mcp:<next release>
+  ractive/tab-mcp:0.7.0
 ```
-
-Relay 0.6.1 does not accept extension origins yet; for development, run it open with
-`-e TAB_MCP_ALLOWED_ORIGINS='*'` instead of `TAB_MCP_SITES`, bound to `127.0.0.1` as
-above. An open relay lets any website open sessions on it, so never expose it.
 
 Then, in the side panel's "AI app" section, keep the relay at `http://localhost:8080`
 and click "Connect AI app". Add the address it shows to Claude Code, then run `/mcp`
