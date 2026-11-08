@@ -24,6 +24,8 @@ export const FOUND_COLOUR = "#1a7f37";
 export const PROBABLE_COLOUR = "#b45f06";
 /** A resolved mark: grey and faded, so the open ones stand out. */
 export const RESOLVED_COLOUR = "#6b7385";
+/** How much of a resolved mark's outline shows; its pin stays solid to be found. */
+export const RESOLVED_OPACITY = 0.3;
 const SVG = "http://www.w3.org/2000/svg";
 const INK = "#1d2433";
 const AMBER = "#ffb000";
@@ -455,13 +457,7 @@ export class Overlay {
 			};
 			const group = svg(doc, "g", {
 				"data-review": item.number,
-				...(item.resolved
-					? {
-							"data-resolved": "",
-							// A focused one is looked for: it shows fully.
-							opacity: item.focused ? 1 : 0.75,
-						}
-					: {}),
+				...(item.resolved ? { "data-resolved": "" } : {}),
 			});
 			if (item.focused && item.rect !== null)
 				group.append(
@@ -476,10 +472,17 @@ export class Overlay {
 						"stroke-width": 1,
 					}),
 				);
-			group.append(
-				...this.#shape(item.shape, colour, look),
-				this.#badge(item, colour),
-			);
+			const shape = this.#shape(item.shape, colour, look);
+			// A focused one is looked for: it shows fully.
+			if (item.resolved && !item.focused) {
+				const faded = svg(doc, "g", {
+					"data-faded": "",
+					opacity: RESOLVED_OPACITY,
+				});
+				faded.append(...shape);
+				group.append(faded);
+			} else group.append(...shape);
+			group.append(this.#badge(item, colour));
 			return group;
 		});
 		this.#review.replaceChildren(...groups);

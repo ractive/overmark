@@ -9,6 +9,7 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { RESOLVED_OPACITY } from "../../src/content/overlay.ts";
 import { webpSize } from "../../src/lib/export.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
@@ -580,6 +581,17 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			),
 		).toBe("Won't fixLegal wants it");
 		await v1.page.waitFor(`${review(2)}?.hasAttribute("data-resolved")`);
+		// Its outline fades; its pin stays solid, to be found and clicked.
+		expect(
+			await v1.page.eval<string[]>(`(() => {
+				const mark = ${review(2)};
+				return [
+					mark.getAttribute("opacity"),
+					mark.querySelector("[data-faded]")?.getAttribute("opacity"),
+					mark.querySelector("[data-faded] [data-number]") === null,
+				].map(String);
+			})()`),
+		).toEqual(["null", String(RESOLVED_OPACITY), "true"]);
 		expect(await v1.page.eval<string>(bar)).toBe(
 			"2 of 2 open found, 1 resolved",
 		);

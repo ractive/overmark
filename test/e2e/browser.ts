@@ -435,13 +435,24 @@ export class Page {
 		return r.result.value as T;
 	}
 
-	/** Wait until `expression` is truthy. */
+	/**
+	 * Wait until `expression` is truthy. One that throws (an element not
+	 * rendered yet) is not yet true; the last error is in the timeout's message.
+	 */
 	async waitFor(expression: string, timeoutMs = 5000): Promise<void> {
 		const end = Date.now() + timeoutMs;
+		let last = "";
 		for (;;) {
-			if (await this.eval<boolean>(`Boolean(${expression})`)) return;
+			try {
+				if (await this.eval<boolean>(`Boolean(${expression})`)) return;
+				last = "";
+			} catch (e) {
+				last = e instanceof Error ? e.message : String(e);
+			}
 			if (Date.now() > end)
-				throw new Error(`timed out waiting for ${expression}`);
+				throw new Error(
+					`timed out waiting for ${expression}${last ? ` (last: ${last})` : ""}`,
+				);
 			await Bun.sleep(50);
 		}
 	}
