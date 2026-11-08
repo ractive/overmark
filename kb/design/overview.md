@@ -88,9 +88,9 @@ rules on remote code, and safety).
 `TabMcp` from `@ractive-ch/tab-mcp-client` runs in the side panel, an extension page. Its
 WebSocket therefore carries the extension's origin `chrome-extension://<id>`, which a
 website cannot fake. A content script's requests would carry the page's origin, so the
-connection must not live there. The relay must allow the extension's origin (tab-mcp
-iteration 17; `TAB_MCP_ALLOWED_ORIGINS=*` works in development). Closing the side panel
-ends the connection, as closing a tab does for a page.
+connection must not live there. The relay must allow the extension's origin (relay 0.7.0
+and later take it in `TAB_MCP_SITES`). Closing the side panel ends the connection, as
+closing a tab does for a page.
 
 The extension ID is fixed by the `key` in the manifest (`manifest-key.txt`, a public key;
 development ID `fphhchhlgklidhnodoleiebmdhnfdadg`). Store builds leave the key out; once
