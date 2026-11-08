@@ -48,6 +48,16 @@ export function formatDate(iso: string): string {
 }
 
 /** `www.example.com/kk` from a URL. */
+/** A web page's address, one a click may open (an imported case's is anyone's). */
+export function isWebPage(url: string): boolean {
+	try {
+		const { protocol } = new URL(url);
+		return protocol === "https:" || protocol === "http:";
+	} catch {
+		return false;
+	}
+}
+
 export function shortUrl(url: string): string {
 	try {
 		const u = new URL(url);

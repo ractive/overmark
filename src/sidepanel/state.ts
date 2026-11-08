@@ -8,11 +8,14 @@
 import type { Case } from "../lib/case.ts";
 import type { ParsedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
+import type { Size } from "./size.ts";
 
 export interface TabInfo {
 	id: number;
 	url: string;
 	title: string;
+	/** In CSS pixels, as a case's viewport; unknown where Chrome does not say. */
+	size: Size | undefined;
 }
 
 /** The case loaded onto a tab, and where its marks were found there. */

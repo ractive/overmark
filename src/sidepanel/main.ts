@@ -29,13 +29,14 @@ import type {
 } from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
-import { byId, h, shortUrl } from "./dom.ts";
+import { byId, h, isWebPage, shortUrl } from "./dom.ts";
 import {
 	createConnection,
 	DEFAULT_RELAY,
 	KeepOn,
 	relayProblem,
 } from "./mcp.ts";
+import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import { Latest, Panel, type PanelState } from "./state.ts";
 import { type Actions, NO_ACCESS, render } from "./view.ts";
 
@@ -108,6 +109,60 @@ async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 	return tab;
 }
 
+/** The tab's size in CSS pixels, as a case records its viewport. */
+async function tabSize(tab: chrome.tabs.Tab): Promise<Size | undefined> {
+	if (tab.id === undefined || !tab.width || !tab.height) return undefined;
+	const zoom = await chrome.tabs.getZoom(tab.id).catch(() => 1);
+	return cssSize({ width: tab.width, height: tab.height }, zoom);
+}
+
+/** Waits until the tab's size holds still, a second at most. */
+async function settledSize(tabId: number): Promise<void> {
+	let last = "";
+	for (let i = 0; i < 10; i++) {
+		await new Promise((r) => setTimeout(r, 100));
+		const tab = await chrome.tabs.get(tabId);
+		const now = `${tab.width}×${tab.height}`;
+		if (now === last) return;
+		last = now;
+	}
+}
+
+/** The tab once it has loaded; `undefined` if it closed or took too long. */
+function loadedTab(
+	tabId: number,
+	timeout = 30_000,
+): Promise<chrome.tabs.Tab | undefined> {
+	return new Promise((resolve) => {
+		const done = (tab?: chrome.tabs.Tab) => {
+			clearTimeout(timer);
+			chrome.tabs.onUpdated.removeListener(updated);
+			chrome.tabs.onRemoved.removeListener(removed);
+			resolve(tab);
+		};
+		const updated = (
+			id: number,
+			info: { status?: string },
+			tab: chrome.tabs.Tab,
+		) => {
+			if (id === tabId && info.status === "complete") done(tab);
+		};
+		const removed = (id: number) => {
+			if (id === tabId) done();
+		};
+		const timer = setTimeout(() => done(), timeout);
+		chrome.tabs.onUpdated.addListener(updated);
+		chrome.tabs.onRemoved.addListener(removed);
+		// It may have loaded before anyone listened.
+		chrome.tabs.get(tabId).then(
+			(tab) => {
+				if (tab.status === "complete") done(tab);
+			},
+			() => done(),
+		);
+	});
+}
+
 /** The overlay's state on the tab, or `undefined` where it is not injected. */
 async function overlayState(tabId: number): Promise<OverlayState | undefined> {
 	try {
@@ -126,12 +181,13 @@ async function refreshTab(): Promise<void> {
 		const tab = await activeTab();
 		const overlay =
 			tab?.id === undefined ? undefined : await overlayState(tab.id);
+		const size = tab === undefined ? undefined : await tabSize(tab);
 		if (!work.current()) return;
 		update((s) => {
 			const next =
 				tab?.id === undefined
 					? undefined
-					: { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" };
+					: { id: tab.id, url: tab.url ?? "", title: tab.title ?? "", size };
 			// A hint is about the tab in front when it was given; the first read
 			// of that tab is no change of it.
 			if (
@@ -351,7 +407,15 @@ const actions: Actions = {
 		})();
 	},
 
-	openCase: (id) => openCase(id),
+	openCase(id) {
+		// The page in front is the case's: show its marks there too, unless
+		// they are already (a load again would drop the candidates chosen).
+		const c = state.cases.find((it) => it.id === id);
+		const url = state.tab?.url;
+		if (c && url && isPageOf(c, url) && state.loaded?.caseId !== id)
+			return actions.openAndLoad(c);
+		openCase(id);
+	},
 	closeCase,
 
 	loadOntoTab(c) {
@@ -387,6 +451,103 @@ const actions: Actions = {
 	openAndLoad(c) {
 		openCase(c.id);
 		actions.loadOntoTab(c);
+	},
+
+	openPage(c) {
+		if (!isWebPage(c.page.url)) return;
+		const hint = caseHintWriter();
+		void (async () => {
+			try {
+				const opened = await chrome.tabs.create({ url: c.page.url });
+				if (opened.id === undefined) return;
+				hint(`Opening ${shortUrl(c.page.url)}…`);
+				const tab = await loadedTab(opened.id);
+				if (tab === undefined)
+					return hint(
+						`${shortUrl(c.page.url)} did not finish loading. Press "Load onto this tab" once it has.`,
+					);
+				// The user went on to another tab meanwhile: leave it be.
+				if ((await activeTab())?.id !== tab.id) return hint("");
+				// Chrome tells the address only where Overmark may run; there the
+				// page may have sent the tab elsewhere, to a sign-in say.
+				if (tab.url && !isPageOf(c, tab.url))
+					return hint(
+						`The page went on to ${shortUrl(tab.url)}, so the case was not loaded there.`,
+					);
+				actions.loadOntoTab(c);
+			} catch (error) {
+				hint(`Could not open the page: ${message(error)}`);
+			}
+		})();
+	},
+
+	matchSize(c) {
+		const hint = caseHintWriter();
+		void (async () => {
+			try {
+				const want = {
+					width: c.page.viewport.width,
+					height: c.page.viewport.height,
+				};
+				for (let attempt = 0; attempt < 3; attempt++) {
+					const tab = await activeTab();
+					if (tab?.id === undefined || !tab.width || !tab.height) return;
+					const win = await chrome.windows.get(tab.windowId);
+					if (win.state !== "normal") {
+						// A maximised or full-screen window takes no size.
+						await chrome.windows.update(tab.windowId, { state: "normal" });
+						await settledSize(tab.id);
+						continue;
+					}
+					if (win.width === undefined || win.height === undefined) return;
+					const zoom = await chrome.tabs.getZoom(tab.id).catch(() => 1);
+					const bigger = windowFor(
+						want,
+						{ width: tab.width, height: tab.height },
+						{ width: win.width, height: win.height },
+						zoom,
+					);
+					// The panel's screen is the window's.
+					const room = screen as Screen & {
+						availLeft?: number;
+						availTop?: number;
+					};
+					const bounds = onScreen(
+						bigger,
+						{ left: win.left ?? 0, top: win.top ?? 0 },
+						{
+							left: room.availLeft ?? 0,
+							top: room.availTop ?? 0,
+							width: room.availWidth,
+							height: room.availHeight,
+						},
+					);
+					await chrome.windows.update(tab.windowId, bounds);
+					// Chrome sizes the tab a moment after the window.
+					await settledSize(tab.id);
+					const now = await activeTab();
+					const size = now && (await tabSize(now));
+					if (size && sameSize(size, want)) {
+						await refreshTab();
+						return hint(
+							`This tab is now ${size.width}×${size.height}, as when the marks were made.`,
+						);
+					}
+					// The screen has no more room: another try changes nothing.
+					if (bounds.width < bigger.width || bounds.height < bigger.height)
+						break;
+				}
+				await refreshTab();
+				const size = state.tab?.size;
+				hint(
+					size
+						? `The screen leaves room for ${size.width}×${size.height}; the marks were made at ${want.width}×${want.height}.`
+						: "Could not change the window's size.",
+				);
+			} catch (error) {
+				hint(`Could not change the window's size: ${message(error)}`);
+			}
+		})();
 	},
 
 	addMarks: (c) => void startAnnotating(c),
@@ -769,6 +930,15 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 });
 
 chrome.tabs.onActivated.addListener(() => void refreshTab());
+// The tab's size: the window's, the panel's own width, or the zoom changed.
+let resized: ReturnType<typeof setTimeout> | undefined;
+const sizeChanged = () => {
+	clearTimeout(resized);
+	resized = setTimeout(() => void refreshTab(), 150);
+};
+chrome.windows.onBoundsChanged.addListener(sizeChanged);
+chrome.tabs.onZoomChange.addListener(sizeChanged);
+window.addEventListener("resize", sizeChanged);
 chrome.tabs.onUpdated.addListener((id, info) => {
 	if (id === state.loaded?.tabId && info.status === "loading")
 		void forgetLoaded();
