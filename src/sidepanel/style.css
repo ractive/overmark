@@ -487,26 +487,23 @@ ol.annotations {
 .mark-actions {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 2px 14px;
-}
-
-/* Quiet: a list of ten marks is not a wall of buttons. */
-.mark-actions button.small {
-	padding: 2px 0;
-	border: 0;
-	background: none;
-	color: var(--muted);
-}
-
-.mark-actions button.small:hover:not(:disabled) {
-	background: none;
-	color: var(--fg);
-	text-decoration: underline;
+	gap: 6px;
 }
 
 .mark-actions button.danger {
-	margin-left: auto;
-	color: var(--danger);
+	border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.mark-actions button.danger:hover:not(:disabled) {
+	border-color: var(--danger);
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+/* "Really delete?": the one filled button, so a second click is meant. */
+.mark-actions button.danger[data-armed] {
+	border-color: var(--danger);
+	background: var(--danger);
+	color: var(--sheet);
 }
 
 button.small {
