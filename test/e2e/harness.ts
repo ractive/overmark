@@ -5,7 +5,6 @@
  * unlike the service worker).
  */
 
-import { setDefaultTimeout } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,8 +16,9 @@ import {
 import { Browser, findBrowser, type Page } from "./browser.ts";
 
 // A timed-out test also loses the browser, and with it the rest of its file:
-// on a busy machine a first screenshot alone can take longer than the default.
-setDefaultTimeout(30_000);
+// on a busy machine a first screenshot alone can take longer than Bun's default.
+// So `bun run test` sets `--timeout`; `setDefaultTimeout` in this module would
+// reach only the first test file of a run, and `bunfig.toml` none at all.
 
 export const browserBinary = findBrowser();
 

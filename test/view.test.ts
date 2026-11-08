@@ -285,3 +285,43 @@ describe("settings and errors at home", () => {
 		expect(el("import-error").hidden).toBe(true);
 	});
 });
+
+describe("the annotate button", () => {
+	const label = (change: (s: PanelState) => void) => {
+		const state = initialState();
+		change(state);
+		render(state, noActions);
+		return el<HTMLButtonElement>("annotate").textContent;
+	};
+	const c = sampleCase();
+	const overlay = {
+		visible: false,
+		url: "https://example.com/",
+		title: "",
+		drafts: 0,
+		saving: false,
+		target: { caseId: c.id, title: c.title, nextAnnotation: 2 },
+	};
+
+	test("says it goes on with the case the tab was adding to", () => {
+		expect(
+			label((s) => {
+				s.overlay = overlay;
+				s.cases = [c];
+			}),
+		).toBe("Continue annotating");
+	});
+
+	test("starts afresh once that case is gone", () => {
+		expect(label((s) => (s.overlay = overlay))).toBe("Annotate this page");
+	});
+
+	test("stops while the toolbar is up", () => {
+		expect(
+			label((s) => {
+				s.overlay = { ...overlay, visible: true };
+				s.cases = [c];
+			}),
+		).toBe("Stop annotating");
+	});
+});

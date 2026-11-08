@@ -319,11 +319,12 @@ export class Overlay {
 		this.layer.classList.toggle("capturing", on);
 	}
 
-	/** Draw the marks, the one being drawn and the hovered element's outline. */
+	/** Draw the marks (saved ones fainter), the one being drawn and the hovered element's outline. */
 	render(
 		marks: readonly RenderedMark[],
 		preview: Shape | null,
 		hover: Rect | null,
+		saved: readonly RenderedMark[] = [],
 	): void {
 		const doc = this.doc;
 		const children: SVGElement[] = [];
@@ -341,6 +342,12 @@ export class Overlay {
 					"stroke-dasharray": "6 4",
 				}),
 			);
+		}
+		if (saved.length > 0) {
+			const group = svg(doc, "g", { class: "saved", opacity: 0.5 });
+			for (const mark of saved)
+				group.append(...this.#shape(mark.shape), this.#badge(mark));
+			children.push(group);
 		}
 		for (const mark of marks)
 			children.push(...this.#shape(mark.shape), this.#badge(mark));

@@ -249,22 +249,36 @@ async function forgetLoaded(
 			.catch(() => undefined);
 }
 
-/** A deleted case's draft goes, and its outlines and bar leave the page. */
+/**
+ * A deleted case's draft goes, its outlines and bar leave the page, and a
+ * toolbar adding to it starts a new case.
+ */
 async function clearDeleted(caseId: string): Promise<void> {
 	update((s) => s.verdictDrafts.delete(caseId));
 	if (state.loaded?.caseId === caseId) await forgetLoaded({ clearTab: true });
-	// An AI app's load_case: only the page knows.
 	const tabId = state.tab?.id;
-	if (tabId !== undefined && (await overlayState(tabId))?.loadedCase === caseId)
+	if (tabId === undefined) return;
+	// An AI app's load_case: only the page knows.
+	const overlay = await overlayState(tabId);
+	if (overlay?.loadedCase === caseId)
 		await chrome.tabs
 			.sendMessage(tabId, { type: "case:clear" })
 			.catch(() => undefined);
+	if (overlay?.visible && overlay.target?.caseId === caseId)
+		await startAnnotating();
 }
 
 /** Tell a panel in another window; a page does not hear its own message. */
 function announce(caseId: string): void {
 	const news: Broadcast = { type: "cases:changed", caseId };
 	chrome.runtime.sendMessage(news).catch(() => undefined);
+}
+
+/** The case the tab's toolbar was adding to, as stored now; it may be gone. */
+async function continued(
+	overlay: OverlayState | undefined,
+): Promise<Case | undefined> {
+	return overlay?.target && store.getCase(overlay.target.caseId);
 }
 
 /** Show the overlay on the tab in front, optionally to add to a case. */
@@ -322,8 +336,8 @@ const actions: Actions = {
 			tabWork.cancel();
 			// Ask the page: the state may have changed while no panel was listening.
 			const now = await overlayState(tab.id);
-			if (!now?.visible) return startAnnotating();
 			try {
+				if (!now?.visible) return await startAnnotating(await continued(now));
 				const overlay = await sendToTab<OverlayState>(tab.id, {
 					type: "overlay:hide",
 				});

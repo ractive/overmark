@@ -14,11 +14,11 @@
 		"build": "bun scripts/build.ts",
 		"zip": "bun scripts/build.ts --zip",
 		"icons": "bun scripts/icons.ts",
-		"verify": "biome ci . && bun run typecheck && bun test",
+		"verify": "biome ci . && bun run typecheck && bun run test",
 		"typecheck": "bun check -p tsconfig.json && bun check -p tsconfig.test.json",
 		"lint": "biome check .",
 		"fix": "biome check --write .",
-		"test": "bun test"
+		"test": "bun test --timeout 30000"
 	},
 	"dependencies": {
 		"@ractive-ch/tab-mcp-client": "0.10.0"

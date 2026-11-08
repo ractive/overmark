@@ -140,6 +140,8 @@ function normalizeRect(a: Point, b: Point): Rect {
 export class Annotator {
 	readonly overlay: Overlay;
 	#drafts: Draft[] = [];
+	/** The target case's marks saved from this page: shown, no longer changed. */
+	#savedMarks: Draft[] = [];
 	#tool: Tool | null = null;
 	#hover: Element | null = null;
 	#drag: Drag | null = null;
@@ -250,6 +252,8 @@ export class Annotator {
 	show(options: ShowOptions): void {
 		// During a save its case stays; the new one applies when it is over.
 		if (!this.#activity.defer({ kind: "show", options })) {
+			if (options.target?.caseId !== this.#target?.caseId)
+				this.#savedMarks = [];
 			this.#target = options.target;
 			this.#blurForms = options.blurForms ?? false;
 			this.#message = "";
@@ -595,14 +599,17 @@ export class Annotator {
 			this.#tool === "element" && this.#hover !== null
 				? this.#hover.getBoundingClientRect()
 				: null;
-		this.overlay.render(
-			this.#drafts
+		const rendered = (marks: Draft[]) =>
+			marks
 				.filter((d) => this.#onPage(d))
-				.map((d) => ({ number: d.number, shape: this.#onWindow(d) })),
+				.map((d) => ({ number: d.number, shape: this.#onWindow(d) }));
+		this.overlay.render(
+			rendered(this.#drafts),
 			this.#preview === null ? null : toWindow(this.#preview),
 			hover === null
 				? null
 				: { x: hover.x, y: hover.y, width: hover.width, height: hover.height },
+			rendered(this.#savedMarks),
 		);
 		if (this.#editing !== null) this.#placePopover(this.#editing);
 	}
@@ -623,6 +630,16 @@ export class Annotator {
 	#setSaveForm(on: boolean): void {
 		this.#saveForm = on;
 		this.#renderToolbar();
+	}
+
+	/** Stop adding to the case: the next save starts another one. */
+	#newCase(): void {
+		this.#target = undefined;
+		this.#savedMarks = [];
+		this.#message = "";
+		this.#renumber();
+		this.#renderToolbar();
+		this.#render();
 	}
 
 	#renderToolbar(): void {
@@ -724,6 +741,9 @@ export class Annotator {
 			sep(),
 			undo,
 			save,
+			...(this.#target
+				? [this.#button("New case", "new-case", () => this.#newCase())]
+				: []),
 			this.#button("Close", "close", () => this.hide()),
 			move,
 			status,
@@ -1003,7 +1023,10 @@ export class Annotator {
 				},
 			});
 			this.#drafts = this.#drafts.filter((d) => !drafts.includes(d));
+			this.#savedMarks.push(...drafts);
 			this.#views = this.#views.filter((v) => !views.includes(v));
+			// Its image went with the save: the next mark takes a new one.
+			this.#shown = undefined;
 			this.#pendingCase = undefined;
 			this.#target = {
 				caseId: result.caseId,
