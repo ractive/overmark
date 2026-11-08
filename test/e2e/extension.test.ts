@@ -594,7 +594,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		).toEqual(["null", String(RESOLVED_OPACITY), "true"]);
 		// Shown from the panel, it is looked for: it shows fully.
 		await h.control.eval(
-			`document.querySelector("#match-a2 [data-action=show]").click()`,
+			`document.querySelector('[data-annotation="a2"] [data-action=show]').click()`,
 		);
 		await v1.page.waitFor(
 			`${review(2)}?.hasAttribute("data-resolved") && ${review(2)}.querySelector("[data-faded]") === null`,
@@ -903,7 +903,7 @@ describe.skipIf(browserBinary === undefined)(
 
 			// "Show" scrolls the page to the contact paragraph.
 			await h.control.eval(
-				`document.querySelectorAll(".match")[2].querySelector("[data-action=show]").click()`,
+				`document.querySelectorAll(".annotation")[2].querySelector("[data-action=show]").click()`,
 			);
 			await v2.page.waitFor(
 				`Math.abs(document.querySelector("[data-truth=contact]").getBoundingClientRect().top - innerHeight / 2) < innerHeight / 2`,

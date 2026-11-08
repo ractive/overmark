@@ -286,35 +286,33 @@ function shownText(
 		: `${shown.summary}, hidden at this width`;
 }
 
-/** Whether the page can scroll to the mark: then Show, and its crop, offer it. */
+/** Whether the page can scroll to the mark: then its head offers Show. */
 const canShow = (m: AnnotationMatch | undefined): m is AnnotationMatch =>
 	m !== undefined && (m.candidates.length > 0 || m.status === "no-element");
 
-/** A mark's crop; on a page that can show the mark, a click shows it, as Show does. */
-function cropView(
-	caseId: string,
-	a: Annotation,
-	src: string,
-	m: AnnotationMatch | undefined,
-	actions: Actions,
-): HTMLElement {
-	const img = h("img", { src, alt: `Mark ${a.number}` });
-	if (!canShow(m)) return img;
-	const label = `Show mark ${a.number} on the page`;
-	return h(
+/** Crops shown large (`caseId:annotationId`); the rest are small. */
+const zoomed = new Set<string>();
+
+/** A mark's crop, small at first: a click shows it large, another small again. */
+function cropView(caseId: string, a: Annotation, src: string): HTMLElement {
+	const key = `${caseId}:${a.id}`;
+	const button: HTMLButtonElement = h(
 		"button",
 		{
 			type: "button",
 			class: "crop",
-			"data-action": "show-crop",
-			title: label,
-			"aria-label": label,
-			// Show is the keyboard's way; one stop per mark is enough.
-			tabindex: "-1",
-			onclick: () => actions.showMatch(caseId, a, m.current),
+			"data-action": "zoom",
+			"aria-pressed": String(zoomed.has(key)),
+			"aria-label": `Mark ${a.number}, shown large`,
+			onclick: () => {
+				const large = !zoomed.delete(key);
+				if (large) zoomed.add(key);
+				button.setAttribute("aria-pressed", String(large));
+			},
 		},
-		img,
+		h("img", { src, alt: "" }),
 	);
+	return button;
 }
 
 function matchView(
@@ -325,18 +323,6 @@ function matchView(
 ): HTMLElement {
 	const shown = m.candidates[m.current];
 	const buttons = h("div", { class: "row" });
-	if (canShow(m))
-		buttons.append(
-			h(
-				"button",
-				{
-					type: "button",
-					"data-action": "show",
-					onclick: () => actions.showMatch(caseId, a, m.current),
-				},
-				"Show",
-			),
-		);
 	if (m.candidates.length > 1)
 		buttons.append(
 			h(
@@ -496,33 +482,30 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			created.deleteButton,
 		),
 		created.hint,
-	);
-	const verdictSection = h(
-		"section",
-		{},
-		h("h2", {}, "Verdict"),
-		verdict,
+		// What the whole case comes to: the case's, not a mark's.
 		h(
 			"div",
-			{ class: "row" },
+			{ class: "verdict" },
+			h("label", { for: "verdict" }, "Verdict"),
+			verdict,
 			h(
-				"button",
-				{
-					type: "button",
-					id: "save-verdict",
-					onclick: () => actions.saveVerdict(c.id, verdict.value),
-				},
-				"Save verdict",
+				"div",
+				{ class: "row" },
+				h(
+					"button",
+					{
+						type: "button",
+						class: "small",
+						id: "save-verdict",
+						onclick: () => actions.saveVerdict(c.id, verdict.value),
+					},
+					"Save verdict",
+				),
+				verdictStatus,
 			),
-			verdictStatus,
 		),
 	);
-	caseView.replaceChildren(
-		header,
-		created.marks,
-		verdictSection,
-		created.shots,
-	);
+	caseView.replaceChildren(header, created.marks, created.shots);
 	return created;
 }
 
@@ -798,52 +781,51 @@ function renderCase(state: PanelState, actions: Actions): void {
 		markArmed ?? null,
 	]);
 	if (marksKey !== p.marksKey) {
-		const list = h("ol", { class: "annotations" });
-		for (const a of [...c.annotations].sort((x, y) => x.number - y.number)) {
-			const crop = images?.urls.get(a.crop);
-			const m = loaded?.matches.get(a.id);
-			list.append(
-				h(
-					"li",
-					{
-						class: "annotation",
-						"data-annotation": a.id,
-						...(m ? { "data-colour": colourOf(m) } : {}),
-						...(a.resolution ? { "data-resolved": a.resolution.kind } : {}),
-					},
-					h("span", { class: "number" }, String(a.number)),
-					h(
-						"div",
-						{ class: "body" },
-						h(
-							"div",
-							{ class: "head" },
-							h(
-								"span",
-								{ class: a.comment ? "comment" : "comment none" },
-								a.comment || "No comment",
-							),
-							a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
-						),
-						crop ? cropView(c.id, a, crop, m, actions) : null,
-						a.resolution ? resolutionLine(a) : null,
-						a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
-						m ? matchView(c.id, a, m, actions) : null,
-						edit?.annotationId === a.id
-							? edit.mode === "resolve"
-								? resolveForm(c, a, edit.kind, edit.text, actions)
-								: commentForm(c, a, edit.text, actions)
-							: markActions(c, a, markArmed === a.id, actions),
-					),
-				),
-			);
-		}
+		const sorted = [...c.annotations].sort((x, y) => x.number - y.number);
+		const items = sorted.map((a) =>
+			markItem(c, a, {
+				crop: images?.urls.get(a.crop),
+				match: loaded?.matches.get(a.id),
+				edit: edit?.annotationId === a.id ? edit : undefined,
+				armed: markArmed === a.id,
+				actions,
+				changed: () => syncToggleAll(),
+			}),
+		);
+		const toggleAll: HTMLButtonElement = h("button", {
+			type: "button",
+			class: "link",
+			id: "toggle-marks",
+			onclick: () => {
+				const open = !items.every((li) => li.hasAttribute("data-open"));
+				for (const li of items) setOpen(c.id, li, open);
+				syncToggleAll();
+			},
+		});
+		const syncToggleAll = () => {
+			const all = items.every((li) => li.hasAttribute("data-open"));
+			toggleAll.textContent = all ? "Collapse all" : "Expand all";
+		};
+		syncToggleAll();
+		toggleAll.hidden = items.length === 0;
 		const marks = h(
 			"section",
-			{},
-			h("h2", {}, `Marks (${c.annotations.length})`),
-			markCounts(c),
-			list,
+			{ class: "marks", "aria-labelledby": "marks-heading" },
+			h(
+				"div",
+				{ class: "marks-bar" },
+				h(
+					"h2",
+					{ id: "marks-heading" },
+					"Marks",
+					h("span", { class: "count" }, String(c.annotations.length)),
+				),
+				toggleAll,
+				markCounts(c),
+			),
+			items.length > 0
+				? h("ol", { class: "annotations" }, ...items)
+				: h("p", { class: "empty" }, "No marks yet."),
 		);
 		p.marks.replaceWith(marks);
 		p.marks = marks;
@@ -858,11 +840,112 @@ function renderCase(state: PanelState, actions: Actions): void {
 			if (url)
 				list.append(h("img", { src: url, alt: `Screenshot ${shot.id}` }));
 		}
-		const shots = h("section", {}, h("h2", {}, "Screenshots"), list);
+		// The record as taken: there to look at, so out of the way until asked.
+		const shots: HTMLDetailsElement = h(
+			"details",
+			{ class: "shots-section", id: "case-shots" },
+			h(
+				"summary",
+				{},
+				"Screenshots",
+				h("span", { class: "count" }, String(c.shots.length)),
+			),
+			list,
+		);
+		shots.open = p.shots.hasAttribute("open");
 		p.shots.replaceWith(shots);
 		p.shots = shots;
 		p.shotsKey = shotsKey;
 	}
+}
+
+// --- a mark in the list -------------------------------------------------------
+
+/** Marks shown open (`caseId:annotationId`); the rest show only their head. */
+const openMarks = new Set<string>();
+
+function setOpen(caseId: string, li: HTMLElement, open: boolean): void {
+	const key = `${caseId}:${li.dataset["annotation"]}`;
+	if (open) openMarks.add(key);
+	else openMarks.delete(key);
+	li.toggleAttribute("data-open", open);
+	li.querySelector(".mark-toggle")?.setAttribute("aria-expanded", String(open));
+	const body = li.querySelector<HTMLElement>(".body");
+	if (body) body.hidden = !open;
+}
+
+interface MarkContext {
+	crop: string | undefined;
+	match: AnnotationMatch | undefined;
+	edit: PanelState["markEdit"];
+	armed: boolean;
+	actions: Actions;
+	/** A mark opened or closed by its own head. */
+	changed: () => void;
+}
+
+/**
+ * One mark: a head (its number, comment and Show) that opens and closes the
+ * rest (crop, where it is, its actions). A mark being edited stays open.
+ */
+function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
+	const { match: m, edit, actions } = x;
+	const bodyId = `mark-body-${a.id}`;
+	const li: HTMLElement = h("li", {
+		class: "annotation",
+		"data-annotation": a.id,
+		...(m ? { "data-colour": colourOf(m) } : {}),
+		...(a.resolution ? { "data-resolved": a.resolution.kind } : {}),
+	});
+	const toggle = h(
+		"button",
+		{
+			type: "button",
+			class: "mark-toggle",
+			"aria-controls": bodyId,
+			onclick: () => {
+				setOpen(c.id, li, !li.hasAttribute("data-open"));
+				x.changed();
+			},
+		},
+		h("span", { class: "chevron", "aria-hidden": "true" }),
+		h("span", { class: "number" }, String(a.number)),
+		h(
+			"span",
+			{ class: a.comment ? "comment" : "comment none" },
+			a.comment || "No comment",
+		),
+		a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
+	);
+	const show = canShow(m)
+		? h(
+				"button",
+				{
+					type: "button",
+					class: "small show",
+					"data-action": "show",
+					"aria-label": `Show mark ${a.number} on the page`,
+					onclick: () => actions.showMatch(c.id, a, m.current),
+				},
+				"Show",
+			)
+		: null;
+	const body = h(
+		"div",
+		{ class: "body", id: bodyId },
+		x.crop ? cropView(c.id, a, x.crop) : null,
+		a.resolution ? resolutionLine(a) : null,
+		a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
+		m ? matchView(c.id, a, m, actions) : null,
+		edit
+			? edit.mode === "resolve"
+				? resolveForm(c, a, edit.kind, edit.text, actions)
+				: commentForm(c, a, edit.text, actions)
+			: markActions(c, a, x.armed, actions),
+	);
+	li.append(h("div", { class: "mark-head" }, toggle, show), body);
+	setOpen(c.id, li, edit !== undefined || openMarks.has(`${c.id}:${a.id}`));
+	return li;
 }
 
 // --- the AI app ------------------------------------------------------------------
