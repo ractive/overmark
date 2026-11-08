@@ -223,4 +223,77 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 		expect(await page.eval<number>(`${HOST} === null ? 0 : 1`)).toBe(1);
 	}, 60_000);
+
+	test("as the owner uses it: after a reload, a case loads at the icon's click and Hide takes its marks off", async () => {
+		const tabTargets = async () =>
+			(await h.browser.targets()).filter((t) => t.type === "tab");
+		const loadedCase = (tabId: number) =>
+			h.control.eval<string | null>(
+				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.loadedCase ?? null, () => null)`,
+			);
+		// A case of two marks, one on an element a script added on that visit.
+		const url = `${h.base}/v1?owner=1`;
+		const first = await h.open("v1?owner=1");
+		await h.browser.clickIcon(h.extensionId, url);
+		const panel = await sidePanel();
+		// It may still show the case of a test before.
+		await panel.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
+		await panel.waitFor(`document.getElementById("annotate")`);
+		await first.page.waitFor(HOST);
+		await panel.click(`document.getElementById("annotate")`);
+		await reachOverlay(first.page);
+		await first.page.waitFor(`!${shadow(".toolbar")}.hidden`);
+		await markElement(first.page, "[data-truth=tip]", "Here");
+		await first.page.eval(
+			`document.body.insertAdjacentHTML("beforeend", '<p id="late">Late</p>')`,
+		);
+		await markElement(first.page, "#late", "Not there next time");
+		await saveAs(first.page, "As the owner uses it");
+		await first.page.send("Page.close");
+
+		// A tab on the case's page that Overmark may not see yet.
+		const before = new Set((await tabTargets()).map((t) => t.targetId));
+		const page = await h.browser.newPage(`${h.base}/v1`);
+		await page.activate();
+		const fresh = (await tabTargets()).find((t) => !before.has(t.targetId));
+		const tabId = await h.control.eval<number>(
+			`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.id)`,
+		);
+		await panel.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
+		const row = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes("As the owner uses it"))`;
+		await panel.waitFor(row);
+		await panel.eval(`${row}.click()`);
+		await panel.waitFor(
+			`document.getElementById("case-hint").textContent.includes("click the Overmark icon")`,
+		);
+		await h.browser.send("Extensions.triggerAction", {
+			id: h.extensionId,
+			targetId: fresh?.targetId,
+		});
+		await panel.waitFor(
+			`document.getElementById("case-hint").textContent.includes("1 of 2 marks found")`,
+			15_000,
+		);
+		expect(await loadedCase(tabId)).not.toBeNull();
+		const button = `document.getElementById("load-case")`;
+		await panel.waitFor(`${button}.textContent === "Hide marks on this tab"`);
+		// A real click, as a person makes it.
+		await panel.click(button);
+		await panel.waitFor(`${button}.textContent === "Show marks on this tab"`);
+		expect(await loadedCase(tabId)).toBeNull();
+		// The searches again (1 s, 2 s) must not draw them back.
+		await Bun.sleep(3500);
+		expect(await loadedCase(tabId)).toBeNull();
+		expect(await panel.eval<string>(`${button}.textContent`)).toBe(
+			"Show marks on this tab",
+		);
+		// And Show puts them back.
+		await panel.click(button);
+		await panel.waitFor(`${button}.textContent === "Hide marks on this tab"`);
+		expect(await loadedCase(tabId)).not.toBeNull();
+	}, 60_000);
 });

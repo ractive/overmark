@@ -421,7 +421,79 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
 				),
 			).toBe(1);
+			// Loaded: the button hides the marks again, and then loads.
+			const button = `document.getElementById("load-case")`;
+			expect(await h.control.eval<string>(`${button}.textContent`)).toBe(
+				"Hide marks on this tab",
+			);
+			await h.control.eval(`${button}.click()`);
+			await v1.page.waitFor(
+				`${shadow("svg.marks")}.querySelectorAll("[data-review]").length === 0`,
+			);
+			await h.control.waitFor(
+				`${button}.textContent === "Show marks on this tab" && !document.querySelector(".match")`,
+			);
 			await v1.page.send("Page.close");
+			await panel();
+		});
+
+		test("Hide holds while a page just opened is searched again", async () => {
+			const v1 = await h.open("v1");
+			await showToolbar(h, v1.page, v1.tabId);
+			await markElement(v1.page, "[data-truth=tip]", "Here");
+			// Drawn by a script on this visit only: the next one lacks it.
+			await v1.page.eval(
+				`document.body.insertAdjacentHTML("beforeend", '<p id="late">Late</p>')`,
+			);
+			await markElement(v1.page, "#late", "Not there next time");
+			await saveAs(v1.page, "Hidden while searched");
+			await v1.page.send("Page.close");
+			await panel();
+			await openTheCase("Hidden while searched");
+			const tabTargets = async () =>
+				(await h.browser.targets()).filter((t) => t.type === "page");
+			const before = new Set((await tabTargets()).map((t) => t.targetId));
+			await h.control.eval(`document.getElementById("open-page").click()`);
+			await h.control.waitFor(
+				`document.getElementById("case-hint").textContent.includes("1 of 2 marks found")`,
+				15_000,
+			);
+			const opened = (await tabTargets()).find((t) => !before.has(t.targetId));
+			const page = await h.browser.attachPage(opened?.targetId as string);
+			const button = `document.getElementById("load-case")`;
+			expect(await h.control.eval<string>(`${button}.textContent`)).toBe(
+				"Hide marks on this tab",
+			);
+			await h.control.eval(`${button}.click()`);
+			// The searches again at 1 s and 2 s would have drawn the marks back.
+			await Bun.sleep(3500);
+			expect(
+				await page.eval<number>(
+					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
+				),
+			).toBe(0);
+			expect(await h.control.eval<string>(`${button}.textContent`)).toBe(
+				"Show marks on this tab",
+			);
+
+			// A clear for another case leaves this one's marks.
+			const db = await h.control.eval<Db>(READ_DB);
+			const saved = db.cases.find((c) => c.title === "Hidden while searched");
+			const tabId = await h.control.eval<number>(
+				`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.id)`,
+			);
+			const send = (message: object) =>
+				h.control.eval<{ loadedCase?: string }>(
+					`chrome.tabs.sendMessage(${tabId}, ${JSON.stringify(message)})`,
+				);
+			await send({ type: "case:load", case: saved });
+			expect(
+				(await send({ type: "case:clear", caseId: "c_other" })).loadedCase,
+			).toBe(saved?.id);
+			expect(
+				(await send({ type: "case:clear", caseId: saved?.id })).loadedCase,
+			).toBeUndefined();
+			await h.control.eval(`chrome.tabs.remove(${tabId})`);
 			await panel();
 		});
 

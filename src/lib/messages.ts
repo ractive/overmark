@@ -43,8 +43,8 @@ export type ContentRequest =
 			annotationId: string;
 			candidate?: number;
 	  }
-	/** Remove the marks (`OverlayState`). */
-	| { type: "case:clear" }
+	/** Remove the marks (`OverlayState`): only that case's, where it is named. */
+	| { type: "case:clear"; caseId?: string }
 	/**
 	 * Scroll to the element `selector` and mark it with `number` for a
 	 * screenshot (`DescribedElement`); the overlay's own bars and the user's

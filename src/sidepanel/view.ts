@@ -24,6 +24,7 @@ export interface Actions {
 	openCase(id: string): void;
 	closeCase(): void;
 	loadOntoTab(c: Case): void;
+	hideFromTab(c: Case): void;
 	openAndLoad(c: Case): void;
 	openPage(c: Case): void;
 	matchSize(c: Case): void;
@@ -336,6 +337,9 @@ interface CaseParts {
 	size: HTMLElement;
 	sizeText: HTMLSpanElement;
 	origin: HTMLElement;
+	/** Load, or Hide where the case is loaded on the tab in front. */
+	loadButton: HTMLButtonElement;
+	loadedHere: boolean;
 	deleteButton: HTMLButtonElement;
 	hint: HTMLElement;
 	verdict: HTMLTextAreaElement;
@@ -388,6 +392,16 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		),
 		sizeText,
 		origin: h("p", { class: "hint", id: "case-origin", hidden: true }),
+		loadButton: h("button", {
+			type: "button",
+			class: "primary wide",
+			id: "load-case",
+			onclick: () =>
+				created.loadedHere
+					? actions.hideFromTab(created.current)
+					: actions.loadOntoTab(created.current),
+		}),
+		loadedHere: false,
 		deleteButton: h("button", {
 			type: "button",
 			class: "danger",
@@ -414,16 +428,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		created.meta,
 		created.size,
 		created.origin,
-		h(
-			"button",
-			{
-				type: "button",
-				class: "primary wide",
-				id: "load-case",
-				onclick: () => actions.loadOntoTab(created.current),
-			},
-			"Load onto this tab",
-		),
+		created.loadButton,
 		h(
 			"div",
 			{ class: "row" },
@@ -511,6 +516,14 @@ function renderCase(state: PanelState, actions: Actions): void {
 			? undefined
 			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments and verdict are whoever wrote the file's, whatever author they name.`,
 	);
+	// Marks the panel loaded, or an AI app (the page says so).
+	p.loadedHere =
+		(state.loaded?.caseId === c.id && state.loaded.tabId === state.tab?.id) ||
+		state.overlay?.loadedCase === c.id;
+	p.loadButton.textContent = p.loadedHere
+		? "Hide marks on this tab"
+		: "Show marks on this tab";
+	p.loadButton.classList.toggle("primary", !p.loadedHere);
 	const armed = state.deleteArmedAt !== undefined;
 	p.deleteButton.toggleAttribute("data-armed", armed);
 	p.deleteButton.textContent = armed ? "Really delete?" : "Delete";
