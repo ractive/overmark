@@ -22,6 +22,8 @@
 	--mark-unsure: #b45f06;
 	/* Only here: a lost mark is not drawn on the page. */
 	--mark-lost: #c62828;
+	/* A resolved mark, here and on the page (overlay.ts). */
+	--resolved: #6b7385;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -440,6 +442,120 @@ ol.annotations {
 
 .annotation[data-colour="lost"] .number {
 	background: var(--mark-lost);
+}
+
+/* A resolved mark steps back, as it does on the page. */
+.annotation[data-resolved] .number {
+	background: var(--resolved);
+}
+
+.annotation[data-resolved] .comment,
+.annotation[data-resolved] img {
+	opacity: 0.6;
+}
+
+.resolution {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 8px;
+	align-items: baseline;
+	margin: 0;
+	font-size: 12px;
+}
+
+.resolution .kind {
+	flex: none;
+	font-weight: 600;
+	padding: 0 6px;
+	border-radius: 8px;
+	background: var(--wash);
+}
+
+.resolution[data-kind="fixed"] .kind {
+	color: var(--ok);
+}
+
+.resolution .note {
+	color: var(--muted);
+	overflow-wrap: anywhere;
+}
+
+.mark-counts {
+	margin: -4px 0 4px;
+}
+
+.mark-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px 14px;
+}
+
+/* Quiet: a list of ten marks is not a wall of buttons. */
+.mark-actions button.small {
+	padding: 2px 0;
+	border: 0;
+	background: none;
+	color: var(--muted);
+}
+
+.mark-actions button.small:hover:not(:disabled) {
+	background: none;
+	color: var(--fg);
+	text-decoration: underline;
+}
+
+.mark-actions button.danger {
+	margin-left: auto;
+	color: var(--danger);
+}
+
+button.small {
+	padding: 2px 8px;
+	font-size: 12px;
+}
+
+.mark-form {
+	display: grid;
+	gap: 8px;
+	padding: 8px;
+	border: 1px solid var(--rule);
+	border-radius: 8px;
+	background: var(--wash);
+}
+
+.mark-form fieldset {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.mark-form legend {
+	width: 100%;
+	padding: 0 0 4px;
+	font-size: 12px;
+	color: var(--muted);
+}
+
+.mark-form .choice {
+	display: inline-flex;
+	gap: 4px;
+	align-items: center;
+}
+
+.mark-form .note {
+	font: inherit;
+	padding: 4px 8px;
+	border: 1px solid var(--rule);
+	border-radius: 6px;
+	background: var(--sheet);
+	color: var(--fg);
+}
+
+.mark-form textarea {
+	min-height: 64px;
 }
 
 .comment {

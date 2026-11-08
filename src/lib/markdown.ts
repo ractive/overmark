@@ -4,7 +4,12 @@
  * zip.
  */
 
-import type { Annotation, Case, ShapeKind } from "./case.ts";
+import {
+	type Annotation,
+	type Case,
+	RESOLUTION_LABEL,
+	type ShapeKind,
+} from "./case.ts";
 import { summarize } from "./element.ts";
 
 const KIND: Record<ShapeKind, string> = {
@@ -39,6 +44,13 @@ function annotation(a: Annotation): string {
 		"",
 	];
 	lines.push(a.comment ? block(a.comment) : "_No comment._", "");
+	if (a.resolution) {
+		lines.push(`- Resolved: ${RESOLUTION_LABEL[a.resolution.kind]}`);
+		if (a.resolution.note)
+			lines.push(`- Resolution note: ${inline(a.resolution.note)}`);
+	} else {
+		lines.push("- Open");
+	}
 	if (a.element) {
 		lines.push(`- Element: ${inline(summarize(a.element))}`);
 		if (a.element.selector)

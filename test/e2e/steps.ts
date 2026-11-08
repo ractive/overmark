@@ -29,6 +29,7 @@ export interface Db {
 	cases: {
 		id: string;
 		title: string;
+		lastNumber?: number;
 		shots: { id: string; scrollY: number }[];
 		annotations: {
 			id: string;

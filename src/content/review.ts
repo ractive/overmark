@@ -106,6 +106,39 @@ export class Reviewer {
 		};
 	}
 
+	/**
+	 * The loaded case changed (a mark settled, edited, deleted or added): its
+	 * marks follow, and the candidates chosen stay. `null` when another case,
+	 * or none, is loaded.
+	 */
+	update(c: Case): LoadResult | null {
+		if (this.#case?.id !== c.id) return null;
+		const byId = new Map(c.annotations.map((a) => [a.id, a]));
+		const kept = this.#entries.flatMap((e) => {
+			const annotation = byId.get(e.annotation.id);
+			return annotation === undefined ? [] : [{ ...e, annotation }];
+		});
+		const known = new Set(kept.map((e) => e.annotation.id));
+		const added = c.annotations.filter((a) => !known.has(a.id));
+		if (added.length > 0) {
+			const search = this.#search();
+			kept.push(...added.map((a) => this.#find(search, a)));
+			kept.sort((a, b) => a.annotation.number - b.annotation.number);
+			clearTextCache();
+		}
+		this.#case = c;
+		this.#entries = kept;
+		if (this.#focused !== undefined && !byId.has(this.#focused))
+			this.#focused = undefined;
+		this.#renderBar();
+		this.#render();
+		return {
+			caseId: c.id,
+			url: location.href,
+			matches: kept.map((e) => e.match),
+		};
+	}
+
 	#search(): PageSearch {
 		return createSearch(this.overlay.doc, { exclude: this.overlay.host });
 	}
@@ -249,6 +282,7 @@ export class Reviewer {
 				entry.match.status !== "ambiguous" &&
 				entry.candidates[entry.match.current]?.found === true,
 			focused: annotation.id === this.#focused,
+			resolved: annotation.resolution !== undefined,
 		};
 	}
 
@@ -268,6 +302,7 @@ export class Reviewer {
 			rect: null,
 			found: false,
 			focused: annotation.id === this.#focused,
+			resolved: annotation.resolution !== undefined,
 		};
 	}
 
@@ -298,8 +333,11 @@ export class Reviewer {
 
 	#renderBar(): void {
 		const doc = this.overlay.doc;
-		const total = this.#entries.length;
-		const found = this.#entries.filter(
+		// Resolved marks are drawn, faded, but no longer counted.
+		const open = this.#entries.filter((e) => !e.annotation.resolution);
+		const total = open.length;
+		const resolved = this.#entries.length - total;
+		const found = open.filter(
 			(e) => e.match.status !== "lost" && e.match.status !== "no-element",
 		).length;
 		const title = doc.createElement("span");
@@ -307,7 +345,10 @@ export class Reviewer {
 		title.textContent = this.#case?.title ?? "";
 		const count = doc.createElement("span");
 		count.className = "count";
-		count.textContent = `${found} of ${total} found`;
+		count.textContent =
+			resolved === 0
+				? `${found} of ${total} found`
+				: `${found} of ${total} open found, ${resolved} resolved`;
 		const text = doc.createElement("span");
 		text.className = "text";
 		text.dataset["role"] = "review-status";

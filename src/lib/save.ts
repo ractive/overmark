@@ -132,7 +132,8 @@ export async function saveCase(
 		const taken = new Set(current?.annotations.map((a) => a.number));
 		const annotations: Annotation[] = [...(current?.annotations ?? [])];
 		for (const draft of request.annotations) {
-			if (taken.has(draft.number))
+			// A deleted mark's number stays its own: its pin is on the screenshots.
+			if (taken.has(draft.number) || draft.number <= (current?.lastNumber ?? 0))
 				throw new SaveError(
 					`mark ${draft.number} exists in the case already (it changed meanwhile). Click "Add marks" in the side panel again, then save.`,
 				);
@@ -162,6 +163,7 @@ export async function saveCase(
 			annotations,
 			verdict: current?.verdict ?? null,
 			importedAt: current?.importedAt,
+			lastNumber: current?.lastNumber,
 		});
 		return { value, images };
 	});

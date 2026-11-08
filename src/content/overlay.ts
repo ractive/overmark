@@ -20,6 +20,12 @@ declare const OVERMARK_TEST_BUILD: boolean | undefined;
 export const HOST_ID = "overmark-root";
 export const HOVER_COLOUR = "#1f6feb";
 /** Both carry a mark's white number, here and in the side panel's list. */
+/** A resolved mark's colour in the grey look. */
+export const RESOLVED_COLOUR = "#6b7385";
+
+/** How a resolved mark looks: grey, or its own colours very faint. */
+export const RESOLVED_LOOK: "grey" | "faint" = "grey";
+
 export const FOUND_COLOUR = "#1a7f37";
 export const PROBABLE_COLOUR = "#b45f06";
 const SVG = "http://www.w3.org/2000/svg";
@@ -194,6 +200,8 @@ export interface ReviewItem {
 	/** The shown candidate is a confident, unambiguous match. */
 	found: boolean;
 	focused: boolean;
+	/** Settled: drawn faded, so the open marks stand out. */
+	resolved: boolean;
 }
 
 /** What the page must not see: a click on the overlay is no click outside its menu. */
@@ -437,7 +445,12 @@ export class Overlay {
 	renderReview(items: readonly ReviewItem[]): void {
 		const doc = this.doc;
 		const groups = items.map((item) => {
-			const colour = item.found ? FOUND_COLOUR : PROBABLE_COLOUR;
+			const colour =
+				item.resolved && RESOLVED_LOOK === "grey"
+					? RESOLVED_COLOUR
+					: item.found
+						? FOUND_COLOUR
+						: PROBABLE_COLOUR;
 			const look = {
 				"stroke-width": item.focused ? 4 : 3,
 				// Round caps would close the gaps.
@@ -445,7 +458,16 @@ export class Overlay {
 					? {}
 					: { "stroke-dasharray": "8 5", "stroke-linecap": "butt" }),
 			};
-			const group = svg(doc, "g", { "data-review": item.number });
+			const group = svg(doc, "g", {
+				"data-review": item.number,
+				...(item.resolved
+					? {
+							"data-resolved": "",
+							// A focused one is looked for: it shows fully.
+							opacity: item.focused ? 1 : RESOLVED_LOOK === "grey" ? 0.75 : 0.3,
+						}
+					: {}),
+			});
 			if (item.focused && item.rect !== null)
 				group.append(
 					svg(doc, "rect", {

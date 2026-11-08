@@ -9,7 +9,11 @@ import {
 	type Annotation,
 	type Case,
 	isPageOf,
+	MAX_COMMENT,
 	MAX_VERDICT,
+	RESOLUTION_KINDS,
+	RESOLUTION_LABEL,
+	type ResolutionKind,
 	samePath,
 } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
@@ -25,6 +29,14 @@ export interface Actions {
 	closeCase(): void;
 	loadOntoTab(c: Case): void;
 	hideFromTab(c: Case): void;
+	/** Open a mark's form: settle it, or edit its comment. */
+	editMark(c: Case, a: Annotation, mode: "resolve" | "comment"): void;
+	typeMark(change: { kind?: ResolutionKind; text?: string }): void;
+	cancelMarkEdit(): void;
+	resolveMark(c: Case, a: Annotation, kind: ResolutionKind, note: string): void;
+	reopenMark(c: Case, a: Annotation): void;
+	saveComment(c: Case, a: Annotation, text: string): void;
+	deleteMark(c: Case, a: Annotation): void;
 	openAndLoad(c: Case): void;
 	openPage(c: Case): void;
 	matchSize(c: Case): void;
@@ -483,6 +495,196 @@ function createParts(c: Case, actions: Actions): CaseParts {
 	return created;
 }
 
+// --- a mark's status and its actions ---------------------------------------
+
+/** "5 open, 2 fixed, 1 won't fix"; nothing while every mark is open. */
+function markCounts(c: Case): HTMLElement | null {
+	const resolved = c.annotations.filter((a) => a.resolution);
+	if (resolved.length === 0) return null;
+	const parts = [`${c.annotations.length - resolved.length} open`];
+	for (const kind of RESOLUTION_KINDS) {
+		const n = resolved.filter((a) => a.resolution?.kind === kind).length;
+		if (n > 0) parts.push(`${n} ${RESOLUTION_LABEL[kind].toLowerCase()}`);
+	}
+	return h("p", { class: "meta mark-counts" }, parts.join(", "));
+}
+
+function resolutionLine(a: Annotation): HTMLElement | null {
+	const r = a.resolution;
+	if (r === undefined) return null;
+	return h(
+		"p",
+		{ class: "resolution", "data-kind": r.kind },
+		h("span", { class: "kind" }, RESOLUTION_LABEL[r.kind]),
+		r.note ? h("span", { class: "note" }, r.note) : null,
+	);
+}
+
+function markActions(
+	c: Case,
+	a: Annotation,
+	armed: boolean,
+	actions: Actions,
+): HTMLElement {
+	const button = (label: string, action: string, onclick: () => void) =>
+		h(
+			"button",
+			{ type: "button", class: "small", "data-mark-action": action, onclick },
+			label,
+		);
+	return h(
+		"div",
+		{ class: "mark-actions" },
+		a.resolution
+			? button("Reopen", "reopen", () => actions.reopenMark(c, a))
+			: button("Resolve…", "resolve", () => actions.editMark(c, a, "resolve")),
+		a.resolution
+			? button("Change…", "resolve", () => actions.editMark(c, a, "resolve"))
+			: null,
+		button("Edit comment", "comment", () => actions.editMark(c, a, "comment")),
+		h(
+			"button",
+			{
+				type: "button",
+				class: "small danger",
+				"data-mark-action": "delete",
+				...(armed ? { "data-armed": true } : {}),
+				onclick: () => actions.deleteMark(c, a),
+			},
+			armed ? "Really delete?" : "Delete",
+		),
+	);
+}
+
+function resolveForm(
+	c: Case,
+	a: Annotation,
+	kind: ResolutionKind,
+	note: string,
+	actions: Actions,
+): HTMLElement {
+	const name = `resolution-${a.id}`;
+	const noteField: HTMLInputElement = h("input", {
+		type: "text",
+		class: "note",
+		placeholder: "Note (optional): why, or what was done",
+		maxlength: String(MAX_COMMENT),
+		"aria-label": `Note for mark ${a.number}`,
+		value: note,
+		oninput: () => actions.typeMark({ text: noteField.value }),
+		onkeydown: (e) => {
+			const key = (e as KeyboardEvent).key;
+			if (key === "Enter") submit();
+			if (key === "Escape") actions.cancelMarkEdit();
+		},
+	});
+	const chosen = () =>
+		(form.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)
+			?.value ?? kind) as ResolutionKind;
+	const submit = () => actions.resolveMark(c, a, chosen(), noteField.value);
+	const form = h(
+		"div",
+		{ class: "mark-form", "data-form": "resolve" },
+		h(
+			"fieldset",
+			{},
+			h("legend", {}, `Resolve mark ${a.number} as`),
+			...RESOLUTION_KINDS.map((k) =>
+				h(
+					"label",
+					{ class: "choice" },
+					h("input", {
+						type: "radio",
+						name,
+						value: k,
+						checked: k === kind,
+						onchange: () => actions.typeMark({ kind: k }),
+					}),
+					RESOLUTION_LABEL[k],
+				),
+			),
+		),
+		noteField,
+		h(
+			"div",
+			{ class: "row" },
+			h(
+				"button",
+				{
+					type: "button",
+					class: "primary small",
+					"data-mark-action": "resolve-done",
+					onclick: submit,
+				},
+				a.resolution ? "Save" : "Resolve",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					class: "small",
+					onclick: () => actions.cancelMarkEdit(),
+				},
+				"Cancel",
+			),
+		),
+	);
+	queueMicrotask(() => noteField.focus());
+	return form;
+}
+
+function commentForm(
+	c: Case,
+	a: Annotation,
+	text: string,
+	actions: Actions,
+): HTMLElement {
+	const field: HTMLTextAreaElement = h(
+		"textarea",
+		{
+			maxlength: String(MAX_COMMENT),
+			"aria-label": `Comment of mark ${a.number}`,
+			oninput: () => actions.typeMark({ text: field.value }),
+			onkeydown: (e) => {
+				const k = e as KeyboardEvent;
+				if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) save();
+				if (k.key === "Escape") actions.cancelMarkEdit();
+			},
+		},
+		text,
+	);
+	const save = () => actions.saveComment(c, a, field.value);
+	queueMicrotask(() => field.focus());
+	return h(
+		"div",
+		{ class: "mark-form", "data-form": "comment" },
+		field,
+		h(
+			"div",
+			{ class: "row" },
+			h(
+				"button",
+				{
+					type: "button",
+					class: "primary small",
+					"data-mark-action": "comment-done",
+					onclick: save,
+				},
+				"Save",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					class: "small",
+					onclick: () => actions.cancelMarkEdit(),
+				},
+				"Cancel",
+			),
+		),
+	);
+}
+
 function renderCase(state: PanelState, actions: Actions): void {
 	const c = state.current;
 	if (c === undefined) {
@@ -531,10 +733,15 @@ function renderCase(state: PanelState, actions: Actions): void {
 
 	const images = state.images?.caseId === c.id ? state.images : undefined;
 	const loaded = state.loaded?.caseId === c.id ? state.loaded : undefined;
+	const edit = state.markEdit;
+	const markArmed = state.markDeleteArmed?.annotationId;
 	const marksKey = JSON.stringify([
 		c.updatedAt,
 		images?.version,
 		loaded ? [...loaded.matches.values()] : null,
+		// What is typed stays out: a key press redraws nothing.
+		edit ? [edit.annotationId, edit.mode] : null,
+		markArmed ?? null,
 	]);
 	if (marksKey !== p.marksKey) {
 		const list = h("ol", { class: "annotations" });
@@ -548,6 +755,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 						class: "annotation",
 						"data-annotation": a.id,
 						...(m ? { "data-colour": colourOf(m) } : {}),
+						...(a.resolution ? { "data-resolved": a.resolution.kind } : {}),
 					},
 					h("span", { class: "number" }, String(a.number)),
 					h(
@@ -564,8 +772,14 @@ function renderCase(state: PanelState, actions: Actions): void {
 							a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
 						),
 						crop ? h("img", { src: crop, alt: `Mark ${a.number}` }) : null,
+						a.resolution ? resolutionLine(a) : null,
 						a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
 						m ? matchView(c.id, a, m, actions) : null,
+						edit?.annotationId === a.id
+							? edit.mode === "resolve"
+								? resolveForm(c, a, edit.kind, edit.text, actions)
+								: commentForm(c, a, edit.text, actions)
+							: markActions(c, a, markArmed === a.id, actions),
 					),
 				),
 			);
@@ -574,6 +788,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 			"section",
 			{},
 			h("h2", {}, `Marks (${c.annotations.length})`),
+			markCounts(c),
 			list,
 		);
 		p.marks.replaceWith(marks);

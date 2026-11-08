@@ -142,6 +142,9 @@ function start(): void {
 						}),
 					);
 					return true; // answers asynchronously
+				case "case:update":
+					sendResponse(reviewer.update(message.case));
+					break;
 				case "case:show":
 					if (activity.busy !== undefined) {
 						sendResponse({ error: activity.busy });

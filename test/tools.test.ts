@@ -654,6 +654,29 @@ describe("tools", () => {
 		expect(changed).toEqual(["c_1", "c_1", "c_1"]);
 	});
 
+	test("set_mark_status settles a mark with a note, and opens it again", async () => {
+		await seed();
+		await call("set_mark_status", {
+			caseId: "c_1",
+			mark: 2,
+			status: "wontfix",
+			note: "Legal wants it",
+		});
+		const settled = (await store.getCase("c_1"))?.annotations[1]?.resolution;
+		expect(settled?.kind).toBe("wontfix");
+		expect(settled?.note).toBe("Legal wants it");
+		const read = await call("get_case", { caseId: "c_1" });
+		expect(JSON.stringify(read)).toContain("Legal wants it");
+		await call("set_mark_status", { caseId: "c_1", mark: 2, status: "open" });
+		expect(
+			(await store.getCase("c_1"))?.annotations[1]?.resolution,
+		).toBeUndefined();
+		expect(changed).toEqual(["c_1", "c_1"]);
+		await expect(
+			call("set_mark_status", { caseId: "c_1", mark: 9, status: "fixed" }),
+		).rejects.toThrow("has no mark 9");
+	});
+
 	test("hints: reading tools are read-only, changing ones ask first", () => {
 		const hints = Object.fromEntries(
 			[...tools.values()].map((t) => [t.name, t.annotations ?? {}]),
@@ -667,7 +690,12 @@ describe("tools", () => {
 			"capture",
 		])
 			expect(hints[name]?.readOnlyHint).toBe(true);
-		for (const name of ["add_annotation", "set_verdict", "delete_case"])
+		for (const name of [
+			"add_annotation",
+			"set_verdict",
+			"set_mark_status",
+			"delete_case",
+		])
 			expect(hints[name]?.consequentialHint).toBe(true);
 		expect(hints["delete_case"]?.destructiveHint).toBe(true);
 		for (const name of [
@@ -787,6 +815,12 @@ describe("confirmations", () => {
 			request("set_verdict", { caseId: "c_9" }),
 		);
 		expect(unknown.tool.description).toContain("Case: none has the id c_9.");
+		const status = await confirmRequestFor(
+			store,
+			tab,
+			request("set_mark_status", { caseId: "c_1", mark: 2, status: "fixed" }),
+		);
+		expect(status.tool.description).toContain("Mark 2: “Comment 2”, now open.");
 	});
 });
 
@@ -850,6 +884,7 @@ describe("through a relay", () => {
 				"highlight",
 				"list_cases",
 				"load_case",
+				"set_mark_status",
 				"set_verdict",
 			]);
 			const cases = await client.callTool({
