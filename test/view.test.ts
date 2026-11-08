@@ -8,6 +8,7 @@ import {
 import type { Annotation, Case } from "../src/lib/case.ts";
 import { summarize } from "../src/lib/element.ts";
 import { MARK_COLOUR } from "../src/lib/marks.ts";
+import type { AnnotationMatch } from "../src/lib/messages.ts";
 import { initialState, type PanelState } from "../src/sidepanel/state.ts";
 import type { Actions } from "../src/sidepanel/view.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -241,6 +242,52 @@ describe("a mark's status and actions", () => {
 		);
 		expect(action("a1", "delete").textContent).toBe("Really delete?");
 		expect(action("a2", "delete").textContent).toBe("Delete");
+	});
+
+	test("a click on a mark's crop shows it on the page, as Show does", () => {
+		const c = twoMarks();
+		const shown: [string, number][] = [];
+		const actions = actionsWith({
+			showMatch: (_caseId, a, candidate) => shown.push([a.id, candidate]),
+		});
+		const found = {
+			annotationId: "a1",
+			number: 1,
+			status: "found",
+			score: 1,
+			current: 0,
+			candidates: [{ score: 1, summary: "p", visible: true }],
+		} as unknown as AnnotationMatch;
+		const withImages = (loaded: boolean) =>
+			caseState(c, (s) => {
+				s.images = {
+					caseId: c.id,
+					version: "v1",
+					urls: new Map([
+						["crops/a1.webp", "blob:a1"],
+						["crops/a2.webp", "blob:a2"],
+					]),
+				};
+				if (loaded)
+					s.loaded = {
+						caseId: c.id,
+						tabId: 1,
+						matches: new Map([["a1", found]]),
+					};
+			});
+		// Not loaded on a tab: nothing to show, only the picture.
+		render(withImages(false), actions);
+		expect(row("a1").querySelector("button.crop")).toBeNull();
+		expect(row("a1").querySelector("img")).not.toBeNull();
+		render(withImages(true), actions);
+		const crop = row("a1").querySelector(
+			"button.crop",
+		) as unknown as HTMLButtonElement;
+		expect(crop.getAttribute("aria-label")).toBe("Show mark 1 on the page");
+		crop.click();
+		expect(shown).toEqual([["a1", 0]]);
+		// A mark the page has no match for: no Show, no click on its crop.
+		expect(row("a2").querySelector("button.crop")).toBeNull();
 	});
 
 	test("the panel's resolved colour is the page's", async () => {

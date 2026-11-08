@@ -286,6 +286,34 @@ function shownText(
 		: `${shown.summary}, hidden at this width`;
 }
 
+/** Whether the page can scroll to the mark: then Show, and its crop, offer it. */
+const canShow = (m: AnnotationMatch | undefined): m is AnnotationMatch =>
+	m !== undefined && (m.candidates.length > 0 || m.status === "no-element");
+
+/** A mark's crop; on a page that can show the mark, a click shows it, as Show does. */
+function cropView(
+	caseId: string,
+	a: Annotation,
+	src: string,
+	m: AnnotationMatch | undefined,
+	actions: Actions,
+): HTMLElement {
+	const img = h("img", { src, alt: `Mark ${a.number}` });
+	if (!canShow(m)) return img;
+	return h(
+		"button",
+		{
+			type: "button",
+			class: "crop",
+			"data-action": "show-crop",
+			title: "Show on the page",
+			"aria-label": `Show mark ${a.number} on the page`,
+			onclick: () => actions.showMatch(caseId, a, m.current),
+		},
+		img,
+	);
+}
+
 function matchView(
 	caseId: string,
 	a: Annotation,
@@ -294,7 +322,7 @@ function matchView(
 ): HTMLElement {
 	const shown = m.candidates[m.current];
 	const buttons = h("div", { class: "row" });
-	if (m.candidates.length > 0 || m.status === "no-element")
+	if (canShow(m))
 		buttons.append(
 			h(
 				"button",
@@ -794,7 +822,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 							),
 							a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
 						),
-						crop ? h("img", { src: crop, alt: `Mark ${a.number}` }) : null,
+						crop ? cropView(c.id, a, crop, m, actions) : null,
 						a.resolution ? resolutionLine(a) : null,
 						a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
 						m ? matchView(c.id, a, m, actions) : null,

@@ -384,6 +384,24 @@ ul.cases .load {
 	border-radius: 6px;
 }
 
+/* A crop that shows its mark on the page when clicked. */
+button.crop {
+	display: block;
+	max-width: 100%;
+	padding: 0;
+	border: 0;
+	background: none;
+	cursor: pointer;
+}
+
+button.crop:hover:not(:disabled) {
+	background: none;
+}
+
+button.crop:hover img {
+	border-color: var(--muted);
+}
+
 .shots {
 	display: grid;
 	gap: 8px;
@@ -459,6 +477,11 @@ ol.annotations {
 .annotation[data-resolved] .comment,
 .annotation[data-resolved] img {
 	opacity: 0.6;
+}
+
+/* The mark is painted into its crop in pink: grey it with the picture. */
+.annotation[data-resolved] img {
+	filter: grayscale(1);
 }
 
 .resolution {
