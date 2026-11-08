@@ -368,6 +368,43 @@ describe("a mark's status and actions", () => {
 			noActions,
 		);
 		expect(isOpen("a2")).toBe(true);
+		// Neither Collapse all nor its own head hides its form.
+		all().click();
+		all().click();
+		expect([isOpen("a1"), isOpen("a2")]).toEqual([false, true]);
+		(
+			row("a2").querySelector(".mark-toggle") as unknown as HTMLButtonElement
+		).click();
+		expect(isOpen("a2")).toBe(true);
+	});
+
+	test("a closed mark says its state in a word, and the counts read apart", () => {
+		const c = twoMarks();
+		const found: AnnotationMatch = {
+			annotationId: "a1",
+			number: 1,
+			status: "lost",
+			score: 0,
+			current: 0,
+			candidates: [],
+		};
+		render(
+			caseState(c, (s) => {
+				s.loaded = {
+					caseId: c.id,
+					tabId: 1,
+					matches: new Map([["a1", found]]),
+				};
+			}),
+			noActions,
+		);
+		const state = (id: string) =>
+			row(id).querySelector(".mark-toggle .state")?.textContent;
+		expect(state("a1")).toBe("Not found");
+		expect(state("a2")).toBe("Won't fix");
+		expect(window.document.getElementById("marks-heading")?.textContent).toBe(
+			"Marks 2",
+		);
 	});
 
 	test("the panel's resolved colour is the page's", async () => {

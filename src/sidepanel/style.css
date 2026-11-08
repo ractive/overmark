@@ -552,7 +552,7 @@ ul.cases .load {
 }
 
 .count {
-	margin-left: 6px;
+	margin-left: 2px;
 	padding: 1px 7px;
 	border-radius: 9px;
 	background: var(--wash);
@@ -597,7 +597,7 @@ ol.annotations {
 	flex: 1;
 	min-width: 0;
 	display: grid;
-	grid-template-columns: 10px auto minmax(0, 1fr) auto;
+	grid-template-columns: 10px auto minmax(0, 1fr) auto auto;
 	align-items: start;
 	gap: 8px;
 	padding: 10px 0 10px 12px;
@@ -647,6 +647,35 @@ ol.annotations {
 	margin-top: 3px;
 }
 
+/* The mark's state in a word; the number's colour alone is not enough. */
+.mark-toggle .state {
+	margin-top: 3px;
+	padding: 0 6px;
+	border-radius: 8px;
+	background: var(--wash);
+	color: var(--muted);
+	font-size: 11px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.annotation[data-colour="found"]:not([data-resolved]) .state {
+	color: var(--ok);
+}
+
+.annotation[data-colour="unsure"]:not([data-resolved]) .state {
+	color: var(--warn);
+}
+
+.annotation[data-colour="lost"]:not([data-resolved]) .state {
+	color: var(--danger);
+}
+
+/* Focus moving up the list stops below the bar, not under it. */
+.annotation :is(button, input, textarea) {
+	scroll-margin-top: 80px;
+}
+
 .mark-head .show {
 	flex: none;
 	margin-top: 9px;
@@ -656,8 +685,8 @@ ol.annotations {
 	display: grid;
 	gap: 8px;
 	min-width: 0;
-	/* Under the comment, past the chevron and the number. */
-	padding: 0 14px 14px 56px;
+	/* Under the comment: 12 + chevron 10 + 8 + number 24 + 8. */
+	padding: 0 14px 14px 62px;
 }
 
 .annotation .body .meta {
@@ -974,7 +1003,9 @@ textarea + .row {
 }
 
 @media (prefers-reduced-motion: reduce) {
-	button {
+	button,
+	.chevron,
+	.shots-section summary::before {
 		transition: none;
 	}
 }

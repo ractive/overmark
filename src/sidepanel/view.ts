@@ -254,6 +254,16 @@ function colourOf(m: AnnotationMatch): "found" | "unsure" | "lost" {
 	return sure ? "found" : "unsure";
 }
 
+/** A mark's state in a word, for its head: the number's colour says it too, but not to everyone. */
+function stateWord(
+	a: Annotation,
+	m: AnnotationMatch | undefined,
+): string | undefined {
+	if (a.resolution) return RESOLUTION_LABEL[a.resolution.kind];
+	if (m === undefined || m.status === "no-element") return undefined;
+	return { found: "Found", unsure: "Unsure", lost: "Not found" }[colourOf(m)];
+}
+
 function matchText(m: AnnotationMatch): string {
 	if (m.current > 0)
 		return `Candidate ${m.current + 1} of ${m.candidates.length} (${percent(m.score)})`;
@@ -798,7 +808,10 @@ function renderCase(state: PanelState, actions: Actions): void {
 			id: "toggle-marks",
 			onclick: () => {
 				const open = !items.every((li) => li.hasAttribute("data-open"));
-				for (const li of items) setOpen(c.id, li, open);
+				// A mark being edited keeps its form in view.
+				for (const li of items)
+					if (open || li.dataset["annotation"] !== edit?.annotationId)
+						setOpen(c.id, li, open);
 				syncToggleAll();
 			},
 		});
@@ -817,7 +830,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 				h(
 					"h2",
 					{ id: "marks-heading" },
-					"Marks",
+					"Marks ",
 					h("span", { class: "count" }, String(c.annotations.length)),
 				),
 				toggleAll,
@@ -847,7 +860,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 			h(
 				"summary",
 				{},
-				"Screenshots",
+				"Screenshots ",
 				h("span", { class: "count" }, String(c.shots.length)),
 			),
 			list,
@@ -891,6 +904,7 @@ interface MarkContext {
 function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 	const { match: m, edit, actions } = x;
 	const bodyId = `mark-body-${a.id}`;
+	const state = stateWord(a, m);
 	const li: HTMLElement = h("li", {
 		class: "annotation",
 		"data-annotation": a.id,
@@ -904,6 +918,8 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 			class: "mark-toggle",
 			"aria-controls": bodyId,
 			onclick: () => {
+				// Its form stays in view while it is being edited.
+				if (edit) return;
 				setOpen(c.id, li, !li.hasAttribute("data-open"));
 				x.changed();
 			},
@@ -916,6 +932,7 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 			a.comment || "No comment",
 		),
 		a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
+		state ? h("span", { class: "state" }, state) : null,
 	);
 	const show = canShow(m)
 		? h(
