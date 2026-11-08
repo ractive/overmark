@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import type { Case } from "../src/lib/case.ts";
+import { FOUND_COLOUR, PROBABLE_COLOUR } from "../src/content/overlay.ts";
+import type { Annotation, Case } from "../src/lib/case.ts";
+import { summarize } from "../src/lib/element.ts";
+import { MARK_COLOUR } from "../src/lib/marks.ts";
 import { initialState, type PanelState } from "../src/sidepanel/state.ts";
 import type { Actions } from "../src/sidepanel/view.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -323,5 +326,90 @@ describe("the annotate button", () => {
 				s.cases = [c];
 			}),
 		).toBe("Stop annotating");
+	});
+});
+
+test("the panel's mark colours are the page's", async () => {
+	const css = await Bun.file(
+		new URL("../src/sidepanel/style.css", import.meta.url),
+	).text();
+	expect(css).toContain(`--mark: ${MARK_COLOUR};`);
+	expect(css).toContain(`--mark-found: ${FOUND_COLOUR};`);
+	expect(css).toContain(`--mark-unsure: ${PROBABLE_COLOUR};`);
+});
+
+describe("a loaded mark", () => {
+	const element = {
+		tag: "button",
+		classes: [],
+		attributes: {},
+		ancestors: [],
+		rect: { x: 0, y: 0, width: 100, height: 20 },
+		page: { width: 1280, height: 800 },
+		selector: "button",
+		text: "Berechnen",
+	};
+	const mark = {
+		id: "a1",
+		number: 1,
+		shot: "s1",
+		comment: "Too pale",
+		author: "user",
+		shape: { kind: "element", rect: element.rect },
+		crop: "crops/a1.webp",
+		element,
+	} as Annotation;
+	const shownAs = (summary: string, visible = true, current = 0) =>
+		caseState({ ...sampleCase("c_m"), annotations: [mark] }, (s) => {
+			s.loaded = {
+				caseId: "c_m",
+				tabId: 1,
+				matches: new Map([
+					[
+						"a1",
+						{
+							annotationId: "a1",
+							number: 1,
+							status: "found",
+							score: 1,
+							current,
+							candidates: [
+								{ score: 1, summary, selector: "b", visible, found: true },
+								{ score: 0.6, summary, selector: "c", visible, found: false },
+							],
+						},
+					],
+				]),
+			};
+		});
+	const said = () =>
+		document.querySelector(".match .meta")?.textContent ?? undefined;
+
+	const colour = () =>
+		document.querySelector<HTMLElement>(".annotation")?.dataset["colour"];
+
+	test("its number has the colour of its mark on the page", () => {
+		render(shownAs(summarize(element)), noActions);
+		expect(colour()).toBe("found");
+	});
+
+	test("another candidate, not sure enough, is unsure on both", () => {
+		render(shownAs(summarize(element), true, 1), noActions);
+		expect(colour()).toBe("unsure");
+		expect(document.querySelector(".match")?.className).toContain("unsure");
+	});
+
+	test("says nothing more about the element it expected", () => {
+		render(shownAs(summarize(element)), noActions);
+		expect(said()).toBeUndefined();
+	});
+
+	test("names another element, and says when one is hidden", () => {
+		render(shownAs("a link"), noActions);
+		expect(said()).toBe("a link");
+		render(shownAs("a span", false), noActions);
+		expect(said()).toBe("a span, hidden at this width");
+		render(shownAs(summarize(element), false), noActions);
+		expect(said()).toBe("Hidden at this width");
 	});
 });

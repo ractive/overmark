@@ -19,13 +19,19 @@ declare const OVERMARK_TEST_BUILD: boolean | undefined;
 
 export const HOST_ID = "overmark-root";
 export const HOVER_COLOUR = "#1f6feb";
-export const FOUND_COLOUR = "#1e8e3e";
-export const PROBABLE_COLOUR = "#d97706";
+/** Both carry a mark's white number, here and in the side panel's list. */
+export const FOUND_COLOUR = "#1a7f37";
+export const PROBABLE_COLOUR = "#b45f06";
 const SVG = "http://www.w3.org/2000/svg";
+const INK = "#1d2433";
+const AMBER = "#ffb000";
+const SHADOW = "0 6px 24px rgba(13, 18, 30, 0.35)";
 
 const STYLE = `
-:host { all: initial; }
+/* Important: a page's own rule on the host would beat this otherwise. */
+:host { all: initial !important; }
 .layer {
+	direction: ltr;
 	position: fixed; inset: 0; z-index: 2147483647;
 	pointer-events: none;
 	font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -36,60 +42,79 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .capture.active { pointer-events: auto; }
 .capture.element { cursor: default; }
 .toolbar {
-	position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+	position: fixed; left: 16px; right: 16px; bottom: 16px; margin-inline: auto;
+	width: fit-content; max-width: calc(100vw - 32px);
 	display: flex; gap: 2px; align-items: center; flex-wrap: wrap; justify-content: center;
-	max-width: calc(100vw - 32px);
-	padding: 6px; border-radius: 10px;
-	background: #1d2433; color: #fff;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+	padding: 5px; border-radius: 12px;
+	background: ${INK}; color: #fff;
+	box-shadow: ${SHADOW};
 	pointer-events: auto;
 }
 .toolbar.top { top: 16px; bottom: auto; }
-.toolbar .brand { padding: 0 8px; font-weight: 600; color: #ffb000; }
-.toolbar .status { padding: 0 8px; color: #b8c0d0; }
-.toolbar .sep { width: 1px; align-self: stretch; margin: 2px 4px; background: #3a4560; }
+.ring { flex: none; width: 20px; height: 20px; margin: 0 6px; fill: none; stroke: ${AMBER}; stroke-width: 3.5; }
+.toolbar .status { padding: 0 8px; color: #b8c0d0; max-width: 340px; font-variant-numeric: tabular-nums; }
+.toolbar .sep { width: 1px; align-self: stretch; margin: 4px; background: #3a4560; }
 .toolbar button {
-	all: unset; cursor: pointer; padding: 6px 10px; border-radius: 6px;
+	all: unset; cursor: pointer; padding: 6px 9px; border-radius: 8px;
+	display: inline-flex; gap: 6px; align-items: center;
 	color: #fff; font: inherit;
 }
+.icon {
+	flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor;
+	stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
 .toolbar button:hover, .toolbar button:focus-visible { background: #34405a; }
-.toolbar button[aria-pressed="true"] { background: #ffb000; color: #1d2433; }
-.toolbar button.primary { background: #ffb000; color: #1d2433; font-weight: 600; }
-.toolbar button:disabled { opacity: 0.5; cursor: default; }
+.toolbar button[aria-pressed="true"] { background: ${AMBER}; color: ${INK}; }
+.toolbar button.primary { background: ${AMBER}; color: ${INK}; font-weight: 600; }
+.toolbar button.primary:hover, .toolbar button.primary:focus-visible { background: #eea400; }
+.toolbar button:disabled { opacity: 0.5; cursor: default; background: none; }
+.toolbar button:focus-visible, .reviewbar button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 .toolbar input {
-	font: inherit; padding: 5px 8px; border-radius: 6px; border: 0;
-	min-width: 220px; color: #1d2433; background: #fff;
+	font: inherit; padding: 5px 8px; border-radius: 8px; border: 0; margin-right: 4px;
+	min-width: 220px; color: ${INK}; background: #fff;
 }
 .popover {
-	position: fixed; width: 280px; padding: 8px; border-radius: 8px;
-	background: #fff; color: #1d2433;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); border: 2px solid ${MARK_COLOUR};
+	box-sizing: border-box; position: fixed; width: 296px; padding: 10px; border-radius: 12px;
+	background: #fff; color: ${INK};
+	box-shadow: ${SHADOW}; border: 1px solid #dfe3ea;
 	pointer-events: auto;
 }
 .popover textarea {
-	box-sizing: border-box; width: 100%; min-height: 72px; resize: vertical;
-	font: inherit; padding: 6px; border: 1px solid #c8cdd8; border-radius: 6px;
-	color: #1d2433; background: #fff;
+	box-sizing: border-box; display: block; width: 100%; min-height: 72px; resize: vertical;
+	font: inherit; padding: 6px 8px; border: 1px solid #c8cdd8; border-radius: 8px;
+	color: ${INK}; background: #fff;
 }
-.popover .row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+.popover textarea:focus { outline: 2px solid ${HOVER_COLOUR}; outline-offset: -1px; border-color: transparent; }
+.popover .row { display: flex; gap: 6px; justify-content: space-between; margin-top: 8px; }
 .popover button {
-	font: inherit; padding: 4px 10px; border-radius: 6px; cursor: pointer;
-	border: 1px solid #c8cdd8; background: #f4f6f9; color: #1d2433;
+	font: inherit; padding: 4px 10px; border-radius: 8px; cursor: pointer;
+	border: 1px solid #c8cdd8; background: #fff; color: ${INK};
 }
-.popover button.primary { background: ${MARK_COLOUR}; border-color: ${MARK_COLOUR}; color: #fff; }
-.popover .label { font-weight: 600; margin-bottom: 4px; }
+.popover button:hover { background: #f2f4f7; }
+.popover button.primary { background: ${AMBER}; border-color: ${AMBER}; font-weight: 600; }
+.popover button.primary:hover { background: #eea400; border-color: #eea400; }
+.popover .label { display: flex; gap: 8px; align-items: center; font-weight: 600; margin-bottom: 8px; }
+.popover .pin {
+	display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding-inline: 4px;
+	box-sizing: border-box; border-radius: 11px; background: ${MARK_COLOUR}; color: #fff;
+	font: 700 12px/1 ui-rounded, system-ui, sans-serif;
+}
 .reviewbar {
 	position: fixed; right: 16px; top: 16px;
 	display: flex; gap: 8px; align-items: center;
-	padding: 6px 6px 6px 12px; border-radius: 10px;
-	background: #1d2433; color: #fff;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-	pointer-events: auto; max-width: min(420px, calc(100vw - 32px));
+	padding: 5px 5px 5px 2px; border-radius: 12px;
+	background: ${INK}; color: #fff;
+	box-shadow: ${SHADOW};
+	pointer-events: auto; max-width: min(440px, calc(100vw - 32px));
 }
-.reviewbar .brand { font-weight: 600; color: #ffb000; }
-.reviewbar .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Under a toolbar at the top: it would cover the toolbar's last buttons. */
+.toolbar.top:not([hidden]) ~ .reviewbar { top: 64px; }
+/* The count says what the bar is for: a long title gives way. */
+.reviewbar .text { display: flex; gap: 8px; min-width: 0; }
+.reviewbar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b8c0d0; }
+.reviewbar .count { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
 .reviewbar button {
-	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 6px; color: #fff; font: inherit;
+	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 8px; color: #fff; font: inherit;
 }
 .reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
 /* Screenshots show the page alone. Invisible, not gone: a field keeps its focus. */
@@ -108,6 +133,54 @@ function svg<K extends keyof SVGElementTagNameMap>(
 	const el = doc.createElementNS(SVG, tag);
 	for (const [k, v] of Object.entries(attributes))
 		el.setAttribute(k, String(v));
+	return el;
+}
+
+/** The toolbar's icons: paths on a 16×16 grid, drawn with a stroke. */
+const ICONS = {
+	element: [
+		"M2 5V3a1 1 0 0 1 1-1h2",
+		"M11 2h2a1 1 0 0 1 1 1v2",
+		"M14 11v2a1 1 0 0 1-1 1h-2",
+		"M5 14H3a1 1 0 0 1-1-1v-2",
+		"M6 6l4.5 1.6-1.9.9-.9 1.9z",
+	],
+	box: [
+		"M3.5 2.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z",
+	],
+	arrow: ["M3 13L13 3", "M6.5 3H13v6.5"],
+	pen: ["M2 11c2-5 3.5-7 5-6s-1.5 6 .5 6.5S11 8 12 8s1 2 2 2"],
+	note: [
+		"M2.5 3.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7l-3 2.5V11h-.5a1 1 0 0 1-1-1z",
+	],
+	undo: ["M5.5 3l-3 3 3 3", "M2.5 6H9a4 4 0 0 1 0 8H6"],
+	close: ["M4 4l8 8", "M12 4l-8 8"],
+	up: ["M8 13V3", "M4 7l4-4 4 4"],
+	down: ["M8 3v10", "M4 9l4 4 4-4"],
+} as const;
+
+export type IconName = keyof typeof ICONS;
+
+export function icon(doc: Document, name: IconName): SVGSVGElement {
+	const el = svg(doc, "svg", {
+		class: "icon",
+		viewBox: "0 0 16 16",
+		"aria-hidden": "true",
+	});
+	for (const d of ICONS[name]) el.append(svg(doc, "path", { d }));
+	return el;
+}
+
+/** The ring of Overmark's icon, as if something on the page were circled. */
+export function ring(doc: Document): SVGSVGElement {
+	const el = svg(doc, "svg", {
+		class: "ring",
+		viewBox: "0 0 20 20",
+		role: "img",
+	});
+	const title = svg(doc, "title", {});
+	title.textContent = "Overmark";
+	el.append(title, svg(doc, "circle", { cx: 10, cy: 10, r: 7 }));
 	return el;
 }
 

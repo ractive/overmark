@@ -90,6 +90,7 @@ class FakeTab implements TabBridge {
 					summary: "button",
 					selector: "form > button",
 					visible: true,
+					found: true,
 				},
 			],
 		};
@@ -367,6 +368,7 @@ describe("tools", () => {
 					summary: "button",
 					selector: "form > button",
 					visible: true,
+					found: true,
 				},
 			],
 		});

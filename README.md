@@ -62,7 +62,7 @@ through a [tab-mcp](https://github.com/ractive/tab-mcp) relay:
 | `list_cases` | The saved cases |
 | `get_case` | A case's marks with their comments, element details and crops |
 | `get_image` | One screenshot or crop |
-| `load_case` | Finds the marks' elements on the tab in front and outlines them |
+| `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |

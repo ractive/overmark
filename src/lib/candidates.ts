@@ -127,7 +127,7 @@ function likely(search: PageSearch, stored: ElementDetails): Element[] {
 export interface Candidate {
 	element: Element;
 	score: number;
-	/** Sure enough to be outlined as found (match.ts `isFound`). */
+	/** Sure enough to be drawn as found (match.ts `isFound`). */
 	found: boolean;
 }
 

@@ -34,7 +34,7 @@ import type {
 	CandidateInfo,
 	LoadResult,
 } from "../lib/messages.ts";
-import type { Overlay, ReviewItem } from "./overlay.ts";
+import { type Overlay, type ReviewItem, ring } from "./overlay.ts";
 
 interface Entry {
 	annotation: Annotation;
@@ -132,9 +132,7 @@ export class Reviewer {
 				...base,
 				status,
 				score: found.score,
-				candidates: candidates.map((k) =>
-					this.#info(k.element, k.score, search.context),
-				),
+				candidates: candidates.map((k) => this.#info(k, search.context)),
 				...(truncated ? { truncated: true } : {}),
 			},
 		};
@@ -153,13 +151,17 @@ export class Reviewer {
 		this.#renderBar();
 	}
 
-	#info(el: Element, score: number, context: DescribeContext): CandidateInfo {
-		const rect = el.getBoundingClientRect();
+	#info(candidate: Candidate, context: DescribeContext): CandidateInfo {
+		const { element, score, found } = candidate;
+		const rect = element.getBoundingClientRect();
 		return {
 			score: Math.round(score * 100) / 100,
-			summary: summarize(describeElement(el, context, { selector: false })),
-			selector: cssSelector(el),
+			summary: summarize(
+				describeElement(element, context, { selector: false }),
+			),
+			selector: cssSelector(element),
 			visible: rect.width > 0 && rect.height > 0,
+			found,
 		};
 	}
 
@@ -300,18 +302,21 @@ export class Reviewer {
 		const found = this.#entries.filter(
 			(e) => e.match.status !== "lost" && e.match.status !== "no-element",
 		).length;
-		const brand = doc.createElement("span");
-		brand.className = "brand";
-		brand.textContent = "Overmark";
+		const title = doc.createElement("span");
+		title.className = "title";
+		title.textContent = this.#case?.title ?? "";
+		const count = doc.createElement("span");
+		count.className = "count";
+		count.textContent = `${found} of ${total} found`;
 		const text = doc.createElement("span");
 		text.className = "text";
 		text.dataset["role"] = "review-status";
-		text.textContent = `“${this.#case?.title ?? ""}”: ${found} of ${total} found`;
+		text.append(title, count);
 		const hide = doc.createElement("button");
 		hide.type = "button";
 		hide.dataset["action"] = "review-hide";
 		hide.textContent = "Hide";
 		hide.addEventListener("click", () => this.clear());
-		this.overlay.reviewBar.replaceChildren(brand, text, hide);
+		this.overlay.reviewBar.replaceChildren(ring(doc), text, hide);
 	}
 }

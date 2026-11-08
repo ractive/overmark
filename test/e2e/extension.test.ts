@@ -258,6 +258,31 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.send("Page.close");
 	}, 60_000);
 
+	test("the toolbar stays on one line in a normal window", async () => {
+		const { page, tabId } = await h.open("v1");
+		await page.send("Emulation.setDeviceMetricsOverride", {
+			width: 1000,
+			height: 700,
+			deviceScaleFactor: 1,
+			mobile: false,
+		});
+		// A page's own styles do not reach it, not even on the host element.
+		await page.eval(`(() => {
+			document.documentElement.dir = "rtl";
+			document.head.insertAdjacentHTML("beforeend", "<style>div { text-transform: uppercase; letter-spacing: 0.3em; }</style>");
+		})()`);
+		await showToolbar(h, page, tabId);
+		const height = await page.eval<number>(
+			`${shadow(".toolbar")}.getBoundingClientRect().height`,
+		);
+		expect(height).toBeLessThan(60);
+		const style = await page.eval<string[]>(
+			`(() => { const s = getComputedStyle(${shadow('[data-action="tool-box"]')}); return [s.textTransform, s.letterSpacing, s.direction]; })()`,
+		);
+		expect(style).toEqual(["none", "normal", "ltr"]);
+		await page.send("Page.close");
+	});
+
 	test("the list's Load puts drawn marks back on their elements", async () => {
 		const box = (page: Page, truth: string) =>
 			page.eval<{ x: number; y: number; width: number; height: number }>(
@@ -390,6 +415,31 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			expect(
 				titled(db, "Another one")[0]?.annotations.map((a) => a.number),
 			).toEqual([1]);
+			await page.send("Page.close");
+		}, 60_000);
+
+		test("New case renumbers the comment that is open", async () => {
+			const { page, tabId } = await h.open("v1");
+			await showToolbar(h, page, tabId);
+			await markElement(page, "h1", "First");
+			await saveAs(page, "Renumbered");
+			await page.click(shadow('[data-action="tool-box"]'));
+			await page.drag({ x: 500, y: 100 }, { x: 640, y: 160 });
+			await page.waitFor(shadow(".popover textarea"));
+			expect(await page.eval(`${shadow(".popover .pin")}.textContent`)).toBe(
+				"2",
+			);
+			await page.click(shadow('[data-action="new-case"]'));
+			expect(await page.eval(`${shadow(".popover .pin")}.textContent`)).toBe(
+				"1",
+			);
+			expect(
+				await page.eval(
+					`${shadow(".popover textarea")}.getAttribute("aria-label")`,
+				),
+			).toBe("Comment for mark 1");
+			// A draft left behind would hold the tab open with "leave this site?".
+			await page.click(shadow('[data-action="comment-remove"]'));
 			await page.send("Page.close");
 		}, 60_000);
 
