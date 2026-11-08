@@ -355,6 +355,9 @@ export class Browser {
 	}
 }
 
+/** An exception thrown by an expression evaluated in the page. */
+class PageError extends Error {}
+
 export class Page {
 	readonly #browser: Browser;
 	readonly sessionId: string;
@@ -428,7 +431,7 @@ export class Page {
 			exceptionDetails?: { exception?: { description?: string }; text: string };
 		};
 		if (r.exceptionDetails) {
-			throw new Error(
+			throw new PageError(
 				r.exceptionDetails.exception?.description ?? r.exceptionDetails.text,
 			);
 		}
@@ -436,8 +439,9 @@ export class Page {
 	}
 
 	/**
-	 * Wait until `expression` is truthy. One that throws (an element not
-	 * rendered yet) is not yet true; the last error is in the timeout's message.
+	 * Wait until `expression` is truthy. One that throws in the page (an element
+	 * not rendered yet) is not yet true, and the last error is in the timeout's
+	 * message; a syntax error or a lost connection fails at once.
 	 */
 	async waitFor(expression: string, timeoutMs = 5000): Promise<void> {
 		const end = Date.now() + timeoutMs;
@@ -447,7 +451,9 @@ export class Page {
 				if (await this.eval<boolean>(`Boolean(${expression})`)) return;
 				last = "";
 			} catch (e) {
-				last = e instanceof Error ? e.message : String(e);
+				if (!(e instanceof PageError) || e.message.startsWith("SyntaxError"))
+					throw e;
+				last = e.message;
 			}
 			if (Date.now() > end)
 				throw new Error(

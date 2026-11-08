@@ -581,7 +581,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			),
 		).toBe("Won't fixLegal wants it");
 		await v1.page.waitFor(`${review(2)}?.hasAttribute("data-resolved")`);
-		// Its outline fades; its pin stays solid, to be found and clicked.
+		// Its outline fades; its pin stays solid, to be found.
 		expect(
 			await v1.page.eval<string[]>(`(() => {
 				const mark = ${review(2)};
@@ -592,6 +592,13 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 				].map(String);
 			})()`),
 		).toEqual(["null", String(RESOLVED_OPACITY), "true"]);
+		// Shown from the panel, it is looked for: it shows fully.
+		await h.control.eval(
+			`document.querySelector("#match-a2 [data-action=show]").click()`,
+		);
+		await v1.page.waitFor(
+			`${review(2)}?.hasAttribute("data-resolved") && ${review(2)}.querySelector("[data-faded]") === null`,
+		);
 		expect(await v1.page.eval<string>(bar)).toBe(
 			"2 of 2 open found, 1 resolved",
 		);
