@@ -27,9 +27,12 @@ When you save marks as a case, or add marks to a case, Overmark stores in your b
 - screenshots of the visible part of the tab, with the marks on them, and a crop per
   mark.
 
-The side panel also keeps its settings in the extension's local storage: the relay
-address, "Blur form fields in screenshots", "Keep AI access on", and the secret from
-which the tab-mcp library derives the address an AI app connects to.
+Overmark also keeps its settings in the extension's storage, which only its own pages
+and its background service worker can read: the relay address, "Blur form fields in
+screenshots", "Keep AI access on", whether AI access is on until the browser closes, and
+the secret from which the tab-mcp library derives the address an AI app connects to.
+(Earlier builds of Overmark kept them in the side panel's own local storage; the first time
+the side panel opens after the update it hands them over and deletes its copy.)
 
 Overmark does not record what is typed into form fields and editable regions: the text
 it keeps about an element leaves them out. Of the editors that draw their text as
@@ -78,16 +81,21 @@ Only in two cases, both started by you:
    else runs is subject to its operator's practices. The AI app's provider handles the
    data under its own privacy policy.
 
-   Changes the AI app wants to make (adding a mark, recording a verdict, deleting a
-   case) are shown to you in the side panel first, every time, naming the case and the
-   page; nothing changes until you allow it. The side panel shows the app's last call.
+   The connection is held by Overmark's background service worker, so it stays while the
+   side panel is closed; the Overmark icon shows "on" while it is up. Changes the AI app
+   wants to make (adding a mark, recording a verdict, changing a mark's status, deleting
+   a case) are asked first, every time, naming the case and the page: in the side panel
+   when it is open in the window in front, otherwise also in a notification of your
+   system (with Don't allow and Allow; the icon shows "?" meanwhile). Nothing changes
+   until you allow it; no answer within 60 seconds is Don't allow. The side panel shows
+   the app's last call.
 
-   Closing the side panel, or "Stop AI access" at the top of it, pauses the connection;
-   it does not end the pairing. "Stop AI access" also turns "Keep AI access on" off. The
-   paired AI app can use the tools again when the side panel connects again, which
-   happens by itself while "Keep AI access on" is checked: when the side panel opens, and
-   when the relay ended a session that was idle or too old. Disconnect, next to the app
-   in the AI connection dialog, removes the app.
+   "Stop AI access" at the top of the side panel pauses the connection; it does not end
+   the pairing, and it turns "Keep AI access on" off. Without "Keep AI access on" the
+   connection also ends when the relay ends a session that was idle or too old, or when
+   the browser closes. With it, Overmark connects again by itself: when the browser
+   starts, and when the relay ended such a session. Disconnect, next to the app in the
+   side panel's AI connection view, removes the app.
 
 Overmark itself sends nothing else. It does work inside the page you annotate, though, so
 that page's own scripts can see what Overmark shows there and the keys you press there,
@@ -104,7 +112,13 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
 - **storage:** for the browser's session storage, which forgets everything when the
   browser closes: Overmark notes there which marks the toolbar on a tab just added (case,
   mark, screenshot and comment), so that the toolbar's Undo can take back those marks
-  and no others.
+  and no others, and whether AI access is on. And for the extension's local storage, with
+  the settings and the secret named above.
+- **alarms:** while AI access is on, Overmark's background service worker wakes once a
+  minute, so the connection to the AI app comes back after the computer slept.
+- **notifications:** to ask whether the AI app may make a change when the side panel is
+  not open in front (see "An AI app" above). Chrome mentions it when installing
+  ("Display notifications").
 - **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
   free disk space, and they may grow beyond its usual limit. They stay in your browser.
 - **Single sites (optional):** when you open a case's page from its address, or show a
