@@ -17,12 +17,12 @@ import {
 	reachOverlay,
 	saveAs,
 	shadow,
+	worker,
 } from "./steps.ts";
 
 interface Capture {
 	ok: boolean;
 	error?: string;
-	dataUrl?: string;
 }
 
 describe.skipIf(browserBinary === undefined)("the store package", () => {
@@ -33,9 +33,10 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		h.control.eval<string>(
 			`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => "injected", (e) => e.message)`,
 		);
-	const capture = (tabId: number) =>
-		h.control.eval<Capture>(
-			`chrome.tabs.get(${tabId}).then((t) => chrome.runtime.sendMessage({ type: "capture:tab", tabId: t.id, windowId: t.windowId }))`,
+	/** Whether the worker may take a screenshot of the tab, as the AI app's `capture` does. */
+	const capture = async (tabId: number) =>
+		(await worker(h)).eval<Capture>(
+			`chrome.tabs.get(${tabId}).then((t) => chrome.tabs.captureVisibleTab(t.windowId, { format: "png" })).then(() => ({ ok: true }), (e) => ({ ok: false, error: e.message }))`,
 		);
 	const sidePanel = async (): Promise<Page> => {
 		const { targetId } = await h.browser.waitForTarget(
@@ -65,6 +66,8 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		expect(granted.origins).toEqual([]);
 		expect(granted.permissions.sort()).toEqual([
 			"activeTab",
+			"alarms",
+			"notifications",
 			"scripting",
 			"sidePanel",
 			"storage",
@@ -79,14 +82,18 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		expect(start).toBe("(()=>{"); // a test build has spaces and line breaks here
 	});
 
-	test("storage and unlimitedStorage add no install warning", async () => {
+	test("only notifications adds an install warning; storage, unlimitedStorage and alarms none", async () => {
 		const warnings = (manifest: object) =>
 			h.control.eval<string[]>(
 				`chrome.management.getPermissionWarningsByManifest(${JSON.stringify(JSON.stringify(manifest))})`,
 			);
-		const permissions = h.manifest["permissions"] as string[];
-		expect(permissions).toContain("unlimitedStorage");
-		expect(await warnings(h.manifest)).toEqual([]);
+		const all = h.manifest["permissions"] as string[];
+		expect(all).toContain("unlimitedStorage");
+		expect(all).toContain("alarms");
+		// "Display notifications", in the browser's language.
+		expect(await warnings(h.manifest)).toHaveLength(1);
+		const permissions = all.filter((p) => p !== "notifications");
+		expect(await warnings({ ...h.manifest, permissions })).toEqual([]);
 		// Chrome does warn here, so the empty answer above means something.
 		expect(
 			await warnings({

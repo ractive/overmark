@@ -1,9 +1,14 @@
 /**
  * The service worker: a click on the icon (or Alt+Shift+O) opens the side
  * panel and injects the content script into that tab (the click grants
- * `activeTab`). It also captures screenshots and writes cases for the content
+ * `activeTab`). It captures screenshots and writes cases for the content
  * script, which runs in the page's origin and cannot reach the extension's
- * storage.
+ * storage. And it holds the connection to the AI app (DEC-015), so that it
+ * stays while the side panel is closed.
+ *
+ * Every listener is added here, at the top level, so that its event wakes
+ * the worker; each worker start connects again if the user left AI access on
+ * (after a browser start, an update, a reload).
  */
 
 import { isSafeId, pendingImage } from "./lib/case.ts";
@@ -13,21 +18,23 @@ import {
 	PENDING_QUALITY,
 	screenshotToWebp,
 } from "./lib/images.ts";
-import type {
-	Broadcast,
-	CaptureResult,
-	ContentRequest,
-	NumberCheck,
-	SaveResult,
-	TabCapture,
-	UndoResult,
-	WorkerRequest,
-	WorkerResponse,
+import {
+	type Broadcast,
+	type CaptureResult,
+	type ContentRequest,
+	isWorkerRequest,
+	type NumberCheck,
+	type SaveResult,
+	type UndoResult,
+	type WorkerRequest,
+	type WorkerResponse,
 } from "./lib/messages.ts";
 import { numberFree, saveCase, undoAdd } from "./lib/save.ts";
 import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
 import { inject } from "./lib/tabs.ts";
 import { AddLedger } from "./lib/undo.ts";
+import { ALARM, Connection } from "./worker/connection.ts";
+import { isPanelSender, PANEL_PORT } from "./worker/protocol.ts";
 
 const store = new IdbStore();
 const added = new AddLedger(chrome.storage.session);
@@ -193,14 +200,6 @@ async function handle(
 				await broadcast({ type: "cases:changed", caseId: request.caseId });
 			return result satisfies UndoResult;
 		}
-		case "capture:tab": {
-			// From the side panel (an AI app's screenshot), not from a content script.
-			if (!sender.url?.startsWith(chrome.runtime.getURL("")))
-				throw new Error("only for Overmark's own pages");
-			return {
-				dataUrl: await capture(request.tabId, request.windowId),
-			} satisfies TabCapture;
-		}
 		case "images:discard":
 			if (!isSafeId(request.caseId)) throw new Error("invalid id");
 			await store.deleteImages(
@@ -214,15 +213,7 @@ async function handle(
 chrome.runtime.onMessage.addListener(
 	(request: WorkerRequest, sender, sendResponse) => {
 		if (sender.id !== chrome.runtime.id) return false;
-		if (
-			request?.type !== "capture" &&
-			request?.type !== "case:save" &&
-			request?.type !== "case:number" &&
-			request?.type !== "case:undo-add" &&
-			request?.type !== "images:discard" &&
-			request?.type !== "capture:tab"
-		)
-			return false;
+		if (!isWorkerRequest(request)) return false;
 		handle(request, sender).then(
 			(result) =>
 				sendResponse({ ok: true, ...result } satisfies WorkerResponse),
@@ -235,3 +226,68 @@ chrome.runtime.onMessage.addListener(
 		return true; // answers asynchronously
 	},
 );
+
+// --- The AI app (DEC-015) ---------------------------------------------------
+
+const ready = Connection.start({ store, capture });
+ready.catch((error: unknown) =>
+	console.error("Overmark: AI connection", error),
+);
+
+const withConnection = (use: (connection: Connection) => void) =>
+	void ready.then(use, () => {});
+
+// Commands come only over the side panel's own port; content scripts reach
+// `chrome.runtime` too, so its sender is checked, and any other port closed.
+chrome.runtime.onConnect.addListener((port) => {
+	if (
+		port.name !== PANEL_PORT ||
+		!isPanelSender(port.sender ?? {}, chrome.runtime.id)
+	) {
+		port.disconnect();
+		return;
+	}
+	// Until the connection has started (a worker that just woke), keep what
+	// the panel says: Chrome hands a message only to the listeners there are.
+	const early: unknown[] = [];
+	const keep = (message: unknown) => void early.push(message);
+	let gone = false;
+	port.onMessage.addListener(keep);
+	port.onDisconnect.addListener(() => {
+		gone = true;
+	});
+	withConnection((c) => {
+		port.onMessage.removeListener(keep);
+		if (!gone) c.addPanel(port, early);
+	});
+});
+
+// The worker starts for these too, which connects again if AI access was on.
+chrome.runtime.onInstalled.addListener(() => withConnection((c) => c.keepUp()));
+chrome.runtime.onStartup.addListener(() => withConnection((c) => c.keepUp()));
+chrome.alarms.onAlarm.addListener((alarm) => {
+	if (alarm.name === ALARM) withConnection((c) => c.keepUp());
+});
+
+/**
+ * A notification's answer: its button Don't allow (0) or Allow (1); a click
+ * on its body, or the user closing it, is Don't allow. On the worker's
+ * global object too, for the DevTools Protocol, which cannot click a
+ * notification: the end-to-end tests answer through the same functions a
+ * click calls.
+ */
+function notificationButton(id: string, index: number): void {
+	withConnection((c) => c.notificationButton(id, index));
+}
+function notificationDismissed(id: string): void {
+	withConnection((c) => c.notificationDismissed(id));
+}
+chrome.notifications.onButtonClicked.addListener(notificationButton);
+chrome.notifications.onClicked.addListener(notificationDismissed);
+chrome.notifications.onClosed.addListener((id, byUser) => {
+	if (byUser) notificationDismissed(id);
+});
+Object.assign(globalThis, {
+	overmarkNotificationButton: notificationButton,
+	overmarkNotificationDismissed: notificationDismissed,
+});

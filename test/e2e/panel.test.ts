@@ -6,15 +6,12 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-	Client,
-	StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/client";
-import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
 import type { Case } from "../../src/lib/case.ts";
 import { exportCase } from "../../src/lib/export.ts";
 import { MemoryStore } from "../../src/lib/store.ts";
 import { sampleCase } from "../fixtures.ts";
+import { answerInPanel, mcpClient, openSidePanel, setRelay } from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
@@ -92,7 +89,9 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			};
 		})`);
 		await putCases(cases);
-		await h.control.eval("localStorage.clear()");
+		await h.control.eval(
+			`localStorage.clear(); chrome.storage.local.remove("blurForms")`,
+		);
 		await openPanel();
 	}
 
@@ -658,91 +657,41 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 
 	describe("with a relay", () => {
 		const status = `${id("ai-status")}.textContent`;
+		let side: Page | undefined;
 
-		async function keepOnWith(relay: string): Promise<void> {
-			await h.control.eval(
-				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay)}); localStorage.setItem("overmark:keep-ai-on", "true")`,
-			);
-			await openPanel();
+		/** The side panel (the AI connection talks only to it), opened once. */
+		async function sidePanel(): Promise<Page> {
+			if (side === undefined) {
+				await (await h.open("v1")).page.activate();
+				side = await openSidePanel(h);
+			}
+			return side;
 		}
 
-		/** A paired MCP client, through the connect dialog's address. */
-		async function pairedClient(store: Parameters<typeof tokenFor>[0]) {
-			await h.control.eval(`${id("connect")}.click()`);
-			await h.control.waitFor(
-				`document.querySelector(".tab-mcp-address-input")?.value.endsWith("/mcp")`,
-			);
-			const address = await h.control.eval<string>(
-				`document.querySelector(".tab-mcp-address-input").value`,
-			);
-			await h.control.activate();
-			await h.control.eval(`document.querySelector("dialog[open]").close()`);
-			const token = await tokenFor(store, address);
-			const client = new Client(
-				{ name: "e2e", version: "1.0.0" },
-				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
-			);
-			await client.connect(
-				new StreamableHTTPClientTransport(new URL(address), {
-					requestInit: { headers: { Authorization: `Bearer ${token}` } },
-				}),
-			);
-			return client;
+		/** The side panel on `relay`, with "Keep AI access on". */
+		async function keepOnWith(relay: string): Promise<Page> {
+			const panel = await sidePanel();
+			await setRelay(panel, relay);
+			await panel.eval(`${id("keep-on")}.checked || ${id("keep-on")}.click()`);
+			return panel;
 		}
 
-		slowTest(
-			"the connect dialog's primary button stays readable under the pointer",
-			async () => {
-				const relay = startTestRelay({ pageWaitMs: 0 });
-				const selector = ".tab-mcp-dialog[open] button.tab-mcp-primary";
-				const copy = `document.querySelector(${JSON.stringify(selector)})`;
-				let nodeId: unknown;
-				try {
-					await keepOnWith(relay.url);
-					await h.control.eval(`${id("connect")}.click()`);
-					await h.control.waitFor(copy);
-					const colours = `(() => { const s = getComputedStyle(${copy}); return [s.color, s.backgroundColor]; })()`;
-					const [colour, background] =
-						await h.control.eval<[string, string]>(colours);
-					expect(colour).not.toBe(background);
-					// A tab behind others does not run transitions: the buttons'
-					// background would stay at its start.
-					await h.control.eval(
-						`document.head.append(Object.assign(document.createElement("style"), { id: "no-transitions", textContent: "* { transition: none !important; }" }))`,
-					);
-					await h.control.send("DOM.enable");
-					await h.control.send("CSS.enable");
-					const { root } = await h.control.send("DOM.getDocument");
-					({ nodeId } = await h.control.send("DOM.querySelector", {
-						nodeId: (root as { nodeId: number }).nodeId,
-						selector,
-					}));
-					await h.control.send("CSS.forcePseudoState", {
-						nodeId,
-						forcedPseudoClasses: ["hover"],
-					});
-					// The panel's own hover rule gives its buttons a light background;
-					// the dialog's primary button keeps its dark one.
-					expect(await h.control.eval<[string, string]>(colours)).toEqual([
-						colour,
-						background,
-					]);
-				} finally {
-					if (nodeId !== undefined)
-						await h.control
-							.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [] })
-							.catch(() => undefined);
-					await h.control.send("CSS.disable").catch(() => undefined);
-					await h.control.send("DOM.disable").catch(() => undefined);
-					await h.control
-						.eval(
-							`document.querySelector("dialog[open]")?.close(); document.getElementById("no-transitions")?.remove()`,
-						)
-						.catch(() => undefined);
-					await relay.stop();
-				}
-			},
-		);
+		/** A paired MCP client, through the pairing view's address. */
+		async function pairedClient(
+			panel: Page,
+			store: Parameters<typeof mcpClient>[0],
+		) {
+			await panel.eval(`${id("connect")}.click()`);
+			await panel.waitFor(
+				`${id("pair-address")}.textContent.endsWith("/mcp")`,
+				10_000,
+			);
+			const address = await panel.eval<string>(
+				`${id("pair-address")}.textContent`,
+			);
+			await panel.eval(`${id("pair-close")}.click()`);
+			return mcpClient(store, address);
+		}
 
 		const visible = (page: Page, name: string) =>
 			page.eval<boolean>(`${id(name)}.getClientRects().length > 0`);
@@ -752,31 +701,34 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			async () => {
 				const relay = startTestRelay({ pageWaitMs: 0 });
 				await fresh([sampleCase("c_ai")]);
-				await keepOnWith(relay.url);
-				await h.control.waitFor(
+				const panel = await keepOnWith(relay.url);
+				await panel.waitFor(
 					`${status} === "Waiting for an AI app to pair"`,
 					10_000,
 				);
-				const client = await pairedClient(relay.store);
+				const client = await pairedClient(panel, relay.store);
 				const list = () =>
 					client.callTool({ name: "list_cases", arguments: {} });
 				try {
 					await list();
-					await h.control.waitFor(
+					await panel.waitFor(
 						`${id("ai-call")}.textContent.includes("List cases")`,
 					);
-					expect(
-						await h.control.eval(`${id("ai-call")}.textContent`),
-					).toContain("Last AI call: List cases");
+					expect(await panel.eval(`${id("ai-call")}.textContent`)).toContain(
+						"Last AI call: List cases",
+					);
 
 					// The connection, the call and the way out show in a case too.
-					await openCase("c_ai");
+					await h.control.eval(
+						`chrome.runtime.sendMessage({ type: "cases:changed", caseId: "c_ai" })`,
+					);
+					await openCase("c_ai", panel);
 					for (const part of ["ai-status", "ai-call", "stop-ai"])
-						expect(await visible(h.control, part)).toBe(true);
+						expect(await visible(panel, part)).toBe(true);
 
-					await h.control.eval(`${id("stop-ai")}.click()`);
-					await h.control.waitFor(`${status} === "Not connected"`);
-					await h.control.waitFor(`${id("stop-ai")}.hidden`);
+					await panel.eval(`${id("stop-ai")}.click()`);
+					await panel.waitFor(`${status} === "Not connected"`);
+					await panel.waitFor(`${id("stop-ai")}.hidden`);
 					expect(relay.relay.sessionCount).toBe(0);
 					const stopped = await list().catch((e: Error) => ({
 						isError: true,
@@ -784,23 +736,25 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					}));
 					expect(stopped.isError).toBe(true);
 
-					// "Keep AI access on" would undo it, now and at the next opening.
-					expect(await h.control.eval(`${id("keep-on")}.checked`)).toBe(false);
+					// "Keep AI access on" would undo it, now and at the next start.
+					expect(await panel.eval(`${id("keep-on")}.checked`)).toBe(false);
 					expect(
-						await h.control.eval(`localStorage.getItem("overmark:keep-ai-on")`),
-					).toBe("false");
+						await panel.eval(
+							`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn)`,
+						),
+					).toBe(false);
 					await Bun.sleep(200);
 					expect(relay.relay.sessionCount).toBe(0);
 
 					// The pairing is still there: the same token works after a connect.
-					await backHome();
-					await h.control.activate();
-					await h.control.click(id("connect"));
+					await backHome(panel);
+					await panel.eval(`${id("connect")}.click()`);
 					await until(
 						async () => relay.relay.sessionCount === 1,
 						"the panel to connect",
 					);
 					expect((await list()).isError).toBeFalsy();
+					await panel.eval(`${id("pair-close")}.click()`);
 				} finally {
 					await client.close();
 					await relay.stop();
@@ -816,22 +770,20 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			async (_reason, limits) => {
 				const relay = startTestRelay(limits);
 				await fresh();
-				await keepOnWith(relay.url);
-				await h.control.waitFor(
+				const panel = await keepOnWith(relay.url);
+				await panel.waitFor(
 					`${status} === "Waiting for an AI app to pair"`,
 					10_000,
 				);
-				await h.control.eval(`(() => {
+				await panel.eval(`(() => {
 				globalThis.seen = [];
 				new MutationObserver(() => globalThis.seen.push(${status})).observe(
 					${id("ai-status")},
 					{ childList: true },
 				);
 			})()`);
-				await h.control.waitFor(`globalThis.seen.includes("Connecting…")`);
-				await h.control.waitFor(
-					`${status} === "Waiting for an AI app to pair"`,
-				);
+				await panel.waitFor(`globalThis.seen.includes("Connecting…")`);
+				await panel.waitFor(`${status} === "Waiting for an AI app to pair"`);
 				await relay.stop();
 			},
 			60_000,
@@ -844,22 +796,18 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				await fresh([sampleCase("c_tool")]);
 				const other = await h.browser.newPage(panelUrl());
 				await openCase("c_tool", other);
-				await keepOnWith(relay.url);
-				await h.control.waitFor(
+				const panel = await keepOnWith(relay.url);
+				await panel.waitFor(
 					`${status} === "Waiting for an AI app to pair"`,
 					10_000,
 				);
-				const client = await pairedClient(relay.store);
+				const client = await pairedClient(panel, relay.store);
 				try {
 					const verdict = client.callTool({
 						name: "set_verdict",
 						arguments: { caseId: "c_tool", verdict: "Darker" },
 					});
-					const allow = `[...document.querySelectorAll("dialog[open] button")].find((b) => b.textContent.trim() === "Allow")`;
-					await h.control.waitFor(allow, 10_000);
-					await h.control.activate();
-					await h.control.waitFor(`!${allow}.disabled`);
-					await h.control.eval(`${allow}.click()`);
+					await answerInPanel(panel, "allow");
 					expect((await verdict).isError).toBeFalsy();
 					await other.waitFor(`${id("verdict")}.value === "Darker"`);
 				} finally {
@@ -878,15 +826,15 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				const { url } = gone;
 				await gone.stop();
 				await fresh();
-				await keepOnWith(url);
-				await h.control.waitFor(
+				const panel = await keepOnWith(url);
+				await panel.waitFor(
 					`${status}.startsWith("Not connected: Could not connect to the relay")`,
 					10_000,
 				);
-				expect(await h.control.eval(status)).toContain("Trying again");
-				expect(await h.control.eval(`${id("stop-ai")}.hidden`)).toBe(false);
+				expect(await panel.eval(status)).toContain("Trying again");
+				expect(await panel.eval(`${id("stop-ai")}.hidden`)).toBe(false);
 				const relay = startTestRelay({ port });
-				await h.control.waitFor(
+				await panel.waitFor(
 					`${status} === "Waiting for an AI app to pair"`,
 					15_000,
 				);
@@ -900,10 +848,10 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			const { url } = gone;
 			await gone.stop();
 			await fresh();
-			await keepOnWith(url);
-			await h.control.waitFor(`${status}.includes("Trying again")`, 10_000);
-			await h.control.eval(`${id("keep-on")}.click()`);
-			await h.control.waitFor(`${status} === "Not connected"`);
+			const panel = await keepOnWith(url);
+			await panel.waitFor(`${status}.includes("Trying again")`, 10_000);
+			await panel.eval(`${id("keep-on")}.click()`);
+			await panel.waitFor(`${status} === "Not connected"`);
 			const relay = startTestRelay({ port });
 			await Bun.sleep(6000);
 			expect(relay.relay.sessionCount).toBe(0);

@@ -4,13 +4,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-	Client,
-	StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/client";
-import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
 import { RESOLVED_OPACITY } from "../../src/content/overlay.ts";
 import { webpSize } from "../../src/lib/export.ts";
+import { answerInPanel, connectAi, mcpClient, openSidePanel } from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
@@ -966,53 +963,22 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
 			);
 
-			// A saved relay the library refuses must not stop the panel.
+			// A saved relay the library refuses must not stop the connection:
+			// one the panel kept before (taken over by the worker once).
 			await h.control.eval(
 				`localStorage.setItem("overmark:relay", "http://192.168.1.20:8080")`,
 			);
-			await h.control.goto(
-				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+			const panel = await openSidePanel(h);
+			await panel.waitFor(
+				`document.getElementById("ai-status").textContent.includes("cannot be used")`,
 			);
-			await h.control.waitFor(`document.querySelector("[data-case]")`);
 			expect(
-				await h.control.eval<string>(
-					`document.getElementById("ai-status").textContent`,
-				),
-			).toContain("cannot be used");
-			expect(
-				await h.control.eval<string>(`document.getElementById("relay").value`),
+				await panel.eval<string>(`document.getElementById("relay").value`),
 			).toBe("https://tab-mcp.ractive.ch");
 
-			// The side panel connects to the test relay by itself ("keep AI access on").
-			await h.control.eval(
-				`localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)}); localStorage.setItem("overmark:keep-ai-on", "true")`,
-			);
-			// goto waits for the new document; a reload through eval would not.
-			await h.control.goto(
-				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
-			);
-			await h.control.waitFor(
-				`document.getElementById("ai-status")?.textContent === "Waiting for an AI app to pair"`,
-				10_000,
-			);
-			await h.control.eval(`document.getElementById("connect").click()`);
-			// The library's connect dialog shows the address in a read-only field.
-			await h.control.waitFor(
-				`document.querySelector(".tab-mcp-address-input")?.value.endsWith("/mcp")`,
-			);
-			const address = await h.control.eval<string>(
-				`document.querySelector(".tab-mcp-address-input").value`,
-			);
-			const token = await tokenFor(relay.store, address);
-			const client = new Client(
-				{ name: "e2e", version: "1.0.0" },
-				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
-			);
-			await client.connect(
-				new StreamableHTTPClientTransport(new URL(address), {
-					requestInit: { headers: { Authorization: `Bearer ${token}` } },
-				}),
-			);
+			// The side panel connects to the test relay ("keep AI access on").
+			const address = await connectAi(panel, relay.url, { keepOn: true });
+			const client = await mcpClient(relay.store, address);
 			try {
 				const cases = await client.callTool({
 					name: "list_cases",
@@ -1057,22 +1023,17 @@ describe.skipIf(browserBinary === undefined)(
 					name: "set_verdict",
 					arguments: { caseId: listed?.caseId, verdict: "Darker" },
 				});
-				// The newest dialog: the connect dialog may still be open under it.
-				const dialog = `[...document.querySelectorAll("dialog[open]")].at(-1)`;
-				const buttons = `[...(${dialog}?.querySelectorAll("button") ?? [])].map((b) => b.textContent.trim())`;
-				await h.control.waitFor(`${buttons}.includes("Don't allow")`, 10_000);
-				expect(await h.control.eval<string[]>(buttons)).not.toContain(
-					"Always allow",
-				);
-				expect(await h.control.eval<string>(`${dialog}.textContent`)).toContain(
+				const question = `document.querySelector("[data-question]")`;
+				await panel.waitFor(question, 10_000);
+				expect(
+					await panel.eval<string[]>(
+						`[...${question}.querySelectorAll("button")].map((b) => b.textContent.trim())`,
+					),
+				).toEqual(["Don't allow", "Allow"]);
+				expect(await panel.eval<string>(`${question}.textContent`)).toContain(
 					"Case: “AI test”",
 				);
-				// A hidden page gets no dialog "close" event: the panel's tab must
-				// be in front to answer (a real side panel is visible).
-				await h.control.activate();
-				await h.control.eval(
-					`[...${dialog}.querySelectorAll("button")].find((b) => b.textContent.trim() === "Don't allow").click()`,
-				);
+				await answerInPanel(panel, "deny");
 				expect((await verdict).isError).toBe(true);
 				await v2.page.activate();
 			} finally {

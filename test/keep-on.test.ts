@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { ConnectOptions } from "@ractive-ch/tab-mcp-client";
-import { KeepOn, type KeptConnection } from "../src/sidepanel/mcp.ts";
+import { KeepOn, type KeptConnection } from "../src/worker/keep-on.ts";
 
 /** What `TabMcp` does for `KeepOn`, with connects that fail on demand. */
 class FakeConnection extends EventTarget implements KeptConnection {

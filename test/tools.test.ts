@@ -13,16 +13,16 @@ import type {
 	InspectResult,
 } from "../src/lib/messages.ts";
 import { MemoryStore } from "../src/lib/store.ts";
-import { relayProblem } from "../src/sidepanel/mcp.ts";
+import { relayProblem } from "../src/worker/settings.ts";
 import {
 	type CurrentTab,
-	confirmRequestFor,
+	confirmLines,
 	createTools,
 	type ImageTools,
 	INSTRUCTIONS,
 	type TabBridge,
 	type ToolDeps,
-} from "../src/sidepanel/tools.ts";
+} from "../src/worker/tools.ts";
 import { putCase, sampleCase } from "./fixtures.ts";
 
 const element: ElementDetails = {
@@ -535,7 +535,7 @@ describe("tools", () => {
 	test("add_annotation is refused when the page in front changed after the user allowed it", async () => {
 		await seed();
 		const signal = new AbortController().signal;
-		const question = await confirmRequestFor(store, tab, {
+		const question = await confirmLines(store, tab, {
 			tool: { name: "add_annotation", description: "Add a mark." },
 			arguments: { caseId: "c_1", selector: "button", comment: "x" },
 			client: {
@@ -545,9 +545,7 @@ describe("tools", () => {
 			},
 			signal,
 		});
-		expect(question.tool.description).toContain(
-			"Page: http://localhost:3000/kk",
-		);
+		expect(question.join("\n")).toContain("Page: http://localhost:3000/kk");
 		tab.url = "https://mail.example/inbox";
 		await expect(
 			call(
@@ -948,13 +946,13 @@ describe("tools", () => {
 		expect(added.content[0]?.text).toContain(`on ${plain}.`);
 		// The user is asked with the whole address; the AI app is told less.
 		const signal = new AbortController().signal;
-		const asked = await confirmRequestFor(store, tab, {
+		const asked = await confirmLines(store, tab, {
 			tool: { name: "add_annotation", description: "Does it." },
 			arguments: { caseId: "c_1" },
 			client: { grantId: "g", id: "i", host: "claude.ai" },
 			signal,
 		});
-		expect(asked.tool.description).toContain(`Page: ${secret}`);
+		expect(asked.join("\n")).toContain(`Page: ${secret}`);
 		tab.url = "https://app.example/other";
 		const input = { caseId: "c_1", selector: "button", comment: "y" };
 		const refused = call("add_annotation", input, signal);
@@ -981,33 +979,32 @@ describe("confirmations", () => {
 		await store.updateCase("c_1", (c) => ({
 			value: { ...(c as Case), verdict: "x" },
 		}));
-		const del = await confirmRequestFor(
+		const del = await confirmLines(
 			store,
 			tab,
 			request("delete_case", { caseId: "c_1" }),
 		);
-		expect(del.tool.description).toBe(
-			"Does it.\n\nCase: “Button contrast” (www.example.com/kk, 2 marks, with a verdict).",
-		);
-		expect(del.arguments).toEqual({ caseId: "c_1" });
-		const add = await confirmRequestFor(
+		expect(del).toEqual([
+			"Case: “Button contrast” (www.example.com/kk, 2 marks, with a verdict).",
+		]);
+		const add = await confirmLines(
 			store,
 			tab,
 			request("add_annotation", { caseId: "c_1", selector: "a" }),
 		);
-		expect(add.tool.description).toContain("Page: http://localhost:3000/kk");
-		const unknown = await confirmRequestFor(
+		expect(add.join("\n")).toContain("Page: http://localhost:3000/kk");
+		const unknown = await confirmLines(
 			store,
 			tab,
 			request("set_verdict", { caseId: "c_9" }),
 		);
-		expect(unknown.tool.description).toContain("Case: none has the id c_9.");
-		const status = await confirmRequestFor(
+		expect(unknown.join("\n")).toContain("Case: none has the id c_9.");
+		const status = await confirmLines(
 			store,
 			tab,
 			request("set_mark_status", { caseId: "c_1", mark: 2, status: "fixed" }),
 		);
-		expect(status.tool.description).toContain("Mark 2: “Comment 2”, now open.");
+		expect(status.join("\n")).toContain("Mark 2: “Comment 2”, now open.");
 	});
 });
 

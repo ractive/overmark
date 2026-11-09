@@ -4,11 +4,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-	Client,
-	StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/client";
-import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
+import { connectAi, mcpClient, openSidePanel } from "./ai.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
 	type Db,
@@ -64,34 +61,9 @@ describe.skipIf(browserBinary === undefined)("get_mark_element", () => {
 			document.querySelector("input[name=year]").value = "1985-typed";
 		})()`);
 
-		await h.control.eval(
-			`localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)}); localStorage.setItem("overmark:keep-ai-on", "true")`,
-		);
-		await h.control.goto(
-			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
-		);
-		await h.control.waitFor(
-			`document.getElementById("ai-status")?.textContent === "Waiting for an AI app to pair"`,
-			10_000,
-		);
-		await h.control.eval(`document.getElementById("connect").click()`);
-		await h.control.waitFor(
-			`document.querySelector(".tab-mcp-address-input")?.value.endsWith("/mcp")`,
-		);
-		const address = await h.control.eval<string>(
-			`document.querySelector(".tab-mcp-address-input").value`,
-		);
-		await h.control.eval(`document.querySelector("dialog[open]")?.close()`);
-		const token = await tokenFor(relay.store, address);
-		const client = new Client(
-			{ name: "e2e", version: "1.0.0" },
-			{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
-		);
-		await client.connect(
-			new StreamableHTTPClientTransport(new URL(address), {
-				requestInit: { headers: { Authorization: `Bearer ${token}` } },
-			}),
-		);
+		const panel = await openSidePanel(h);
+		const address = await connectAi(panel, relay.url);
+		const client = await mcpClient(relay.store, address);
 		await v1.page.activate();
 		const read = async (args: Record<string, unknown>): Promise<Read> => {
 			const result = await client.callTool({

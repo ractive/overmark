@@ -139,18 +139,4 @@ export class Panel {
 	}
 }
 
-/** Only the newest of overlapping pieces of work may write its result. */
-export class Latest {
-	#n = 0;
-
-	/** Start a piece of work; `current()` says whether it is still the newest. */
-	start(): { current: () => boolean } {
-		const mine = ++this.#n;
-		return { current: () => mine === this.#n };
-	}
-
-	/** Make every running piece of work stale. */
-	cancel(): void {
-		this.#n++;
-	}
-}
+export { Latest } from "../lib/latest.ts";

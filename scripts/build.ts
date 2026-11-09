@@ -102,6 +102,8 @@ export function createManifest(
 		side_panel: { default_path: "sidepanel/index.html" },
 		permissions: [
 			"activeTab",
+			"alarms",
+			"notifications",
 			"scripting",
 			"sidePanel",
 			"storage",

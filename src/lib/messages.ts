@@ -193,15 +193,22 @@ export type WorkerRequest =
 	/** The toolbar's Undo: take out the mark it just added (`UndoResult`, save.ts `undoAdd`). */
 	| { type: "case:undo-add"; caseId: string; annotationId: string }
 	/** Remove the pending screenshots of a save that was given up. */
-	| { type: "images:discard"; caseId: string; shotIds: string[] }
-	/**
-	 * From the side panel: a PNG data URL of `tabId`, which must be in front
-	 * of `windowId` (`TabCapture`), through the worker's rate-limited queue.
-	 */
-	| { type: "capture:tab"; tabId: number; windowId: number };
+	| { type: "images:discard"; caseId: string; shotIds: string[] };
 
-export interface TabCapture {
-	dataUrl: string;
+/**
+ * The one-off messages the service worker answers. Nothing about the AI
+ * connection is among them: that goes over the side panel's port (DEC-015).
+ */
+export const WORKER_REQUESTS: ReadonlySet<string> = new Set<
+	WorkerRequest["type"]
+>(["capture", "case:save", "case:number", "case:undo-add", "images:discard"]);
+
+export function isWorkerRequest(message: unknown): message is WorkerRequest {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		WORKER_REQUESTS.has((message as { type?: unknown }).type as string)
+	);
 }
 
 export type WorkerResponse<T = object> =

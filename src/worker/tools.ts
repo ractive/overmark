@@ -35,7 +35,7 @@ import type {
 } from "../lib/messages.ts";
 import { type Crop, cropRectFor, SaveError, saveCase } from "../lib/save.ts";
 import type { CaseStore, StoredImage } from "../lib/store.ts";
-import { shortUrl } from "./dom.ts";
+import { shortUrl } from "../sidepanel/dom.ts";
 
 type MarkStatus = "open" | ResolutionKind;
 
@@ -46,7 +46,7 @@ export interface CurrentTab {
 	title: string;
 }
 
-/** The tab in front of the side panel's window. */
+/** The tab in front: the active tab of the last focused normal window. */
 export interface TabBridge {
 	current(): Promise<CurrentTab>;
 	/** Send to the tab's content script, injecting it when needed. */
@@ -1023,14 +1023,15 @@ export function createTools(deps: ToolDeps): Tool[] {
 const confirmedPages = new WeakMap<AbortSignal, { id: number; url: string }>();
 
 /**
- * A confirmation that names the case (and for add_annotation, the page) the
- * call is about, next to the raw arguments the dialog shows.
+ * What a question about `request` says besides the tool and its arguments:
+ * the case it is about (title, page, marks), the mark for set_mark_status,
+ * and for add_annotation the page in front, which the call is then held to.
  */
-export async function confirmRequestFor(
+export async function confirmLines(
 	store: CaseStore,
 	tab: TabBridge,
 	request: ConfirmRequest,
-): Promise<ConfirmRequest> {
+): Promise<string[]> {
 	const lines: string[] = [];
 	const caseId = request.arguments["caseId"];
 	if (typeof caseId === "string") {
@@ -1058,12 +1059,5 @@ export async function confirmRequestFor(
 			confirmedPages.set(request.signal, { id: current.id, url: current.url });
 		}
 	}
-	if (lines.length === 0) return request;
-	return {
-		...request,
-		tool: {
-			...request.tool,
-			description: `${request.tool.description}\n\n${lines.join("\n")}`,
-		},
-	};
+	return lines;
 }
