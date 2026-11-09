@@ -69,7 +69,7 @@ const EDIT_REGIONS =
 	'[contenteditable]:not([contenteditable="false"]), [role="textbox"], .monaco-editor, .CodeMirror, .ace_editor';
 
 /** Where somebody types: the text inside is theirs, not the page's. */
-const EDITORS = `textarea, select, input, ${EDIT_REGIONS}`;
+export const EDITORS = `textarea, select, input, ${EDIT_REGIONS}`;
 
 /** Text that is no text on the page. */
 const HIDDEN_TEXT = new Set(["script", "style", "noscript", "template"]);

@@ -174,7 +174,7 @@ export const MAX_TITLE = 500;
 
 /**
  * The most marks and screenshots a case holds. Marks added one by one have a
- * screenshot each (DEC-013), so there can be as many shots as marks.
+ * screenshot each (DEC-014), so there can be as many shots as marks.
  */
 export const MAX_ANNOTATIONS = 1000;
 export const MAX_SHOTS = MAX_ANNOTATIONS;
@@ -349,9 +349,18 @@ export function samePath(a: string, b: string): boolean {
  * home page has the same path.
  */
 export function isPageOf(c: Case, url: string): boolean {
-	if (!samePath(c.page.url, url)) return false;
-	const { origin, pathname } = new URL(url);
-	return pathname !== "/" || origin === new URL(c.page.url).origin;
+	return isPageUrl(c.page.url, url);
+}
+
+/** `isPageOf` for a case's page address. */
+export function isPageUrl(caseUrl: string, url: string): boolean {
+	if (!samePath(caseUrl, url)) return false;
+	try {
+		const { origin, pathname } = new URL(url);
+		return pathname !== "/" || origin === new URL(caseUrl).origin;
+	} catch {
+		return false;
+	}
 }
 
 /** Move a shape by `dx`, `dy`. */

@@ -315,7 +315,7 @@ describe("saveCase", () => {
 	});
 });
 
-/** The toolbar adds a case's marks one by one (DEC-013). */
+/** The toolbar adds a case's marks one by one (DEC-014). */
 describe("adding mark by mark", () => {
 	/** Add mark `n` alone, on the pending screenshot `shotId` of the session. */
 	const addOne = (

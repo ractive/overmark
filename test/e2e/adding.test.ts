@@ -1,6 +1,6 @@
 /**
  * End to end: with a case open, each mark goes into it as soon as it is done,
- * without a save step (DEC-013). Without a case, the marks are saved as a new
+ * without a save step (DEC-014). Without a case, the marks are saved as a new
  * case with a title, as before.
  */
 

@@ -236,7 +236,7 @@ export interface AddedAs {
  * here the mark must still be as that add stored it (not resolved, its comment
  * not edited), the user's, the highest number in the case, on a screenshot of
  * its own taken lately. Its pin was on that screenshot only, which goes with
- * it, so its number is free again (unlike a delete, DEC-013).
+ * it, so its number is free again (unlike a delete, DEC-014).
  * `removed: false`: it was gone already (deleted in the side panel).
  */
 export async function undoAdd(

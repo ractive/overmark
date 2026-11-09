@@ -109,7 +109,8 @@ PRs (`.github/dependabot.yml`).
 >
 > Export a case as a zip with a Markdown summary and the images, or connect an AI app
 > such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
-> page in front, take screenshots, and record what should change. Changes it wants to
+> page in front, read a marked element's HTML and CSS there, take screenshots, and
+> record what should change. Changes it wants to
 > make are shown to you first, every time.
 >
 > Your cases stay in your browser unless you export one or connect an AI app. Overmark
@@ -128,7 +129,7 @@ of the same pages, alone or with an AI app the user connects.
 | `sidePanel` | The side panel lists cases, loads them onto the tab and connects the AI app. |
 | `storage` | Session storage only, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others. |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
-| `<all_urls>` (optional) | Only when the user turns on "allow on all sites", so Overmark works without clicking its icon on each tab. |
+| `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page from its address or shows a case's marks on a tab Overmark may not run on yet ("Show marks on this tab" or the case's Load button), so the marks load without clicking the icon. All sites only when the user turns on "allow on all sites". |
 
 **Remote code:** No. All code is in the package; the connection to the relay carries
 data only, and no tool runs code an AI app sends.
@@ -139,7 +140,11 @@ data only, and no tool runs code an AI app sends.
   - **Web history:** the address, title and time of each page saved as a case, and the
     address and title of the tab in front when an AI app asks for them.
   - **Website content:** screenshots, page text excerpts and element details (see
-    PRIVACY.md for the full list).
+    PRIVACY.md for the full list); when the AI app asks about a mark, also the marked
+    element's (or an element around or inside it) trimmed HTML, computed styles and
+    matching CSS rules from the page in front, sent to the AI app and not stored,
+    without form field values, text typed into editable regions, hidden elements or
+    the page's head, and with addresses cut to their path.
   - **User activity:** limited to the marks the user draws and their comments.
 - Stored locally in the browser. Transmitted only to the relay (by default the hosted
   relay tab-mcp.ractive.ch, run by the developer; the user can enter another) and the

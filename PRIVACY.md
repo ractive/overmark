@@ -34,7 +34,8 @@ which the tab-mcp library derives the address an AI app connects to.
 Overmark does not record what is typed into form fields and editable regions: the text
 it keeps about an element leaves them out. Of the editors that draw their text as
 ordinary page content, it recognises only Monaco, CodeMirror 5 and Ace; to Overmark the
-text of any other such editor is page text, and it is kept when you mark it. A
+text of any other such editor is page text, and it is kept when you mark it (and sent
+when an AI app reads that element). A
 screenshot shows what was on the screen, though, form fields included. Whenever Overmark
 takes a screenshot (when you draw a mark, and when an AI app asks for one, see below),
 password fields are blurred, and with "Blur form fields in screenshots" all form fields
@@ -51,6 +52,23 @@ Only in two cases, both started by you:
 2. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
    address (cut as above), title, element details and screenshots of the tab in front.
+   When the app asks about a mark's element, Overmark also reads that element from the
+   page in front and sends it without storing it. Instead of the element, the app can
+   name (by a CSS selector) one of the elements around it or inside it; for a mark not
+   drawn on an element (a box, an arrow, a pen mark or a note), any element of the
+   case's page, and only while the tab in front shows that page. What is sent: up to
+   about 16 KB of the element's HTML with the page's text, its position and size, the
+   window's size, a list of its computed styles, up to 30 of the page's CSS rules that
+   apply to it, and the tag, id, classes, position and layout styles of up to four
+   elements around it and twelve inside it (with up to 80 characters of each one's
+   text). Hidden elements (`display: none`, `visibility: hidden`) are left out. That HTML
+   holds no form field values: form fields keep only attributes such as their name,
+   type and placeholder, and what is inside text areas, selects and editable regions is
+   left out. Addresses in it, wherever they appear in attributes and in CSS, lose their
+   query string, fragment, user name and password; of a mail, phone or other address
+   that is not a web address only its kind stays (`mailto:`). The page's head (with its
+   meta tags), comments, the content of scripts, styles and embedded documents, and the
+   values of attributes named like a token or secret are never sent.
    They travel
    through a tab-mcp relay and on to the AI app you paired with a code. Unless you enter
    another relay in the side panel, that is `tab-mcp.ractive.ch`, run by Overmark's
@@ -89,6 +107,11 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   and no others.
 - **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
   free disk space, and they may grow beyond its usual limit. They stay in your browser.
+- **Single sites (optional):** when you open a case's page from its address, or show a
+  case's marks on a tab where Overmark may not run yet ("Show marks on this tab" or the
+  case's Load button), Chrome asks whether Overmark may run on that case's site from
+  then on. Only a yes allows it; you can take it back in Chrome's extension settings.
+  After a no, Overmark does not ask for that site again until the side panel reopens.
 - **All sites (optional, off by default):** only if you choose "allow on all sites", so
   that Overmark works on a tab without clicking its icon first.
 

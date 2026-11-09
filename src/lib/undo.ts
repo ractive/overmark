@@ -1,7 +1,7 @@
 /**
  * Which marks the toolbar of which page added (service worker). Undo in the
  * toolbar takes a mark out of its case; the worker allows that only for a mark
- * recorded here, from the same tab and document, and only once (DEC-013). So a
+ * recorded here, from the same tab and document, and only once (DEC-014). So a
  * content script cannot use Undo to delete marks it did not just add. Kept in
  * `chrome.storage.session`: it outlives a stopped service worker, not the
  * browser, and content scripts cannot reach it.

@@ -4,6 +4,7 @@
  */
 
 import type { Case, ElementDetails, Rect, Viewport } from "./case.ts";
+import type { Inspection, Relation } from "./inspect.ts";
 import type { MatchStatus } from "./match.ts";
 import type { SaveRequest } from "./save.ts";
 
@@ -62,6 +63,20 @@ export type ContentRequest =
 			number: number;
 			blurForms: boolean;
 	  }
+	/**
+	 * Read the element of a loaded case's annotation (or, with `selector`, one
+	 * relative to it) from the page: markup, styles, matching rules
+	 * (`InspectResult`; `null` when another case, or none, is loaded, or the
+	 * loaded copy lacks the annotation). Changes nothing on the page.
+	 */
+	| {
+			type: "element:inspect";
+			caseId: string;
+			annotationId: string;
+			/** The case's page: a mark without an element is looked for only there. */
+			casePage: string;
+			selector?: string;
+	  }
 	/** Remove that mark and the blur again (`Released`). */
 	| { type: "element:unmark" }
 	/** Blur form fields for a screenshot of the page as it is (`BlurResult`). */
@@ -96,6 +111,31 @@ export type DescribedElement =
 			title: string;
 	  }
 	| { ok: false; error: string };
+
+/** The answer to `element:inspect`. */
+export type InspectResult =
+	| {
+			ok: true;
+			url: string;
+			title: string;
+			match: AnnotationMatch;
+			/** How `selector` found the element; `mark` without one. */
+			relation: Relation;
+			/** A selector that finds the inspected element (empty in a shadow root). */
+			selector: string;
+			inspection: Inspection;
+	  }
+	| {
+			ok: false;
+			/**
+			 * `lost` and `no-element`: the mark has no element on this page;
+			 * `other-page`: a selector for a mark without an element, and the tab
+			 * does not show the case's page.
+			 */
+			reason: "busy" | "lost" | "no-element" | "other-page" | "selector";
+			error: string;
+			match?: AnnotationMatch;
+	  };
 
 /** One of the best elements for an annotation on this page. */
 export interface CandidateInfo {

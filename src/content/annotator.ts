@@ -2,7 +2,7 @@
  * Annotating a page: the tools (element, box, arrow, pen, note), a comment for
  * each mark, undo, and saving the marks as a case.
  *
- * Two modes (DEC-013). Without a case, the marks are drafts until "Save case"
+ * Two modes (DEC-014). Without a case, the marks are drafts until "Save case"
  * stores them as a new case with a title. With a case (the side panel's "Add
  * marks", or after that save), each mark goes into the case as soon as it is
  * done: its comment confirmed, or the comment closed with the mark kept. One

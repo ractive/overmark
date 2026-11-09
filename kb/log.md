@@ -9,4 +9,4 @@
 
 ## 2026-11-09
 
-- Owner feedback: adding marks to a case needed "Save…" and then "Add to case" or "Back". DEC-013: marks for a case go into it as each is done, Undo takes the last one out again, failures stay on the page with "Add mark N"; the new-case save keeps its title, its form says "Keep drawing" instead of "Back"
+- Owner feedback: adding marks to a case needed "Save…" and then "Add to case" or "Back". DEC-014: marks for a case go into it as each is done, Undo takes the last one out again, failures stay on the page with "Add mark N"; the new-case save keeps its title, its form says "Keep drawing" instead of "Back"
