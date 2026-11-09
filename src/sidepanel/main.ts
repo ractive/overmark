@@ -87,9 +87,23 @@ function writeSetting(key: string, value: string): void {
  */
 function askForSite(url: string): Promise<boolean> {
 	const pattern = sitePattern(url);
-	if (pattern === undefined) return Promise.resolve(false);
-	return chrome.permissions.request({ origins: [pattern] }).catch(() => false);
+	if (pattern === undefined || declinedSites.has(pattern))
+		return Promise.resolve(false);
+	return chrome.permissions.request({ origins: [pattern] }).then(
+		(granted) => {
+			if (!granted) declinedSites.add(pattern);
+			return granted;
+		},
+		(error: unknown) => {
+			// Not the user's no: a call outside a click, say.
+			console.warn(`Overmark could not ask for ${pattern}: ${message(error)}`);
+			return false;
+		},
+	);
 }
+
+/** Sites the user said no to: Chrome asks again only after the panel reopens. */
+const declinedSites = new Set<string>();
 
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
@@ -557,11 +571,17 @@ const actions: Actions = {
 			const work = loadWork.start();
 			const tab = await activeTab();
 			if (tab?.id === undefined) return;
+			// This load replaces one the icon's click would start.
+			if (pendingLoad?.tabId === tab.id) pendingLoad = undefined;
 			const loaded = await loadInto(c, tab.id, hint, work);
 			// Allowed by Chrome's prompt only now: once more.
 			if (loaded !== undefined || asked === undefined || !(await asked)) return;
 			if (!work.current()) return;
 			await refreshTab();
+			if (state.tab?.id === tab.id && !state.tab.url)
+				return hint(
+					`This tab is not on ${shortUrl(c.page.url)}, so the access to that site does not reach it. Click the Overmark icon in the toolbar (or press Alt+Shift+O) while this tab is in front.`,
+				);
 			await loadInto(c, tab.id, hint, work);
 		})();
 	},
@@ -615,20 +635,17 @@ const actions: Actions = {
 					return hint("");
 				// Chrome tells the address only where Overmark may run. Elsewhere
 				// the icon's click lets it: the case loads then (see onMessage).
-				let url = tab.url;
+				const url = tab.url;
 				if (url === undefined) {
 					pendingLoad = { tabId: opened.id, caseId: c.id };
 					hint(
 						"Click the Overmark icon in the toolbar (or press Alt+Shift+O) to load the case onto this tab.",
 					);
 					// A yes to Chrome's prompt after the page loaded: load it now,
-					// unless the icon's click did already.
-					if (!(await asked)) return;
-					const now = await chrome.tabs.get(opened.id).catch(() => undefined);
-					if (now?.url === undefined || pendingLoad?.tabId !== opened.id)
-						return;
+					// unless the icon's click did already, as the click would.
+					if (!(await asked) || pendingLoad?.tabId !== opened.id) return;
 					pendingLoad = undefined;
-					url = now.url;
+					return await loadPending(c.id, opened.id);
 				}
 				// The page may have sent the tab elsewhere, to a sign-in say.
 				if (!isPageOf(c, url))
