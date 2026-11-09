@@ -7,12 +7,13 @@
 		<link rel="stylesheet" href="./style.css" />
 	</head>
 	<body>
+		<!-- Chrome names the panel and shows the icon above it: no brand here. -->
 		<header id="bar">
-			<div class="brand">
-				<svg class="ring" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /></svg>
-				<h1>Overmark</h1>
-			</div>
-			<span id="ai-status" class="meta">Not connected</span>
+			<h1 class="visually-hidden">Overmark</h1>
+			<button id="ai-button" type="button" class="ai-pill">
+				<span id="ai-status">Not connected</span>
+				<span id="ai-action" class="ai-action">Connect</span>
+			</button>
 			<button id="stop-ai" type="button" hidden>Stop AI access</button>
 			<p id="ai-call" class="meta" hidden></p>
 		</header>

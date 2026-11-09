@@ -244,7 +244,7 @@ describe("a mark's status and actions", () => {
 		expect(action("a2", "delete").textContent).toBe("Delete");
 	});
 
-	test("a click on a mark's crop shows it on the page, as Show does", () => {
+	test("Show sits in a mark's head, where the page can show the mark", () => {
 		const c = twoMarks();
 		const shown: [string, number][] = [];
 		const actions = actionsWith({
@@ -286,19 +286,22 @@ describe("a mark's status and actions", () => {
 						matches,
 					};
 			});
-		// Not loaded on a tab: nothing to show, only the picture.
+		// Not loaded on a tab: nothing to show.
 		render(withImages(false), actions);
-		expect(row("a1").querySelector("button.crop")).toBeNull();
-		expect(row("a1").querySelector("img")).not.toBeNull();
+		expect(row("a1").querySelector("[data-action=show]")).toBeNull();
 		render(withImages(true), actions);
-		const crop = row("a1").querySelector(
-			"button.crop",
-		) as unknown as HTMLButtonElement;
-		expect(crop.getAttribute("aria-label")).toBe("Show mark 1 on the page");
-		crop.click();
+		const show = (id: string) =>
+			row(id).querySelector(
+				".mark-head [data-action=show]",
+			) as unknown as HTMLButtonElement | null;
+		expect(show("a1")?.getAttribute("aria-label")).toBe(
+			"Show mark 1 on the page",
+		);
+		show("a1")?.click();
 		expect(shown).toEqual([["a1", 0]]);
-		// A mark the page has no match for: no Show, no click on its crop.
-		expect(row("a2").querySelector("button.crop")).toBeNull();
+		// A mark the page has no match for: no Show.
+		expect(show("a2")).toBeNull();
+		// A note or box has no element, and Show still scrolls to it.
 		render(
 			withImages(
 				true,
@@ -309,12 +312,106 @@ describe("a mark's status and actions", () => {
 			),
 			actions,
 		);
-		(
-			row("a2").querySelector("button.crop") as unknown as HTMLButtonElement
-		).click();
+		show("a2")?.click();
 		expect(shown).toEqual([
 			["a1", 0],
 			["a2", 0],
+		]);
+		// A crop is small; a click shows it large, another small again.
+		const crop = row("a1").querySelector(
+			"button.crop",
+		) as unknown as HTMLButtonElement;
+		expect(crop.getAttribute("aria-pressed")).toBe("false");
+		crop.click();
+		expect(crop.getAttribute("aria-pressed")).toBe("true");
+		crop.click();
+		expect(crop.getAttribute("aria-pressed")).toBe("false");
+	});
+
+	test("a mark opens and closes at its head; Expand all opens every one", () => {
+		const c = twoMarks();
+		render(caseState(c), noActions);
+		const isOpen = (id: string) => {
+			const toggle = row(id).querySelector(".mark-toggle");
+			const body = row(id).querySelector(".body") as unknown as HTMLElement;
+			expect(toggle?.getAttribute("aria-expanded")).toBe(String(!body.hidden));
+			return !body.hidden;
+		};
+		const all = () =>
+			window.document.getElementById(
+				"toggle-marks",
+			) as unknown as HTMLButtonElement;
+		expect([isOpen("a1"), isOpen("a2")]).toEqual([false, false]);
+		expect(all().textContent).toBe("Expand all");
+		(
+			row("a1").querySelector(".mark-toggle") as unknown as HTMLButtonElement
+		).click();
+		expect([isOpen("a1"), isOpen("a2")]).toEqual([true, false]);
+		all().click();
+		expect([isOpen("a1"), isOpen("a2")]).toEqual([true, true]);
+		expect(all().textContent).toBe("Collapse all");
+		// Drawn again (the case changed): what was open stays open.
+		render(caseState({ ...c, updatedAt: "2026-11-08T23:00:00Z" }), noActions);
+		expect([isOpen("a1"), isOpen("a2")]).toEqual([true, true]);
+		all().click();
+		expect([isOpen("a1"), isOpen("a2")]).toEqual([false, false]);
+		// A mark being edited is open.
+		render(
+			caseState(c, (s) => {
+				s.markEdit = {
+					annotationId: "a2",
+					mode: "comment",
+					kind: "fixed",
+					text: "",
+				};
+			}),
+			noActions,
+		);
+		expect(isOpen("a2")).toBe(true);
+		// Neither Collapse all nor its own head hides its form.
+		all().click();
+		all().click();
+		expect([isOpen("a1"), isOpen("a2")]).toEqual([false, true]);
+		(
+			row("a2").querySelector(".mark-toggle") as unknown as HTMLButtonElement
+		).click();
+		expect(isOpen("a2")).toBe(true);
+	});
+
+	test("a closed mark says its state in a word, and the counts read apart", () => {
+		const c = twoMarks();
+		const found: AnnotationMatch = {
+			annotationId: "a1",
+			number: 1,
+			status: "lost",
+			score: 0,
+			current: 0,
+			candidates: [],
+		};
+		render(
+			caseState(c, (s) => {
+				s.loaded = {
+					caseId: c.id,
+					tabId: 1,
+					matches: new Map([["a1", found]]),
+				};
+			}),
+			noActions,
+		);
+		const state = (id: string) =>
+			row(id).querySelector(".mark-toggle .state")?.textContent;
+		expect(state("a1")).toBe("Not found");
+		expect(state("a2")).toBe("Won't fix");
+		expect(window.document.getElementById("marks-heading")?.textContent).toBe(
+			"Marks 2",
+		);
+		// The bar: one open, one won't fix, each its share.
+		const bar = [
+			...window.document.querySelectorAll(".marks-bar .progress > span"),
+		].map((s) => [s.getAttribute("data-kind"), s.getAttribute("style")]);
+		expect(bar).toEqual([
+			["open", "flex-grow: 1"],
+			["wontfix", "flex-grow: 1"],
 		]);
 	});
 
@@ -394,9 +491,14 @@ describe("the case's page and size", () => {
 		]) {
 			render(caseState(at(url)), noActions);
 			expect(el("open-page").hidden).toBe(true);
-			expect(el("open-page").parentElement?.textContent).toStartWith(
-				`${url}, `,
-			);
+			const chips = [...(el("open-page").parentElement?.children ?? [])]
+				.filter((chip) => !(chip as unknown as HTMLElement).hidden)
+				.map((chip) => chip.textContent);
+			expect(chips).toEqual([
+				url,
+				expect.stringMatching(/^\d+×\d+$/),
+				expect.stringMatching(/\d{4}/),
+			]);
 		}
 	});
 
@@ -587,8 +689,12 @@ describe("the AI app", () => {
 	test("the connect button says what it does now", () => {
 		render(caseState(sampleCase("c_b1")), noActions);
 		expect(el("connect").textContent).toBe("Connect AI app");
+		// The status at the top is a button too, saying what a click does.
+		expect(el("ai-button").contains(el("ai-status"))).toBe(true);
+		expect(el("ai-action").textContent).toBe("Connect");
 		render(caseState(sampleCase("c_b1"), ai({ connected: true })), noActions);
-		expect(el("connect").textContent).toBe("AI connection…");
+		expect(el("connect").textContent).toBe("Manage AI connection");
+		expect(el("ai-action").textContent).toBe("Manage");
 	});
 });
 
@@ -723,6 +829,15 @@ describe("a loaded mark", () => {
 		});
 	const said = () =>
 		document.querySelector(".match .meta")?.textContent ?? undefined;
+
+	test("a sure match offers no other candidate, unless one is shown", () => {
+		const next = () => document.querySelector("[data-action=next]");
+		render(shownAs("button"), noActions);
+		expect(next()).toBeNull();
+		// Stepped to the second: the way back stays.
+		render(shownAs("button", true, 1), noActions);
+		expect(next()).not.toBeNull();
+	});
 
 	const colour = () =>
 		document.querySelector<HTMLElement>(".annotation")?.dataset["colour"];

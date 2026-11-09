@@ -1143,12 +1143,17 @@ relayInput.addEventListener("change", () => {
 	keep.connect();
 });
 
-connectButton.addEventListener("click", () => {
+/** The connect dialog; it needs the user's click, which both buttons give. */
+function openConnect(): void {
 	const connection = mcp;
 	void connection.showConnectDialog().catch((error: unknown) => {
 		if (connection === mcp) keep.failed(error);
 	});
-});
+}
+
+connectButton.addEventListener("click", openConnect);
+// The status at the top is where one looks for the connection.
+byId<HTMLButtonElement>("ai-button").addEventListener("click", openConnect);
 
 function setKeepOn(on: boolean): void {
 	update((s) => (s.ai.keepOn = on));
