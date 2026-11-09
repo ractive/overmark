@@ -57,6 +57,16 @@ export function isWebPage(url: string): boolean {
 	}
 }
 
+/**
+ * The match pattern for the site of a web page's `url`, as Chrome's
+ * permissions take it (`https://www.example.com/*`; patterns have no port).
+ */
+export function sitePattern(url: string): string | undefined {
+	if (!isWebPage(url)) return undefined;
+	const { protocol, hostname } = new URL(url);
+	return `${protocol}//${hostname}/*`;
+}
+
 /** `www.example.com/kk` from a URL. */
 
 export function shortUrl(url: string): string {

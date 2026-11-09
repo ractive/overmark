@@ -85,6 +85,11 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
 - **sidePanel:** for its side panel.
 - **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
   free disk space, and they may grow beyond its usual limit. They stay in your browser.
+- **Single sites (optional):** when you open a case's page from its address, or show a
+  case's marks on a tab where Overmark may not run yet ("Show marks on this tab" or the
+  case's Load button), Chrome asks whether Overmark may run on that case's site from
+  then on. Only a yes allows it; you can take it back in Chrome's extension settings.
+  After a no, Overmark does not ask for that site again until the side panel reopens.
 - **All sites (optional, off by default):** only if you choose "allow on all sites", so
   that Overmark works on a tab without clicking its icon first.
 
