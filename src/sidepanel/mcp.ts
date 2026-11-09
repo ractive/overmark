@@ -20,7 +20,8 @@ import {
 	type TabBridge,
 } from "./tools.ts";
 
-export const DEFAULT_RELAY = "http://localhost:8080";
+/** The hosted relay, which allows the development build's ID. */
+export const DEFAULT_RELAY = "https://tab-mcp.ractive.ch";
 
 /** Hosts the library accepts over plain http: and ws:. */
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
