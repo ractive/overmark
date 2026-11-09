@@ -220,7 +220,10 @@ button {
 		border-color 0.12s;
 }
 
-button:hover:not(:disabled) {
+/* Not in the tab-mcp library's dialogs: this selector is more specific than
+   their own hover rules and would give the primary button a light background
+   under its light text. */
+button:hover:not(:disabled, .tab-mcp-dialog *) {
 	background: var(--wash);
 	border-color: var(--muted);
 }
