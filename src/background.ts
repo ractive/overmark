@@ -17,12 +17,14 @@ import type {
 	Broadcast,
 	CaptureResult,
 	ContentRequest,
+	NumberCheck,
 	SaveResult,
 	TabCapture,
+	UndoResult,
 	WorkerRequest,
 	WorkerResponse,
 } from "./lib/messages.ts";
-import { saveCase } from "./lib/save.ts";
+import { numberFree, saveCase, undoAdd } from "./lib/save.ts";
 import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
 import { inject } from "./lib/tabs.ts";
 
@@ -139,6 +141,21 @@ async function handle(
 				annotations: saved.annotations.length,
 			} satisfies SaveResult;
 		}
+		case "case:number":
+			if (!isSafeId(request.caseId)) throw new Error("invalid id");
+			return (await numberFree(
+				store,
+				request.caseId,
+				request.number,
+			)) satisfies NumberCheck;
+		case "case:undo-add": {
+			if (!isSafeId(request.caseId) || !isSafeId(request.annotationId))
+				throw new Error("invalid id");
+			const result = await undoAdd(store, request.caseId, request.annotationId);
+			if (result.removed)
+				await broadcast({ type: "cases:changed", caseId: request.caseId });
+			return result satisfies UndoResult;
+		}
 		case "capture:tab": {
 			// From the side panel (an AI app's screenshot), not from a content script.
 			if (!sender.url?.startsWith(chrome.runtime.getURL("")))
@@ -163,6 +180,8 @@ chrome.runtime.onMessage.addListener(
 		if (
 			request?.type !== "capture" &&
 			request?.type !== "case:save" &&
+			request?.type !== "case:number" &&
+			request?.type !== "case:undo-add" &&
 			request?.type !== "images:discard" &&
 			request?.type !== "capture:tab"
 		)

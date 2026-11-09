@@ -44,6 +44,8 @@ is what a case is about, and finding the element again is a best-effort extra:
 - When a mark is drawn, Overmark captures the visible part of the page as the user sees
   it (DEC-012); marks drawn while nothing scrolled or changed share that screenshot.
   Saving draws the marks onto the screenshots and cuts a crop per annotation.
+- Marks for a case that exists go into it one by one, each as soon as its comment is
+  done, with a screenshot of its own (DEC-013); a new case is saved once, with a title.
 - Shapes are stored in the screenshot's own coordinates (CSS pixels of that viewport).
   They never have to follow the live page.
 - Each annotation also stores the details of its element (tag, role, accessible name,

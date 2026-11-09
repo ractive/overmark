@@ -25,6 +25,7 @@ import {
 	saveAs,
 	shadow,
 	showToolbar,
+	until,
 } from "./steps.ts";
 
 describe.skipIf(browserBinary === undefined)("extension", () => {
@@ -218,7 +219,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.send("Page.close");
 	}, 60_000);
 
-	test("marks drawn before choosing a case are renumbered for it and added", async () => {
+	test("marks drawn before choosing a case are renumbered for it and go into it", async () => {
 		const before = (await h.control.eval<Db>(READ_DB)).cases[0];
 		if (before === undefined) throw new Error("the previous test saves a case");
 		const { page, tabId } = await h.open("v1");
@@ -238,24 +239,25 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			);
 		expect(await numbers()).toEqual(["1"]);
 
-		// "Add marks on this tab" for the saved case (marks 1–3).
+		// "Add marks" for the saved case (marks 1–3): no save step.
 		await h.control.eval(
 			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show", target: { caseId: ${JSON.stringify(before.id)}, title: ${JSON.stringify(before.title)}, nextAnnotation: 4 } })`,
 		);
 		expect(await numbers()).toEqual(["4"]);
-
-		await page.click(shadow('[data-action="save"]'));
-		await page.click(shadow('[data-action="save-confirm"]'));
 		await page.waitFor(
-			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+			`${shadow('[data-role="status"]')}?.textContent === "Mark 4 added to “Prämienrechner”"`,
 			20_000,
 		);
-		const db = await h.control.eval<Db>(READ_DB);
+		// The page's picture goes with the toolbar.
+		await page.click(shadow('[data-action="close"]'));
+		const db = await until(
+			() => h.control.eval<Db>(READ_DB),
+			(now) => !now.images.some((i) => i.key.includes("/pending/")),
+		);
 		const after = db.cases.find((c) => c.id === before.id);
 		expect(after?.annotations.map((a) => a.number)).toEqual([1, 2, 3, 4]);
 		expect(after?.shots.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
 		expect(after?.annotations[3]?.shot).toBe("s3");
-		expect(db.images.some((i) => i.key.includes("/pending/"))).toBe(false);
 		expect(db.images.some((i) => i.key.endsWith("/crops/a4.webp"))).toBe(true);
 		await page.send("Page.close");
 	}, 60_000);
@@ -691,10 +693,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await page.waitFor(`${status} === "Adding to “Going on”"`);
 			expect(await savedMarks(page)).toEqual(["1"]);
 
+			// Into the case at once, no save step.
 			await markElement(page, "[data-truth=tip]", "Say how much");
-			await page.click(shadow('[data-action="save"]'));
-			await page.click(shadow('[data-action="save-confirm"]'));
-			await page.waitFor(`${status}?.startsWith("Saved")`, 20_000);
+			await page.waitFor(`${status} === "Mark 2 added to “Going on”"`, 20_000);
 			expect(await savedMarks(page)).toEqual(["1", "2"]);
 			// A screenshot shows the page alone: mark 2's has no faint mark 1. Its
 			// own edges have a few pixels of that colour, a faint mark over 1000.
@@ -750,14 +751,19 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await page.send("Page.close");
 		}, 60_000);
 
-		test("marks right after a save, on the same screen, save too", async () => {
+		test("marks right after a save, on the same screen, go into the case too", async () => {
 			const { page, tabId } = await h.open("v1");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "h1", "First");
 			await saveAs(page, "Same screen");
 			// No scroll and no change to the page: nothing calls for a new shot.
 			const box = async (text: string) => {
-				await page.click(shadow('[data-action="tool-box"]'));
+				// The tool stays on after a mark goes into the case.
+				const tool = shadow('[data-action="tool-box"]');
+				if (
+					(await page.eval(`${tool}.getAttribute("aria-pressed")`)) !== "true"
+				)
+					await page.click(tool);
 				await page.drag({ x: 500, y: 100 }, { x: 640, y: 160 });
 				await comment(page, text);
 			};
@@ -766,9 +772,10 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 					?.annotations.length;
 
 			await box("Second");
-			await page.click(shadow('[data-action="save"]'));
-			await page.click(shadow('[data-action="save-confirm"]'));
-			await page.waitFor(`${status}?.startsWith("Saved")`, 20_000);
+			await page.waitFor(
+				`${status} === "Mark 2 added to “Same screen”"`,
+				20_000,
+			);
 			expect(await marksOf("Same screen")).toBe(2);
 
 			await page.click(shadow('[data-action="new-case"]'));
@@ -1206,12 +1213,6 @@ describe.skipIf(browserBinary === undefined)("the side panel", () => {
 			`${shadow('[data-role="status"]')}?.textContent.includes("Panel test")`,
 		);
 		await markElement(page, "[data-truth=tip]", "Say how much");
-		await page.click(shadow('[data-action="save"]'));
-		await page.click(shadow('[data-action="save-confirm"]'));
-		await page.waitFor(
-			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
-			20_000,
-		);
 		await h.control.waitFor(
 			`document.querySelectorAll(".annotation").length === 2`,
 		);

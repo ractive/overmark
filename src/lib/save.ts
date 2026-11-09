@@ -44,7 +44,21 @@ export interface SaveRequest {
 	annotations: AnnotationDraft[];
 	/** The id the pending screenshots are stored under, when not `caseId`. */
 	imagesFrom?: string;
+	/**
+	 * The pending screenshots stay after the save: the toolbar adds a case's
+	 * marks one by one, and the next mark on the same view shares its picture.
+	 * The toolbar discards them once no mark needs them.
+	 */
+	keepPending?: boolean;
+	/**
+	 * Marks of the case on the same view, drawn on the new shot under the new
+	 * marks: the screenshot shows what the user saw, as one save would.
+	 */
+	alsoDrawn?: (RenderedMark & { shot: string })[];
 }
+
+/** The most marks drawn on a screenshot besides its own (`alsoDrawn`). */
+export const MAX_ALSO_DRAWN = 100;
 
 /** Cut several crops from one screenshot. */
 export type Crop = (
@@ -84,8 +98,11 @@ export async function saveCase(
 		if (stored === undefined)
 			throw new SaveError(`the screenshot ${shot.id} is missing`);
 		const drafts = request.annotations.filter((a) => a.shot === shot.id);
+		const others = (request.alsoDrawn ?? [])
+			.slice(0, MAX_ALSO_DRAWN)
+			.filter((m) => m.shot === shot.id);
 		const image = draw
-			? await draw(stored.blob, drafts, shot.viewport.dpr)
+			? await draw(stored.blob, [...others, ...drafts], shot.viewport.dpr)
 			: stored;
 		screenshots.set(shot.id, image);
 		const cut = await crop(
@@ -167,13 +184,79 @@ export async function saveCase(
 		});
 		return { value, images };
 	});
-	await store
-		.deleteImages(
-			from,
-			request.shots.map((s) => pendingImage(s.id)),
-		)
-		.catch(() => undefined);
+	if (!request.keepPending)
+		await store
+			.deleteImages(
+				from,
+				request.shots.map((s) => pendingImage(s.id)),
+			)
+			.catch(() => undefined);
 	return saved;
+}
+
+/** Whether a mark can take `number` in the case now, and the case's next number. */
+export async function numberFree(
+	store: CaseStore,
+	caseId: string,
+	number: number,
+): Promise<{ free: boolean; next: number }> {
+	const c = await store.getCase(caseId);
+	if (c === undefined) throw new SaveError("The case no longer exists.");
+	return {
+		free:
+			number > (c.lastNumber ?? 0) &&
+			!c.annotations.some((a) => a.number === number),
+		next: nextNumbers(c).annotation,
+	};
+}
+
+/** How long after its screenshot the toolbar's Undo may take a mark out again. */
+export const UNDO_WINDOW_MS = 24 * 60 * 60_000;
+
+/**
+ * Undo in the toolbar: take out the mark it just added, with its crop and its
+ * screenshot. Only a mark of the user's with a screenshot of its own, taken
+ * lately: a content script cannot take out older marks this way (the side
+ * panel deletes those). Its pin was on its own screenshot only, which goes
+ * with it, so its number is free again (unlike a delete, DEC-013).
+ * `removed: false`: it was gone already (deleted in the side panel).
+ */
+export async function undoAdd(
+	store: CaseStore,
+	caseId: string,
+	annotationId: string,
+	now: Date = new Date(),
+): Promise<{ removed: boolean; next: number }> {
+	let removed = false;
+	const saved = await store.updateCase(caseId, (current) => {
+		if (current === undefined)
+			throw new SaveError("The case no longer exists.");
+		const gone = current.annotations.find((a) => a.id === annotationId);
+		if (gone === undefined) return { value: current };
+		const shot = current.shots.find((s) => s.id === gone.shot);
+		const shared = current.annotations.some(
+			(a) => a !== gone && a.shot === gone.shot,
+		);
+		const age = now.getTime() - Date.parse(shot?.capturedAt ?? "");
+		if (
+			gone.author !== "user" ||
+			shot === undefined ||
+			shared ||
+			!(age >= 0 && age < UNDO_WINDOW_MS)
+		)
+			throw new SaveError(
+				`mark ${gone.number} cannot be undone here; delete it in the side panel.`,
+			);
+		removed = true;
+		const value = validateCase({
+			...current,
+			annotations: current.annotations.filter((a) => a !== gone),
+			shots: current.shots.filter((s) => s !== shot),
+			updatedAt: now.toISOString(),
+		});
+		return { value, deleteImages: [gone.crop, shot.image] };
+	});
+	return { removed, next: nextNumbers(saved).annotation };
 }
 
 /** A rectangle grown by `pad` and kept inside the viewport. */

@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { lastMark } from "../src/content/annotator.ts";
 import { type Case, pendingImage, type Shot } from "../src/lib/case.ts";
 import type { Draw } from "../src/lib/save.ts";
 import {
 	type AnnotationDraft,
 	type Crop,
+	numberFree,
 	type SaveRequest,
 	saveCase,
+	UNDO_WINDOW_MS,
+	undoAdd,
 } from "../src/lib/save.ts";
 import { MemoryStore } from "../src/lib/store.ts";
 
@@ -302,5 +306,166 @@ describe("saveCase", () => {
 				crop,
 			),
 		).rejects.toThrow("the screenshot p_a is missing");
+	});
+});
+
+/** The toolbar adds a case's marks one by one (DEC-013). */
+describe("adding mark by mark", () => {
+	/** Add mark `n` alone, on the pending screenshot `shotId` of the session. */
+	const addOne = (
+		store: MemoryStore,
+		n: number,
+		shotId: string,
+		extra: Partial<SaveRequest> = {},
+		draw?: Draw,
+	) =>
+		saveCase(
+			store,
+			{
+				...request("c_1", false, [shot(shotId)], [draft(n, shotId)]),
+				imagesFrom: "c_session",
+				keepPending: true,
+				...extra,
+			},
+			crop,
+			new Date("2026-11-04T10:05:00Z"),
+			draw,
+		);
+
+	test("marks on one view share its picture: each gets a shot of its own, drawn with the marks before it", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		await captured(store, "c_session", "p_v");
+		const drawn: number[][] = [];
+		const draw: Draw = async (image, marks) => {
+			drawn.push(marks.map((m) => m.number));
+			return { blob: image, width: 1, height: 1 };
+		};
+		await addOne(store, 3, "p_v", {}, draw);
+		// The pending picture stays for the next mark on the same view.
+		expect(store.images.has("c_session/pending/p_v.webp")).toBe(true);
+		const saved = await addOne(
+			store,
+			4,
+			"p_v",
+			{
+				alsoDrawn: [
+					{
+						shot: "p_v",
+						number: 3,
+						shape: { kind: "note", at: { x: 5, y: 5 } },
+					},
+					// Another view's mark is not drawn here.
+					{
+						shot: "p_other",
+						number: 9,
+						shape: { kind: "note", at: { x: 5, y: 5 } },
+					},
+				],
+			},
+			draw,
+		);
+		expect(drawn).toEqual([[3], [3, 4]]);
+		expect(saved.annotations.map((a) => [a.number, a.shot])).toEqual([
+			[1, "s1"],
+			[2, "s1"],
+			[3, "s2"],
+			[4, "s3"],
+		]);
+		expect(store.images.has("c_1/shots/s3.webp")).toBe(true);
+		expect(store.images.has("c_session/pending/p_v.webp")).toBe(true);
+	});
+
+	test("numberFree: a number in use or reserved by a deleted mark is not free", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		expect(await numberFree(store, "c_1", 3)).toEqual({ free: true, next: 3 });
+		expect(await numberFree(store, "c_1", 2)).toEqual({ free: false, next: 3 });
+		await store.updateCase("c_1", (c) => ({
+			value: { ...(c as Case), lastNumber: 5 },
+		}));
+		expect(await numberFree(store, "c_1", 4)).toEqual({ free: false, next: 6 });
+		expect(await numberFree(store, "c_1", 6)).toEqual({ free: true, next: 6 });
+		await expect(numberFree(store, "c_9", 1)).rejects.toThrow(
+			"no longer exists",
+		);
+	});
+
+	test("undoAdd takes the mark out with its crop and screenshot, and frees its number", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		await captured(store, "c_session", "p_v");
+		await addOne(store, 3, "p_v");
+		expect(keys(store)).toContain("c_1/shots/s2.webp");
+		const result = await undoAdd(
+			store,
+			"c_1",
+			"a3",
+			new Date("2026-11-04T10:06:00Z"),
+		);
+		expect(result).toEqual({ removed: true, next: 3 });
+		const c = (await store.getCase("c_1")) as Case;
+		expect(c.annotations.map((a) => a.number)).toEqual([1, 2]);
+		expect(c.shots.map((s) => s.id)).toEqual(["s1"]);
+		expect(c.lastNumber).toBeUndefined();
+		expect(keys(store)).toEqual([
+			"c_1/crops/a1.webp",
+			"c_1/crops/a2.webp",
+			"c_1/shots/s1.webp",
+			"c_session/pending/p_v.webp",
+		]);
+		// Added again, it takes the same number and the next shot number.
+		const again = await addOne(store, 3, "p_v");
+		expect(again.annotations.at(-1)?.shot).toBe("s2");
+	});
+
+	test("undoAdd: a mark already gone is no error", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		expect(await undoAdd(store, "c_1", "a7")).toEqual({
+			removed: false,
+			next: 3,
+		});
+		await expect(undoAdd(store, "c_9", "a1")).rejects.toThrow(
+			"no longer exists",
+		);
+	});
+
+	test("undoAdd refuses a mark that shares its screenshot, an AI app's, or an old one", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		const at = new Date("2026-11-04T10:06:00Z");
+		// Marks 1 and 2 were saved together, on one screenshot.
+		await expect(undoAdd(store, "c_1", "a2", at)).rejects.toThrow(
+			"delete it in the side panel",
+		);
+		await captured(store, "c_session", "p_v");
+		await addOne(store, 3, "p_v");
+		await store.updateCase("c_1", (c) => ({
+			value: {
+				...(c as Case),
+				annotations: (c as Case).annotations.map((a) =>
+					a.number === 3 ? { ...a, author: "ai" as const } : a,
+				),
+			},
+		}));
+		await expect(undoAdd(store, "c_1", "a3", at)).rejects.toThrow(
+			"cannot be undone",
+		);
+		await captured(store, "c_session", "p_w");
+		await addOne(store, 4, "p_w");
+		const later = new Date(Date.parse("2026-11-04T10:00:00Z") + UNDO_WINDOW_MS);
+		await expect(undoAdd(store, "c_1", "a4", later)).rejects.toThrow(
+			"cannot be undone",
+		);
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(4);
+	});
+});
+
+describe("lastMark", () => {
+	test("is the mark with the highest number, wherever it is in the list", () => {
+		expect(lastMark([])).toBeUndefined();
+		const marks = [{ number: 12 }, { number: 14 }, { number: 13 }];
+		expect(lastMark(marks)).toBe(marks[1]);
 	});
 });

@@ -6,3 +6,7 @@
 - Iterations 1 to 4 built and reviewed (claude + glm through background forks), every finding fixed; PRs #1 to #4 stacked, CI green; DEC-008 (every AI change confirmed each time). Iteration 5 in part (PR #5): PRIVACY.md, store listing, release workflow. Merges wait for the owner. tab-mcp iteration 17 (relay accepts `chrome-extension://` origins) is tab-mcp PR #72
 - Second review of the review-fix commits (claude 22 findings, glm 7; 26 distinct, all fixed): typed text left out of element details, one counted blur per page that reaches shadow roots, saves and AI screenshots no longer interfere, size budgets for list_cases and load_case, abandoned pending screenshots swept; PR #7. tab-mcp #72: only real extension ids are worded as extensions
 - Full review of the whole codebase (four Claude reviewers by area, GLM over everything): 70 findings, 57 distinct, 5 high. DEC-012: a mark's screenshot is taken when it is drawn. Fixed in PR #9. The machine was killed during the fixes; all work was recovered from the worktrees
+
+## 2026-11-09
+
+- Owner feedback: adding marks to a case needed "Save…" and then "Add to case" or "Back". DEC-013: marks for a case go into it as each is done, Undo takes the last one out again, failures stay on the page with "Add mark N"; the new-case save keeps its title, its form says "Keep drawing" instead of "Back"

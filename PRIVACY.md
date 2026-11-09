@@ -6,7 +6,7 @@ relay when you connect an AI app through it (see "An AI app" below).
 
 ## What Overmark keeps, and where
 
-When you save marks as a case, Overmark stores in your browser, on your computer
+When you save marks as a case, or add marks to a case, Overmark stores in your browser, on your computer
 (IndexedDB of the extension):
 
 - the case's title, your comments, the verdict, when the case and its screenshots were
@@ -36,7 +36,7 @@ it keeps about an element leaves them out. Of the editors that draw their text a
 ordinary page content, it recognises only Monaco, CodeMirror 5 and Ace; to Overmark the
 text of any other such editor is page text, and it is kept when you mark it. A
 screenshot shows what was on the screen, though, form fields included. Whenever Overmark
-takes a screenshot (when you save marks, and when an AI app asks for one, see below),
+takes a screenshot (when you draw a mark, and when an AI app asks for one, see below),
 password fields are blurred, and with "Blur form fields in screenshots" all form fields
 and text editors are. This covers fields in the page itself and inside its web
 components, not fields inside embedded frames (for example a payment form from another

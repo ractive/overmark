@@ -137,3 +137,37 @@ The price: every new view flashes the overlay away for about 100 ms, and pending
 screenshots live as long as their marks, so they are swept after 7 days instead of
 10 minutes.
 
+## DEC-013: Marks for a case go into it as they are done
+
+The owner's feedback: after "Add marks" a new mark was only stored after "Save…",
+which then asked "Add to case" or "Back"; nobody expects either step. Now the toolbar
+has two modes. Without a case, marks are drafts and "Save case…" stores them as a new
+case with a title, as before (its form's other button is "Keep drawing"). With a case
+(the side panel's "Add marks", "Continue annotating", or after that first save), the
+toolbar says "Adding to “<case>”" and each mark goes into the case as soon as it is done:
+its comment confirmed, or the comment closed with the mark kept. Done closes the
+toolbar once the marks are in.
+
+- One queue in the content script adds the marks in order, one save each, and also
+  runs Undo and New case, so nothing overtakes an add. Before each add the worker says
+  whether the mark's number is still free (`case:number`); if an AI app took it, the
+  marks not added yet are renumbered.
+- The screenshot is taken when the mark is drawn, as before (DEC-012). Each added mark
+  gets a shot of its own in the case, drawn with its mark and the marks this toolbar
+  added before on the same view (so it looks as one save would have). Marks on one view
+  still share the one capture: its pending image stays (`keepPending`) until the page
+  no longer looks like it and no mark waits for it. More shots per case, no extra
+  captures, and Undo never has to redraw a screenshot.
+- Undo takes the mark with the highest number: a draft from the page, or an added mark
+  out of the case (`case:undo-add`), with its crop and its shot. Since its pin was on
+  no other screenshot, its number is free again, unlike a delete in the side panel,
+  which keeps the number (a pin may stay on shared shots). The worker refuses this for
+  marks of an AI app, marks that share a screenshot, or a screenshot older than a day:
+  a content script cannot take out older marks this way.
+- A failed add leaves the mark on the page as a draft with the reason and an "Add mark
+  N" button; a mark whose screenshot was given up (the page moved before its turn)
+  waits for that button or for Done, when nobody is using the page and scrolling back
+  to take it is safe. A failure shows the toolbar again if it was closed meanwhile.
+- A new case gets its own id instead of the pending images' id, so one id holds a
+  page's pending screenshots for as long as the page is open.
+

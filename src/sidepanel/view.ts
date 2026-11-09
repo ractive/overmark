@@ -489,6 +489,8 @@ function createParts(c: Case, actions: Actions): CaseParts {
 				{
 					type: "button",
 					id: "add-marks",
+					title:
+						"Each mark you draw on the page goes into this case when its comment is done",
 					onclick: () => actions.addMarks(created.current),
 				},
 				"Add marks",
