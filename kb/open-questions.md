@@ -10,9 +10,11 @@ timestamp: 2026-11-04T17:00:00+01:00
 # Open questions for the owner
 
 1. **Relay for POs.** claude.ai and Claude Desktop connect from Anthropic's servers and
-   need a relay with a public HTTPS address that allows Overmark's extension ID. Who runs
-   it, or do POs start with file export only? The hosted `tab-mcp.ractive.ch` serves only
-   ractive.ch's examples.
+   need a relay with a public HTTPS address that allows Overmark's extension ID. The
+   hosted `tab-mcp.ractive.ch` allows the development build's ID since relay 0.7.1 and is
+   the side panel's default; the store build's ID still has to be added there
+   (`kb/operations/chrome-web-store.md`, step 5). Open: does Acme accept that relay
+   for POs, or run its own?
 2. **Acme IT.** Is Developer mode allowed on company machines ("Load unpacked")? Is
    Chrome managed by policy, so IT could install Overmark?
 3. **Test ids.** Do the Acme frontends have `data-testid` (or similar) attributes?

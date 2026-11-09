@@ -1,7 +1,8 @@
 # Overmark privacy policy
 
-Overmark is a browser extension for annotating web pages. It has no server, no
-account and no analytics. Its author receives nothing from it.
+Overmark is a browser extension for annotating web pages. It has no account and no
+analytics. Its author receives nothing from it, except what passes through the hosted
+relay when you connect an AI app through it (see "An AI app" below).
 
 ## What Overmark keeps, and where
 
@@ -51,10 +52,13 @@ Only in two cases, both started by you:
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
    address (cut as above), title, element details and screenshots of the tab in front.
    They travel
-   through the relay whose address you entered, and on to the AI app you paired with a
-   code. The tab-mcp relay software forwards them without storing them; a relay that
-   someone else runs is subject to its operator's practices. The AI app's provider
-   handles the data under its own privacy policy.
+   through a tab-mcp relay and on to the AI app you paired with a code. Unless you enter
+   another relay in the side panel, that is `tab-mcp.ractive.ch`, run by Overmark's
+   developer: it forwards the data without storing it or writing it to its logs, and
+   stores for each pairing only the AI app's id and name and hashes of its tokens
+   ([its privacy statement](https://ractive.ch/tab-mcp/privacy/)). A relay that someone
+   else runs is subject to its operator's practices. The AI app's provider handles the
+   data under its own privacy policy.
 
    Changes the AI app wants to make (adding a mark, recording a verdict, deleting a
    case) are shown to you in the side panel first, every time, naming the case and the

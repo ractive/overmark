@@ -68,7 +68,12 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 ## With an AI app
 
 The side panel offers the cases to an AI app (Claude Code, Claude, ChatGPT, Codex)
-through a [tab-mcp](https://github.com/ractive/tab-mcp) relay:
+through a [tab-mcp](https://github.com/ractive/tab-mcp) relay. The side panel uses
+the hosted relay `https://tab-mcp.ractive.ch` unless you enter another one. It allows
+only builds with the fixed key in `manifest-key.txt` (ID
+`chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`); the store package has none, so
+it gets another ID and needs a relay of its own until the store's key is set.
+The side panel's tools:
 
 | Tool | What it does |
 |---|---|
@@ -99,7 +104,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   ractive/tab-mcp:0.7.0
 ```
 
-Then, in the side panel's "AI app" section, keep the relay at `http://localhost:8080`
+Then, in the side panel's "AI app" section, set the relay to `http://localhost:8080`
 and click "Connect AI app". Add the address it shows to Claude Code, then run `/mcp`
 there and choose Authenticate:
 
@@ -113,7 +118,7 @@ session. "Stop AI access" ends the connection and keeps the pairing, as closing 
 panel does; closing a tab does the same for a web page.
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
-relay with a public HTTPS address that allows Overmark's ID.
+relay with a public HTTPS address that allows Overmark's ID, such as the hosted one.
 
 ## Development
 
