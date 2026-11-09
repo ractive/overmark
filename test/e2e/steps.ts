@@ -222,6 +222,34 @@ export function countColour(
 	);
 }
 
+/**
+ * The worker's settings database (`src/worker/kv.ts`), read or changed in an
+ * extension page or the worker: `KV(code)` runs `code` with `store`, the
+ * object store, in a transaction of `mode`, and answers every entry after it.
+ */
+export const KV = (code = "", mode: "readonly" | "readwrite" = "readonly") =>
+	`new Promise((resolve, reject) => {
+		const open = indexedDB.open("overmark-settings", 1);
+		open.onupgradeneeded = () => open.result.createObjectStore("settings");
+		open.onerror = () => reject(open.error);
+		open.onsuccess = () => {
+			const tx = open.result.transaction("settings", ${JSON.stringify(mode)});
+			const store = tx.objectStore("settings");
+			${code};
+			const keys = store.getAllKeys();
+			const values = store.getAll();
+			tx.oncomplete = () => {
+				open.result.close();
+				resolve(Object.fromEntries(keys.result.map((k, i) => [k, values.result[i]])));
+			};
+			tx.onerror = () => reject(tx.error);
+		};
+	})`;
+
+/** The worker's settings now, read in the control page (the same origin). */
+export const settingsOf = (h: Harness) =>
+	h.control.eval<Record<string, unknown>>(KV());
+
 /** A session on the extension's service worker, which starts it if needed. */
 export async function worker(h: Harness): Promise<Page> {
 	await h.control.eval(WAKE_WORKER);

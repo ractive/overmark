@@ -7,7 +7,9 @@
  * else happens. While AI access is on, an alarm wakes the worker once a
  * minute, and every worker start connects again: always with "Keep AI
  * access on", else until the browser closes or the extension is updated,
- * reloaded or disabled (all of which clear `chrome.storage.session`).
+ * reloaded or disabled (all of which clear `chrome.storage.session`). The
+ * settings and the address secret are in the worker's own IndexedDB
+ * (`kv.ts`, DEC-016), out of content scripts' reach.
  */
 
 import {
@@ -18,9 +20,10 @@ import {
 	type ToolCallStart,
 } from "@ractive-ch/tab-mcp-client";
 import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
-import type { Broadcast } from "../lib/messages.ts";
+import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
 import { KeepOn } from "./keep-on.ts";
+import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
 	type AiState,
 	type CallView,
@@ -29,7 +32,7 @@ import {
 	type WorkerMessage,
 } from "./protocol.ts";
 import { Questions, type QuestionsHost } from "./questions.ts";
-import { CachedSecretStorage, SECRET_PREFIX } from "./secret.ts";
+import { CachedSecretStorage } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
 	KEYS,
@@ -38,6 +41,7 @@ import {
 	relayProblem,
 	SESSION_ON,
 	type Settings,
+	saveReplaced,
 } from "./settings.ts";
 import { type Capture, tabInFront, workerTab } from "./tab.ts";
 import {
@@ -75,12 +79,31 @@ async function clearNotifications(): Promise<void> {
 	}
 }
 
-/** Remove every address secret from `area`. */
-async function removeSecrets(area: chrome.storage.StorageArea): Promise<void> {
-	const keys = Object.keys(await area.get(null)).filter((key) =>
-		key.startsWith(SECRET_PREFIX),
-	);
-	if (keys.length > 0) await area.remove(keys);
+/**
+ * Close `chrome.storage.local` to content scripts, which may read and write
+ * it by default. Only an extra layer (DEC-016): nothing is kept there any
+ * more, and not every Chrome takes this for the local area, so a refusal is
+ * only logged.
+ */
+async function restrictStorage(): Promise<void> {
+	try {
+		await chrome.storage.local.setAccessLevel({
+			accessLevel: "TRUSTED_CONTEXTS",
+		});
+	} catch (error) {
+		console.warn("Overmark: storage access level", error);
+	}
+}
+
+/** Tell every tab's overlay, whatever a tab answers. */
+async function tellTabs(news: ContentRequest): Promise<void> {
+	try {
+		for (const { id } of await chrome.tabs.query({}))
+			if (id !== undefined)
+				chrome.tabs.sendMessage(id, news).catch(() => undefined);
+	} catch {
+		// No tabs to tell.
+	}
 }
 
 const message = (error: unknown) =>
@@ -98,6 +121,7 @@ export class Connection {
 	readonly #deps: ConnectionDeps;
 	readonly #tab: TabBridge;
 	readonly #storage: CachedSecretStorage;
+	readonly #kv: Kv;
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
 	readonly #keep: KeepOn;
@@ -110,11 +134,6 @@ export class Connection {
 	#listening = new AbortController();
 	/** Why the last command failed, until the next connection. */
 	#problem: string | undefined;
-	/**
-	 * Why AI access cannot be on at all: Chrome would not keep the extension's
-	 * storage from content scripts, so the address secret is not kept there.
-	 */
-	readonly #locked: string | undefined;
 	/** The takeover happened in this worker's life: the library knows of it. */
 	#replacedHere = false;
 	#lastCall: CallView | undefined;
@@ -124,23 +143,20 @@ export class Connection {
 
 	private constructor(
 		deps: ConnectionDeps,
+		kv: Kv,
 		storage: CachedSecretStorage,
 		settings: Settings,
 		sessionOn: boolean,
-		locked: string | undefined,
 	) {
 		this.#deps = deps;
-		this.#locked = locked;
+		this.#kv = kv;
 		this.#tab = workerTab(deps.capture);
 		this.#storage = storage;
 		this.#settings = settings;
 		this.#sessionOn = sessionOn;
 		this.#questions = new Questions(this.#questionsHost());
 		this.#keep = new KeepOn(
-			() =>
-				this.#locked === undefined &&
-				this.#settings.keepOn &&
-				this.#settings.replaced === undefined,
+			() => this.#settings.keepOn && this.#settings.replaced === undefined,
 			() => this.#changed(),
 		);
 		const relay = settings.relay ?? DEFAULT_RELAY;
@@ -165,34 +181,32 @@ export class Connection {
 	 * address was not taken over meanwhile.
 	 */
 	static async start(deps: ConnectionDeps): Promise<Connection> {
-		// Content scripts have no business with the settings or the secret.
-		// Where Chrome refuses that, the secret is not kept at all (fail closed):
-		// a content script that a page took over could read it.
-		const locked = await chrome.storage.local
-			.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
-			.then(
-				() => undefined,
-				(error: unknown) =>
-					`Overmark cannot keep its storage from web pages in this browser (${message(error)}), so AI access stays off.`,
-			);
+		await restrictStorage();
+		// The settings live in IndexedDB, out of content scripts' reach. An
+		// unreleased build kept them in chrome.storage.local: removed there at
+		// every start, never taken over (DEC-016).
+		const kv = await openKv();
+		await removeOldSettings(chrome.storage.local).catch((error: unknown) =>
+			console.warn("Overmark: removing the old settings", error),
+		);
+		// A previous worker's questions died with it.
 		await clearNotifications();
-		if (locked !== undefined) await removeSecrets(chrome.storage.local);
 		const [storage, settings, session] = await Promise.all([
-			locked === undefined
-				? CachedSecretStorage.load(chrome.storage.local)
-				: CachedSecretStorage.memory(),
-			loadSettings(chrome.storage.local),
+			CachedSecretStorage.load(kv),
+			loadSettings(kv),
 			chrome.storage.session.get(SESSION_ON),
 		]);
 		const connection = new Connection(
 			deps,
+			kv,
 			storage,
 			settings,
 			session[SESSION_ON] === true,
-			locked,
 		);
 		connection.#showBadge();
 		connection.keepUp();
+		// Overlays a panel started before this worker knew: the stored value.
+		connection.#tellBlur();
 		return connection;
 	}
 
@@ -219,10 +233,9 @@ export class Connection {
 			tab: this.#tab,
 			images: { toWebp, scale: scaleImage, crop: cropImages },
 			onChange: (caseId) => void broadcast({ type: "cases:changed", caseId }),
-			// Read at each call: the panel changes it in storage at any time.
-			blurForms: async () =>
-				(await chrome.storage.local.get(KEYS.blurForms))[KEYS.blurForms] ===
-				true,
+			// Read at each call: only the worker writes it, and only after the
+			// write to the store succeeded, so this is what the panel shows.
+			blurForms: () => this.#settings.blurForms,
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
 		});
 		for (const tool of tools) void mcp.registerTool(tool);
@@ -310,11 +323,7 @@ export class Connection {
 	#connect(): void {
 		const mcp = this.#mcp;
 		if (mcp.state !== "disconnected") return;
-		this.#problem = this.#locked;
-		if (this.#locked !== undefined) {
-			this.#changed();
-			return;
-		}
+		this.#problem = undefined;
 		mcp.connect({ resume: true }).catch((error: unknown) => {
 			if (mcp === this.#mcp) this.#keep.failed(error);
 		});
@@ -322,10 +331,8 @@ export class Connection {
 
 	async #setReplaced(replaced: Replaced | undefined): Promise<void> {
 		this.#settings = { ...this.#settings, replaced };
-		if (replaced === undefined) {
-			this.#replacedHere = false;
-			await chrome.storage.local.remove(KEYS.replaced);
-		} else await chrome.storage.local.set({ [KEYS.replaced]: replaced });
+		if (replaced === undefined) this.#replacedHere = false;
+		await saveReplaced(this.#kv, replaced);
 		await this.#syncAlarm();
 	}
 
@@ -335,10 +342,29 @@ export class Connection {
 		await this.#syncAlarm();
 	}
 
+	/** Settings change in memory only once the store has them. */
 	async #setKeepOn(on: boolean): Promise<void> {
+		await this.#kv.set({ [KEYS.keepOn]: on });
 		this.#settings = { ...this.#settings, keepOn: on };
-		await chrome.storage.local.set({ [KEYS.keepOn]: on });
 		await this.#syncAlarm();
+	}
+
+	/**
+	 * Blur form fields: kept, then told to the overlays already open. A write
+	 * that fails changes nothing: the command's problem is shown, the panel's
+	 * box goes back with the next state, and the tools keep the old value.
+	 */
+	async #setBlurForms(on: boolean): Promise<void> {
+		await this.#kv.set({ [KEYS.blurForms]: on });
+		this.#settings = { ...this.#settings, blurForms: on };
+		this.#tellBlur();
+	}
+
+	#tellBlur(): void {
+		void tellTabs({
+			type: "overlay:settings",
+			blurForms: this.#settings.blurForms,
+		});
 	}
 
 	/** The alarm runs while AI access is on (and the address is ours). */
@@ -362,11 +388,17 @@ export class Connection {
 	 */
 	async #useRelay(relay: string): Promise<void> {
 		const next = this.#create(relay);
+		await this.#kv.set({ [KEYS.relay]: relay });
+		await this.#switchTo(relay, next);
+	}
+
+	/** Switch to `next`, a connection to `relay` that is stored already. */
+	async #switchTo(relay: string, next: TabMcp): Promise<void> {
 		const before = this.#mcp;
+		this.#settings = { ...this.#settings, relay };
 		this.#relay = relay;
 		this.#relayNote = undefined;
 		this.#problem = undefined;
-		await chrome.storage.local.set({ [KEYS.relay]: relay });
 		await this.#setReplaced(undefined);
 		// AI access was on for the relay before: this one connects with
 		// "Keep AI access on", or on the user's click.
@@ -386,8 +418,7 @@ export class Connection {
 	 */
 	keepUp(): void {
 		void this.#syncAlarm();
-		if (this.#settings.replaced !== undefined || this.#locked !== undefined)
-			return;
+		if (this.#settings.replaced !== undefined) return;
 		if (this.#settings.keepOn) this.#keep.connect();
 		else if (this.#sessionOn && this.#mcp.reconnecting === undefined)
 			this.#connect();
@@ -410,6 +441,8 @@ export class Connection {
 	addPanel(port: chrome.runtime.Port, early: unknown[] = []): void {
 		const panel: Panel = { port, pairing: false };
 		this.#panels.add(panel);
+		// Its overlays may have started before it knew the worker's value.
+		this.#tellBlur();
 		const receive = (raw: unknown) => {
 			// Anything that is not a command is dropped; the rest run one after
 			// the other, so a stop never ends before the connect that came first.
@@ -460,6 +493,10 @@ export class Connection {
 				else this.#keep.stop();
 				this.#changed();
 				return;
+			case "blur-forms":
+				await this.#setBlurForms(command.on);
+				this.#changed();
+				return;
 			case "pair":
 				panel.pairing = command.on;
 				if (command.on) this.#mcp.startPairing();
@@ -497,32 +534,46 @@ export class Connection {
 	async #migrate(
 		command: Extract<PanelCommand, { type: "migrate" }>,
 	): Promise<void> {
-		// Locked: the panel keeps its copy until this browser can keep it safe.
-		if (this.#settings.migrated || this.#locked !== undefined) return;
+		if (this.#settings.panelHandedOver) return;
+		// The secrets first: a crash after them leaves no marker, and the
+		// panel, which deletes its copy only once the marker is set, hands
+		// everything over again at its next start (taking no secret twice).
 		for (const [key, value] of Object.entries(command.secrets))
 			this.#storage.adopt(key, value);
 		await this.#storage.written;
-		this.#settings = { ...this.#settings, migrated: true };
-		const changes: Record<string, unknown> = { [KEYS.migrated]: true };
-		if (command.blurForms !== undefined)
-			changes[KEYS.blurForms] = command.blurForms;
-		await chrome.storage.local.set(changes);
-		if (command.keepOn !== undefined) await this.#setKeepOn(command.keepOn);
 		const problem =
 			command.relay === undefined ? undefined : relayProblem(command.relay);
+		let next: TabMcp | undefined;
+		let note: string | undefined;
 		if (problem !== undefined)
-			this.#relayNote = `The saved relay ${command.relay} cannot be used (${problem}); using ${this.#relay}.`;
-		if (
-			command.relay !== undefined &&
-			problem === undefined &&
-			command.relay !== this.#relay
-		) {
+			note = `The saved relay ${command.relay} cannot be used (${problem}); using ${this.#relay}.`;
+		else if (command.relay !== undefined && command.relay !== this.#relay)
 			try {
-				await this.#useRelay(command.relay);
+				next = this.#create(command.relay);
 			} catch (error) {
-				this.#relayNote = `The saved relay ${command.relay} cannot be used (${message(error)}); using ${this.#relay}.`;
+				note = `The saved relay ${command.relay} cannot be used (${message(error)}); using ${this.#relay}.`;
 			}
-		} else this.#keep.connect();
+		// The settings and the marker in one transaction: all or none.
+		const keepOn = command.keepOn ?? this.#settings.keepOn;
+		const blurForms = command.blurForms ?? this.#settings.blurForms;
+		await this.#kv.set({
+			[KEYS.keepOn]: keepOn,
+			[KEYS.blurForms]: blurForms,
+			...(next !== undefined ? { [KEYS.relay]: command.relay } : {}),
+			[KEYS.panelHandedOver]: true,
+		});
+		this.#settings = {
+			...this.#settings,
+			keepOn,
+			blurForms,
+			panelHandedOver: true,
+		};
+		this.#tellBlur();
+		await this.#syncAlarm();
+		if (next !== undefined && command.relay !== undefined)
+			await this.#switchTo(command.relay, next);
+		else this.#keep.connect();
+		if (note !== undefined) this.#relayNote = note;
 		this.#changed();
 	}
 
@@ -535,11 +586,6 @@ export class Connection {
 	 * which revokes every grant of the old one.
 	 */
 	async #newAddress(): Promise<void> {
-		if (this.#locked !== undefined) {
-			this.#problem = this.#locked;
-			this.#changed();
-			return;
-		}
 		const takeBack =
 			this.#settings.replaced !== undefined && !this.#replacedHere;
 		this.#problem = undefined;
@@ -594,7 +640,7 @@ export class Connection {
 
 	get state(): AiState {
 		const mcp = this.#mcp;
-		const problem = this.#keep.problem ?? this.#problem ?? this.#locked;
+		const problem = this.#keep.problem ?? this.#problem;
 		const address = mcp.address;
 		const code = mcp.pairingCode?.code;
 		const replaced = this.#settings.replaced;
@@ -602,6 +648,7 @@ export class Connection {
 			relay: this.#relay,
 			...(this.#relayNote !== undefined ? { relayNote: this.#relayNote } : {}),
 			keepOn: this.#settings.keepOn,
+			blurForms: this.#settings.blurForms,
 			state: mcp.state,
 			reconnecting: mcp.reconnecting !== undefined,
 			retrying: this.#keep.retrying,
@@ -619,7 +666,7 @@ export class Connection {
 				: {}),
 			...(this.#lastCall !== undefined ? { lastCall: this.#lastCall } : {}),
 			questions: this.#questions.list,
-			migrated: this.#settings.migrated,
+			migrated: this.#settings.panelHandedOver,
 		};
 	}
 

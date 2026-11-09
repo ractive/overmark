@@ -1,8 +1,9 @@
 /**
  * The AI connection's pieces in the service worker (DEC-015): who may send
  * what, the questions of tools that change something, the address secret's
- * storage, the panel's old settings handed over once, and a background
- * bundle a service worker can run.
+ * storage, the settings in IndexedDB (and what an unreleased build left in
+ * chrome.storage.local removed), the panel's old settings handed over, and
+ * bundles: one a service worker can run, a side panel that keeps no setting.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -13,6 +14,12 @@ import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
 import { oldSettings, statusText } from "../src/sidepanel/ai.ts";
+import {
+	DATABASE,
+	memoryKv,
+	type OldArea,
+	removeOldSettings,
+} from "../src/worker/kv.ts";
 import {
 	type AiState,
 	isPanelSender,
@@ -27,6 +34,7 @@ import {
 	visible,
 } from "../src/worker/questions.ts";
 import { CachedSecretStorage } from "../src/worker/secret.ts";
+import { kvContract } from "./kv-contract.ts";
 
 const ID = "fphhchhlgklidhnodoleiebmdhnfdadg";
 const PANEL = `chrome-extension://${ID}/sidepanel/index.html`;
@@ -38,6 +46,7 @@ const COMMANDS: PanelCommand[] = [
 	{ type: "connect" },
 	{ type: "stop" },
 	{ type: "keep-on", on: true },
+	{ type: "blur-forms", on: false },
 	{ type: "pair", on: true },
 	{ type: "revoke", grantId: "g" },
 	{ type: "new-address" },
@@ -104,6 +113,8 @@ describe("who may send what", () => {
 			{ type: "hello", windowId: "1" },
 			{ type: "hello", windowId: 1.5 },
 			{ type: "keep-on", on: "yes" },
+			{ type: "blur-forms" },
+			{ type: "blur-forms", on: 1 },
 			{ type: "pair" },
 			{ type: "revoke", grantId: 1 },
 			{ type: "set-relay" },
@@ -378,41 +389,24 @@ describe("the address secret in the worker", () => {
 	const KEY = "tab-mcp:secret:https://relay:overmark";
 	const SECRET = "a".repeat(43);
 
-	function area(stored: Record<string, unknown>) {
-		return {
-			get: async () => ({ ...stored }),
-			set: async (items: Record<string, unknown>) => {
-				Object.assign(stored, items);
-			},
-		};
-	}
-
-	test("loaded once, read from memory, written through to storage", async () => {
-		const stored: Record<string, unknown> = { [KEY]: "s1", relay: "x" };
-		const storage = await CachedSecretStorage.load(area(stored));
+	test("loaded once, read from memory, written through to the worker's database", async () => {
+		const kv = memoryKv({ [KEY]: "s1", relay: "x" });
+		const storage = await CachedSecretStorage.load(kv);
 		expect(storage.getItem(KEY)).toBe("s1");
 		// Only the library's keys.
 		expect(storage.getItem("relay")).toBeNull();
 		storage.setItem("tab-mcp:secret:https://other:overmark", "s2");
 		expect(storage.getItem("tab-mcp:secret:https://other:overmark")).toBe("s2");
 		await storage.written;
-		expect(stored["tab-mcp:secret:https://other:overmark"]).toBe("s2");
-	});
-
-	test("where Chrome cannot keep storage from content scripts: secrets in memory only", async () => {
-		const storage = CachedSecretStorage.memory();
-		storage.setItem(KEY, SECRET);
-		expect(storage.getItem(KEY)).toBe(SECRET);
-		await storage.written;
-		expect(CachedSecretStorage.memory().getItem(KEY)).toBeNull();
+		expect(kv.data.get("tab-mcp:secret:https://other:overmark")).toBe("s2");
 	});
 
 	test("the panel's old secret is taken over only where the worker has none", async () => {
-		const stored: Record<string, unknown> = {};
-		const storage = await CachedSecretStorage.load(area(stored));
+		const kv = memoryKv();
+		const storage = await CachedSecretStorage.load(kv);
 		expect(storage.adopt(KEY, SECRET)).toBe(true);
 		await storage.written;
-		expect(stored[KEY]).toBe(SECRET);
+		expect(kv.data.get(KEY)).toBe(SECRET);
 		// Never over one it has, never another key, never a value that is no secret.
 		expect(storage.adopt(KEY, "b".repeat(43))).toBe(false);
 		expect(storage.getItem(KEY)).toBe(SECRET);
@@ -422,6 +416,54 @@ describe("the address secret in the worker", () => {
 		);
 		expect(storage.adopt("tab-mcp:secret:https://x:overmark", 42)).toBe(false);
 		expect(storage.getItem("relay")).toBeNull();
+	});
+});
+
+describe("the settings in IndexedDB (memoryKv; e2e/store.test.ts runs openKv)", () => {
+	for (const [name, run] of Object.entries(kvContract))
+		test(name, () => run(memoryKv()));
+});
+
+describe("what an unreleased build kept in chrome.storage.local", () => {
+	/** chrome.storage.local as the clean-up sees it. */
+	function oldArea(initial: Record<string, unknown>) {
+		const data = { ...initial };
+		const area: OldArea & { data: Record<string, unknown> } = {
+			data,
+			get: async () => ({ ...data }),
+			async remove(keys: string[]) {
+				for (const key of keys) delete data[key];
+			},
+		};
+		return area;
+	}
+
+	test("is removed at every start and never taken over", async () => {
+		// As overmark#26 wrote it, or a content script where Chrome lets it:
+		// a relay of theirs, keep-on, a secret, the handover marked done.
+		const old = oldArea({
+			"tab-mcp:secret:https://evil.example:overmark": "E".repeat(43),
+			relay: "https://evil.example",
+			keepAiOn: true,
+			blurForms: false,
+			replaced: { sibling: false },
+			migrated: true,
+			somethingElse: 1,
+		});
+		expect((await removeOldSettings(old)).sort()).toEqual(
+			[
+				"blurForms",
+				"keepAiOn",
+				"migrated",
+				"relay",
+				"replaced",
+				"tab-mcp:secret:https://evil.example:overmark",
+			].sort(),
+		);
+		expect(old.data).toEqual({ somethingElse: 1 });
+		// Again, and on a start with nothing there: nothing to do.
+		expect(await removeOldSettings(old)).toEqual([]);
+		expect(await removeOldSettings(oldArea({}))).toEqual([]);
 	});
 });
 
@@ -477,6 +519,7 @@ describe("the panel's status line", () => {
 	const base: AiState = {
 		relay: "https://relay.example",
 		keepOn: false,
+		blurForms: false,
 		state: "disconnected",
 		reconnecting: false,
 		retrying: false,
@@ -525,6 +568,32 @@ describe("the service worker's bundle", () => {
 			const { outdir } = await build({ outdir: join(dir, "dist"), test: true });
 			const code = await Bun.file(join(outdir, "background.js")).text();
 			expect(code).not.toMatch(/\bimport\s*\(/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("the side panel's bundle", () => {
+	test("touches no storage of the settings: it changes them only over the port", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "overmark-build-"));
+		try {
+			const { outdir } = await build({ outdir: join(dir, "dist"), test: true });
+			const files = [
+				...new Bun.Glob("sidepanel/**/*.js").scanSync({ cwd: outdir }),
+			];
+			expect(files.length).toBeGreaterThan(0);
+			for (const file of files) {
+				const code = await Bun.file(join(outdir, file)).text();
+				// Neither chrome.storage (any area) nor the worker's database.
+				expect(code).not.toMatch(/\bstorage\s*\.\s*(local|session|sync)\b/);
+				expect(code).not.toContain("onChanged");
+				expect(code).not.toContain(DATABASE);
+			}
+			// The worker's does use both.
+			const worker = await Bun.file(join(outdir, "background.js")).text();
+			expect(worker).toContain(DATABASE);
+			expect(worker).toMatch(/\bstorage\.local\b/);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

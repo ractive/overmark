@@ -11,7 +11,13 @@ import type { Case } from "../../src/lib/case.ts";
 import { exportCase } from "../../src/lib/export.ts";
 import { MemoryStore } from "../../src/lib/store.ts";
 import { sampleCase } from "../fixtures.ts";
-import { answerInPanel, mcpClient, openSidePanel, setRelay } from "./ai.ts";
+import {
+	answerInPanel,
+	closeSidePanel,
+	mcpClient,
+	openSidePanel,
+	setRelay,
+} from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
@@ -19,8 +25,10 @@ import {
 	markElement,
 	READ_DB,
 	saveAs,
+	settingsOf,
 	shadow,
 	showToolbar,
+	worker,
 } from "./steps.ts";
 
 const id = (name: string) => `document.getElementById(${JSON.stringify(name)})`;
@@ -89,9 +97,8 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			};
 		})`);
 		await putCases(cases);
-		await h.control.eval(
-			`localStorage.clear(); chrome.storage.local.remove("blurForms")`,
-		);
+		// Blur form fields is the worker's; the blur test turns it off again.
+		await h.control.eval(`localStorage.clear()`);
 		await openPanel();
 	}
 
@@ -633,23 +640,38 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await fresh();
 			const a = await h.open("v1");
 			const b = await h.open("v2");
-			const tabs = await h.control.eval<number[]>(
+			await b.page.activate();
+			// The real side panel's box: the worker keeps the setting and tells
+			// the tabs (DEC-016).
+			const panel = await openSidePanel(h);
+			const w = await worker(h);
+			const tabs = await w.eval<number[]>(
 				`chrome.tabs.query({}).then((tabs) => tabs.map((t) => t.id).sort())`,
 			);
-			await h.control.eval(`globalThis.told = []`);
-			await wrapSend(`(tabId, message, send) => {
-			if (message.type !== "overlay:settings") return send(tabId, message);
-			globalThis.told.push({ tabId, ...message });
-			return Promise.reject(new Error("no receiver"));
-		}`);
-			await h.control.eval(`${id("blur-forms")}.click()`);
-			await h.control.waitFor(`globalThis.told.length === ${tabs.length}`);
+			await w.eval(`(() => {
+				globalThis.told = [];
+				const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+				chrome.tabs.sendMessage = (tabId, message, ...rest) => {
+					if (message?.type !== "overlay:settings") return send(tabId, message, ...rest);
+					globalThis.told.push({ tabId, ...message });
+					return Promise.reject(new Error("no receiver"));
+				};
+			})()`);
+			expect(await panel.eval(`${id("blur-forms")}.checked`)).toBe(false);
+			await panel.eval(`${id("blur-forms")}.click()`);
+			await w.waitFor(`globalThis.told.length === ${tabs.length}`);
 			const told =
-				await h.control.eval<{ tabId: number; blurForms: boolean }[]>(
+				await w.eval<{ tabId: number; blurForms: boolean }[]>(
 					`globalThis.told`,
 				);
 			expect(told.map((t) => t.tabId).sort()).toEqual(tabs);
 			expect(told.every((t) => t.blurForms === true)).toBe(true);
+			expect((await settingsOf(h))["blurForms"]).toBe(true);
+			// Off again for the tests after this one.
+			await panel.eval(`${id("blur-forms")}.click()`);
+			await w.waitFor(`globalThis.told.length === ${2 * tabs.length}`);
+			expect((await settingsOf(h))["blurForms"]).toBe(false);
+			await closeSidePanel(h, panel);
 			await a.page.send("Page.close");
 			await b.page.send("Page.close");
 		},
@@ -738,11 +760,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 
 					// "Keep AI access on" would undo it, now and at the next start.
 					expect(await panel.eval(`${id("keep-on")}.checked`)).toBe(false);
-					expect(
-						await panel.eval(
-							`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn)`,
-						),
-					).toBe(false);
+					expect((await settingsOf(h))["keepAiOn"]).toBe(false);
 					await Bun.sleep(200);
 					expect(relay.relay.sessionCount).toBe(0);
 

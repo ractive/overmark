@@ -37,7 +37,11 @@ import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
 import { inject } from "./lib/tabs.ts";
 import { AddLedger } from "./lib/undo.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
-import { isPanelSender, PANEL_PORT } from "./worker/protocol.ts";
+import {
+	isPanelSender,
+	PANEL_PORT,
+	type WorkerMessage,
+} from "./worker/protocol.ts";
 
 const store = new IdbStore();
 const added = new AddLedger(chrome.storage.session);
@@ -259,10 +263,25 @@ chrome.runtime.onConnect.addListener((port) => {
 	port.onDisconnect.addListener(() => {
 		gone = true;
 	});
-	withConnection((c) => {
-		port.onMessage.removeListener(keep);
-		if (!gone) c.addPanel(port, early);
-	});
+	void ready.then(
+		(c) => {
+			port.onMessage.removeListener(keep);
+			if (!gone) c.addPanel(port, early);
+		},
+		(error: unknown) => {
+			// Not silence: the panel says AI access is not available, and why.
+			port.onMessage.removeListener(keep);
+			const news: WorkerMessage = {
+				type: "failed",
+				problem: error instanceof Error ? error.message : String(error),
+			};
+			try {
+				if (!gone) port.postMessage(news);
+			} catch {
+				// Closed meanwhile.
+			}
+		},
+	);
 });
 
 // The worker starts for these too, which connects again if AI access was on.

@@ -27,15 +27,16 @@ When you save marks as a case, or add marks to a case, Overmark stores in your b
 - screenshots of the visible part of the tab, with the marks on them, and a crop per
   mark.
 
-Overmark also keeps its settings in the extension's storage, which only its own pages
-and its background service worker can read: the relay address, "Blur form fields in
-screenshots", "Keep AI access on", whether AI access is on until the browser closes (or
-the extension is updated, reloaded or turned off), and the secret from which the tab-mcp
-library derives the address an AI app connects to. If the browser cannot keep that
-storage from the scripts Overmark runs in web pages, Overmark keeps no secret there and
-AI access stays off.
+Overmark also keeps its settings in a database of its own in the browser (IndexedDB in
+the extension's origin), which only its background service worker uses; the scripts
+Overmark runs in web pages cannot reach it: the relay address, "Blur form fields in
+screenshots", "Keep AI access on", and the secret from which the tab-mcp library derives
+the address an AI app connects to. Whether AI access is on until the browser closes (or
+the extension is updated, reloaded or turned off) is in the browser's session storage,
+which those scripts cannot reach either.
 (Earlier builds of Overmark kept them in the side panel's own local storage; the first time
-the side panel opens after the update it hands them over and deletes its copy.)
+the side panel opens after the update it hands them over and deletes its copy. Where an
+unreleased build kept them in the extension's local storage, Overmark deletes them.)
 
 Overmark does not record what is typed into form fields and editable regions: the text
 it keeps about an element leaves them out. Of the editors that draw their text as
@@ -116,8 +117,8 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
 - **storage:** for the browser's session storage, which forgets everything when the
   browser closes: Overmark notes there which marks the toolbar on a tab just added (case,
   mark, screenshot and comment), so that the toolbar's Undo can take back those marks
-  and no others, and whether AI access is on. And for the extension's local storage, with
-  the settings and the secret named above.
+  and no others, and whether AI access is on. Overmark keeps nothing in the extension's
+  local storage any more: it only deletes what an unreleased build kept there.
 - **alarms:** while AI access is on, Overmark's background service worker wakes once a
   minute, so the connection to the AI app comes back after the computer slept.
 - **notifications:** to ask whether the AI app may make a change when the side panel is

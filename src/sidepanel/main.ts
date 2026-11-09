@@ -25,14 +25,12 @@ import {
 import type {
 	AnnotationMatch,
 	Broadcast,
-	ContentRequest,
 	LoadResult,
 	OverlayState,
 } from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
-import { KEYS } from "../worker/settings.ts";
-import { startAi } from "./ai.ts";
+import { blurFormsNow, startAi } from "./ai.ts";
 import { byId, h, isWebPage, shortUrl, sitePattern } from "./dom.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import { Latest, Panel, type PanelState } from "./state.ts";
@@ -40,7 +38,6 @@ import { type Actions, NO_ACCESS, render } from "./view.ts";
 
 const store = new IdbStore();
 
-const blurForms = byId<HTMLInputElement>("blur-forms");
 const importButton = byId<HTMLButtonElement>("import");
 const importFile = byId<HTMLInputElement>("import-file");
 const allSites = byId<HTMLInputElement>("all-sites");
@@ -449,7 +446,7 @@ async function startAnnotating(target?: Case): Promise<void> {
 		const next = nextNumbers(target);
 		const overlay = await sendToTab<OverlayState>(tab.id, {
 			type: "overlay:show",
-			blurForms: blurForms.checked,
+			blurForms: await blurFormsNow(),
 			...(target
 				? {
 						target: {
@@ -918,29 +915,8 @@ const actions: Actions = {
 
 // --- settings and import -------------------------------------------------------------
 
-// In the extension's storage: the AI app's screenshots, taken in the worker,
-// follow it too (DEC-015).
-void chrome.storage.local.get(KEYS.blurForms).then((stored) => {
-	blurForms.checked = stored[KEYS.blurForms] === true;
-});
-chrome.storage.onChanged.addListener((changes, area) => {
-	const change = changes[KEYS.blurForms];
-	if (area === "local" && change !== undefined)
-		blurForms.checked = change.newValue === true;
-});
-blurForms.addEventListener("change", () => {
-	void chrome.storage.local.set({ [KEYS.blurForms]: blurForms.checked });
-	// An overlay already open on a tab took the setting when it was shown.
-	const news: ContentRequest = {
-		type: "overlay:settings",
-		blurForms: blurForms.checked,
-	};
-	void chrome.tabs.query({}).then((tabs) => {
-		for (const { id } of tabs)
-			if (id !== undefined)
-				chrome.tabs.sendMessage(id, news).catch(() => undefined);
-	});
-});
+// "Blur form fields in screenshots" is the worker's (DEC-016): `ai.ts` shows
+// it and sends a change over the panel's port.
 
 async function refreshAllSites(): Promise<void> {
 	const work = sitesWork.start();

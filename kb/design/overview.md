@@ -80,8 +80,10 @@ the page's origin and never touches it directly.
 - `notifications`: a tool's question when no side panel is open in the window in front
   (DEC-015). Chrome's install warning "Display notifications".
 - `storage`: `chrome.storage.session` for the toolbar's Undo and for AI access being on
-  until the browser closes; `chrome.storage.local` (trusted contexts only) for the AI
-  connection's settings and its address secret.
+  until the browser closes. The AI connection's settings and its address secret are in
+  the worker's own IndexedDB (`overmark-settings`, DEC-016), not in `chrome.storage.local`,
+  which content scripts may reach; the worker deletes what overmark#26 kept there and
+  takes none of it over.
 - `unlimitedStorage`: IndexedDB holds the only copy of the cases, so the browser must not
   evict it when disk space runs low. Chrome documents the permission as exempt from quota
   and eviction, and it adds no install warning, which keeps DEC-003's small warning.

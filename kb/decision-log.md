@@ -226,7 +226,7 @@ the toolbar stays up and says so, and Done again discards it.
 - A new case gets its own id instead of the pending images' id, so one id holds a
   page's pending screenshots for as long as the page is open.
 
-## DEC-015: The AI connection lives in the service worker; questions in the panel or a notification
+## DEC-015: The AI connection lives in the service worker; questions in the panel or a notification (storage replaced by DEC-016)
 
 The owner, 2026-11-09: the connection to the AI app must stay while the side panel is
 closed, as the tab-mcp extension's does (its DEC-116). This replaces DEC-004's home for
@@ -237,7 +237,7 @@ its WebSocket carries the extension's origin.
   that carries messages keeps the worker alive since Chrome 116,
   and the relay's heartbeat (a ping every 25 s) carries some on a quiet connection. The
   library runs there without a document: its address secret in a write-through cache over
-  `chrome.storage.local`, `connect({ resume: true })`, and a bundle without dynamic
+  `chrome.storage.local` (IndexedDB since DEC-016), `connect({ resume: true })`, and a bundle without dynamic
   `import()`. An alarm once a minute while AI access is on, and every worker start,
   connect again. "Keep AI access on" keeps its meaning (also after a browser start and an
   idle session); without it AI access stays on until "Stop AI access", the relay's end of
@@ -250,8 +250,10 @@ its WebSocket carries the extension's origin.
   is among them. `chrome.storage.local`, which now holds the secret, is for trusted
   contexts only (`setAccessLevel`, for the local area from Chrome 140, so that is now the
   manifest's minimum). Where Chrome refuses it, the worker fails closed: it removes the
-  stored secrets, keeps none, and AI access stays off with a message saying why. The panel's page opened in a tab gets no port: it is not where the user
-  answers questions.
+  stored secrets, keeps none, and AI access stays off with a message saying why.
+  (Replaced by DEC-016: the settings and the secret are in the worker's IndexedDB,
+  `setAccessLevel` is best effort, the minimum is Chrome 116 again.) The panel's page
+  opened in a tab gets no port: it is not where the user answers questions.
 - **Questions.** Every call that changes something still asks (DEC-008), now in the side
   panel of the window in front when it is open and focused, and otherwise also in a Chrome
   notification: `requireInteraction`, an id per call, Don't allow first, an Allow within
@@ -266,3 +268,72 @@ its WebSocket carries the extension's origin.
   AI app keeps working with the address it was given.
 - **Cost.** `notifications` adds Chrome's install warning "Display notifications"; Overmark
   is not in the store yet. `alarms` adds none.
+
+## DEC-016: The AI settings and the address secret in the worker's IndexedDB
+
+2026-11-09, after overmark#26: DEC-015 kept the address secret and the AI settings in
+`chrome.storage.local`, closed to content scripts with `setAccessLevel({ accessLevel:
+"TRUSTED_CONTEXTS" })`, treated a refusal as fail closed, and raised the minimum to Chrome
+140 because the local area's access level was said to apply only from there. The sources
+disagree (Chromium's `storage.json` and MDN say the access level applies to the session
+area only), and a level that silently does not apply would not throw: the fail-closed
+path guarded nothing it could see. Content scripts can read and write
+`chrome.storage.local` by default, so a page whose renderer was compromised could, in
+Overmark's content-script world, have read the secret, or written a `relay` of its own
+for the next start to connect to with it. The tab-mcp extension made the same move (its
+PR 89 and PR 91, DEC-116); this follows it.
+
+- **Where.** The relay, "Keep AI access on", "Blur form fields in screenshots", the
+  takeover (`replaced`), the panel-handover marker and the address secret are in an
+  IndexedDB database of their own, `overmark-settings` (object store `settings`,
+  `src/worker/kv.ts`), in the extension's origin. Content scripts run in the page's
+  origin and cannot open it, in any Chrome version. Only the service worker uses it; the
+  cases' database (`overmark`) and its schema are untouched. No package: a few lines
+  over IndexedDB.
+- **The panel.** It neither reads nor writes these settings in storage. It sends
+  `keep-on`, `set-relay` and the new `blur-forms` over its port, and shows the state the
+  worker sends, which now carries `blurForms`. A setting changes in the worker's memory
+  only after its write to the database succeeded; a failed write keeps the old value and
+  shows the problem, so the panel, the tools and the database agree. The tools read blur
+  from the worker's settings at each call, so a change while connected holds for the
+  next screenshot (the fix from overmark#26). The worker tells open overlays its blur
+  value (`overlay:settings`) when it changes, when the worker starts and when a panel
+  attaches, so an overlay a panel started before it knew the value is corrected. A panel
+  that has no state from the worker within 2 s, or whose worker failed to start, starts
+  an overlay with blur on (the safe side), as does the panel's page opened in a tab,
+  which has no port and whose blur box is disabled like its other AI controls. A worker
+  whose connection cannot start (its database cannot be opened) tells the panel why, and
+  the panel says "AI access is not available" instead of nothing.
+- **The database closing.** Chrome may close the connection (`onclose`), and deleting or
+  upgrading the database elsewhere asks it to close (`onversionchange`): the worker
+  closes it, and the next read or write opens it again.
+- **The session flag stays in `chrome.storage.session`.** "AI access is on until the
+  browser closes, or the extension is updated, reloaded or disabled" is exactly that
+  area's lifetime, and the area is for trusted contexts only unless the extension opens
+  it (Overmark never does, and calls no `setAccessLevel` on it). In IndexedDB it would
+  need a browser-start marker from `runtime.onStartup` and `onInstalled`, and no event
+  says the extension was disabled and enabled again, so it could not keep the meaning.
+  The flag cannot redirect anything either: it only connects to the user's own relay
+  with the user's own secret.
+- **Nothing is taken from `chrome.storage.local`.** Only the owner's own build of
+  overmark#26 ever wrote settings there; it was never released. Every worker start
+  removes the setting keys found there (`relay`, `keepAiOn`, `blurForms`, `replaced`,
+  `migrated`, the secrets) and imports none of them, whoever wrote them. A one-off import
+  would need a marker that lives in the database it guards (lost with the site's data, after
+  which a content script's value would be imported), or `onInstalled`, which fires after
+  the worker has already loaded its settings and may have made a new secret. Cost: the
+  owner's build loses its relay, Keep AI access on, Blur form fields and its address once,
+  and the AI apps paired with it pair once more.
+- **The panel's handover stays.** The side panel's `localStorage` (builds before
+  overmark#26) is in the extension's origin, out of content scripts' reach, so its
+  handover stays: the secrets are adopted first, then Keep AI access on, the relay, Blur
+  form fields and the marker `panelHandedOver` are written in one transaction, and only
+  then does the worker connect or switch relay. The panel deletes its copy only once the
+  marker is set; a handover cut short before that runs again, whole, at the panel's next
+  connection (a secret the worker has is not taken twice).
+- **`setAccessLevel` is best effort.** The worker still asks for `TRUSTED_CONTEXTS` on
+  the local area as an extra layer; a refusal is logged, nothing fails closed, and
+  nothing of the AI connection is kept there any more.
+- **Chrome 116 again.** The minimum from before overmark#26: a WebSocket that carries
+  messages keeps the service worker alive from there (DEC-015); nothing else in the code
+  needs a newer Chrome.

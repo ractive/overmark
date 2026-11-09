@@ -44,16 +44,20 @@ export async function openSidePanel(h: Harness): Promise<Page> {
 	})) as { result: { value?: string } };
 	if (opened.result.value) throw new Error(opened.result.value);
 	const end = Date.now() + 10_000;
+	const attached = new Map<string, Page>();
 	for (;;) {
 		for (const id of await panelPages(h)) {
 			if (before.has(id)) continue;
-			const page = await h.browser.attachPage(id);
-			// The panel's page in a tab is no side panel.
-			if (
-				await page.eval<boolean>(
-					"chrome.tabs.getCurrent().then((t) => t === undefined)",
-				)
-			) {
+			const page = attached.get(id) ?? (await h.browser.attachPage(id));
+			attached.set(id, page);
+			// The panel's page in a tab is no side panel. Under load the page
+			// can be attached before its document has the extension's APIs:
+			// asked again on the next round.
+			const side = await page
+				.eval<boolean>("chrome.tabs.getCurrent().then((t) => t === undefined)")
+				.catch(() => undefined);
+			if (side === undefined) continue;
+			if (side) {
 				await page.waitFor(`document.documentElement.dataset.aiState`, 10_000);
 				return page;
 			}
