@@ -88,8 +88,9 @@ interface Pending {
 	view: QuestionView;
 	summary: string;
 	windowId: number | undefined;
-	/** The notification showing it, if one does. */
+	/** The notification showing it, if one does, and its creation. */
 	notification?: string;
+	created?: Promise<void>;
 	shownAt: number;
 	settle(answer: Answer | "timeout"): void;
 }
@@ -153,7 +154,7 @@ export class Questions {
 					clearTimeout(timer);
 					request.signal.removeEventListener("abort", cancelled);
 					if (pending.notification !== undefined)
-						this.#host.clear(pending.notification);
+						this.#clear(pending.notification, pending.created);
 					this.#host.changed();
 					resolve(answer);
 				},
@@ -187,12 +188,20 @@ export class Questions {
 		const id = `${pending.view.id}:${++this.#shown}`;
 		pending.notification = id;
 		pending.shownAt = this.#host.now();
-		this.#host
+		pending.created = this.#host
 			.notify(id, notificationText(pending.view, pending.summary))
 			.catch((error: unknown) =>
 				// Notifications off for Chrome: the badge and the panel remain.
 				console.warn("Overmark: notification", error),
 			);
+	}
+
+	/**
+	 * Clear notification `id` once Chrome has made it: cleared before, it
+	 * would come afterwards and stay, asking for a call that is settled.
+	 */
+	#clear(id: string, created: Promise<void> | undefined): void {
+		void (created ?? Promise.resolve()).then(() => this.#host.clear(id));
 	}
 
 	/** An answer from a side panel. */
@@ -216,8 +225,9 @@ export class Questions {
 		}
 		if (this.#host.now() - pending.shownAt < NOTIFICATION_GUARD_MS) {
 			// Too soon to be read: show it again rather than take it.
+			const created = pending.created;
 			this.#notify(pending);
-			this.#host.clear(id);
+			this.#clear(id, created);
 			return;
 		}
 		pending.settle("allow");

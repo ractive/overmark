@@ -7,8 +7,11 @@
  * stays while the side panel is closed.
  *
  * Every listener is added here, at the top level, so that its event wakes
- * the worker; each worker start connects again if the user left AI access on
- * (after a browser start, an update, a reload).
+ * the worker; each worker start connects again if the user left AI access on.
+ * With "Keep AI access on" that holds after a browser start, an update or a
+ * reload; without it AI access is on only until the browser closes or the
+ * extension is updated, reloaded or disabled, which clear
+ * `chrome.storage.session`.
  */
 
 import { isSafeId, pendingImage } from "./lib/case.ts";

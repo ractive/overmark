@@ -40,6 +40,17 @@ export class CachedSecretStorage implements SecretStorage {
 		return new CachedSecretStorage(area, cache);
 	}
 
+	/**
+	 * Secrets in memory only, written nowhere: for a browser that would let
+	 * content scripts read the extension's storage.
+	 */
+	static memory(): CachedSecretStorage {
+		return new CachedSecretStorage(
+			{ get: async () => ({}), set: async () => {} },
+			new Map(),
+		);
+	}
+
 	getItem(key: string): string | null {
 		return this.#cache.get(key) ?? null;
 	}

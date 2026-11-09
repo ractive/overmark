@@ -39,7 +39,10 @@ export const KEYS = {
 	migrated: "migrated",
 } as const;
 
-/** In `chrome.storage.session`: AI access is on until the browser closes. */
+/**
+ * In `chrome.storage.session`: AI access is on until the browser closes, or
+ * the extension is updated, reloaded or disabled.
+ */
 export const SESSION_ON = "aiOn";
 
 /** What the settings need of a `chrome.storage` area. */
@@ -61,19 +64,22 @@ export interface Settings {
 	/** As stored; `undefined` for none. The connection checks it. */
 	relay: string | undefined;
 	keepOn: boolean;
-	blurForms: boolean;
 	replaced: Replaced | undefined;
 	migrated: boolean;
 }
 
 export async function loadSettings(area: Area): Promise<Settings> {
-	const s = await area.get(Object.values(KEYS));
+	const s = await area.get([
+		KEYS.relay,
+		KEYS.keepOn,
+		KEYS.replaced,
+		KEYS.migrated,
+	]);
 	const replaced = s[KEYS.replaced];
 	return {
 		relay:
 			typeof s[KEYS.relay] === "string" ? (s[KEYS.relay] as string) : undefined,
 		keepOn: s[KEYS.keepOn] === true,
-		blurForms: s[KEYS.blurForms] === true,
 		replaced:
 			typeof replaced === "object" &&
 			replaced !== null &&

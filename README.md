@@ -129,13 +129,18 @@ claude mcp add --transport http overmark <address>
 
 Your browser opens the relay's page; type the code from the side panel. The connection
 stays when you close the side panel (the icon shows "on"), until "Stop AI access" (which
-keeps the pairing), the relay's end of an idle session, or the browser closes. "Keep AI
-access on" connects again by itself after those last two as well.
+keeps the pairing), the relay's end of an idle session, or the browser closes; an update
+or reload of the extension (or turning it off) ends it too. "Keep AI access on" connects
+again by itself after all of these but "Stop AI access".
 
 A tool that changes something (marked "asks first" above) asks every time: in the side
 panel when it is open in the window in front, otherwise in a system notification with
 Don't allow and Allow (the icon shows "?" while a question waits). No answer within 60
 seconds is Don't allow.
+
+Overmark needs Chrome 140 or later: from then on Chrome keeps the extension's storage,
+which holds the connection's address secret, from the scripts it runs in web pages.
+Where it cannot, AI access stays off.
 
 Permissions for this: `alarms` wakes the service worker once a minute while AI access is
 on, so the connection comes back after a sleep; `notifications` asks the questions when

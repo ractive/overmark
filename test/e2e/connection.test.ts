@@ -57,6 +57,7 @@ describe.skipIf(browserBinary === undefined)(
 		let panel: Page;
 		let client: Client;
 		let address: string;
+		let tab: { page: Page; tabId: number };
 		const relay = startTestRelay();
 
 		const call = (name: string, args: Record<string, unknown> = {}) =>
@@ -67,7 +68,7 @@ describe.skipIf(browserBinary === undefined)(
 		beforeAll(async () => {
 			h = await startHarness(browserBinary as string);
 			await putCases(h, [sampleCase("c_1")]);
-			const tab = await h.open("v1");
+			tab = await h.open("v1");
 			await tab.page.activate();
 			panel = await openSidePanel(h);
 			address = await connectAi(panel, relay.url);
@@ -131,6 +132,40 @@ describe.skipIf(browserBinary === undefined)(
 			expect(result.isError).toBeFalsy();
 			expect(result.content[0]?.text).toContain("c_1");
 			expect(await badge()).toBe("on");
+		});
+
+		test("Blur form fields, changed while connected, holds for the next screenshot", async () => {
+			const w = await worker(h);
+			// What the tools ask the page to blur.
+			await w.eval(`(() => {
+				globalThis.e2eBlur = [];
+				const send = chrome.tabs.sendMessage.bind(chrome.tabs);
+				chrome.tabs.sendMessage = (tabId, message, ...rest) => {
+					if (message?.type === "page:blur") globalThis.e2eBlur.push(message.blurForms);
+					return send(tabId, message, ...rest);
+				};
+			})()`);
+			await tab.page.activate();
+			const blurBox = byId("blur-forms");
+			const set = async (on: boolean) => {
+				await h.control.waitFor(`${blurBox}.checked !== undefined`);
+				if ((await h.control.eval<boolean>(`${blurBox}.checked`)) !== on)
+					await h.control.eval(`${blurBox}.click()`);
+				await h.control.waitFor(
+					`chrome.storage.local.get("blurForms").then((s) => s.blurForms === ${on})`,
+				);
+			};
+			/** What the page was asked to blur for one screenshot. */
+			const blurOfCapture = async () => {
+				await w.eval("globalThis.e2eBlur = []");
+				expect((await call("capture")).isError).toBeFalsy();
+				return [...new Set(await w.eval<boolean[]>("globalThis.e2eBlur"))];
+			};
+			for (const on of [true, false, true]) {
+				await set(on);
+				expect(await blurOfCapture()).toEqual([on]);
+			}
+			await set(false);
 		});
 
 		test("with the side panel closed a question is a notification: Don't allow, Allow, late clicks", async () => {
@@ -254,14 +289,25 @@ describe.skipIf(browserBinary === undefined)("who may command it", () => {
 				`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn ?? null)`,
 			),
 		).toBeNull();
-		// The settings and the secret are not even readable there.
-		const read = await h.control.eval<string>(
+		// The settings and the secret are neither readable nor writable there.
+		const tried = await h.control.eval<string[]>(
 			`chrome.scripting.executeScript({
 				target: { tabId: ${tabId} },
-				func: () => chrome.storage.local.get(null).then(() => "read", (e) => e.message),
+				func: () => Promise.all([
+					chrome.storage.local.get(null).then(() => "read", (e) => e.message),
+					chrome.storage.local.set({ keepAiOn: true }).then(() => "written", (e) => e.message),
+				]),
 			}).then(([injected]) => injected.result)`,
 		);
-		expect(read).not.toBe("read");
+		expect(tried).toEqual([
+			"Access to storage is not allowed from this context.",
+			"Access to storage is not allowed from this context.",
+		]);
+		expect(
+			await w.eval(
+				`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn ?? null)`,
+			),
+		).toBeNull();
 	});
 
 	test("the panel's page in a tab is no side panel: closed too, and its AI buttons are off", async () => {

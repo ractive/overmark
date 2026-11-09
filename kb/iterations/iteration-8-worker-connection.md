@@ -25,12 +25,15 @@ DEC-015.
   worker's bundle (a unit test checks the build).
 - "Keep AI access on" (`KeepOn`, moved) in the worker: it connects at every worker start,
   after an idle or expired session, and goes on trying. Without it a connection lasts
-  until the relay ends it, "Stop AI access", or the browser closes
-  (`chrome.storage.session`), across worker restarts. An alarm once a minute while AI
+  until the relay ends it, "Stop AI access", the browser closes, or the extension is
+  updated, reloaded or disabled (`chrome.storage.session` is cleared then), across
+  worker restarts. An alarm once a minute while AI
   access is on restarts it after a sleep.
 - One named port from the side panel, its sender checked: this extension's page at the
   panel's path, not in a tab. Content scripts cannot command; their one-off messages are
-  the old ones (`isWorkerRequest`). `chrome.storage.local` is for trusted contexts only.
+  the old ones (`isWorkerRequest`). `chrome.storage.local` is for trusted contexts only
+  (`setAccessLevel` for the local area works from Chrome 140, now the manifest's
+  minimum); where Chrome refuses, no secret is kept and AI access stays off.
 - The panel as a view: the header (status, Connect/Manage, Stop AI access, last AI call),
   "Keep AI access on" and the relay field as before; the library's dialog cannot draw from
   the worker, so a plain pairing view of its own (`src/sidepanel/ai.ts`): the address
@@ -77,3 +80,6 @@ DEC-015.
 - [Chrome extensions: WebSockets in service workers (Chrome 116)](https://developer.chrome.com/docs/extensions/how-to/web-platform/websockets)
 - [Chrome extensions: notifications](https://developer.chrome.com/docs/extensions/reference/api/notifications)
 - [Chrome extensions: storage access levels](https://developer.chrome.com/docs/extensions/reference/api/storage#method-StorageArea-setAccessLevel)
+- [Chromium a8f1f337c6: setAccessLevel() for the local and sync areas](https://chromium.googlesource.com/chromium/src/+/a8f1f337c6)
+  (commit position 1482413, between the branch points of M139 at 1477651 and M140 at
+  1496484, so Chrome 140)

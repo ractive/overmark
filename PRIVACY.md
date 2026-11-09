@@ -29,8 +29,11 @@ When you save marks as a case, or add marks to a case, Overmark stores in your b
 
 Overmark also keeps its settings in the extension's storage, which only its own pages
 and its background service worker can read: the relay address, "Blur form fields in
-screenshots", "Keep AI access on", whether AI access is on until the browser closes, and
-the secret from which the tab-mcp library derives the address an AI app connects to.
+screenshots", "Keep AI access on", whether AI access is on until the browser closes (or
+the extension is updated, reloaded or turned off), and the secret from which the tab-mcp
+library derives the address an AI app connects to. If the browser cannot keep that
+storage from the scripts Overmark runs in web pages, Overmark keeps no secret there and
+AI access stays off.
 (Earlier builds of Overmark kept them in the side panel's own local storage; the first time
 the side panel opens after the update it hands them over and deletes its copy.)
 
@@ -92,9 +95,10 @@ Only in two cases, both started by you:
 
    "Stop AI access" at the top of the side panel pauses the connection; it does not end
    the pairing, and it turns "Keep AI access on" off. Without "Keep AI access on" the
-   connection also ends when the relay ends a session that was idle or too old, or when
-   the browser closes. With it, Overmark connects again by itself: when the browser
-   starts, and when the relay ended such a session. Disconnect, next to the app in the
+   connection also ends when the relay ends a session that was idle or too old, when
+   the browser closes, and when Overmark is updated, reloaded or turned off. With it,
+   Overmark connects again by itself after all of these: when the browser starts, after
+   an update or reload, and when the relay ended such a session. Disconnect, next to the app in the
    side panel's AI connection view, removes the app.
 
 Overmark itself sends nothing else. It does work inside the page you annotate, though, so

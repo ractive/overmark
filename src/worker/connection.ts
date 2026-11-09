@@ -6,7 +6,8 @@
  * heartbeat (a ping every 25 s, answered) carries some even when nothing
  * else happens. While AI access is on, an alarm wakes the worker once a
  * minute, and every worker start connects again: always with "Keep AI
- * access on", else until the browser closes (`chrome.storage.session`).
+ * access on", else until the browser closes or the extension is updated,
+ * reloaded or disabled (all of which clear `chrome.storage.session`).
  */
 
 import {
@@ -27,12 +28,8 @@ import {
 	parseCommand,
 	type WorkerMessage,
 } from "./protocol.ts";
-import {
-	QUESTION_TIMEOUT_MS,
-	Questions,
-	type QuestionsHost,
-} from "./questions.ts";
-import { CachedSecretStorage } from "./secret.ts";
+import { Questions, type QuestionsHost } from "./questions.ts";
+import { CachedSecretStorage, SECRET_PREFIX } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
 	KEYS,
@@ -78,6 +75,14 @@ async function clearNotifications(): Promise<void> {
 	}
 }
 
+/** Remove every address secret from `area`. */
+async function removeSecrets(area: chrome.storage.StorageArea): Promise<void> {
+	const keys = Object.keys(await area.get(null)).filter((key) =>
+		key.startsWith(SECRET_PREFIX),
+	);
+	if (keys.length > 0) await area.remove(keys);
+}
+
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
@@ -105,6 +110,11 @@ export class Connection {
 	#listening = new AbortController();
 	/** Why the last command failed, until the next connection. */
 	#problem: string | undefined;
+	/**
+	 * Why AI access cannot be on at all: Chrome would not keep the extension's
+	 * storage from content scripts, so the address secret is not kept there.
+	 */
+	readonly #locked: string | undefined;
 	/** The takeover happened in this worker's life: the library knows of it. */
 	#replacedHere = false;
 	#lastCall: CallView | undefined;
@@ -117,15 +127,20 @@ export class Connection {
 		storage: CachedSecretStorage,
 		settings: Settings,
 		sessionOn: boolean,
+		locked: string | undefined,
 	) {
 		this.#deps = deps;
+		this.#locked = locked;
 		this.#tab = workerTab(deps.capture);
 		this.#storage = storage;
 		this.#settings = settings;
 		this.#sessionOn = sessionOn;
 		this.#questions = new Questions(this.#questionsHost());
 		this.#keep = new KeepOn(
-			() => this.#settings.keepOn && this.#settings.replaced === undefined,
+			() =>
+				this.#locked === undefined &&
+				this.#settings.keepOn &&
+				this.#settings.replaced === undefined,
 			() => this.#changed(),
 		);
 		const relay = settings.relay ?? DEFAULT_RELAY;
@@ -151,14 +166,21 @@ export class Connection {
 	 */
 	static async start(deps: ConnectionDeps): Promise<Connection> {
 		// Content scripts have no business with the settings or the secret.
-		await chrome.storage.local
+		// Where Chrome refuses that, the secret is not kept at all (fail closed):
+		// a content script that a page took over could read it.
+		const locked = await chrome.storage.local
 			.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
-			.catch((error: unknown) =>
-				console.warn("Overmark: storage access level", error),
+			.then(
+				() => undefined,
+				(error: unknown) =>
+					`Overmark cannot keep its storage from web pages in this browser (${message(error)}), so AI access stays off.`,
 			);
 		await clearNotifications();
+		if (locked !== undefined) await removeSecrets(chrome.storage.local);
 		const [storage, settings, session] = await Promise.all([
-			CachedSecretStorage.load(chrome.storage.local),
+			locked === undefined
+				? CachedSecretStorage.load(chrome.storage.local)
+				: CachedSecretStorage.memory(),
 			loadSettings(chrome.storage.local),
 			chrome.storage.session.get(SESSION_ON),
 		]);
@@ -167,6 +189,7 @@ export class Connection {
 			storage,
 			settings,
 			session[SESSION_ON] === true,
+			locked,
 		);
 		connection.#showBadge();
 		connection.keepUp();
@@ -196,7 +219,10 @@ export class Connection {
 			tab: this.#tab,
 			images: { toWebp, scale: scaleImage, crop: cropImages },
 			onChange: (caseId) => void broadcast({ type: "cases:changed", caseId }),
-			blurForms: () => this.#settings.blurForms,
+			// Read at each call: the panel changes it in storage at any time.
+			blurForms: async () =>
+				(await chrome.storage.local.get(KEYS.blurForms))[KEYS.blurForms] ===
+				true,
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
 		});
 		for (const tool of tools) void mcp.registerTool(tool);
@@ -207,11 +233,9 @@ export class Connection {
 	async #decide(request: ConfirmRequest): Promise<boolean> {
 		const lines = await confirmLines(this.#deps.store, this.#tab, request);
 		const front = await tabInFront().catch(() => undefined);
+		// No answer in time is Don't allow; the library tells the AI app
+		// "The user declined" for that as for any no.
 		const answer = await this.#questions.ask(request, lines, front?.id);
-		if (answer === "timeout")
-			throw new Error(
-				`The user was asked and did not answer within ${QUESTION_TIMEOUT_MS / 1000} s.`,
-			);
 		return answer === "allow";
 	}
 
@@ -286,7 +310,11 @@ export class Connection {
 	#connect(): void {
 		const mcp = this.#mcp;
 		if (mcp.state !== "disconnected") return;
-		this.#problem = undefined;
+		this.#problem = this.#locked;
+		if (this.#locked !== undefined) {
+			this.#changed();
+			return;
+		}
 		mcp.connect({ resume: true }).catch((error: unknown) => {
 			if (mcp === this.#mcp) this.#keep.failed(error);
 		});
@@ -358,7 +386,8 @@ export class Connection {
 	 */
 	keepUp(): void {
 		void this.#syncAlarm();
-		if (this.#settings.replaced !== undefined) return;
+		if (this.#settings.replaced !== undefined || this.#locked !== undefined)
+			return;
 		if (this.#settings.keepOn) this.#keep.connect();
 		else if (this.#sessionOn && this.#mcp.reconnecting === undefined)
 			this.#connect();
@@ -468,16 +497,15 @@ export class Connection {
 	async #migrate(
 		command: Extract<PanelCommand, { type: "migrate" }>,
 	): Promise<void> {
-		if (this.#settings.migrated) return;
+		// Locked: the panel keeps its copy until this browser can keep it safe.
+		if (this.#settings.migrated || this.#locked !== undefined) return;
 		for (const [key, value] of Object.entries(command.secrets))
 			this.#storage.adopt(key, value);
 		await this.#storage.written;
 		this.#settings = { ...this.#settings, migrated: true };
 		const changes: Record<string, unknown> = { [KEYS.migrated]: true };
-		if (command.blurForms !== undefined) {
-			this.#settings = { ...this.#settings, blurForms: command.blurForms };
+		if (command.blurForms !== undefined)
 			changes[KEYS.blurForms] = command.blurForms;
-		}
 		await chrome.storage.local.set(changes);
 		if (command.keepOn !== undefined) await this.#setKeepOn(command.keepOn);
 		const problem =
@@ -507,6 +535,11 @@ export class Connection {
 	 * which revokes every grant of the old one.
 	 */
 	async #newAddress(): Promise<void> {
+		if (this.#locked !== undefined) {
+			this.#problem = this.#locked;
+			this.#changed();
+			return;
+		}
 		const takeBack =
 			this.#settings.replaced !== undefined && !this.#replacedHere;
 		this.#problem = undefined;
@@ -561,7 +594,7 @@ export class Connection {
 
 	get state(): AiState {
 		const mcp = this.#mcp;
-		const problem = this.#keep.problem ?? this.#problem;
+		const problem = this.#keep.problem ?? this.#problem ?? this.#locked;
 		const address = mcp.address;
 		const code = mcp.pairingCode?.code;
 		const replaced = this.#settings.replaced;

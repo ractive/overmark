@@ -234,25 +234,30 @@ the connection; its reason stays true, since the worker is an extension context 
 its WebSocket carries the extension's origin.
 
 - **Where.** `TabMcp` and the tools run in the service worker (iteration 8). A WebSocket
-  that carries messages keeps the worker alive since Chrome 116 (the manifest's minimum),
+  that carries messages keeps the worker alive since Chrome 116,
   and the relay's heartbeat (a ping every 25 s) carries some on a quiet connection. The
   library runs there without a document: its address secret in a write-through cache over
   `chrome.storage.local`, `connect({ resume: true })`, and a bundle without dynamic
   `import()`. An alarm once a minute while AI access is on, and every worker start,
   connect again. "Keep AI access on" keeps its meaning (also after a browser start and an
   idle session); without it AI access stays on until "Stop AI access", the relay's end of
-  the session, or the browser closes.
+  the session, or the browser closes. The flag for that lives in `chrome.storage.session`,
+  which Chrome also clears when the extension is updated, reloaded or disabled: without
+  "Keep AI access on", an update or reload ends AI access too.
 - **Who may command it.** Only the side panel's own page, over one named port whose
   sender is checked (this extension, the panel's path, not in a tab). Content scripts
   reach `chrome.runtime` too; their one-off messages stay the old ones and no AI command
   is among them. `chrome.storage.local`, which now holds the secret, is for trusted
-  contexts only. The panel's page opened in a tab gets no port: it is not where the user
+  contexts only (`setAccessLevel`, for the local area from Chrome 140, so that is now the
+  manifest's minimum). Where Chrome refuses it, the worker fails closed: it removes the
+  stored secrets, keeps none, and AI access stays off with a message saying why. The panel's page opened in a tab gets no port: it is not where the user
   answers questions.
 - **Questions.** Every call that changes something still asks (DEC-008), now in the side
   panel of the window in front when it is open and focused, and otherwise also in a Chrome
   notification: `requireInteraction`, an id per call, Don't allow first, an Allow within
   500 ms of showing does not count, a click on the body or closing it is Don't allow, a
-  click on a settled call is dropped. No answer in 60 s is Don't allow. The panel's Allow
+  click on a settled call is dropped. No answer in 60 s is Don't allow (the library tells
+  the AI app "The user declined", as for any no). The panel's Allow
   arms after the panel was visible and focused for 750 ms. While a question waits the
   icon shows "?", so a user whose notifications are off can answer in the panel. The text
   is the same as before (`confirmLines`: the case, the mark, the page).

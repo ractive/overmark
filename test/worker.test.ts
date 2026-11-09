@@ -290,7 +290,34 @@ describe("questions", () => {
 		expect(host.shown.size).toBe(1);
 		questions.answer(questions.list[0]?.id as string, "allow");
 		expect(await answer).toBe("allow");
+		// Cleared once Chrome has made it.
+		await settle();
 		expect(host.shown.size).toBe(0);
+	});
+
+	test("a notification Chrome makes only after its call settled is cleared once it is there", async () => {
+		const host = fakeHost();
+		let made: () => void = () => {};
+		host.notify = (id, text) =>
+			new Promise<void>((resolve) => {
+				made = () => {
+					host.shown.set(id, text);
+					resolve();
+				};
+			});
+		const questions = new Questions(host);
+		const controller = new AbortController();
+		const answer = questions.ask(request({}, controller.signal), CASE, 7);
+		await settle();
+		// The AI app cancels before Chrome has made the notification.
+		controller.abort();
+		expect(await answer).toBe("deny");
+		await settle();
+		expect(host.cleared).toEqual([]);
+		made();
+		await settle();
+		expect(host.shown.size).toBe(0);
+		expect(host.cleared).toHaveLength(1);
 	});
 
 	test("no tab in front, or one in another window: a notification", async () => {
@@ -370,6 +397,14 @@ describe("the address secret in the worker", () => {
 		expect(storage.getItem("tab-mcp:secret:https://other:overmark")).toBe("s2");
 		await storage.written;
 		expect(stored["tab-mcp:secret:https://other:overmark"]).toBe("s2");
+	});
+
+	test("where Chrome cannot keep storage from content scripts: secrets in memory only", async () => {
+		const storage = CachedSecretStorage.memory();
+		storage.setItem(KEY, SECRET);
+		expect(storage.getItem(KEY)).toBe(SECRET);
+		await storage.written;
+		expect(CachedSecretStorage.memory().getItem(KEY)).toBeNull();
 	});
 
 	test("the panel's old secret is taken over only where the worker has none", async () => {

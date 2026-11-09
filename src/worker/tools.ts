@@ -71,8 +71,8 @@ export interface ToolDeps {
 	onChange?: (caseId: string) => void;
 	/** Waits for the page to paint before a screenshot. */
 	settle?: () => Promise<void>;
-	/** The side panel's "Blur form fields in screenshots". */
-	blurForms?: () => boolean;
+	/** The side panel's "Blur form fields in screenshots", as set at this moment. */
+	blurForms?: () => boolean | Promise<boolean>;
 	/** The relay's message limit for this session, when connected. */
 	maxMessageBytes?: () => number | undefined;
 	/** How long the page may take to answer. */
@@ -323,7 +323,7 @@ function fittingList<T>(
 export function createTools(deps: ToolDeps): Tool[] {
 	const { store, images } = deps;
 	const settle = deps.settle ?? (() => new Promise((r) => setTimeout(r, 150)));
-	const blurForms = () => deps.blurForms?.() ?? false;
+	const blurForms = async () => (await deps.blurForms?.()) ?? false;
 	const budget = () =>
 		Math.floor(
 			(deps.maxMessageBytes?.() ?? DEFAULT_MESSAGE_BYTES) * RESULT_SHARE,
@@ -748,7 +748,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 				// as in the user's own screenshots.
 				const blurred = await tab.send<BlurResult>(current.id, {
 					type: "page:blur",
-					blurForms: blurForms(),
+					blurForms: await blurForms(),
 				});
 				if (!blurred.ok) throw new CaseError(blurred.error);
 				const png = await heldShot(current, "page:unblur");
@@ -786,7 +786,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 			type: "element:mark",
 			selector: input.selector,
 			number: next.annotation,
-			blurForms: blurForms(),
+			blurForms: await blurForms(),
 		});
 		if (!described.ok) throw new CaseError(described.error);
 		const png = await heldShot(current, "element:unmark");
