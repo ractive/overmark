@@ -337,7 +337,19 @@ describe.skipIf(browserBinary === undefined)(
 	"the address the panel had",
 	() => {
 		let h: Harness;
+		let panel: Page;
+		let address: string;
 		const relay = startTestRelay();
+		// A secret the panel kept before the connection moved into the worker.
+		const secret = "Q".repeat(43);
+		const key = () => `tab-mcp:secret:${relay.url}:overmark`;
+		/** What the panel kept in its localStorage. */
+		const OLD_PANEL = () => `(() => {
+			localStorage.setItem(${JSON.stringify(key())}, ${JSON.stringify(secret)});
+			localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)});
+			localStorage.setItem("overmark:keep-ai-on", "true");
+			localStorage.setItem("overmark:blur-forms", "true");
+		})()`;
 
 		beforeAll(async () => {
 			h = await startHarness(browserBinary as string);
@@ -348,25 +360,35 @@ describe.skipIf(browserBinary === undefined)(
 			await relay.stop();
 		});
 
+		const answers = async () => {
+			const client = await mcpClient(relay.store, address);
+			try {
+				return !(
+					(await client.callTool({
+						name: "list_cases",
+						arguments: {},
+					})) as CallResult
+				).isError;
+			} finally {
+				await client.close();
+			}
+		};
+
 		test("the side panel hands its localStorage secret and settings to the worker once", async () => {
-			// The address of a secret the panel kept before this version.
-			const secret = "Q".repeat(43);
-			const key = `tab-mcp:secret:${relay.url}:overmark`;
+			const key_ = key();
 			const before = new TabMcp({
 				relay: relay.url,
 				server: { name: "overmark", version: "1.0.0" },
-				storage: { getItem: (k) => (k === key ? secret : null), setItem() {} },
+				storage: {
+					getItem: (k) => (k === key_ ? secret : null),
+					setItem() {},
+				},
 			});
-			const { address } = await before.connect({ resume: true });
+			({ address } = await before.connect({ resume: true }));
 			before.disconnect();
-			await h.control.eval(`(() => {
-			localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(secret)});
-			localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)});
-			localStorage.setItem("overmark:keep-ai-on", "true");
-			localStorage.setItem("overmark:blur-forms", "true");
-		})()`);
+			await h.control.eval(OLD_PANEL());
 			await (await h.open("v1")).page.activate();
-			const panel = await openSidePanel(h);
+			panel = await openSidePanel(h);
 			// Keep AI access on: it connects by itself, with the old address.
 			await panel.waitFor(
 				`document.documentElement.dataset.aiState === "connected"`,
@@ -401,61 +423,63 @@ describe.skipIf(browserBinary === undefined)(
 			await Bun.sleep(300);
 			expect((await settingsOf(h))["keepAiOn"]).toBe(true);
 		}, 60_000);
+
+		test("a handover cut short before its settings were written runs again, whole", async () => {
+			// As a crash right after the secret's write left it: the secret, no
+			// settings, no marker; the panel still has its copy.
+			await h.control.eval(
+				KV(
+					`for (const k of ["panelHandedOver", "keepAiOn", "relay", "blurForms"]) store.delete(k)`,
+					"readwrite",
+				),
+			);
+			const settingKeys = (kv: Record<string, unknown>) =>
+				Object.keys(kv).filter((k) => !k.startsWith("tab-mcp:secret:"));
+			const left = await settingsOf(h);
+			expect(settingKeys(left)).toEqual([]);
+			expect(left[key()]).toBe(secret);
+			await panel.eval(OLD_PANEL());
+			// The next worker start: the panel's port connects again and hands over.
+			await restartWorker(h);
+			await until(
+				() => settingsOf(h),
+				(kv) => kv["panelHandedOver"] === true,
+				10_000,
+			);
+			const after = await settingsOf(h);
+			expect(after[key()]).toBe(secret);
+			expect(
+				Object.fromEntries(settingKeys(after).map((k) => [k, after[k]])),
+			).toEqual({
+				relay: relay.url,
+				keepAiOn: true,
+				blurForms: true,
+				panelHandedOver: true,
+			});
+			await panel.waitFor(`localStorage.length === 0`);
+			// Keep AI access on again: the same address answers.
+			await until(
+				() => answers().catch(() => false),
+				(ok) => ok,
+				20_000,
+			);
+		}, 60_000);
 	},
 );
 
 describe.skipIf(browserBinary === undefined)(
-	"the settings the build before kept in chrome.storage.local",
+	"what an unreleased build kept in chrome.storage.local",
 	() => {
 		let h: Harness;
-		const relay = startTestRelay();
-		const secret = "R".repeat(43);
-		const key = () => `tab-mcp:secret:${relay.url}:overmark`;
 		let address: string;
-
-		const listCases = async () => {
-			const client = await mcpClient(relay.store, address);
-			try {
-				return (await client.callTool({
-					name: "list_cases",
-					arguments: {},
-				})) as CallResult;
-			} finally {
-				await client.close();
-			}
-		};
-
-		/** The same address answers an AI app (after a worker start, in a while). */
-		async function answers(): Promise<void> {
-			const end = Date.now() + 20_000;
-			for (;;) {
-				const result = await listCases().catch((e: Error) => e);
-				if (!(result instanceof Error) && !result.isError) return;
-				if (Date.now() > end)
-					throw new Error(
-						`the address did not answer: ${result instanceof Error ? result.message : JSON.stringify(result)}; ${JSON.stringify(await settingsOf(h))}`,
-					);
-				await Bun.sleep(250);
-			}
-		}
-
-		// In the control page, an extension page too: a session on the worker
-		// would keep Chrome from stopping it.
-		const localAll = () =>
-			h.control.eval<Record<string, unknown>>("chrome.storage.local.get(null)");
+		const relay = startTestRelay();
 
 		beforeAll(async () => {
 			h = await startHarness(browserBinary as string);
-			const before = new TabMcp({
-				relay: relay.url,
-				server: { name: "overmark", version: "1.0.0" },
-				storage: {
-					getItem: (k) => (k === key() ? secret : null),
-					setItem() {},
-				},
-			});
-			({ address } = await before.connect({ resume: true }));
-			before.disconnect();
+			await (await h.open("v1")).page.activate();
+			const panel = await openSidePanel(h);
+			address = await connectAi(panel, relay.url, { keepOn: true });
+			await closeSidePanel(h, panel);
 		}, 60_000);
 
 		afterAll(async () => {
@@ -463,58 +487,23 @@ describe.skipIf(browserBinary === undefined)(
 			await relay.stop();
 		});
 
-		test("after the update the same address answers, and the settings are in IndexedDB", async () => {
-			// The worker's first start is done: it found nothing to move.
-			await until(
-				() => settingsOf(h),
-				(kv) => kv["movedFromStorage"] === 1,
-				10_000,
-			);
-			// As before this version: no settings database yet, everything in
-			// chrome.storage.local as overmark#26 wrote it.
-			await h.control.eval(KV("store.clear()", "readwrite"));
-			const old = {
-				[key()]: secret,
-				relay: relay.url,
-				keepAiOn: true,
-				blurForms: true,
-				migrated: true,
-			};
-			await h.control.eval(`chrome.storage.local.set(${JSON.stringify(old)})`);
-			await restartWorker(h);
-			// Keep AI access on: the new worker connects by itself.
-			await answers();
-			const kv = await settingsOf(h);
-			expect(kv).toEqual({
-				[key()]: secret,
-				relay: relay.url,
-				keepAiOn: true,
-				blurForms: true,
-				panelHandedOver: true,
-				movedFromStorage: 1,
-			});
-			expect(await localAll()).toEqual({});
-			await (await h.open("v1")).page.activate();
-			const panel = await openSidePanel(h);
-			await panel.waitFor(
-				`${byId("relay")}.value === ${JSON.stringify(relay.url)}`,
-			);
-			expect(await panel.eval(`${byId("keep-on")}.checked`)).toBe(true);
-			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(true);
-			await panel.eval(`${byId("ai-button")}.click()`);
-			await panel.waitFor(
-				`${byId("pair-address")}.textContent === ${JSON.stringify(address)}`,
-			);
-			await closeSidePanel(h, panel);
-		}, 60_000);
+		// In the control page, an extension page too: a session on the worker
+		// would keep Chrome from stopping it.
+		const localAll = () =>
+			h.control.eval<Record<string, unknown>>("chrome.storage.local.get(null)");
 
-		test("a relay a content script writes into chrome.storage.local is never used", async () => {
+		test("is removed at the next start and never taken over: the relay and the address stay", async () => {
 			const before = await settingsOf(h);
-			const evil = {
-				relay: "https://evil.example",
-				keepAiOn: true,
-				blurForms: false,
+			expect(before["relay"]).toBe(relay.url);
+			// overmark#26's layout (only the owner's build wrote it), here with a
+			// relay and a secret of someone else's, as a content script could.
+			const old = {
 				"tab-mcp:secret:https://evil.example:overmark": "E".repeat(43),
+				relay: "https://evil.example",
+				keepAiOn: false,
+				blurForms: true,
+				replaced: { sibling: true },
+				migrated: true,
 			};
 			// From a content script: Chrome refuses it where it closes the area.
 			const { tabId } = await h.open("v1");
@@ -522,22 +511,147 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({
 					target: { tabId: ${tabId} },
 					func: (items) => chrome.storage.local.set(items).then(() => "written", (e) => e.message),
-					args: [${JSON.stringify(evil)}],
+					args: [${JSON.stringify(old)}],
 				})`,
 			);
 			// And as one could where Chrome lets it: written there all the same.
-			await h.control.eval(`chrome.storage.local.set(${JSON.stringify(evil)})`);
+			await h.control.eval(`chrome.storage.local.set(${JSON.stringify(old)})`);
 			await restartWorker(h);
 			// The new worker only removes it from there.
 			await until(localAll, (local) => Object.keys(local).length === 0, 10_000);
 			expect(await settingsOf(h)).toEqual(before);
-			await answers();
+			// Keep AI access on: the same address answers, on the same relay.
+			await until(
+				async () => {
+					const client = await mcpClient(relay.store, address).catch(
+						() => undefined,
+					);
+					if (client === undefined) return false;
+					try {
+						return !(
+							(await client.callTool({
+								name: "list_cases",
+								arguments: {},
+							})) as CallResult
+						).isError;
+					} catch {
+						return false;
+					} finally {
+						await client.close();
+					}
+				},
+				(ok) => ok,
+				20_000,
+			);
 			await (await h.open("v1")).page.activate();
 			const panel = await openSidePanel(h);
-			await panel.waitFor(
-				`${byId("relay")}.value === ${JSON.stringify(relay.url)}`,
+			expect(await panel.eval(`${byId("relay")}.value`)).toBe(relay.url);
+			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(false);
+			await closeSidePanel(h, panel);
+		}, 60_000);
+	},
+);
+
+describe.skipIf(browserBinary === undefined)(
+	"Blur form fields for open overlays, and a worker that cannot start",
+	() => {
+		let h: Harness;
+
+		beforeAll(async () => {
+			h = await startHarness(browserBinary as string);
+		}, 60_000);
+
+		afterAll(async () => {
+			await h?.stop();
+		});
+
+		/** In the tab's content-script world: what the extension tells it of these types. */
+		const listen = (tabId: number) =>
+			h.control.eval(
+				`chrome.scripting.executeScript({
+					target: { tabId: ${tabId} },
+					func: () => {
+						globalThis.e2eTold = [];
+						chrome.runtime.onMessage.addListener((m) => {
+							if (m?.type === "overlay:settings" || m?.type === "overlay:show")
+								globalThis.e2eTold.push([m.type, m.blurForms]);
+						});
+					},
+				})`,
 			);
-			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(true);
+		const told = (tabId: number) =>
+			h.control.eval<[string, boolean][]>(
+				`chrome.scripting.executeScript({
+					target: { tabId: ${tabId} },
+					func: () => globalThis.e2eTold,
+				}).then(([r]) => r.result)`,
+			);
+		const clear = (tabId: number) =>
+			h.control.eval(
+				`chrome.scripting.executeScript({
+					target: { tabId: ${tabId} },
+					func: () => { globalThis.e2eTold = []; },
+				})`,
+			);
+
+		test("the worker tells open overlays its value when it starts and when a panel attaches", async () => {
+			const { page, tabId } = await h.open("v1");
+			await listen(tabId);
+			// Stored on, as the side panel would have set it.
+			await h.control.eval(KV(`store.put(true, "blurForms")`, "readwrite"));
+			await restartWorker(h);
+			await until(
+				() => told(tabId),
+				(t) => t.some(([type, on]) => type === "overlay:settings" && on),
+				10_000,
+			);
+			await clear(tabId);
+			await page.activate();
+			const panel = await openSidePanel(h);
+			await until(
+				() => told(tabId),
+				(t) => t.some(([type, on]) => type === "overlay:settings" && on),
+				10_000,
+			);
+			await closeSidePanel(h, panel);
+			await page.send("Page.close");
+		}, 60_000);
+
+		test("a worker that cannot start says so in the panel, and an overlay started then blurs", async () => {
+			// Stored off; then the database is one the worker cannot open (a
+			// newer version). The worker's open connection closes on request,
+			// or this upgrade would be blocked.
+			await h.control.eval(KV(`store.put(false, "blurForms")`, "readwrite"));
+			await h.control.eval(`new Promise((resolve, reject) => {
+				const open = indexedDB.open("overmark-settings", 2);
+				open.onsuccess = () => { open.result.close(); resolve(true); };
+				open.onerror = () => reject(open.error);
+				open.onblocked = () => reject(new Error("blocked"));
+			})`);
+			await restartWorker(h);
+			const { page, tabId } = await h.open("v1");
+			await listen(tabId);
+			await page.activate();
+			const panel = await openSidePanel(h);
+			await panel.waitFor(
+				`document.documentElement.dataset.aiState === "failed"`,
+				10_000,
+			);
+			expect(
+				await panel.eval<string>(`${byId("ai-status")}.textContent`),
+			).toContain("AI access is not available");
+			expect(await panel.eval(`${byId("blur-forms")}.disabled`)).toBe(true);
+			expect(await panel.eval(`${byId("connect")}.disabled`)).toBe(true);
+			// Without the worker's value the panel blurs: the safe side.
+			await panel.eval(`${byId("annotate")}.click()`);
+			await until(
+				() => told(tabId),
+				(t) => t.some(([type]) => type === "overlay:show"),
+				10_000,
+			);
+			expect(
+				(await told(tabId)).filter(([type]) => type === "overlay:show"),
+			).toEqual([["overlay:show", true]]);
 		}, 60_000);
 	},
 );

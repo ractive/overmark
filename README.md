@@ -150,9 +150,9 @@ on, so the connection comes back after a sleep; `notifications` asks the questio
 the side panel is not in front (Chrome mentions it when installing: "Display
 notifications"). In earlier builds the connection lived in the side panel, and its
 address secret in the panel's own storage; the first time the side panel opens after the
-update, it hands the secret over, so the address an AI app has stays the same. The build
-just before this one kept the settings in the extension's local storage; the worker
-moves them into its database once, at its first start, and deletes them there.
+update, it hands the secret over, so the address an AI app has stays the same. An
+unreleased build kept the settings in the extension's local storage; Overmark deletes
+them there and does not take them over, so such a build's AI apps pair once more.
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
 relay with a public HTTPS address that allows Overmark's ID, such as the hosted one.

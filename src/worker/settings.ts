@@ -89,11 +89,6 @@ export async function loadSettings(kv: Kv): Promise<Settings> {
 	};
 }
 
-/** "Blur form fields in screenshots", as stored now. */
-export async function loadBlurForms(kv: Kv): Promise<boolean> {
-	return (await kv.get(KEYS.blurForms)) === true;
-}
-
 export async function saveReplaced(
 	kv: Kv,
 	replaced: Replaced | undefined,

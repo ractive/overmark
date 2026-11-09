@@ -108,7 +108,10 @@ export interface AiState {
 }
 
 /** From the service worker. */
-export type WorkerMessage = { type: "state"; state: AiState };
+export type WorkerMessage =
+	| { type: "state"; state: AiState }
+	/** The connection could not start (its settings could not be read): why. */
+	| { type: "failed"; problem: string };
 
 /** The sender of a port, as far as the check needs it. */
 export interface Sender {

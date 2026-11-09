@@ -1,8 +1,8 @@
 /**
  * The AI connection's pieces in the service worker (DEC-015): who may send
  * what, the questions of tools that change something, the address secret's
- * storage, the settings in IndexedDB and their move from
- * chrome.storage.local, the panel's old settings handed over once, and
+ * storage, the settings in IndexedDB (and what an unreleased build left in
+ * chrome.storage.local removed), the panel's old settings handed over, and
  * bundles: one a service worker can run, a side panel that keeps no setting.
  */
 
@@ -14,7 +14,12 @@ import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
 import { oldSettings, statusText } from "../src/sidepanel/ai.ts";
-import { DATABASE, memoryKv } from "../src/worker/kv.ts";
+import {
+	DATABASE,
+	memoryKv,
+	type OldArea,
+	removeOldSettings,
+} from "../src/worker/kv.ts";
 import {
 	type AiState,
 	isPanelSender,
@@ -417,6 +422,49 @@ describe("the address secret in the worker", () => {
 describe("the settings in IndexedDB (memoryKv; e2e/store.test.ts runs openKv)", () => {
 	for (const [name, run] of Object.entries(kvContract))
 		test(name, () => run(memoryKv()));
+});
+
+describe("what an unreleased build kept in chrome.storage.local", () => {
+	/** chrome.storage.local as the clean-up sees it. */
+	function oldArea(initial: Record<string, unknown>) {
+		const data = { ...initial };
+		const area: OldArea & { data: Record<string, unknown> } = {
+			data,
+			get: async () => ({ ...data }),
+			async remove(keys: string[]) {
+				for (const key of keys) delete data[key];
+			},
+		};
+		return area;
+	}
+
+	test("is removed at every start and never taken over", async () => {
+		// As overmark#26 wrote it, or a content script where Chrome lets it:
+		// a relay of theirs, keep-on, a secret, the handover marked done.
+		const old = oldArea({
+			"tab-mcp:secret:https://evil.example:overmark": "E".repeat(43),
+			relay: "https://evil.example",
+			keepAiOn: true,
+			blurForms: false,
+			replaced: { sibling: false },
+			migrated: true,
+			somethingElse: 1,
+		});
+		expect((await removeOldSettings(old)).sort()).toEqual(
+			[
+				"blurForms",
+				"keepAiOn",
+				"migrated",
+				"relay",
+				"replaced",
+				"tab-mcp:secret:https://evil.example:overmark",
+			].sort(),
+		);
+		expect(old.data).toEqual({ somethingElse: 1 });
+		// Again, and on a start with nothing there: nothing to do.
+		expect(await removeOldSettings(old)).toEqual([]);
+		expect(await removeOldSettings(oldArea({}))).toEqual([]);
+	});
 });
 
 /** A `localStorage` with these entries. */

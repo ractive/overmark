@@ -34,9 +34,9 @@ screenshots", "Keep AI access on", and the secret from which the tab-mcp library
 the address an AI app connects to. Whether AI access is on until the browser closes (or
 the extension is updated, reloaded or turned off) is in the browser's session storage,
 which those scripts cannot reach either.
-(Earlier builds of Overmark kept them in the side panel's own local storage, and the build
-just before this one in the extension's local storage; Overmark moves them once and
-deletes the old copy.)
+(Earlier builds of Overmark kept them in the side panel's own local storage; the first time
+the side panel opens after the update it hands them over and deletes its copy. Where an
+unreleased build kept them in the extension's local storage, Overmark deletes them.)
 
 Overmark does not record what is typed into form fields and editable regions: the text
 it keeps about an element leaves them out. Of the editors that draw their text as
@@ -118,7 +118,7 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   browser closes: Overmark notes there which marks the toolbar on a tab just added (case,
   mark, screenshot and comment), so that the toolbar's Undo can take back those marks
   and no others, and whether AI access is on. Overmark keeps nothing in the extension's
-  local storage any more: it only empties what the build before kept there.
+  local storage any more: it only deletes what an unreleased build kept there.
 - **alarms:** while AI access is on, Overmark's background service worker wakes once a
   minute, so the connection to the AI app comes back after the computer slept.
 - **notifications:** to ask whether the AI app may make a change when the side panel is

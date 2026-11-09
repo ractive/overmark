@@ -279,8 +279,9 @@ disagree (Chromium's `storage.json` and MDN say the access level applies to the 
 area only), and a level that silently does not apply would not throw: the fail-closed
 path guarded nothing it could see. Content scripts can read and write
 `chrome.storage.local` by default, so a page whose renderer was compromised could, in
-Overmark's content-script world, have read the secret, or written a `relay` of its own for the next start to connect
-to with it. The tab-mcp extension made the same move (its PR 89, DEC-116); this follows it.
+Overmark's content-script world, have read the secret, or written a `relay` of its own
+for the next start to connect to with it. The tab-mcp extension made the same move (its
+PR 89 and PR 91, DEC-116); this follows it.
 
 - **Where.** The relay, "Keep AI access on", "Blur form fields in screenshots", the
   takeover (`replaced`), the panel-handover marker and the address secret are in an
@@ -291,11 +292,21 @@ to with it. The tab-mcp extension made the same move (its PR 89, DEC-116); this 
   over IndexedDB.
 - **The panel.** It neither reads nor writes these settings in storage. It sends
   `keep-on`, `set-relay` and the new `blur-forms` over its port, and shows the state the
-  worker sends, which now carries `blurForms`. The worker tells open overlays a changed
-  blur setting (`overlay:settings`), which the panel did before. The tools read blur from
-  the worker's store at each call, so a change while connected holds for the next
-  screenshot (the fix from overmark#26). The panel's page opened in a tab has no port and
-  its blur box is disabled, like its other AI controls.
+  worker sends, which now carries `blurForms`. A setting changes in the worker's memory
+  only after its write to the database succeeded; a failed write keeps the old value and
+  shows the problem, so the panel, the tools and the database agree. The tools read blur
+  from the worker's settings at each call, so a change while connected holds for the
+  next screenshot (the fix from overmark#26). The worker tells open overlays its blur
+  value (`overlay:settings`) when it changes, when the worker starts and when a panel
+  attaches, so an overlay a panel started before it knew the value is corrected. A panel
+  that has no state from the worker within 2 s, or whose worker failed to start, starts
+  an overlay with blur on (the safe side), as does the panel's page opened in a tab,
+  which has no port and whose blur box is disabled like its other AI controls. A worker
+  whose connection cannot start (its database cannot be opened) tells the panel why, and
+  the panel says "AI access is not available" instead of nothing.
+- **The database closing.** Chrome may close the connection (`onclose`), and deleting or
+  upgrading the database elsewhere asks it to close (`onversionchange`): the worker
+  closes it, and the next read or write opens it again.
 - **The session flag stays in `chrome.storage.session`.** "AI access is on until the
   browser closes, or the extension is updated, reloaded or disabled" is exactly that
   area's lifetime, and the area is for trusted contexts only unless the extension opens
@@ -304,22 +315,25 @@ to with it. The tab-mcp extension made the same move (its PR 89, DEC-116); this 
   says the extension was disabled and enabled again, so it could not keep the meaning.
   The flag cannot redirect anything either: it only connects to the user's own relay
   with the user's own secret.
-- **The move, once.** At every worker start `migrate` looks at `chrome.storage.local`.
-  The first time (no marker `movedFromStorage` in the database) it writes the setting
-  keys overmark#26 kept there (`relay`, `keepAiOn`, `blurForms`, `replaced`, the secrets,
-  and `migrated` as `panelHandedOver`) together with the marker in one transaction, also
-  when there was nothing to move, keeps a key the database has already, then removes the
-  old keys. With the marker present it only removes setting keys found there and never
-  imports them: a relay or secret written there later (by a content script, where Chrome
-  lets it) is not taken. The handover from the side panel's `localStorage` (builds before
-  overmark#26) stays as it was, guarded by `panelHandedOver`, so both are idempotent.
+- **Nothing is taken from `chrome.storage.local`.** Only the owner's own build of
+  overmark#26 ever wrote settings there; it was never released. Every worker start
+  removes the setting keys found there (`relay`, `keepAiOn`, `blurForms`, `replaced`,
+  `migrated`, the secrets) and imports none of them, whoever wrote them. A one-off import
+  would need a marker that lives in the database it guards (lost with the site's data, after
+  which a content script's value would be imported), or `onInstalled`, which fires after
+  the worker has already loaded its settings and may have made a new secret. Cost: the
+  owner's build loses its relay, Keep AI access on, Blur form fields and its address once,
+  and the AI apps paired with it pair once more.
+- **The panel's handover stays.** The side panel's `localStorage` (builds before
+  overmark#26) is in the extension's origin, out of content scripts' reach, so its
+  handover stays: the secrets are adopted first, then Keep AI access on, the relay, Blur
+  form fields and the marker `panelHandedOver` are written in one transaction, and only
+  then does the worker connect or switch relay. The panel deletes its copy only once the
+  marker is set; a handover cut short before that runs again, whole, at the panel's next
+  connection (a secret the worker has is not taken twice).
 - **`setAccessLevel` is best effort.** The worker still asks for `TRUSTED_CONTEXTS` on
   the local area as an extra layer; a refusal is logged, nothing fails closed, and
   nothing of the AI connection is kept there any more.
 - **Chrome 116 again.** The minimum from before overmark#26: a WebSocket that carries
   messages keeps the service worker alive from there (DEC-015); nothing else in the code
   needs a newer Chrome.
-- **Left as is.** The one-off move takes what `chrome.storage.local` holds at the first
-  start of this build; on a Chrome that let content scripts write there under
-  overmark#26, a value written then would be taken once. That needs a page with a
-  compromised renderer while overmark#26, which is not in the store, was installed.

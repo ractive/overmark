@@ -56,6 +56,13 @@ describe.skipIf(browserBinary === undefined)("IdbStore and openKv", () => {
 			await page.eval(`__overmarkKv.run(${JSON.stringify(name)})`);
 		});
 
+	test("settings: a database deleted under an open Kv is opened again", async () => {
+		expect(await page.eval("__overmarkKv.reopens()")).toEqual({
+			afterDelete: {},
+			afterWrite: { relay: "https://after.test" },
+		});
+	});
+
 	test("sweepPending reads the pending records only, and no image of a finished case", async () => {
 		expect(
 			await page.eval<{ swept: number; reads: string[] }>(

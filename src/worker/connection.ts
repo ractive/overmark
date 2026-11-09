@@ -23,7 +23,7 @@ import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
 import { KeepOn } from "./keep-on.ts";
-import { type Kv, migrate, openKv } from "./kv.ts";
+import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
 	type AiState,
 	type CallView,
@@ -36,7 +36,6 @@ import { CachedSecretStorage } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
 	KEYS,
-	loadBlurForms,
 	loadSettings,
 	type Replaced,
 	relayProblem,
@@ -183,11 +182,12 @@ export class Connection {
 	 */
 	static async start(deps: ConnectionDeps): Promise<Connection> {
 		await restrictStorage();
-		// The settings live in IndexedDB, out of content scripts' reach; the
-		// version before kept them in chrome.storage.local: moved once.
+		// The settings live in IndexedDB, out of content scripts' reach. An
+		// unreleased build kept them in chrome.storage.local: removed there at
+		// every start, never taken over (DEC-016).
 		const kv = await openKv();
-		await migrate(chrome.storage.local, kv).catch((error: unknown) =>
-			console.error("Overmark: moving the settings", error),
+		await removeOldSettings(chrome.storage.local).catch((error: unknown) =>
+			console.warn("Overmark: removing the old settings", error),
 		);
 		// A previous worker's questions died with it.
 		await clearNotifications();
@@ -205,6 +205,8 @@ export class Connection {
 		);
 		connection.#showBadge();
 		connection.keepUp();
+		// Overlays a panel started before this worker knew: the stored value.
+		connection.#tellBlur();
 		return connection;
 	}
 
@@ -231,8 +233,9 @@ export class Connection {
 			tab: this.#tab,
 			images: { toWebp, scale: scaleImage, crop: cropImages },
 			onChange: (caseId) => void broadcast({ type: "cases:changed", caseId }),
-			// Read at each call from the store: what holds now, not at the start.
-			blurForms: () => loadBlurForms(this.#kv),
+			// Read at each call: only the worker writes it, and only after the
+			// write to the store succeeded, so this is what the panel shows.
+			blurForms: () => this.#settings.blurForms,
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
 		});
 		for (const tool of tools) void mcp.registerTool(tool);
@@ -339,17 +342,29 @@ export class Connection {
 		await this.#syncAlarm();
 	}
 
+	/** Settings change in memory only once the store has them. */
 	async #setKeepOn(on: boolean): Promise<void> {
-		this.#settings = { ...this.#settings, keepOn: on };
 		await this.#kv.set({ [KEYS.keepOn]: on });
+		this.#settings = { ...this.#settings, keepOn: on };
 		await this.#syncAlarm();
 	}
 
-	/** Blur form fields: kept, and told to the overlays already open. */
+	/**
+	 * Blur form fields: kept, then told to the overlays already open. A write
+	 * that fails changes nothing: the command's problem is shown, the panel's
+	 * box goes back with the next state, and the tools keep the old value.
+	 */
 	async #setBlurForms(on: boolean): Promise<void> {
-		this.#settings = { ...this.#settings, blurForms: on };
 		await this.#kv.set({ [KEYS.blurForms]: on });
-		await tellTabs({ type: "overlay:settings", blurForms: on });
+		this.#settings = { ...this.#settings, blurForms: on };
+		this.#tellBlur();
+	}
+
+	#tellBlur(): void {
+		void tellTabs({
+			type: "overlay:settings",
+			blurForms: this.#settings.blurForms,
+		});
 	}
 
 	/** The alarm runs while AI access is on (and the address is ours). */
@@ -373,11 +388,17 @@ export class Connection {
 	 */
 	async #useRelay(relay: string): Promise<void> {
 		const next = this.#create(relay);
+		await this.#kv.set({ [KEYS.relay]: relay });
+		await this.#switchTo(relay, next);
+	}
+
+	/** Switch to `next`, a connection to `relay` that is stored already. */
+	async #switchTo(relay: string, next: TabMcp): Promise<void> {
 		const before = this.#mcp;
+		this.#settings = { ...this.#settings, relay };
 		this.#relay = relay;
 		this.#relayNote = undefined;
 		this.#problem = undefined;
-		await this.#kv.set({ [KEYS.relay]: relay });
 		await this.#setReplaced(undefined);
 		// AI access was on for the relay before: this one connects with
 		// "Keep AI access on", or on the user's click.
@@ -420,6 +441,8 @@ export class Connection {
 	addPanel(port: chrome.runtime.Port, early: unknown[] = []): void {
 		const panel: Panel = { port, pairing: false };
 		this.#panels.add(panel);
+		// Its overlays may have started before it knew the worker's value.
+		this.#tellBlur();
 		const receive = (raw: unknown) => {
 			// Anything that is not a command is dropped; the rest run one after
 			// the other, so a stop never ends before the connect that came first.
@@ -512,31 +535,45 @@ export class Connection {
 		command: Extract<PanelCommand, { type: "migrate" }>,
 	): Promise<void> {
 		if (this.#settings.panelHandedOver) return;
+		// The secrets first: a crash after them leaves no marker, and the
+		// panel, which deletes its copy only once the marker is set, hands
+		// everything over again at its next start (taking no secret twice).
 		for (const [key, value] of Object.entries(command.secrets))
 			this.#storage.adopt(key, value);
 		await this.#storage.written;
-		const blurForms = command.blurForms ?? this.#settings.blurForms;
-		this.#settings = { ...this.#settings, panelHandedOver: true, blurForms };
-		await this.#kv.set({
-			[KEYS.panelHandedOver]: true,
-			[KEYS.blurForms]: blurForms,
-		});
-		if (command.keepOn !== undefined) await this.#setKeepOn(command.keepOn);
 		const problem =
 			command.relay === undefined ? undefined : relayProblem(command.relay);
+		let next: TabMcp | undefined;
+		let note: string | undefined;
 		if (problem !== undefined)
-			this.#relayNote = `The saved relay ${command.relay} cannot be used (${problem}); using ${this.#relay}.`;
-		if (
-			command.relay !== undefined &&
-			problem === undefined &&
-			command.relay !== this.#relay
-		) {
+			note = `The saved relay ${command.relay} cannot be used (${problem}); using ${this.#relay}.`;
+		else if (command.relay !== undefined && command.relay !== this.#relay)
 			try {
-				await this.#useRelay(command.relay);
+				next = this.#create(command.relay);
 			} catch (error) {
-				this.#relayNote = `The saved relay ${command.relay} cannot be used (${message(error)}); using ${this.#relay}.`;
+				note = `The saved relay ${command.relay} cannot be used (${message(error)}); using ${this.#relay}.`;
 			}
-		} else this.#keep.connect();
+		// The settings and the marker in one transaction: all or none.
+		const keepOn = command.keepOn ?? this.#settings.keepOn;
+		const blurForms = command.blurForms ?? this.#settings.blurForms;
+		await this.#kv.set({
+			[KEYS.keepOn]: keepOn,
+			[KEYS.blurForms]: blurForms,
+			...(next !== undefined ? { [KEYS.relay]: command.relay } : {}),
+			[KEYS.panelHandedOver]: true,
+		});
+		this.#settings = {
+			...this.#settings,
+			keepOn,
+			blurForms,
+			panelHandedOver: true,
+		};
+		this.#tellBlur();
+		await this.#syncAlarm();
+		if (next !== undefined && command.relay !== undefined)
+			await this.#switchTo(command.relay, next);
+		else this.#keep.connect();
+		if (note !== undefined) this.#relayNote = note;
 		this.#changed();
 	}
 
