@@ -30,7 +30,8 @@ timestamp: 2026-11-05T08:00:00+01:00
 5. After the first upload: Package → "View public key". Put that key into
    `manifest-key.txt`, so unpacked builds get the store's ID. Update the README, the
    design note and `test/build.test.ts` with the new ID, and every relay's
-   `TAB_MCP_SITES` entry. Edge Add-ons gives the extension a different ID again.
+   `TAB_MCP_SITES` entry, including the hosted relay's `TAB_MCP_ALLOWED_ORIGINS` in
+   ractive/ractive.ch (`infra/tab-mcp/variables.tf`). Edge Add-ons gives the extension a different ID again.
 
 ## Where the packages come from
 
@@ -139,8 +140,9 @@ data only, and no tool runs code an AI app sends.
   - **Website content:** screenshots, page text excerpts and element details (see
     PRIVACY.md for the full list).
   - **User activity:** limited to the marks the user draws and their comments.
-- Stored locally in the browser. Transmitted only to the relay and AI app the user
-  configures and pairs, and only while connected. Every screenshot blurs password
+- Stored locally in the browser. Transmitted only to the relay (by default the hosted
+  relay tab-mcp.ractive.ch, run by the developer; the user can enter another) and the
+  AI app the user pairs, and only while connected. Every screenshot blurs password
   fields, and all form fields when the user turns that on, except fields inside
   embedded frames. Text typed into form fields and editable regions is not recorded; of
   the editors that draw their text as ordinary page content, only Monaco, CodeMirror 5
