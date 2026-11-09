@@ -34,7 +34,8 @@ which the tab-mcp library derives the address an AI app connects to.
 Overmark does not record what is typed into form fields and editable regions: the text
 it keeps about an element leaves them out. Of the editors that draw their text as
 ordinary page content, it recognises only Monaco, CodeMirror 5 and Ace; to Overmark the
-text of any other such editor is page text, and it is kept when you mark it. A
+text of any other such editor is page text, and it is kept when you mark it (and sent
+when an AI app reads that element). A
 screenshot shows what was on the screen, though, form fields included. Whenever Overmark
 takes a screenshot (when you save marks, and when an AI app asks for one, see below),
 password fields are blurred, and with "Blur form fields in screenshots" all form fields
@@ -51,6 +52,17 @@ Only in two cases, both started by you:
 2. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
    address (cut as above), title, element details and screenshots of the tab in front.
+   When the app asks about a mark's element, Overmark also reads that element (or one
+   near it the app names) from the page in front and sends it without storing it: up to
+   about 16 KB of its HTML with the page's text, its position and size, the window's
+   size, a list of its computed styles, up to 30 of the page's CSS rules that apply to
+   it, and the tag, id, classes, position and layout styles of up to four elements
+   around it and twelve inside it (with up to 80 characters of each one's text). That
+   HTML holds no form field values: form fields keep only attributes such as their
+   name, type and placeholder, and what is inside text areas, selects and editable
+   regions is left out. Addresses in it, in attributes and in CSS, lose their query
+   string and fragment; comments, the content of the page's head, scripts and styles,
+   and the values of attributes named like a token or secret are left out.
    They travel
    through a tab-mcp relay and on to the AI app you paired with a code. Unless you enter
    another relay in the side panel, that is `tab-mcp.ractive.ch`, run by Overmark's

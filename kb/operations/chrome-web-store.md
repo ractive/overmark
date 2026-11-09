@@ -109,7 +109,8 @@ PRs (`.github/dependabot.yml`).
 >
 > Export a case as a zip with a Markdown summary and the images, or connect an AI app
 > such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
-> page in front, take screenshots, and record what should change. Changes it wants to
+> page in front, read a marked element's HTML and CSS there, take screenshots, and
+> record what should change. Changes it wants to
 > make are shown to you first, every time.
 >
 > Your cases stay in your browser unless you export one or connect an AI app. Overmark
@@ -138,7 +139,10 @@ data only, and no tool runs code an AI app sends.
   - **Web history:** the address, title and time of each page saved as a case, and the
     address and title of the tab in front when an AI app asks for them.
   - **Website content:** screenshots, page text excerpts and element details (see
-    PRIVACY.md for the full list).
+    PRIVACY.md for the full list); when the AI app asks about a mark, also the marked
+    element's trimmed HTML, computed styles and matching CSS rules from the page in
+    front, sent to the AI app and not stored, without form field values or text typed
+    into editable regions, and with addresses cut to their path.
   - **User activity:** limited to the marks the user draws and their comments.
 - Stored locally in the browser. Transmitted only to the relay (by default the hosted
   relay tab-mcp.ractive.ch, run by the developer; the user can enter another) and the

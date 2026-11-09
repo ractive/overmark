@@ -80,13 +80,16 @@ The side panel's tools:
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
+| `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children; a CSS selector reads a parent or neighbour instead |
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |
 | `set_verdict` | Records what should change; asks first |
+| `set_mark_status` | Resolves a mark or opens it again; asks first |
 | `delete_case` | Deletes a case; asks first |
 
 No tool runs code an AI app sends. Page text in the results comes from web pages, and
-the tools say so to the model.
+the tools say so to the model. `get_mark_element` sends no form field values and no
+text typed into editable regions, and URLs without their query string or fragment.
 
 ### A relay on your computer, for Claude Code
 

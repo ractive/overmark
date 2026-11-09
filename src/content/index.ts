@@ -3,12 +3,18 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import { describeElement } from "../lib/element.ts";
+import { cssSelector, describeElement } from "../lib/element.ts";
+import {
+	inspectElement,
+	type Relation,
+	resolveSelector,
+} from "../lib/inspect.ts";
 import type {
 	BlurResult,
 	Broadcast,
 	ContentRequest,
 	DescribedElement,
+	InspectResult,
 	Released,
 } from "../lib/messages.ts";
 import { PageActivity } from "./activity.ts";
@@ -84,6 +90,58 @@ function mark(
 		scroll: { x: scrollX, y: scrollY },
 		url: location.href,
 		title: document.title,
+	};
+}
+
+/** An annotation's element read for an AI app (`get_mark_element`). */
+function inspect(
+	overlay: Overlay,
+	reviewer: Reviewer,
+	request: { caseId: string; annotationId: string; selector?: string },
+): InspectResult | null {
+	// A save or a screenshot blurs fields with inline styles: not the page's.
+	if (activity.busy !== undefined)
+		return { ok: false, reason: "busy", error: activity.busy };
+	if (reviewer.caseId !== request.caseId) return null;
+	const target = reviewer.target(request.annotationId);
+	if (target === undefined) return null;
+	const { match } = target;
+	let element = target.element;
+	let relation: Relation = "mark";
+	if (request.selector !== undefined) {
+		const found = resolveSelector(
+			document,
+			element,
+			request.selector,
+			overlay.host,
+		);
+		if ("error" in found)
+			return { ok: false, reason: "selector", error: found.error, match };
+		element = found.element;
+		relation = found.relation;
+	}
+	if (element === undefined)
+		return match.status === "no-element"
+			? {
+					ok: false,
+					reason: "no-element",
+					error: `Mark ${match.number} was not drawn on an element.`,
+					match,
+				}
+			: {
+					ok: false,
+					reason: "lost",
+					error: `Mark ${match.number}'s element was not found on this page.`,
+					match,
+				};
+	return {
+		ok: true,
+		url: location.href,
+		title: document.title,
+		match,
+		relation,
+		selector: cssSelector(element),
+		inspection: inspectElement(element, overlay.host),
 	};
 }
 
@@ -178,6 +236,9 @@ function start(): void {
 					sendResponse(
 						mark(overlay, message.selector, message.number, message.blurForms),
 					);
+					break;
+				case "element:inspect":
+					sendResponse(inspect(overlay, reviewer, message));
 					break;
 				case "element:unmark": {
 					const held = activity.now.kind === "ai-mark";

@@ -137,3 +137,28 @@ The price: every new view flashes the overlay away for about 100 ms, and pending
 screenshots live as long as their marks, so they are swept after 7 days instead of
 10 minutes.
 
+## DEC-013: An AI app may read a mark's element from the live page
+
+The owner, 2026-11-09: the AI app could not help find solutions to a case's marks, since
+it had no access to the page structure, only screenshots and the stored details. So
+`get_mark_element` reads one mark's element (or, by a CSS selector, an ancestor, a
+descendant or another element of that page) from the tab in front: its outer HTML, box,
+the window's size, a fixed list of computed styles without those at their initial value,
+the style rules that match it from the sheets the page may read, four ancestors with
+their layout styles and up to twelve children. It is a fixed, read-only tool (DEC-005
+still holds: no code from the AI app runs, the selector is only matched), so it does not
+ask first, like the other reading tools.
+
+Nothing of it is stored, so DEC-009's allow-list of recorded details does not apply, but
+its reasons do: the HTML is written by Overmark's own serializer (`src/lib/inspect.ts`),
+not taken from `outerHTML`. Form fields keep an allow-list of attributes (never `value`,
+`checked`, `selected` or `aria-value*`); the content of text areas, selects and editable
+regions (with Monaco, CodeMirror 5 and Ace) is left out, also when the element itself is
+inside one; URLs in attributes and in CSS `url()`s lose their query and fragment;
+comments, the content of the head, scripts, styles, `noscript` and `template`, event
+handlers' code and the values of attributes named like a secret (`data-csrf-token`) are
+left out. Everything is capped (about 16 KB of markup, 30 rules), and a cut is said
+in the result. The result opens with a note that the page's content is data, not
+instructions, and is marked `untrustedContentHint`. It is refused while the page is busy
+with a save or a screenshot, whose blur is inline style the page does not have.
+

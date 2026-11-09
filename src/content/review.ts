@@ -266,6 +266,19 @@ export class Reviewer {
 		return entry.match;
 	}
 
+	/**
+	 * The element an annotation's mark is drawn on now (looked for again when a
+	 * re-render replaced it), without scrolling or focusing anything.
+	 */
+	target(
+		annotationId: string,
+	): { element: Element | undefined; match: AnnotationMatch } | undefined {
+		const entry = this.#entries.find((e) => e.annotation.id === annotationId);
+		if (entry === undefined) return undefined;
+		if (this.#replaced(entry)) this.#findAgain(entry);
+		return { element: this.#element(entry), match: entry.match };
+	}
+
 	/** Bring a mark without an element to the middle of the window. */
 	#scrollTo(annotation: Annotation): void {
 		const win = this.overlay.doc.defaultView;
