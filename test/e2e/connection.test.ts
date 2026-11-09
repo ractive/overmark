@@ -307,6 +307,43 @@ describe.skipIf(browserBinary === undefined)(
 			await answerInPanel(panel, "allow");
 			expect((await third).isError).toBeFalsy();
 		});
+
+		test("after a takeover, New address in the notice drops the address taken over", async () => {
+			const key = `tab-mcp:secret:${relay.url}:overmark`;
+			const secret = (await settingsOf(h))[key];
+			expect(typeof secret).toBe("string");
+			// Another program with a copy of the address secret takes it over.
+			const other = new TabMcp({
+				relay: relay.url,
+				server: { name: "overmark", version: "1.0.0" },
+				storage: {
+					getItem: (k) => (k === key ? (secret as string) : null),
+					setItem() {},
+				},
+			});
+			const { address: taken } = await other.connect({ resume: true });
+			try {
+				expect(taken).toBe(address);
+				await panel.waitFor(`!${byId("pair-replaced")}.hidden`, 10_000);
+				// AI access is off: the code is hidden, the notice has the button.
+				expect(await panel.eval(`${byId("pairing")}.hidden`)).toBe(true);
+				const button = byId("pair-replaced-new-address");
+				await panel.eval(`${button}.click()`);
+				// With apps listed it asks first.
+				if (
+					(await panel.eval<string>(`${button}.textContent`)) !== "New address"
+				) {
+					await Bun.sleep(100);
+					await panel.eval(`${button}.click()`);
+				}
+				await panel.waitFor(
+					`${byId("pair-replaced")}.hidden && ${byId("pair-address")}.textContent.endsWith("/mcp") && ${byId("pair-address")}.textContent !== ${JSON.stringify(address)}`,
+					10_000,
+				);
+			} finally {
+				other.disconnect();
+			}
+		});
 	},
 );
 

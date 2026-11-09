@@ -322,9 +322,14 @@ export async function startAi(
 	);
 
 	aiSwitch.addEventListener("change", () => {
-		switchIntent = { on: aiSwitch.checked, until: Date.now() + SWITCH_WAIT_MS };
+		const intent = { on: aiSwitch.checked, until: Date.now() + SWITCH_WAIT_MS };
+		switchIntent = intent;
 		addingApp = false;
 		send({ type: aiSwitch.checked ? "connect" : "stop" });
+		// No state that matches the flip: the switch shows the state again.
+		setTimeout(() => {
+			if (switchIntent === intent && current) showCard(current);
+		}, SWITCH_WAIT_MS);
 	});
 
 	function addApp(on: boolean): void {
@@ -385,25 +390,35 @@ export async function startAi(
 		send({ type: "connect" }),
 	);
 
-	const newAddress = byId<HTMLButtonElement>("pair-new-address");
-	newAddress.addEventListener("click", () => {
-		const armed =
-			newAddressArmedAt !== undefined &&
-			Date.now() - newAddressArmedAt < NEW_ADDRESS_ARMED_MS;
-		// With apps connected it asks first: they all have to pair again.
-		if ((current?.grants.length ?? 0) > 0 && !armed) {
-			newAddressArmedAt = Date.now();
-			newAddress.textContent = "Really? Every app must pair again";
-			setTimeout(() => {
-				newAddressArmedAt = undefined;
-				newAddress.textContent = "New address";
-			}, NEW_ADDRESS_ARMED_MS);
-			return;
-		}
-		newAddressArmedAt = undefined;
-		newAddress.textContent = "New address";
-		send({ type: "new-address" });
-	});
+	// Under the code, and in the takeover notice: there AI access is off and
+	// the code is hidden, and a new address is what drops the apps paired
+	// with the address taken over.
+	const newAddressButtons = [
+		"pair-new-address",
+		"pair-replaced-new-address",
+	].map((id) => byId<HTMLButtonElement>(id));
+	const newAddressText = (text: string) => {
+		for (const b of newAddressButtons) b.textContent = text;
+	};
+	for (const button of newAddressButtons)
+		button.addEventListener("click", () => {
+			const armed =
+				newAddressArmedAt !== undefined &&
+				Date.now() - newAddressArmedAt < NEW_ADDRESS_ARMED_MS;
+			// With apps connected it asks first: they all have to pair again.
+			if ((current?.grants.length ?? 0) > 0 && !armed) {
+				newAddressArmedAt = Date.now();
+				newAddressText("Really? Every app must pair again");
+				setTimeout(() => {
+					newAddressArmedAt = undefined;
+					newAddressText("New address");
+				}, NEW_ADDRESS_ARMED_MS);
+				return;
+			}
+			newAddressArmedAt = undefined;
+			newAddressText("New address");
+			send({ type: "new-address" });
+		});
 
 	// --- The card ---
 
@@ -475,6 +490,11 @@ export async function startAi(
 				clearTimeout(disconnectArmed.get(id)?.timer);
 				disconnectArmed.delete(id);
 			}
+		// Redrawn on every state: the Disconnect that had the keyboard's focus
+		// keeps it, so Enter can confirm it.
+		const focused = (
+			document.activeElement as HTMLElement | null
+		)?.closest<HTMLElement>("#pair-grants li[data-grant]")?.dataset["grant"];
 		byId("pair-grants").replaceChildren(
 			...a.grants.map((grant) =>
 				h(
@@ -490,6 +510,12 @@ export async function startAi(
 				),
 			),
 		);
+		if (focused !== undefined)
+			byId("pair-grants")
+				.querySelector<HTMLButtonElement>(
+					`li[data-grant="${CSS.escape(focused)}"] button`,
+				)
+				?.focus();
 		syncPairing(view.pairing);
 		byId("pairing").hidden = !view.pairing;
 		byId("add-app").hidden = !view.addApp;
