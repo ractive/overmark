@@ -17,6 +17,37 @@
 			<button id="stop-ai" type="button" hidden>Stop AI access</button>
 			<p id="ai-call" class="meta" hidden></p>
 		</header>
+		<!-- The AI connection lives in the service worker; these show it (ai.ts). -->
+		<div id="questions" class="ai-box" aria-live="polite"></div>
+		<section id="pairing" class="ai-box" aria-labelledby="pairing-heading" hidden>
+			<h2 id="pairing-heading">AI connection</h2>
+			<div id="pair-replaced" class="hint" hidden>
+				<p id="pair-replaced-text"></p>
+				<div class="row">
+					<button id="pair-take-back" type="button">Connect again</button>
+				</div>
+			</div>
+			<p id="pair-problem" class="hint" hidden></p>
+			<div id="pair-address-box">
+				<p class="meta">
+					Add this address to your AI app as an MCP server, for example
+					<code>claude mcp add --transport http overmark &lt;address&gt;</code>
+				</p>
+				<div class="row">
+					<code id="pair-address" class="address"></code>
+					<button id="pair-copy" type="button">Copy</button>
+				</div>
+				<p class="meta">When the relay's page asks for a code, type this one:</p>
+				<p id="pair-code" class="code">––– –––</p>
+			</div>
+			<h3 class="group-title">Connected apps</h3>
+			<ul id="pair-grants" class="grants"></ul>
+			<p id="pair-none" class="empty">None yet.</p>
+			<div class="row">
+				<button id="pair-new-address" type="button">New address</button>
+				<button id="pair-close" type="button">Close</button>
+			</div>
+		</section>
 		<main id="home">
 			<section aria-labelledby="page-heading">
 				<h2 id="page-heading">This tab</h2>

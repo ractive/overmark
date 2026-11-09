@@ -125,9 +125,11 @@ of the same pages, alone or with an AI app the user connects.
 | Permission | Justification |
 |---|---|
 | `activeTab` | Add the annotation toolbar to the tab where the user clicked the icon, read the marked elements' details, and take screenshots of that tab. |
+| `alarms` | While the user has the AI app connected, wake the background service worker once a minute, so the connection comes back after the computer slept. |
+| `notifications` | When the connected AI app wants to change something (add a mark, record a verdict, change a mark's status, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Don't allow. Nothing changes without that answer. |
 | `scripting` | Inject the toolbar and outlines into that tab. |
-| `sidePanel` | The side panel lists cases, loads them onto the tab and connects the AI app. |
-| `storage` | Session storage only, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others. |
+| `sidePanel` | The side panel lists cases, loads them onto the tab, and shows the AI app's connection and its questions. |
+| `storage` | Session storage, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others, and whether AI access is on. Local storage, readable only by the extension's own pages and service worker: the AI connection's settings (relay address, "Keep AI access on", "Blur form fields in screenshots") and the secret from which the connection's address is derived. |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
 | `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page from its address or shows a case's marks on a tab Overmark may not run on yet ("Show marks on this tab" or the case's Load button), so the marks load without clicking the icon. All sites only when the user turns on "allow on all sites". |
 
@@ -165,4 +167,5 @@ panel with a case; a case loaded onto another build with green and amber outline
 - [Storage and cookies](https://developer.chrome.com/docs/extensions/develop/concepts/storage-and-cookies):
   `unlimitedStorage` "exempts extensions from both quota restrictions and eviction".
 - [Permissions list](https://developer.chrome.com/docs/extensions/reference/permissions-list):
-  `unlimitedStorage` shows no warning. `test/e2e/shipped.test.ts` asks Chrome itself.
+  `unlimitedStorage` and `alarms` show no warning, `notifications` shows "Display
+  notifications". `test/e2e/shipped.test.ts` asks Chrome itself.

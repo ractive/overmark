@@ -1,6 +1,7 @@
 /**
  * What the service worker refuses: a screenshot of a tab that left the front
- * (it would show another tab), and the side panel's capture from anywhere else.
+ * (it would show another tab), and a screenshot of another tab than the one
+ * asking.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -11,7 +12,7 @@ import { worker } from "./steps.ts";
 interface Capture {
 	ok: boolean;
 	error?: string;
-	dataUrl?: string;
+	width?: number;
 }
 
 describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
@@ -21,9 +22,13 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 	let b: { page: Page; tabId: number };
 	let windowId: number;
 
-	const capture = (tabId: number, window = windowId) =>
+	/** The page's own screenshot of a mark, which the worker takes (DEC-012). */
+	const capture = (tabId: number) =>
 		h.control.eval<Capture>(
-			`chrome.runtime.sendMessage({ type: "capture:tab", tabId: ${tabId}, windowId: ${window} })`,
+			`chrome.scripting.executeScript({
+				target: { tabId: ${tabId} },
+				func: () => chrome.runtime.sendMessage({ type: "capture", caseId: "c_refusals", shotId: "s1" }),
+			}).then(([injected]) => injected.result)`,
 		);
 	const captures = () => serviceWorker.eval<number>("globalThis.captures");
 
@@ -56,7 +61,7 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 		await a.page.activate();
 		const answer = await capture(a.tabId);
 		expect(answer.error).toBeUndefined();
-		expect(answer.dataUrl?.startsWith("data:image/png")).toBe(true);
+		expect(answer.width).toBeGreaterThan(0);
 		expect(await captures()).toBe(1);
 	});
 
@@ -81,16 +86,7 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 		expect(await captures()).toBe(before + 1);
 		expect(answer.ok).toBe(false);
 		expect(answer.error).toContain("no longer in front");
-		expect(answer.dataUrl).toBeUndefined();
-	});
-
-	test("a tab in front of another window than the one asked for", async () => {
-		await a.page.activate();
-		const before = await captures();
-		const answer = await capture(a.tabId, windowId + 1);
-		expect(answer.ok).toBe(false);
-		expect(answer.error).toContain("no longer in front");
-		expect(await captures()).toBe(before);
+		expect(answer.width).toBeUndefined();
 	});
 
 	test("a capture Chrome never answers, and the queue goes on", async () => {
@@ -125,19 +121,13 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 		).toEqual({ ok: false, error: "invalid id" });
 	});
 
-	test("capture:tab from a content script", async () => {
+	test("no message asks for another tab's screenshot: the side panel's capture:tab is gone", async () => {
 		await a.page.activate();
 		const before = await captures();
-		const answer = await h.control.eval<Capture>(
-			`chrome.scripting.executeScript({
-				target: { tabId: ${a.tabId} },
-				args: [${a.tabId}, ${windowId}],
-				func: (tabId, windowId) => chrome.runtime.sendMessage({ type: "capture:tab", tabId, windowId }),
-			}).then(([injected]) => injected.result)`,
+		const answer = await h.control.eval(
+			`chrome.runtime.sendMessage({ type: "capture:tab", tabId: ${a.tabId}, windowId: ${windowId} }).then((r) => r ?? null, () => null)`,
 		);
-		expect(answer.ok).toBe(false);
-		expect(answer.error).toBe("only for Overmark's own pages");
-		expect(answer.dataUrl).toBeUndefined();
+		expect(answer).toBeNull();
 		expect(await captures()).toBe(before);
 	});
 });

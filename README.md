@@ -76,13 +76,15 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
 ## With an AI app
 
-The side panel offers the cases to an AI app (Claude Code, Claude, ChatGPT, Codex)
-through a [tab-mcp](https://github.com/ractive/tab-mcp) relay. The side panel uses
-the hosted relay `https://tab-mcp.ractive.ch` unless you enter another one. It allows
+Overmark offers the cases to an AI app (Claude Code, Claude, ChatGPT, Codex) through a
+[tab-mcp](https://github.com/ractive/tab-mcp) relay. The connection is held by the
+extension's background service worker, so it stays while the side panel is closed; the
+side panel shows it and sets it up. Overmark uses the hosted relay
+`https://tab-mcp.ractive.ch` unless you enter another one in the side panel. It allows
 only builds with the fixed key in `manifest-key.txt` (ID
 `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`); the store package has none, so
 it gets another ID and needs a relay of its own until the store's key is set.
-The side panel's tools:
+The tools:
 
 | Tool | What it does |
 |---|---|
@@ -118,17 +120,34 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 ```
 
 Then, in the side panel's "AI app" section, set the relay to `http://localhost:8080`
-and click "Connect AI app". Add the address it shows to Claude Code, then run `/mcp`
-there and choose Authenticate:
+and click "Connect AI app". Add the address the side panel shows to Claude Code, then run
+`/mcp` there and choose Authenticate:
 
 ```sh
 claude mcp add --transport http overmark <address>
 ```
 
-Your browser opens the relay's page; type the code from the side panel. "Keep AI access
-on" connects again whenever the side panel opens, and when the relay ended an idle
-session. "Stop AI access" ends the connection and keeps the pairing, as closing the side
-panel does; closing a tab does the same for a web page.
+Your browser opens the relay's page; type the code from the side panel. The connection
+stays when you close the side panel (the icon shows "on"), until "Stop AI access" (which
+keeps the pairing), the relay's end of an idle session, or the browser closes; an update
+or reload of the extension (or turning it off) ends it too. "Keep AI access on" connects
+again by itself after all of these but "Stop AI access".
+
+A tool that changes something (marked "asks first" above) asks every time: in the side
+panel when it is open in the window in front, otherwise in a system notification with
+Don't allow and Allow (the icon shows "?" while a question waits). No answer within 60
+seconds is Don't allow.
+
+Overmark needs Chrome 140 or later: from then on Chrome keeps the extension's storage,
+which holds the connection's address secret, from the scripts it runs in web pages.
+Where it cannot, AI access stays off.
+
+Permissions for this: `alarms` wakes the service worker once a minute while AI access is
+on, so the connection comes back after a sleep; `notifications` asks the questions when
+the side panel is not in front (Chrome mentions it when installing: "Display
+notifications"). In earlier builds the connection lived in the side panel, and its
+address secret in the panel's own storage; the first time the side panel opens after the
+update, it hands the secret over, so the address an AI app has stays the same.
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
 relay with a public HTTPS address that allows Overmark's ID, such as the hosted one.

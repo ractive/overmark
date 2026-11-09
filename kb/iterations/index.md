@@ -11,5 +11,6 @@
 * [Iteration 5: pilot and store](iteration-5-pilot.md) - A first pilot with a PO and a dev on real Acme pages, measuring how often elements are found; the privacy policy and the store listing; the extension unlisted in the Chrome Web Store and the store's key in the manifest.
 * [Iteration 6: trial on dev pages and the refactor](iteration-6-trial-refactor.md) - Overmark on real Acme dev pages (matching measured, a scale bug found and fixed), then three refactors the reviews asked for: an allow-list of recorded details, one state machine per page, and a side panel drawn from one state.
 * [Iteration 7: full review](iteration-7-full-review.md) - A review of the whole codebase by four Claude reviewers and GLM: 70 findings, 57 distinct. Screenshots moved to the moment a mark is drawn, which removed the cause of the worst ones; the rest fixed or answered.
+* [Iteration 8: the AI connection without the side panel](iteration-8-worker-connection.md) - The connection to the AI app moves from the side panel into the service worker (DEC-015), so it stays while the panel is closed and comes back after a restart; the panel becomes a view with a plain pairing view of its own; a tool that changes something asks in the side panel of the window in front, else in a Chrome notification.
 
 <!-- okf:index:end -->

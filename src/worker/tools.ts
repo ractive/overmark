@@ -35,7 +35,7 @@ import type {
 } from "../lib/messages.ts";
 import { type Crop, cropRectFor, SaveError, saveCase } from "../lib/save.ts";
 import type { CaseStore, StoredImage } from "../lib/store.ts";
-import { shortUrl } from "./dom.ts";
+import { shortUrl } from "../sidepanel/dom.ts";
 
 type MarkStatus = "open" | ResolutionKind;
 
@@ -46,7 +46,7 @@ export interface CurrentTab {
 	title: string;
 }
 
-/** The tab in front of the side panel's window. */
+/** The tab in front: the active tab of the last focused normal window. */
 export interface TabBridge {
 	current(): Promise<CurrentTab>;
 	/** Send to the tab's content script, injecting it when needed. */
@@ -71,8 +71,8 @@ export interface ToolDeps {
 	onChange?: (caseId: string) => void;
 	/** Waits for the page to paint before a screenshot. */
 	settle?: () => Promise<void>;
-	/** The side panel's "Blur form fields in screenshots". */
-	blurForms?: () => boolean;
+	/** The side panel's "Blur form fields in screenshots", as set at this moment. */
+	blurForms?: () => boolean | Promise<boolean>;
 	/** The relay's message limit for this session, when connected. */
 	maxMessageBytes?: () => number | undefined;
 	/** How long the page may take to answer. */
@@ -323,7 +323,7 @@ function fittingList<T>(
 export function createTools(deps: ToolDeps): Tool[] {
 	const { store, images } = deps;
 	const settle = deps.settle ?? (() => new Promise((r) => setTimeout(r, 150)));
-	const blurForms = () => deps.blurForms?.() ?? false;
+	const blurForms = async () => (await deps.blurForms?.()) ?? false;
 	const budget = () =>
 		Math.floor(
 			(deps.maxMessageBytes?.() ?? DEFAULT_MESSAGE_BYTES) * RESULT_SHARE,
@@ -748,7 +748,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 				// as in the user's own screenshots.
 				const blurred = await tab.send<BlurResult>(current.id, {
 					type: "page:blur",
-					blurForms: blurForms(),
+					blurForms: await blurForms(),
 				});
 				if (!blurred.ok) throw new CaseError(blurred.error);
 				const png = await heldShot(current, "page:unblur");
@@ -786,7 +786,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 			type: "element:mark",
 			selector: input.selector,
 			number: next.annotation,
-			blurForms: blurForms(),
+			blurForms: await blurForms(),
 		});
 		if (!described.ok) throw new CaseError(described.error);
 		const png = await heldShot(current, "element:unmark");
@@ -1023,14 +1023,15 @@ export function createTools(deps: ToolDeps): Tool[] {
 const confirmedPages = new WeakMap<AbortSignal, { id: number; url: string }>();
 
 /**
- * A confirmation that names the case (and for add_annotation, the page) the
- * call is about, next to the raw arguments the dialog shows.
+ * What a question about `request` says besides the tool and its arguments:
+ * the case it is about (title, page, marks), the mark for set_mark_status,
+ * and for add_annotation the page in front, which the call is then held to.
  */
-export async function confirmRequestFor(
+export async function confirmLines(
 	store: CaseStore,
 	tab: TabBridge,
 	request: ConfirmRequest,
-): Promise<ConfirmRequest> {
+): Promise<string[]> {
 	const lines: string[] = [];
 	const caseId = request.arguments["caseId"];
 	if (typeof caseId === "string") {
@@ -1058,12 +1059,5 @@ export async function confirmRequestFor(
 			confirmedPages.set(request.signal, { id: current.id, url: current.url });
 		}
 	}
-	if (lines.length === 0) return request;
-	return {
-		...request,
-		tool: {
-			...request.tool,
-			description: `${request.tool.description}\n\n${lines.join("\n")}`,
-		},
-	};
+	return lines;
 }

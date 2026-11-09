@@ -62,8 +62,8 @@ is what a case is about, and finding the element again is a best-effort extra:
 | Part | Job |
 |---|---|
 | Content script (`src/content/`) | Toolbar and drawing overlay in a shadow DOM, element picker, element details, a screenshot per mark as it is drawn, highlighting a loaded case |
-| Service worker (`src/background.ts`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases |
-| Side panel (`src/sidepanel/`) | Case list, case viewer, verdict, export and import, and `TabMcp` (connect dialog, tools, confirmations) |
+| Service worker (`src/background.ts`, `src/worker/`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases; `TabMcp` with the tools and their questions (DEC-015) |
+| Side panel (`src/sidepanel/`) | Case list, case viewer, verdict, export and import; a view of the AI connection (status, pairing, questions) |
 | Library (`src/lib/`) | Case format, element details, matching, zip, export, IndexedDB store, images |
 
 Storage is IndexedDB in the extension's origin (database `overmark`, stores `cases` and
@@ -75,6 +75,13 @@ the page's origin and never touches it directly.
 - `activeTab`: clicking the icon (or the keyboard shortcut) on a tab allows Overmark on
   that tab until it navigates: injecting the content script and `captureVisibleTab`.
 - `scripting`, `sidePanel`.
+- `alarms`: wakes the service worker once a minute while AI access is on, so the
+  connection comes back after a sleep. No install warning.
+- `notifications`: a tool's question when no side panel is open in the window in front
+  (DEC-015). Chrome's install warning "Display notifications".
+- `storage`: `chrome.storage.session` for the toolbar's Undo and for AI access being on
+  until the browser closes; `chrome.storage.local` (trusted contexts only) for the AI
+  connection's settings and its address secret.
 - `unlimitedStorage`: IndexedDB holds the only copy of the cases, so the browser must not
   evict it when disk space runs low. Chrome documents the permission as exempt from quota
   and eviction, and it adds no install warning, which keeps DEC-003's small warning.
@@ -87,12 +94,16 @@ rules on remote code, and safety).
 
 ### The tab-mcp connection
 
-`TabMcp` from `@ractive-ch/tab-mcp-client` runs in the side panel, an extension page. Its
-WebSocket therefore carries the extension's origin `chrome-extension://<id>`, which a
-website cannot fake. A content script's requests would carry the page's origin, so the
-connection must not live there. The relay must allow the extension's origin (relay 0.7.0
-and later take it in `TAB_MCP_SITES`). Closing the side panel ends the connection, as
-closing a tab does for a page.
+`TabMcp` from `@ractive-ch/tab-mcp-client` runs in the service worker (DEC-015), an
+extension context. Its WebSocket therefore carries the extension's origin
+`chrome-extension://<id>`, which a website cannot fake. A content script's requests would
+carry the page's origin, so the connection must not live there. The relay must allow the
+extension's origin (relay 0.7.0 and later take it in `TAB_MCP_SITES`). The connection
+stays while the side panel is closed; the panel is a view that talks to it over one named
+port, whose sender the worker checks (the panel's own page, not in a tab). "Keep AI access
+on" connects at every worker start and after an idle session; without it AI access stays
+on until "Stop AI access", the relay's end of the session, the browser closing, or an
+update or reload of the extension (`chrome.storage.session` is cleared then too).
 
 The extension ID is fixed by the `key` in the manifest (`manifest-key.txt`, a public key;
 development ID `fphhchhlgklidhnodoleiebmdhnfdadg`). Store builds leave the key out; once
@@ -194,9 +205,11 @@ loading is searched for again.
 | `set_mark_status` | Resolves a mark (fixed, won't fix, can't reproduce) or opens it again | yes |
 | `delete_case` | Deletes a case | yes |
 
-Every call that changes something asks in the side panel, every time (DEC-008). The
-question names the case (title, page, number of marks) and, for `add_annotation`, the page
-in front, next to the raw arguments.
+Every call that changes something asks, every time (DEC-008): in the side panel of the
+window in front when it is open and focused, else also in a Chrome notification; no
+answer in 60 s is Don't allow (DEC-015). The question names the case (title, page, number
+of marks) and, for `add_annotation`, the page in front, next to the raw arguments. "The
+tab in front" is the active tab of the last focused normal window.
 
 The tools that act on the tab (`load_case`, `highlight`, `get_mark_element`, `capture`,
 `add_annotation`) run

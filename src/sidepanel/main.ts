@@ -4,7 +4,6 @@
  * view.ts draws it (DEC-011).
  */
 
-import type { TabMcp, ToolCallStart } from "@ractive-ch/tab-mcp-client";
 import {
 	type Annotation,
 	type Case,
@@ -32,13 +31,9 @@ import type {
 } from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
+import { KEYS } from "../worker/settings.ts";
+import { startAi } from "./ai.ts";
 import { byId, h, isWebPage, shortUrl, sitePattern } from "./dom.ts";
-import {
-	createConnection,
-	DEFAULT_RELAY,
-	KeepOn,
-	relayProblem,
-} from "./mcp.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import { Latest, Panel, type PanelState } from "./state.ts";
 import { type Actions, NO_ACCESS, render } from "./view.ts";
@@ -48,14 +43,7 @@ const store = new IdbStore();
 const blurForms = byId<HTMLInputElement>("blur-forms");
 const importButton = byId<HTMLButtonElement>("import");
 const importFile = byId<HTMLInputElement>("import-file");
-const relayInput = byId<HTMLInputElement>("relay");
-const connectButton = byId<HTMLButtonElement>("connect");
-const keepOn = byId<HTMLInputElement>("keep-on");
 const allSites = byId<HTMLInputElement>("all-sites");
-
-const BLUR_KEY = "overmark:blur-forms";
-const RELAY_KEY = "overmark:relay";
-const KEEP_ON_KEY = "overmark:keep-ai-on";
 
 const ALL_SITES = { origins: ["<all_urls>"] };
 
@@ -63,22 +51,6 @@ const ALL_SITES = { origins: ["<all_urls>"] };
 const DELETE_CLICK_GAP_MS = 500;
 /** After a first click on Delete: a click much later is no decision either. */
 const DELETE_ARMED_MS = 4000;
-
-function readSetting(key: string): string | null {
-	try {
-		return localStorage.getItem(key);
-	} catch {
-		return null;
-	}
-}
-
-function writeSetting(key: string, value: string): void {
-	try {
-		localStorage.setItem(key, value);
-	} catch {
-		// Storage blocked: the setting lasts until the panel closes.
-	}
-}
 
 /**
  * Chrome's prompt to let Overmark run on the site of `url` from now on. It
@@ -946,9 +918,18 @@ const actions: Actions = {
 
 // --- settings and import -------------------------------------------------------------
 
-blurForms.checked = readSetting(BLUR_KEY) === "true";
+// In the extension's storage: the AI app's screenshots, taken in the worker,
+// follow it too (DEC-015).
+void chrome.storage.local.get(KEYS.blurForms).then((stored) => {
+	blurForms.checked = stored[KEYS.blurForms] === true;
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+	const change = changes[KEYS.blurForms];
+	if (area === "local" && change !== undefined)
+		blurForms.checked = change.newValue === true;
+});
 blurForms.addEventListener("change", () => {
-	writeSetting(BLUR_KEY, String(blurForms.checked));
+	void chrome.storage.local.set({ [KEYS.blurForms]: blurForms.checked });
 	// An overlay already open on a tab took the setting when it was shown.
 	const news: ContentRequest = {
 		type: "overlay:settings",
@@ -1091,158 +1072,7 @@ async function changeMark(
 	}
 }
 
-function connectTo(relay: string): TabMcp {
-	return createConnection(relay, store, {
-		onChange: (caseId) => {
-			caseChanged(caseId);
-			announce(caseId);
-		},
-		blurForms: () => blurForms.checked,
-	});
-}
-
-/**
- * The relay to use. Until 2026-11-09 the default was a relay on this
- * computer, and nothing was saved for it: a panel that connected there (the
- * library keeps an address secret per relay) stays with it.
- */
-function savedRelay(): string {
-	const saved = readSetting(RELAY_KEY);
-	if (saved !== null) return saved;
-	const old = "http://localhost:8080";
-	if (readSetting(`tab-mcp:secret:${old}:overmark`) === null)
-		return DEFAULT_RELAY;
-	writeSetting(RELAY_KEY, old);
-	return old;
-}
-
-/** Shown while disconnected when the saved relay could not be used. */
-let relayNote: string | undefined;
-let relay = savedRelay();
-let mcp: TabMcp;
-try {
-	mcp = connectTo(relay);
-} catch (error) {
-	// A stored address the library refuses must not stop the panel.
-	relayNote = `The saved relay ${relay} cannot be used (${message(error)}); using ${DEFAULT_RELAY}.`;
-	relay = DEFAULT_RELAY;
-	mcp = connectTo(relay);
-}
-relayInput.value = relay;
-update((s) => (s.ai.keepOn = readSetting(KEEP_ON_KEY) === "true"));
-
-const keep = new KeepOn(() => state.ai.keepOn, aiChanged);
-
-function aiChanged(): void {
-	const grants = mcp.grants;
-	const connected = mcp.state !== "disconnected";
-	const problem =
-		keep.problem &&
-		`Not connected: ${keep.problem}${keep.retrying ? " Trying again…" : ""}`;
-	update((s) => {
-		s.ai = {
-			...s.ai,
-			connected,
-			active: connected || mcp.reconnecting !== undefined || keep.retrying,
-			status:
-				mcp.state === "connected"
-					? grants.length > 0
-						? `Connected: ${grants.map((g) => g.client.name).join(", ")}`
-						: "Waiting for an AI app to pair"
-					: mcp.state === "connecting"
-						? "Connecting…"
-						: mcp.reconnecting
-							? "Connection lost, retrying…"
-							: [relayNote, problem].filter(Boolean).join(" ") ||
-								"Not connected",
-		};
-	});
-}
-
-function aiCalled({ tool, title, client }: ToolCallStart): void {
-	update((s) => {
-		s.ai.lastCall = {
-			tool: title ?? tool,
-			// The name is what the app declares; the host is verified.
-			app: client.name ? `${client.name} (${client.host})` : client.host,
-			at: Date.now(),
-		};
-	});
-}
-
-function watch(connection: TabMcp): void {
-	for (const type of [
-		"statechange",
-		"grantschange",
-		"reconnecting",
-		"disconnected",
-	])
-		connection.addEventListener(type, aiChanged);
-	connection.addEventListener("toolcall", (event) => aiCalled(event.detail));
-	keep.watch(connection);
-}
-watch(mcp);
-aiChanged();
-
-relayInput.addEventListener("change", () => {
-	const value = relayInput.value.trim();
-	const refuse = (problem: string) => {
-		relayInput.setCustomValidity(problem);
-		relayInput.reportValidity();
-	};
-	const problem = relayProblem(value);
-	if (problem !== undefined) return refuse(problem);
-	// Build the new connection first: the setting and the old connection
-	// change only once it exists.
-	let next: TabMcp;
-	try {
-		next = connectTo(value);
-	} catch (error) {
-		return refuse(message(error));
-	}
-	relayInput.setCustomValidity("");
-	writeSetting(RELAY_KEY, value);
-	relayNote = undefined;
-	mcp.disconnect();
-	mcp = next;
-	watch(mcp);
-	aiChanged();
-	keep.connect();
-});
-
-/** The connect dialog; it needs the user's click, which both buttons give. */
-function openConnect(): void {
-	const connection = mcp;
-	void connection.showConnectDialog().catch((error: unknown) => {
-		if (connection === mcp) keep.failed(error);
-	});
-}
-
-connectButton.addEventListener("click", openConnect);
-// The status at the top is where one looks for the connection.
-byId<HTMLButtonElement>("ai-button").addEventListener("click", openConnect);
-
-function setKeepOn(on: boolean): void {
-	update((s) => (s.ai.keepOn = on));
-	writeSetting(KEEP_ON_KEY, String(on));
-}
-
-keepOn.addEventListener("change", () => {
-	setKeepOn(keepOn.checked);
-	if (state.ai.keepOn) keep.connect();
-	else keep.stop();
-});
-
-// Ends the session, not the pairing: the AI app works again after the next
-// connect. "Keep AI access on" would undo that, so it goes off too.
-byId<HTMLButtonElement>("stop-ai").addEventListener("click", () => {
-	setKeepOn(false);
-	keep.stop();
-	mcp.disconnect();
-	aiChanged();
-});
-
-keep.connect();
+void startAi(update);
 
 // --- news from the pages and the browser -----------------------------------------
 

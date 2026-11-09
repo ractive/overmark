@@ -50,13 +50,15 @@ describe("extension ID", () => {
 });
 
 describe("manifest", () => {
-	test("development: key, activeTab, optional <all_urls> only", () => {
+	test("development: key, activeTab, alarms and notifications, optional <all_urls> only", () => {
 		const m = createManifest("1.2.3", { key: "abc" });
 		expect(m["manifest_version"]).toBe(3);
 		expect(m["version"]).toBe("1.2.3");
 		expect(m["key"]).toBe("abc");
 		expect(m["permissions"]).toEqual([
 			"activeTab",
+			"alarms",
+			"notifications",
 			"scripting",
 			"sidePanel",
 			"storage",
@@ -64,6 +66,9 @@ describe("manifest", () => {
 		]);
 		expect(m["optional_host_permissions"]).toEqual(["<all_urls>"]);
 		expect(m["host_permissions"]).toBeUndefined();
+		// storage.local.setAccessLevel(), which keeps the address secret from
+		// content scripts, works from Chrome 140.
+		expect(m["minimum_chrome_version"]).toBe("140");
 	});
 
 	test("test builds get host access", () => {

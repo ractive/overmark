@@ -1,0 +1,193 @@
+/**
+ * What the side panel and the service worker say to each other about the AI
+ * connection, and who may say it (DEC-015). The connection lives in the
+ * worker; the side panel is a view that sends commands over one named port
+ * and gets the state back. Content scripts reach the same `chrome.runtime`
+ * events, so the port's sender is checked: only the side panel's own page.
+ */
+
+/** The name of the side panel's port (`chrome.runtime.connect`). */
+export const PANEL_PORT = "ai";
+
+/** The side panel's page in the build. */
+export const PANEL_PATH = "/sidepanel/index.html";
+
+/** The answer to a question: no "Always allow" (DEC-008). */
+export type Answer = "allow" | "deny";
+
+/** From the side panel. */
+export type PanelCommand =
+	/** The panel opened in window `windowId`. */
+	| { type: "hello"; windowId: number }
+	/** Connect (Connect, Manage: the user's click). */
+	| { type: "connect" }
+	/** "Stop AI access": end the session, keep the pairing, Keep AI access off. */
+	| { type: "stop" }
+	| { type: "keep-on"; on: boolean }
+	/** The pairing view opened (`on`) or closed: codes only while it is open. */
+	| { type: "pair"; on: boolean }
+	| { type: "revoke"; grantId: string }
+	| { type: "new-address" }
+	| { type: "set-relay"; relay: string }
+	| { type: "answer"; id: string; answer: Answer }
+	/**
+	 * Once: what the panel kept in its `localStorage` before the connection
+	 * moved into the worker, so the address and the settings stay.
+	 */
+	| {
+			type: "migrate";
+			relay?: string;
+			keepOn?: boolean;
+			blurForms?: boolean;
+			secrets: Record<string, string>;
+	  };
+
+/** A connected AI app. */
+export interface GrantView {
+	grantId: string;
+	/** Its self-declared name ("" if none). */
+	name: string;
+	/** The host of its client id: the verified part. */
+	host: string;
+}
+
+/** A question waiting for the user (a tool that changes something). */
+export interface QuestionView {
+	id: string;
+	/** The AI app: its declared name beside its verified host. */
+	app: string;
+	/** The tool's name, and its title. */
+	tool: string;
+	title?: string;
+	/** The case, mark and page it is about (`confirmLines`). */
+	lines: string[];
+	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
+	args: string;
+}
+
+/** An AI app's last tool call. */
+export interface CallView {
+	/** The tool's title. */
+	tool: string;
+	app: string;
+	/** `Date.now()` when it came. */
+	at: number;
+}
+
+/** Everything the panel shows of the connection. */
+export interface AiState {
+	relay: string;
+	/** The saved relay could not be used, and the default is used instead. */
+	relayNote?: string;
+	keepOn: boolean;
+	/** The library's state. */
+	state: "disconnected" | "connecting" | "connected";
+	/** The library is reconnecting by itself. */
+	reconnecting: boolean;
+	/** "Keep AI access on" waits to try again. */
+	retrying: boolean;
+	/** Why the last connect failed, or the last command. */
+	problem?: string;
+	address?: string;
+	grants: GrantView[];
+	/** A panel's pairing view is open. */
+	pairing: boolean;
+	code?: string;
+	/** Another tab or program took the address over. */
+	replaced?: { sibling: boolean };
+	lastCall?: CallView;
+	questions: QuestionView[];
+	/** The panel's old `localStorage` settings were taken over. */
+	migrated: boolean;
+}
+
+/** From the service worker. */
+export type WorkerMessage = { type: "state"; state: AiState };
+
+/** The sender of a port, as far as the check needs it. */
+export interface Sender {
+	id?: string;
+	url?: string;
+	tab?: unknown;
+}
+
+/**
+ * A port from the side panel: this extension's page at the panel's path, not
+ * in a tab. A content script's port has `tab`, and its `url` is the page's;
+ * the panel's page opened in a tab by its address is not the side panel
+ * either, and gets nothing.
+ */
+export function isPanelSender(sender: Sender, extensionId: string): boolean {
+	if (sender.id !== extensionId || sender.tab !== undefined) return false;
+	try {
+		const url = new URL(sender.url ?? "");
+		return (
+			url.protocol === "chrome-extension:" &&
+			url.host === extensionId &&
+			url.pathname === PANEL_PATH
+		);
+	} catch {
+		return false;
+	}
+}
+
+const isString = (value: unknown): value is string => typeof value === "string";
+const isBoolean = (value: unknown): value is boolean =>
+	typeof value === "boolean";
+
+/** A panel command, checked; `undefined` for anything else. */
+export function parseCommand(message: unknown): PanelCommand | undefined {
+	if (typeof message !== "object" || message === null) return undefined;
+	const m = message as Record<string, unknown>;
+	switch (m["type"]) {
+		case "hello":
+			return Number.isInteger(m["windowId"])
+				? { type: "hello", windowId: m["windowId"] as number }
+				: undefined;
+		case "connect":
+		case "stop":
+		case "new-address":
+			return { type: m["type"] };
+		case "keep-on":
+		case "pair":
+			return isBoolean(m["on"]) ? { type: m["type"], on: m["on"] } : undefined;
+		case "revoke":
+			return isString(m["grantId"])
+				? { type: "revoke", grantId: m["grantId"] }
+				: undefined;
+		case "set-relay":
+			return isString(m["relay"])
+				? { type: "set-relay", relay: m["relay"] }
+				: undefined;
+		case "answer":
+			return isString(m["id"]) &&
+				(m["answer"] === "allow" || m["answer"] === "deny")
+				? { type: "answer", id: m["id"], answer: m["answer"] }
+				: undefined;
+		case "migrate": {
+			const raw = m["secrets"];
+			if (typeof raw !== "object" || raw === null) return undefined;
+			const secrets: Record<string, string> = {};
+			for (const [key, value] of Object.entries(raw))
+				if (isString(value)) secrets[key] = value;
+			const relay = m["relay"];
+			const keepOn = m["keepOn"];
+			const blurForms = m["blurForms"];
+			if (
+				(relay !== undefined && !isString(relay)) ||
+				(keepOn !== undefined && !isBoolean(keepOn)) ||
+				(blurForms !== undefined && !isBoolean(blurForms))
+			)
+				return undefined;
+			return {
+				type: "migrate",
+				...(relay !== undefined ? { relay } : {}),
+				...(keepOn !== undefined ? { keepOn } : {}),
+				...(blurForms !== undefined ? { blurForms } : {}),
+				secrets,
+			};
+		}
+		default:
+			return undefined;
+	}
+}

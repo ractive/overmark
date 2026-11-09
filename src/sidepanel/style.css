@@ -220,10 +220,7 @@ button {
 		border-color 0.12s;
 }
 
-/* Not in the tab-mcp library's dialogs: this selector is more specific than
-   their own hover rules and would give the primary button a light background
-   under its light text. */
-button:hover:not(:disabled, .tab-mcp-dialog *) {
+button:hover:not(:disabled) {
 	background: var(--wash);
 	border-color: var(--muted);
 }
@@ -1130,6 +1127,63 @@ textarea + .row {
 
 .field input:invalid {
 	border-color: var(--danger);
+}
+
+/* The AI connection's pairing and questions, under the header (ai.ts). */
+.ai-box {
+	padding: 12px 14px;
+	border-bottom: 1px solid var(--rule);
+}
+
+#questions:empty {
+	display: none;
+}
+
+.ai-box p {
+	margin: 0 0 6px;
+}
+
+.ai-box pre {
+	margin: 0 0 8px;
+	padding: 6px 8px;
+	max-height: 12em;
+	overflow: auto;
+	border-radius: 8px;
+	background: var(--wash);
+	font-size: 12px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.ai-box .address {
+	overflow-wrap: anywhere;
+	font-size: 12px;
+}
+
+.ai-box .code {
+	font-size: 20px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+}
+
+.question + .question {
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid var(--rule);
+}
+
+ul.grants {
+	list-style: none;
+	margin: 0 0 8px;
+	padding: 0;
+}
+
+ul.grants li {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
