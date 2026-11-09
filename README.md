@@ -119,22 +119,25 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   ractive/tab-mcp:0.7.0
 ```
 
-Then, in the side panel's "AI app" section, set the relay to `http://localhost:8080`
-and click "Connect AI app". Add the address the side panel shows to Claude Code, then run
-`/mcp` there and choose Authenticate:
+Then, in the side panel's "AI app" card, set the relay to `http://localhost:8080`
+and click "Turn on AI access" (or flip the AI access switch). With no AI app paired yet,
+the card shows the address and a code at once; with apps paired, "+ Add another AI app"
+shows them. Add the address to Claude Code, then run `/mcp` there and choose
+Authenticate:
 
 ```sh
 claude mcp add --transport http overmark <address>
 ```
 
 Your browser opens the relay's page; type the code from the side panel. The connection
-stays when you close the side panel (the icon shows "on"), until "Stop AI access" (which
-keeps the pairing), the relay's end of an idle session, or the browser closes; an update
+stays when you close the side panel (the icon shows "on"), until you turn the switch off
+or click "Stop AI access" (either keeps the pairing), the relay's end of an idle session, or the browser closes; an update
 or reload of the extension (or turning it off) ends it too. "Keep AI access on" connects
 again by itself after all of these but "Stop AI access".
 
 A tool that changes something (marked "asks first" above) asks every time: in the side
-panel when it is open in the window in front, otherwise in a system notification with
+panel when it is open and on screen in the window in front (another extension's panel,
+such as Claude in Chrome's, can cover it), otherwise in a system notification with
 Don't allow and Allow (the icon shows "?" while a question waits). No answer within 60
 seconds is Don't allow.
 

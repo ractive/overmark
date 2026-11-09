@@ -1,8 +1,8 @@
 /**
  * The questions of tools that change something (DEC-008: every call asks),
  * now that the connection has no page of its own to ask in (DEC-015). A
- * question shows in every open side panel; unless a side panel is open in
- * the focused window of the tab in front, it also goes out as a Chrome
+ * question shows in every open side panel; unless a side panel is open, on
+ * screen, in the focused window of the tab in front, it also goes out as a Chrome
  * notification. The first answer counts; nobody answering within the time
  * limit, or the AI app cancelling, is Don't allow. Each notification carries
  * its call: a click answers only that call, and a click on a call that is
@@ -239,8 +239,9 @@ export class Questions {
 	}
 
 	/**
-	 * The side panel of window `windowId` closed: its questions that showed
-	 * only there go out as notifications.
+	 * The side panel of window `windowId` closed, or another extension's
+	 * panel covered it: its questions that showed only there go out as
+	 * notifications.
 	 */
 	panelClosed(windowId: number): void {
 		for (const pending of this.#pending.values())

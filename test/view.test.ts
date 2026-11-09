@@ -686,14 +686,12 @@ describe("the AI app", () => {
 		expect(el("ai-call").textContent).toContain("Screenshot, by claude.ai");
 	});
 
-	test("the connect button says what it does now", () => {
+	test("the status at the top says what a click on it does", () => {
 		render(caseState(sampleCase("c_b1")), noActions);
-		expect(el("connect").textContent).toBe("Connect AI app");
-		// The status at the top is a button too, saying what a click does.
+		// The status at the top is a button too.
 		expect(el("ai-button").contains(el("ai-status"))).toBe(true);
-		expect(el("ai-action").textContent).toBe("Connect");
+		expect(el("ai-action").textContent).toBe("Turn on");
 		render(caseState(sampleCase("c_b1"), ai({ connected: true })), noActions);
-		expect(el("connect").textContent).toBe("Manage AI connection");
 		expect(el("ai-action").textContent).toBe("Manage");
 	});
 });

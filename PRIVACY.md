@@ -94,7 +94,7 @@ Only in two cases, both started by you:
    until you allow it; no answer within 60 seconds is Don't allow. The side panel shows
    the app's last call.
 
-   "Stop AI access" at the top of the side panel pauses the connection; it does not end
+   "Stop AI access" at the top of the side panel, or the AI access switch, pauses the connection; it does not end
    the pairing, and it turns "Keep AI access on" off. Without "Keep AI access on" the
    connection also ends when the relay ends a session that was idle or too old, when
    the browser closes, and when Overmark is updated, reloaded or turned off. With it,

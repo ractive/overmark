@@ -21,14 +21,19 @@ export type Answer = "allow" | "deny";
 export type PanelCommand =
 	/** The panel opened in window `windowId`. */
 	| { type: "hello"; windowId: number }
-	/** Connect (Connect, Manage: the user's click). */
+	/**
+	 * Whether the panel is on screen: another extension's panel for the tab
+	 * (Claude in Chrome's) can cover it while it stays open.
+	 */
+	| { type: "visible"; visible: boolean }
+	/** Connect (the AI access switch, Turn on AI access: the user's click). */
 	| { type: "connect" }
 	/** "Stop AI access": end the session, keep the pairing, Keep AI access off. */
 	| { type: "stop" }
 	| { type: "keep-on"; on: boolean }
 	/** "Blur form fields in screenshots" (DEC-016: only the worker keeps it). */
 	| { type: "blur-forms"; on: boolean }
-	/** The pairing view opened (`on`) or closed: codes only while it is open. */
+	/** The card shows the address and code (`on`) or not: codes only while it does. */
 	| { type: "pair"; on: boolean }
 	| { type: "revoke"; grantId: string }
 	| { type: "new-address" }
@@ -152,6 +157,10 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "hello":
 			return Number.isInteger(m["windowId"])
 				? { type: "hello", windowId: m["windowId"] as number }
+				: undefined;
+		case "visible":
+			return isBoolean(m["visible"])
+				? { type: "visible", visible: m["visible"] }
 				: undefined;
 		case "connect":
 		case "stop":

@@ -337,3 +337,37 @@ PR 89 and PR 91, DEC-116); this follows it.
 - **Chrome 116 again.** The minimum from before overmark#26: a WebSocket that carries
   messages keeps the service worker alive from there (DEC-015); nothing else in the code
   needs a newer Chrome.
+
+## DEC-017: The tab-mcp extension's AI app card
+
+2026-11-09, after the owner's "wait until Tab MCP finishes it and then just copy it": the
+tab-mcp extension's PR 88 settled its side panel's AI access UI, and DEC-015's plain
+pairing view gives way to it.
+
+- **The card** (`src/sidepanel/card.ts`, the tab-mcp extension's rules on Overmark's
+  state): an "AI access" switch in its header (on also while connecting or retrying, so
+  the user can stop that); off, "Turn on AI access" is the one primary button; on with no
+  AI app paired, the address and the code show at once (pairing runs only then); with
+  apps paired, "+ Add another AI app" shows them again, with Done. The address shows only
+  while pairing. Disconnect asks first, and the second click of a double click confirms
+  nothing. The switch shows the user's flip until a state that matches it comes, for at
+  most 10 s.
+- **Overmark's own parts stay.** The relay field and "Keep AI access on" sit under the
+  card (the tab-mcp extension has no Keep AI access on: its worker always retries). The
+  header keeps its status pill and "Stop AI access", which also show in a case; the pill
+  leads to the card on the home view, turning AI access on if it was off.
+- **A covered panel is not on screen.** Another extension's panel for the tab (Claude in
+  Chrome's) can cover Overmark's while it stays open. The panel tells the worker its
+  visibility (`visible`); a hidden panel's questions go out as notifications, as a
+  closed panel's do, and a question asked meanwhile is a notification at once.
+- **The panel still opens for the window, not yet with the tab.** The tab-mcp extension
+  opens it with `sidePanel.open({ tabId, windowId })`, so that it shows over a panel
+  another extension opened for the tab (with the window alone Chrome resolves and shows
+  nothing). In Overmark that call made the store package's end-to-end test fail in CI
+  (Chrome for Testing 156 on Linux, twice in a row; a probe without it passed, and main
+  had been green all day): after the icon's click a click with the Element tool went
+  past the overlay to the page. It passes on macOS, so the cause is not known yet; the
+  call stays out until it is. The covered-panel test hides the panel's page itself: in
+  Overmark's harness a second extension's worker did not start.
+- **Notifications keep Don't allow and Allow.** The tab-mcp extension's Allow and Always
+  allow do not apply: every change asks each time (DEC-008).

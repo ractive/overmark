@@ -1129,7 +1129,162 @@ textarea + .row {
 	border-color: var(--danger);
 }
 
-/* The AI connection's pairing and questions, under the header (ai.ts). */
+/* The AI app card (card.ts): the title with the AI access switch beside it. */
+.card-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.card-head h2 {
+	margin: 0;
+}
+
+.switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.switch input {
+	appearance: none;
+	flex: none;
+	position: relative;
+	margin: 0;
+	width: 34px;
+	height: 20px;
+	border-radius: 999px;
+	background: var(--rule);
+	cursor: pointer;
+	transition: background-color 0.15s;
+}
+
+.switch input::after {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	background: var(--sheet);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+	transition: transform 0.15s;
+}
+
+.switch input:checked {
+	background: var(--ok);
+}
+
+.switch input:checked::after {
+	transform: translateX(14px);
+}
+
+.switch input:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+/* The card's state, its dot coloured as the header's. */
+.ai-state {
+	display: flex;
+	align-items: baseline;
+	gap: 7px;
+	margin: 0 0 8px;
+	overflow-wrap: anywhere;
+}
+
+.ai-state .dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--muted);
+	transform: translateY(-1px);
+}
+
+.ai-state[data-state="connecting"] .dot,
+.ai-state[data-state="retrying"] .dot,
+.ai-state[data-state="waiting"] .dot {
+	background: var(--amber);
+}
+
+.ai-state[data-state="on"] .dot {
+	background: var(--ok);
+}
+
+.ai-state[data-state="on"] {
+	font-weight: 600;
+}
+
+.ai-card > .row,
+.ai-card > p {
+	margin: 0 0 8px;
+}
+
+button.link.add-app {
+	color: var(--link);
+}
+
+button.link.add-app:hover:not(:disabled) {
+	color: var(--link);
+	text-decoration: underline;
+}
+
+/* The address and the code: the step, set apart from the settings under it. */
+.pairing {
+	margin: 0 0 12px;
+	padding: 10px 12px;
+	border-radius: 8px;
+	background: var(--wash);
+}
+
+.pairing .group-title {
+	margin-top: 0;
+}
+
+.pairing p {
+	margin: 0 0 8px;
+}
+
+.pairing > .row {
+	margin-bottom: 8px;
+}
+
+.pairing > .row:last-child {
+	margin-bottom: 0;
+}
+
+.pairing a {
+	color: var(--link);
+}
+
+.pairing .address {
+	flex: 1 1 12em;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	font-size: 12px;
+}
+
+.pairing .code {
+	font-size: 20px;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+}
+
+/* "Disconnect? Click again": filled, so the second click is meant. */
+ul.grants button[data-armed],
+ul.grants button[data-armed]:hover:not(:disabled) {
+	border-color: var(--danger);
+	background: var(--danger);
+	color: var(--sheet);
+}
+
+/* The questions, under the header (ai.ts). */
 .ai-box {
 	padding: 12px 14px;
 	border-bottom: 1px solid var(--rule);
@@ -1155,17 +1310,6 @@ textarea + .row {
 	overflow-wrap: anywhere;
 }
 
-.ai-box .address {
-	overflow-wrap: anywhere;
-	font-size: 12px;
-}
-
-.ai-box .code {
-	font-size: 20px;
-	font-weight: 600;
-	letter-spacing: 0.08em;
-}
-
 .question + .question {
 	margin-top: 12px;
 	padding-top: 12px;
@@ -1188,6 +1332,8 @@ ul.grants li {
 
 @media (prefers-reduced-motion: reduce) {
 	button,
+	.switch input,
+	.switch input::after,
 	.chevron,
 	.shots-section summary::before {
 		transition: none;
