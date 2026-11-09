@@ -44,9 +44,12 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    toolbar says "Adding to “<case>”": each mark goes into that case as soon as its
    comment is done (Done, or the comment closed with Escape or a click elsewhere); there
    is no save step, and the case in the side panel shows it at once. Undo takes the last
-   mark out of the case again. A mark that could not be added stays on the page with the
-   reason and an "Add mark N" button to try again. Done closes the toolbar once the marks
-   are in; New case stops adding to the case, and the next marks wait for "Save case…".
+   mark added since the toolbar was shown out of the case again, while nobody has
+   resolved or edited it. A mark that could not be added stays on the page with the
+   reason and an "Add mark N" button to try again; it never moves to another case unless
+   you click that button. Done tries such marks once more and closes the toolbar when all
+   are in; while one is not, the toolbar stays up and says so, and Done again discards
+   it. New case stops adding to the case, and the next marks wait for "Save case…".
 4. On another build of the page (say `localhost:3000`), click the case in the side panel:
    on the same path it loads at once; a case of another page has a Load button for this
    tab. In the case, "Show marks on this tab" and "Hide marks on this tab" put its marks

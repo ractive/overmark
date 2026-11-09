@@ -83,6 +83,10 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   its shortcut), and only until that tab navigates elsewhere.
 - **scripting:** to add its toolbar and outlines to that tab.
 - **sidePanel:** for its side panel.
+- **storage:** for the browser's session storage, which forgets everything when the
+  browser closes: Overmark notes there which marks the toolbar on a tab just added (case,
+  mark, screenshot and comment), so that the toolbar's Undo can take back those marks
+  and no others.
 - **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
   free disk space, and they may grow beyond its usual limit. They stay in your browser.
 - **All sites (optional, off by default):** only if you choose "allow on all sites", so

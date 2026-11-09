@@ -22,6 +22,7 @@ import {
 } from "./steps.ts";
 
 const status = `${shadow('[data-role="status"]')}?.textContent`;
+const alert = `${shadow('[data-role="alert"]')}?.textContent`;
 
 /** The mark numbers drawn on the page: drafts, and those in the case (fainter). */
 const drawn = (page: Page) =>
@@ -72,6 +73,33 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		return { c, db };
 	};
 
+	/** Take a case out of the store behind the panel's back; answers it to put back. */
+	async function takeOut(caseId: string): Promise<object> {
+		return h.control.eval<object>(`new Promise((resolve, reject) => {
+			const open = indexedDB.open("overmark");
+			open.onsuccess = () => {
+				const tx = open.result.transaction("cases", "readwrite");
+				const cases = tx.objectStore("cases");
+				const get = cases.get(${JSON.stringify(caseId)});
+				get.onsuccess = () => cases.delete(${JSON.stringify(caseId)});
+				tx.oncomplete = () => resolve(get.result);
+				tx.onerror = () => reject(tx.error);
+			};
+		})`);
+	}
+
+	async function putBack(value: object): Promise<void> {
+		await h.control.eval(`new Promise((resolve, reject) => {
+			const open = indexedDB.open("overmark");
+			open.onsuccess = () => {
+				const tx = open.result.transaction("cases", "readwrite");
+				tx.objectStore("cases").put(${JSON.stringify(value)});
+				tx.oncomplete = () => resolve(true);
+				tx.onerror = () => reject(tx.error);
+			};
+		})`);
+	}
+
 	/** A case with one mark, saved from the toolbar, and the toolbar closed. */
 	async function savedCase(title: string) {
 		const v1 = await h.open("v1");
@@ -87,13 +115,17 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	}
 
 	/** "Add marks" in the side panel's case view. */
-	async function addMarks(page: Page, title: string): Promise<Page> {
+	async function addMarks(
+		page: Page,
+		title: string,
+		says = `Adding to “${title}”`,
+	): Promise<Page> {
 		await page.activate();
 		const panel = await panelHome(h);
 		await openCase(panel, title);
 		await page.activate();
 		await panel.eval(`document.getElementById("add-marks").click()`);
-		await page.waitFor(`${status} === "Adding to “${title}”"`);
+		await page.waitFor(`${status} === ${JSON.stringify(says)}`);
 		return panel;
 	}
 
@@ -198,53 +230,52 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			[1, "First", "s1"],
 			[2, "Instead", "s2"],
 		]);
+
+		// Shown again, Undo reaches no mark of the earlier session.
+		await page.click(shadow('[data-action="close"]'));
+		await addMarks(page, "Taken back");
+		expect(
+			await page.eval<boolean>(`${shadow('[data-action="undo"]')}.disabled`),
+		).toBe(true);
 		await page.click(shadow('[data-action="close"]'));
 		await page.send("Page.close");
 	}, 90_000);
 
 	test("a mark that could not be added stays on the page, says why, and is added on a second try", async () => {
-		const { page } = await savedCase("Gone for a moment");
+		const { page, tabId } = await savedCase("Gone for a moment");
 		await addMarks(page, "Gone for a moment");
 		const { c } = await caseTitled("Gone for a moment");
-		// The case goes from the store behind the panel's back.
-		const removeCase = `new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark");
-			open.onsuccess = () => {
-				const tx = open.result.transaction("cases", "readwrite");
-				tx.objectStore("cases").delete(${JSON.stringify(c.id)});
-				tx.oncomplete = () => resolve(true);
-				tx.onerror = () => reject(tx.error);
-			};
-		})`;
-		const stored = await h.control.eval<object>(`new Promise((resolve) => {
-			const open = indexedDB.open("overmark");
-			open.onsuccess = () => {
-				const get = open.result.transaction("cases").objectStore("cases").get(${JSON.stringify(c.id)});
-				get.onsuccess = () => resolve(get.result);
-			};
-		})`);
-		await h.control.eval(removeCase);
+		const stored = await takeOut(c.id);
 
 		await markElement(page, "[data-truth=submit]", "Kept anyway");
-		await page.waitFor(`${status}?.startsWith("Mark 2 was not added")`, 20_000);
-		expect(await page.eval<string>(status)).toContain("no longer exists");
+		await page.waitFor(`${alert}?.startsWith("Mark 2 was not added")`, 20_000);
+		expect(await page.eval<string>(alert)).toContain("no longer exists");
+		expect(
+			await page.eval<string>(
+				`${shadow('[data-role="alert"]')}.getAttribute("role")`,
+			),
+		).toBe("alert");
+		expect(await page.eval<string>(status)).toBe(
+			"Mark 2 is not in “Gone for a moment” yet",
+		);
 		expect(await drawn(page)).toEqual({ drafts: ["2"], saved: ["1"] });
 		expect(await buttons(page)).toContain("Add mark 2");
 
-		await h.control.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark");
-			open.onsuccess = () => {
-				const tx = open.result.transaction("cases", "readwrite");
-				tx.objectStore("cases").put(${JSON.stringify(stored)});
-				tx.oncomplete = () => resolve(true);
-				tx.onerror = () => reject(tx.error);
-			};
-		})`);
+		// Done tries once more, and stays while the mark is not in the case.
+		await page.click(shadow('[data-action="close"]'));
+		await page.waitFor(
+			`${alert} === "Mark 2 is not in the case yet: Add mark 2, or Done again to discard it."`,
+			20_000,
+		);
+		expect(await toolbarUp(tabId)).toBe(true);
+
+		await putBack(stored);
 		await page.click(shadow('[data-action="retry"]'));
 		await page.waitFor(
 			`${status} === "Mark 2 added to “Gone for a moment”"`,
 			20_000,
 		);
+		expect(await page.eval<string>(alert)).toBe("");
 		expect(await drawn(page)).toEqual({ drafts: [], saved: ["1", "2"] });
 		expect(await buttons(page)).not.toContain("Add mark 2");
 		const after = await caseTitled("Gone for a moment");
@@ -252,6 +283,66 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			"First",
 			"Kept anyway",
 		]);
+		await page.click(shadow('[data-action="close"]'));
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		await page.send("Page.close");
+	}, 90_000);
+
+	test("Done again discards a mark that could not be added", async () => {
+		const { page, tabId } = await savedCase("Discarded");
+		await addMarks(page, "Discarded");
+		const { c } = await caseTitled("Discarded");
+		const stored = await takeOut(c.id);
+		await markElement(page, "[data-truth=submit]", "Never stored");
+		await page.waitFor(`${alert}?.startsWith("Mark 2 was not added")`, 20_000);
+		await page.click(shadow('[data-action="close"]'));
+		await page.waitFor(
+			`${alert}?.includes("Done again to discard it")`,
+			20_000,
+		);
+		await page.click(shadow('[data-action="close"]'));
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		await putBack(stored);
+		// Shown again, the mark is gone, and nothing was added meanwhile.
+		await addMarks(page, "Discarded");
+		expect(await drawn(page)).toEqual({ drafts: [], saved: ["1"] });
+		expect((await caseTitled("Discarded")).c.annotations).toHaveLength(1);
+		await page.click(shadow('[data-action="close"]'));
+		await page.send("Page.close");
+	}, 90_000);
+
+	test("a mark that failed for one case does not go into another one unasked", async () => {
+		// One tab per address: the harness finds a tab by its address.
+		await (await savedCase("Case B")).page.send("Page.close");
+		const { page } = await savedCase("Case A");
+		await addMarks(page, "Case A");
+		const a = (await caseTitled("Case A")).c;
+		const stored = await takeOut(a.id);
+		await markElement(page, "[data-truth=submit]", "Meant for A");
+		await page.waitFor(`${alert}?.startsWith("Mark 2 was not added")`, 20_000);
+
+		// The side panel switches the toolbar to case B.
+		await putBack(stored);
+		await addMarks(page, "Case B", "Mark 2 is not in “Case B” yet");
+		await page.waitFor(`${alert}?.includes("it was for “Case A”")`, 10_000);
+		await Bun.sleep(1500);
+		const b = (await caseTitled("Case B")).c;
+		expect(b.annotations.map((x) => x.comment)).toEqual(["First"]);
+		expect((await caseTitled("Case A")).c.annotations).toHaveLength(1);
+		expect(await drawn(page)).toEqual({ drafts: ["2"], saved: [] });
+
+		// "Add mark 2" is the user's choice: then it goes into B.
+		await page.click(shadow('[data-action="retry"]'));
+		await page.waitFor(`${status} === "Mark 2 added to “Case B”"`, 20_000);
+		expect(
+			(await caseTitled("Case B")).c.annotations.map((x) => x.comment),
+		).toEqual(["First", "Meant for A"]);
 		await page.click(shadow('[data-action="close"]'));
 		await page.send("Page.close");
 	}, 90_000);

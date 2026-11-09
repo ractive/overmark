@@ -59,6 +59,7 @@ describe("manifest", () => {
 			"activeTab",
 			"scripting",
 			"sidePanel",
+			"storage",
 			"unlimitedStorage",
 		]);
 		expect(m["optional_host_permissions"]).toEqual(["<all_urls>"]);

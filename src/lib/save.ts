@@ -15,6 +15,8 @@ import {
 	CASE_FORMAT,
 	type Case,
 	cropImage,
+	MAX_ANNOTATIONS,
+	MAX_SHOTS,
 	nextNumbers,
 	type PageInfo,
 	pendingImage,
@@ -52,7 +54,9 @@ export interface SaveRequest {
 	keepPending?: boolean;
 	/**
 	 * Marks of the case on the same view, drawn on the new shot under the new
-	 * marks: the screenshot shows what the user saw, as one save would.
+	 * marks: the screenshot shows what the user saw, as one save would. Only
+	 * marks numbered below the new ones are drawn: Undo, which takes the
+	 * highest number out, then never leaves a pin of its mark behind.
 	 */
 	alsoDrawn?: (RenderedMark & { shot: string })[];
 }
@@ -91,6 +95,12 @@ export async function saveCase(
 	draw?: Draw,
 ): Promise<Case> {
 	const from = request.imagesFrom ?? request.caseId;
+	// Said plainly before the slow part, rather than by validateCase after it.
+	if (!request.isNew) {
+		const c = await store.getCase(request.caseId);
+		if (c !== undefined) checkRoom(c, request);
+	}
+	const lowest = Math.min(...request.annotations.map((a) => a.number));
 	const screenshots = new Map<string, StoredImage>();
 	const crops = new Map<AnnotationDraft, StoredImage>();
 	for (const shot of request.shots) {
@@ -100,7 +110,7 @@ export async function saveCase(
 		const drafts = request.annotations.filter((a) => a.shot === shot.id);
 		const others = (request.alsoDrawn ?? [])
 			.slice(0, MAX_ALSO_DRAWN)
-			.filter((m) => m.shot === shot.id);
+			.filter((m) => m.shot === shot.id && m.number < lowest);
 		const image = draw
 			? await draw(stored.blob, [...others, ...drafts], shot.viewport.dpr)
 			: stored;
@@ -125,6 +135,7 @@ export async function saveCase(
 			throw new SaveError("A case with this id exists already.");
 		if (!request.isNew && current === undefined)
 			throw new SaveError("The case no longer exists.");
+		if (current !== undefined) checkRoom(current, request);
 		const images = new Map<string, StoredImage>();
 		const finalIds = new Map<string, string>();
 		const shots = [...(current?.shots ?? [])];
@@ -152,7 +163,7 @@ export async function saveCase(
 			// A deleted mark's number stays its own: its pin is on the screenshots.
 			if (taken.has(draft.number) || draft.number <= (current?.lastNumber ?? 0))
 				throw new SaveError(
-					`mark ${draft.number} exists in the case already (it changed meanwhile). Click "Add marks" in the side panel again, then save.`,
+					`mark ${draft.number} exists in the case already: the case changed meanwhile. Adding it again gives it the next free number.`,
 				);
 			taken.add(draft.number);
 			const { cropRect: _, ...rest } = draft;
@@ -213,18 +224,26 @@ export async function numberFree(
 /** How long after its screenshot the toolbar's Undo may take a mark out again. */
 export const UNDO_WINDOW_MS = 24 * 60 * 60_000;
 
+/** What the toolbar's add stored, as the worker recorded it (undo.ts). */
+export interface AddedAs {
+	shot: string;
+	comment: string;
+}
+
 /**
  * Undo in the toolbar: take out the mark it just added, with its crop and its
- * screenshot. Only a mark of the user's with a screenshot of its own, taken
- * lately: a content script cannot take out older marks this way (the side
- * panel deletes those). Its pin was on its own screenshot only, which goes
- * with it, so its number is free again (unlike a delete, DEC-013).
+ * screenshot. The worker allows it only for a mark this page added (undo.ts);
+ * here the mark must still be as that add stored it (not resolved, its comment
+ * not edited), the user's, the highest number in the case, on a screenshot of
+ * its own taken lately. Its pin was on that screenshot only, which goes with
+ * it, so its number is free again (unlike a delete, DEC-013).
  * `removed: false`: it was gone already (deleted in the side panel).
  */
 export async function undoAdd(
 	store: CaseStore,
 	caseId: string,
 	annotationId: string,
+	added: AddedAs,
 	now: Date = new Date(),
 ): Promise<{ removed: boolean; next: number }> {
 	let removed = false;
@@ -233,20 +252,27 @@ export async function undoAdd(
 			throw new SaveError("The case no longer exists.");
 		const gone = current.annotations.find((a) => a.id === annotationId);
 		if (gone === undefined) return { value: current };
+		const refuse = (why: string) =>
+			new SaveError(
+				`mark ${gone.number} ${why}; delete it in the side panel if it should go.`,
+			);
+		if (gone.resolution !== undefined) throw refuse("was resolved since");
+		if (gone.comment !== added.comment || gone.author !== "user")
+			throw refuse("was edited since");
+		if (current.annotations.some((a) => a.number > gone.number))
+			throw refuse("has marks after it");
 		const shot = current.shots.find((s) => s.id === gone.shot);
 		const shared = current.annotations.some(
 			(a) => a !== gone && a.shot === gone.shot,
 		);
 		const age = now.getTime() - Date.parse(shot?.capturedAt ?? "");
 		if (
-			gone.author !== "user" ||
 			shot === undefined ||
+			gone.shot !== added.shot ||
 			shared ||
 			!(age >= 0 && age < UNDO_WINDOW_MS)
 		)
-			throw new SaveError(
-				`mark ${gone.number} cannot be undone here; delete it in the side panel.`,
-			);
+			throw refuse("cannot be undone here");
 		removed = true;
 		const value = validateCase({
 			...current,
@@ -257,6 +283,20 @@ export async function undoAdd(
 		return { value, deleteImages: [gone.crop, shot.image] };
 	});
 	return { removed, next: nextNumbers(saved).annotation };
+}
+
+/** The case can take the request's marks and screenshots, or says why not. */
+function checkRoom(c: Case, request: SaveRequest): void {
+	const full =
+		c.shots.length + request.shots.length > MAX_SHOTS
+			? `${MAX_SHOTS} screenshots`
+			: c.annotations.length + request.annotations.length > MAX_ANNOTATIONS
+				? `${MAX_ANNOTATIONS} marks`
+				: undefined;
+	if (full !== undefined)
+		throw new SaveError(
+			`“${c.title}” holds ${full}, the most a case can; start a new case for further marks.`,
+		);
 }
 
 /** A rectangle grown by `pad` and kept inside the viewport. */

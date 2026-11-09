@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { lastMark } from "../src/content/annotator.ts";
-import { type Case, pendingImage, type Shot } from "../src/lib/case.ts";
+import {
+	type Case,
+	MAX_SHOTS,
+	pendingImage,
+	type Shot,
+	validateCase,
+} from "../src/lib/case.ts";
 import type { Draw } from "../src/lib/save.ts";
 import {
 	type AnnotationDraft,
@@ -358,7 +364,13 @@ describe("adding mark by mark", () => {
 					// Another view's mark is not drawn here.
 					{
 						shot: "p_other",
-						number: 9,
+						number: 2,
+						shape: { kind: "note", at: { x: 5, y: 5 } },
+					},
+					// Nor a later mark: Undo of it would leave its pin here.
+					{
+						shot: "p_v",
+						number: 5,
 						shape: { kind: "note", at: { x: 5, y: 5 } },
 					},
 				],
@@ -391,18 +403,17 @@ describe("adding mark by mark", () => {
 		);
 	});
 
+	/** What the worker recorded for mark `n` added on its own shot `shot`. */
+	const as = (shot: string, n: number) => ({ shot, comment: `comment ${n}` });
+	const at = new Date("2026-11-04T10:06:00Z");
+
 	test("undoAdd takes the mark out with its crop and screenshot, and frees its number", async () => {
 		const store = new MemoryStore();
 		await newCase(store);
 		await captured(store, "c_session", "p_v");
 		await addOne(store, 3, "p_v");
 		expect(keys(store)).toContain("c_1/shots/s2.webp");
-		const result = await undoAdd(
-			store,
-			"c_1",
-			"a3",
-			new Date("2026-11-04T10:06:00Z"),
-		);
+		const result = await undoAdd(store, "c_1", "a3", as("s2", 3), at);
 		expect(result).toEqual({ removed: true, next: 3 });
 		const c = (await store.getCase("c_1")) as Case;
 		expect(c.annotations.map((a) => a.number)).toEqual([1, 2]);
@@ -422,43 +433,112 @@ describe("adding mark by mark", () => {
 	test("undoAdd: a mark already gone is no error", async () => {
 		const store = new MemoryStore();
 		await newCase(store);
-		expect(await undoAdd(store, "c_1", "a7")).toEqual({
+		expect(await undoAdd(store, "c_1", "a7", as("s9", 7), at)).toEqual({
 			removed: false,
 			next: 3,
 		});
-		await expect(undoAdd(store, "c_9", "a1")).rejects.toThrow(
+		await expect(undoAdd(store, "c_9", "a1", as("s1", 1), at)).rejects.toThrow(
 			"no longer exists",
 		);
 	});
 
-	test("undoAdd refuses a mark that shares its screenshot, an AI app's, or an old one", async () => {
-		const store = new MemoryStore();
-		await newCase(store);
-		const at = new Date("2026-11-04T10:06:00Z");
-		// Marks 1 and 2 were saved together, on one screenshot.
-		await expect(undoAdd(store, "c_1", "a2", at)).rejects.toThrow(
-			"delete it in the side panel",
-		);
-		await captured(store, "c_session", "p_v");
-		await addOne(store, 3, "p_v");
-		await store.updateCase("c_1", (c) => ({
+	/** Change mark `n` of case c_1 as the side panel or an AI app would. */
+	const change = (
+		store: MemoryStore,
+		n: number,
+		edit: (a: Case["annotations"][number]) => Case["annotations"][number],
+	) =>
+		store.updateCase("c_1", (c) => ({
 			value: {
 				...(c as Case),
 				annotations: (c as Case).annotations.map((a) =>
-					a.number === 3 ? { ...a, author: "ai" as const } : a,
+					a.number === n ? edit(a) : a,
 				),
 			},
 		}));
-		await expect(undoAdd(store, "c_1", "a3", at)).rejects.toThrow(
-			"cannot be undone",
+
+	test("undoAdd refuses a mark resolved or edited since, or with marks after it", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		await captured(store, "c_session", "p_v");
+		await addOne(store, 3, "p_v");
+		await change(store, 3, (a) => ({
+			...a,
+			resolution: { kind: "fixed", at: "2026-11-04T10:05:30Z" },
+		}));
+		await expect(undoAdd(store, "c_1", "a3", as("s2", 3), at)).rejects.toThrow(
+			"was resolved since",
 		);
+		await change(store, 3, ({ resolution: _, ...a }) => ({
+			...a,
+			comment: "edited in the side panel",
+		}));
+		await expect(undoAdd(store, "c_1", "a3", as("s2", 3), at)).rejects.toThrow(
+			"was edited since",
+		);
+		await change(store, 3, (a) => ({ ...a, comment: "comment 3" }));
 		await captured(store, "c_session", "p_w");
 		await addOne(store, 4, "p_w");
-		const later = new Date(Date.parse("2026-11-04T10:00:00Z") + UNDO_WINDOW_MS);
-		await expect(undoAdd(store, "c_1", "a4", later)).rejects.toThrow(
-			"cannot be undone",
+		await expect(undoAdd(store, "c_1", "a3", as("s2", 3), at)).rejects.toThrow(
+			"has marks after it",
 		);
 		expect((await store.getCase("c_1"))?.annotations).toHaveLength(4);
+		// The last one can go, then the one before it.
+		await undoAdd(store, "c_1", "a4", as("s3", 4), at);
+		await undoAdd(store, "c_1", "a3", as("s2", 3), at);
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(2);
+	});
+
+	test("undoAdd refuses a mark that shares its screenshot, an AI app's, another shot, or an old one", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		// Marks 1 and 2 were saved together, on one screenshot.
+		await expect(undoAdd(store, "c_1", "a2", as("s1", 2), at)).rejects.toThrow(
+			"cannot be undone here",
+		);
+		await captured(store, "c_session", "p_v");
+		await addOne(store, 3, "p_v");
+		await expect(undoAdd(store, "c_1", "a3", as("s9", 3), at)).rejects.toThrow(
+			"cannot be undone here",
+		);
+		const later = new Date(Date.parse("2026-11-04T10:00:00Z") + UNDO_WINDOW_MS);
+		await expect(
+			undoAdd(store, "c_1", "a3", as("s2", 3), later),
+		).rejects.toThrow("cannot be undone here");
+		await change(store, 3, (a) => ({ ...a, author: "ai" as const }));
+		await expect(undoAdd(store, "c_1", "a3", as("s2", 3), at)).rejects.toThrow(
+			"was edited since",
+		);
+		expect((await store.getCase("c_1"))?.annotations).toHaveLength(3);
+	});
+
+	test("a case with as many screenshots as it can hold says so before anything is drawn", async () => {
+		const store = new MemoryStore();
+		await newCase(store);
+		await store.updateCase("c_1", (c) => {
+			const one = (c as Case).shots[0] as Shot;
+			return {
+				value: validateCase({
+					...(c as Case),
+					shots: Array.from({ length: MAX_SHOTS }, (_, i) => ({
+						...one,
+						id: `s${i + 1}`,
+						image: `shots/s${i + 1}.webp`,
+					})),
+				}),
+			};
+		});
+		await captured(store, "c_session", "p_v");
+		let drawnAny = false;
+		const draw: Draw = async (image) => {
+			drawnAny = true;
+			return { blob: image, width: 1, height: 1 };
+		};
+		await expect(addOne(store, 3, "p_v", {}, draw)).rejects.toThrow(
+			`holds ${MAX_SHOTS} screenshots, the most a case can; start a new case`,
+		);
+		expect(drawnAny).toBe(false);
+		expect(MAX_SHOTS).toBe(1000);
 	});
 });
 

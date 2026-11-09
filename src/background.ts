@@ -27,8 +27,10 @@ import type {
 import { numberFree, saveCase, undoAdd } from "./lib/save.ts";
 import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
 import { inject } from "./lib/tabs.ts";
+import { AddLedger } from "./lib/undo.ts";
 
 const store = new IdbStore();
+const added = new AddLedger(chrome.storage.session);
 
 // Screenshots of saves that never finished (the tab was closed or navigated
 // while saving) would otherwise stay in storage unseen.
@@ -134,6 +136,25 @@ async function handle(
 				new Date(),
 				drawMarks,
 			);
+			// Marks added one by one: the page that added them may undo them.
+			const tabId = sender.tab?.id;
+			if (
+				request.request.keepPending &&
+				tabId !== undefined &&
+				sender.documentId !== undefined
+			)
+				for (const draft of request.request.annotations) {
+					const a = saved.annotations.find((x) => x.number === draft.number);
+					if (a !== undefined)
+						await added.record({
+							caseId: saved.id,
+							annotationId: a.id,
+							shot: a.shot,
+							comment: a.comment,
+							tabId,
+							documentId: sender.documentId,
+						});
+				}
 			await broadcast({ type: "cases:changed", caseId: saved.id });
 			return {
 				caseId: saved.id,
@@ -151,7 +172,23 @@ async function handle(
 		case "case:undo-add": {
 			if (!isSafeId(request.caseId) || !isSafeId(request.annotationId))
 				throw new Error("invalid id");
-			const result = await undoAdd(store, request.caseId, request.annotationId);
+			const mark = await added.find(
+				request.caseId,
+				request.annotationId,
+				sender.tab?.id,
+				sender.documentId,
+			);
+			if (mark === undefined)
+				throw new Error(
+					"this page did not add that mark; delete it in the side panel if it should go.",
+				);
+			const result = await undoAdd(
+				store,
+				request.caseId,
+				request.annotationId,
+				mark,
+			);
+			await added.remove(mark);
 			if (result.removed)
 				await broadcast({ type: "cases:changed", caseId: request.caseId });
 			return result satisfies UndoResult;
