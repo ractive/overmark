@@ -360,12 +360,14 @@ pairing view gives way to it.
   Chrome's) can cover Overmark's while it stays open. The panel tells the worker its
   visibility (`visible`); a hidden panel's questions go out as notifications, as a
   closed panel's do, and a question asked meanwhile is a notification at once.
-- **The icon opens the panel with the tab.** `sidePanel.open({ windowId })` resolved and
-  showed nothing over a panel another extension opened for the tab; `{ tabId, windowId }`
-  shows Overmark's over it. Overmark sets no panel of the tab's, so it stays the global
-  one. The tab-mcp extension's e2e test proves this with a second extension; in
-  Overmark's harness that extension's worker did not start reliably, so Overmark's test
-  covers the visibility path by hiding the panel's page, and the open call is the tab-mcp
-  extension's.
+- **The panel still opens for the window, not yet with the tab.** The tab-mcp extension
+  opens it with `sidePanel.open({ tabId, windowId })`, so that it shows over a panel
+  another extension opened for the tab (with the window alone Chrome resolves and shows
+  nothing). In Overmark that call made the store package's end-to-end test fail in CI
+  (Chrome for Testing 156 on Linux, twice in a row; a probe without it passed, and main
+  had been green all day): after the icon's click a click with the Element tool went
+  past the overlay to the page. It passes on macOS, so the cause is not known yet; the
+  call stays out until it is. The covered-panel test hides the panel's page itself: in
+  Overmark's harness a second extension's worker did not start.
 - **Notifications keep Don't allow and Allow.** The tab-mcp extension's Allow and Always
   allow do not apply: every change asks each time (DEC-008).
