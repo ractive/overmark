@@ -69,7 +69,7 @@ The side panel offers the cases to an AI app (Claude Code, Claude, ChatGPT, Code
 through a [tab-mcp](https://github.com/ractive/tab-mcp) relay. The side panel uses
 the hosted relay `https://tab-mcp.ractive.ch` unless you enter another one; it allows
 the development build's ID, `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`.
-Its tools:
+The side panel's tools:
 
 | Tool | What it does |
 |---|---|
