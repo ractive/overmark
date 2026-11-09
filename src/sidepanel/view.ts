@@ -64,7 +64,6 @@ const aiButton = byId<HTMLButtonElement>("ai-button");
 const aiAction = byId<HTMLSpanElement>("ai-action");
 const aiCall = byId<HTMLParagraphElement>("ai-call");
 const stopAi = byId<HTMLButtonElement>("stop-ai");
-const connectButton = byId<HTMLButtonElement>("connect");
 const keepOn = byId<HTMLInputElement>("keep-on");
 const importError = byId<HTMLDivElement>("import-error");
 const importErrorText = byId<HTMLParagraphElement>("import-error-text");
@@ -1024,7 +1023,7 @@ function renderAi({ ai }: PanelState): void {
 	aiButton.title = aiStatus.scrollWidth > aiStatus.clientWidth ? ai.status : "";
 	// Waiting for an app to pair: nothing to do but wait (a click shows how).
 	aiAction.hidden = ai.active && !ai.connected;
-	aiAction.textContent = ai.connected ? "Manage" : "Connect";
+	aiAction.textContent = ai.connected ? "Manage" : "Turn on";
 	bar.dataset["ai"] = ai.connected
 		? "connected"
 		: ai.active
@@ -1033,9 +1032,6 @@ function renderAi({ ai }: PanelState): void {
 	stopAi.hidden = !ai.active;
 	keepOn.checked = ai.keepOn;
 	setHint(aiCall, ai.lastCall && callText(ai.lastCall));
-	connectButton.textContent = ai.connected
-		? "Manage AI connection"
-		: "Connect AI app";
 }
 
 /** Draw the panel from `state`. */

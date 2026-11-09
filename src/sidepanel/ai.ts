@@ -1,12 +1,12 @@
 /**
  * The side panel's view of the AI connection, which lives in the service
  * worker (DEC-015). It shows the state the worker sends over the panel's
- * port, in the header (through the panel's state, `s.ai`) and in the pairing
- * view and the questions (drawn here), and sends the user's commands back.
+ * port, in the header (through the panel's state, `s.ai`) and in the "AI app"
+ * card and the questions (drawn here), and sends the user's commands back.
  * Closing the panel changes nothing but pairing, which stops.
  *
- * All of the panel's AI access UI is in this module, so that it can be
- * replaced as a whole (by the tab-mcp extension's, once that is settled).
+ * The card is the tab-mcp extension's (its `sidepanel/card.ts`), with
+ * Overmark's relay and "Keep AI access on" under it.
  * "Blur form fields in screenshots" goes the same way: the worker keeps it,
  * and the panel neither reads nor writes it in storage (DEC-016).
  */
@@ -24,6 +24,13 @@ import {
 	relayProblem,
 	SECRET_PREFIX,
 } from "../worker/settings.ts";
+import {
+	cardView,
+	confirms,
+	SWITCH_WAIT_MS,
+	type SwitchIntent,
+	switchShown,
+} from "./card.ts";
 import { byId, h } from "./dom.ts";
 import type { PanelState } from "./state.ts";
 
@@ -143,13 +150,18 @@ function forgetOldSettings(): void {
 	}
 }
 
-/** Start the panel's side of the connection; `update` changes the panel's state. */
+/**
+ * Start the panel's side of the connection; `update` changes the panel's
+ * state, `showHome` leaves an open case for the home view, where the card is.
+ */
 export async function startAi(
 	update: (change: (s: PanelState) => void) => void,
+	showHome: () => void,
 ): Promise<void> {
 	const relayInput = byId<HTMLInputElement>("relay");
 	const keepOn = byId<HTMLInputElement>("keep-on");
 	const blurForms = byId<HTMLInputElement>("blur-forms");
+	const aiSwitch = byId<HTMLInputElement>("ai-switch");
 	const buttons = [
 		byId<HTMLButtonElement>("ai-button"),
 		byId<HTMLButtonElement>("connect"),
@@ -170,6 +182,7 @@ export async function startAi(
 		keepOn.disabled = true;
 		relayInput.disabled = true;
 		blurForms.disabled = true;
+		aiSwitch.disabled = true;
 		blurSettled();
 		return;
 	}
@@ -177,8 +190,17 @@ export async function startAi(
 	const windowId = (await chrome.windows.getCurrent()).id;
 	let port: chrome.runtime.Port | undefined;
 	let current: AiState | undefined;
-	/** The pairing view is open (codes come only then). */
-	let pairingOpen = false;
+	/** What the worker was told: pairing on (codes come only then). */
+	let pairing = false;
+	/** The user asked to add another AI app (with apps paired already). */
+	let addingApp = false;
+	/** Disconnect asks first: the apps whose button was clicked once. */
+	const disconnectArmed = new Map<
+		string,
+		{ at: number; timer: ReturnType<typeof setTimeout> }
+	>();
+	/** The user's flip of the AI access switch, while the worker acts on it. */
+	let switchIntent: SwitchIntent | undefined;
 	let newAddressArmedAt: number | undefined;
 
 	function send(command: PanelCommand): void {
@@ -220,7 +242,8 @@ export async function startAi(
 			setTimeout(connectPort, 250);
 		});
 		if (windowId !== undefined) send({ type: "hello", windowId });
-		if (pairingOpen) send({ type: "pair", on: true });
+		sendVisible();
+		if (pairing) send({ type: "pair", on: true });
 		let old: PanelCommand | undefined;
 		try {
 			old = oldSettings(localStorage);
@@ -239,6 +262,7 @@ export async function startAi(
 		keepOn.disabled = true;
 		relayInput.disabled = true;
 		blurForms.disabled = true;
+		aiSwitch.disabled = true;
 		update(
 			(s) =>
 				(s.ai = {
@@ -265,7 +289,7 @@ export async function startAi(
 			};
 		});
 		// A worker that failed before may have started since.
-		for (const control of [...buttons, keepOn, relayInput, blurForms])
+		for (const control of [...buttons, keepOn, relayInput, blurForms, aiSwitch])
 			control.disabled = false;
 		blurForms.checked = a.blurForms;
 		blurValue = a.blurForms;
@@ -274,27 +298,45 @@ export async function startAi(
 			relayInput.value = a.relay;
 			relayInput.setCustomValidity("");
 		}
-		showPairing(a);
+		showCard(a);
 		showQuestions(a.questions);
 	}
 
 	// --- Commands ---
 
-	/** Connect, Manage: the pairing view, and a connection if there is none. */
-	function openPairing(): void {
-		pairingOpen = true;
-		send({ type: "pair", on: true });
-		if (current?.state === "disconnected" && !current.reconnecting)
+	/** The header's pill: to the card, turning AI access on if it is off. */
+	byId<HTMLButtonElement>("ai-button").addEventListener("click", () => {
+		if (current !== undefined && cardView(current, false).turnOn)
 			send({ type: "connect" });
-		if (current) showPairing(current);
-		byId("pairing").scrollIntoView({ block: "nearest" });
-	}
+		showHome();
+		// After the render that shows the home view.
+		setTimeout(() => byId("ai-card").scrollIntoView({ block: "nearest" }));
+	});
 
-	for (const id of ["ai-button", "connect"])
-		byId<HTMLButtonElement>(id).addEventListener("click", openPairing);
+	byId<HTMLButtonElement>("connect").addEventListener("click", () =>
+		send({ type: "connect" }),
+	);
 
 	byId<HTMLButtonElement>("stop-ai").addEventListener("click", () =>
 		send({ type: "stop" }),
+	);
+
+	aiSwitch.addEventListener("change", () => {
+		switchIntent = { on: aiSwitch.checked, until: Date.now() + SWITCH_WAIT_MS };
+		addingApp = false;
+		send({ type: aiSwitch.checked ? "connect" : "stop" });
+	});
+
+	function addApp(on: boolean): void {
+		addingApp = on;
+		if (current) showCard(current);
+	}
+
+	byId<HTMLButtonElement>("add-app").addEventListener("click", () =>
+		addApp(true),
+	);
+	byId<HTMLButtonElement>("pair-done").addEventListener("click", () =>
+		addApp(false),
 	);
 
 	keepOn.addEventListener("change", () =>
@@ -315,20 +357,29 @@ export async function startAi(
 			return;
 		}
 		relayInput.setCustomValidity("");
+		addApp(false);
 		send({ type: "set-relay", relay: value });
 	});
 
-	byId<HTMLButtonElement>("pair-close").addEventListener("click", () => {
-		pairingOpen = false;
-		send({ type: "pair", on: false });
-		if (current) showPairing(current);
-	});
+	function copy(button: HTMLButtonElement, text: string | undefined): void {
+		if (text === undefined) return;
+		navigator.clipboard.writeText(text).then(
+			() => {
+				button.textContent = "Copied";
+				setTimeout(() => {
+					button.textContent = "Copy";
+				}, 1500);
+			},
+			() => undefined,
+		);
+	}
 
-	byId<HTMLButtonElement>("pair-copy").addEventListener("click", () => {
-		const address = current?.address;
-		if (address !== undefined)
-			void navigator.clipboard.writeText(address).catch(() => undefined);
-	});
+	const copyAddress = byId<HTMLButtonElement>("pair-copy");
+	copyAddress.addEventListener("click", () =>
+		copy(copyAddress, current?.address),
+	);
+	const copyCode = byId<HTMLButtonElement>("pair-copy-code");
+	copyCode.addEventListener("click", () => copy(copyCode, current?.code));
 
 	byId<HTMLButtonElement>("pair-take-back").addEventListener("click", () =>
 		send({ type: "connect" }),
@@ -354,23 +405,76 @@ export async function startAi(
 		send({ type: "new-address" });
 	});
 
-	// --- The pairing view ---
+	// --- The card ---
 
-	function showPairing(a: AiState): void {
-		byId("pairing").hidden = !pairingOpen;
+	/** Tell the worker whether to pair (codes come only then). */
+	function syncPairing(on: boolean): void {
+		if (on === pairing) return;
+		pairing = on;
+		send({ type: "pair", on });
+	}
+
+	function disconnectButton(grant: AiState["grants"][number]): HTMLElement {
+		const armed = disconnectArmed.has(grant.grantId);
+		return h(
+			"button",
+			{
+				type: "button",
+				"data-armed": armed ? "" : false,
+				onclick: () => {
+					const first = disconnectArmed.get(grant.grantId);
+					if (first === undefined) {
+						// Asks first: the app has to be added and paired again after.
+						disconnectArmed.set(grant.grantId, {
+							at: Date.now(),
+							timer: setTimeout(() => {
+								disconnectArmed.delete(grant.grantId);
+								if (current) showCard(current);
+							}, NEW_ADDRESS_ARMED_MS),
+						});
+					} else {
+						// The second click of a double click confirms nothing.
+						if (!confirms(first.at, Date.now())) return;
+						clearTimeout(first.timer);
+						disconnectArmed.delete(grant.grantId);
+						send({ type: "revoke", grantId: grant.grantId });
+					}
+					if (current) showCard(current);
+				},
+			},
+			armed ? "Disconnect? Click again" : "Disconnect",
+		);
+	}
+
+	function showCard(a: AiState): void {
+		// Adding another app ends with the connection.
+		if (a.state !== "connected") addingApp = false;
+		const view = cardView(a, addingApp);
+		byId("ai-state").dataset["state"] = view.status;
+		byId("ai-state-text").textContent = view.stateText;
+		// Also while connecting or retrying, so the user can stop it.
+		const shown = switchShown(view.switchOn, switchIntent, Date.now());
+		switchIntent = shown.intent;
+		aiSwitch.checked = shown.checked;
+		aiSwitch.setAttribute("aria-checked", String(shown.checked));
+		byId("connect").hidden = !view.turnOn;
 		byId("pair-replaced").hidden = a.replaced === undefined;
 		byId("pair-replaced-text").textContent = a.replaced?.sibling
 			? "Overmark's address is in use elsewhere in this browser."
 			: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.";
-		const problem = a.state === "disconnected" ? a.problem : undefined;
-		byId("pair-problem").hidden = problem === undefined;
-		byId("pair-problem").textContent = problem ?? "";
-		byId("pair-address-box").hidden = a.address === undefined;
-		byId("pair-address").textContent = a.address ?? "";
-		const code = a.code;
-		byId("pair-code").textContent =
-			code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
-		byId("pair-none").hidden = a.grants.length > 0;
+		const problem = [
+			a.relayNote,
+			a.state === "disconnected" ? a.problem : undefined,
+		]
+			.filter(Boolean)
+			.join(" ");
+		byId("pair-problem").hidden = problem === "";
+		byId("pair-problem").textContent = problem;
+		for (const id of disconnectArmed.keys())
+			if (!a.grants.some((g) => g.grantId === id)) {
+				clearTimeout(disconnectArmed.get(id)?.timer);
+				disconnectArmed.delete(id);
+			}
 		byId("pair-grants").replaceChildren(
 			...a.grants.map((grant) =>
 				h(
@@ -382,17 +486,20 @@ export async function startAi(
 						grant.name || grant.host,
 						grant.name ? h("span", { class: "meta" }, ` ${grant.host}`) : null,
 					),
-					h(
-						"button",
-						{
-							type: "button",
-							onclick: () => send({ type: "revoke", grantId: grant.grantId }),
-						},
-						"Disconnect",
-					),
+					disconnectButton(grant),
 				),
 			),
 		);
+		syncPairing(view.pairing);
+		byId("pairing").hidden = !view.pairing;
+		byId("add-app").hidden = !view.addApp;
+		byId("pair-done").hidden = !view.done;
+		// The address only while pairing: it is what an AI app is added with.
+		byId("pair-address").textContent = view.address;
+		const code = a.code;
+		byId("pair-code").textContent =
+			code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
+		byId<HTMLButtonElement>("pair-copy-code").disabled = code === undefined;
 	}
 
 	// --- Questions ---
@@ -485,6 +592,12 @@ export async function startAi(
 	}, 100);
 	for (const type of ["focus", "blur", "visibilitychange"])
 		window.addEventListener(type, arm);
+
+	/** Tell the worker whether the panel is on screen (not covered by another's). */
+	function sendVisible(): void {
+		send({ type: "visible", visible: document.visibilityState === "visible" });
+	}
+	document.addEventListener("visibilitychange", sendVisible);
 
 	update((s) => (s.ai = { ...s.ai, status: "Not connected" }));
 	relayInput.value = DEFAULT_RELAY;

@@ -1048,7 +1048,10 @@ async function changeMark(
 	}
 }
 
-void startAi(update);
+// The header's AI pill leaves an open case: the AI app card is on the home view.
+void startAi(update, () => {
+	if (state.view.kind === "case") closeCase();
+});
 
 // --- news from the pages and the browser -----------------------------------------
 

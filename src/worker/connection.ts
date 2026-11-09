@@ -58,8 +58,10 @@ export const ALARM = "overmark-ai";
 interface Panel {
 	port: chrome.runtime.Port;
 	windowId?: number;
-	/** Its pairing view is open. */
+	/** It shows the address and code. */
 	pairing: boolean;
+	/** On screen, as it last said (covered by another extension's panel: not). */
+	visible: boolean;
 }
 
 export interface ConnectionDeps {
@@ -439,7 +441,7 @@ export class Connection {
 	 * sent before the connection had started.
 	 */
 	addPanel(port: chrome.runtime.Port, early: unknown[] = []): void {
-		const panel: Panel = { port, pairing: false };
+		const panel: Panel = { port, pairing: false, visible: true };
 		this.#panels.add(panel);
 		// Its overlays may have started before it knew the worker's value.
 		this.#tellBlur();
@@ -470,6 +472,12 @@ export class Connection {
 		switch (command.type) {
 			case "hello":
 				panel.windowId = command.windowId;
+				return;
+			case "visible":
+				panel.visible = command.visible;
+				// Hidden: the questions it alone showed go out as notifications.
+				if (!command.visible && panel.windowId !== undefined)
+					this.#questions.panelClosed(panel.windowId);
 				return;
 			case "connect":
 				// The user's click takes the address back after a takeover. AI
@@ -616,7 +624,11 @@ export class Connection {
 				}
 			},
 			panelInFocus: async (windowId) => {
-				if (![...this.#panels].some((p) => p.windowId === windowId))
+				// Open is not enough: it has to be on screen, not covered by
+				// another extension's panel for the tab.
+				if (
+					![...this.#panels].some((p) => p.windowId === windowId && p.visible)
+				)
 					return false;
 				return (await chrome.windows.get(windowId)).focused;
 			},

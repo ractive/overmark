@@ -55,8 +55,11 @@ void store
 chrome.action.onClicked.addListener((tab) => {
 	if (tab.id === undefined) return;
 	// `sidePanel.open` needs the click's user gesture: call it before any await.
+	// With the tab, so it shows over a panel another extension opened for the
+	// tab (Claude in Chrome's); with the window alone, Chrome resolves and
+	// shows nothing. Overmark sets no panel of the tab's: it stays the global one.
 	void chrome.sidePanel
-		.open({ windowId: tab.windowId })
+		.open({ tabId: tab.id, windowId: tab.windowId })
 		.catch((error: unknown) => console.warn("Overmark: side panel", error));
 	void inject(tab.id).catch((error: unknown) =>
 		console.warn("Overmark: cannot run on this tab", error),

@@ -4,6 +4,7 @@
 
 ## iteration
 
+* [Iteration 10: the tab-mcp extension's AI app card](iteration-10-ai-card.md) - The side panel's plain pairing view gives way to the tab-mcp extension's AI app card (DEC-017): an AI access switch, Turn on AI access, the address and code at once with no app paired, + Add another AI app, Disconnect asking first; a panel covered by another extension's panel hands its questions to notifications; the icon opens the panel with the tab.
 * [Iteration 1: skeleton](iteration-1-skeleton.md) - The repository's tooling, a build that produces the unpacked extension with a fixed ID, the service worker that opens the side panel and injects the content script on a click, icons, CI, and an end-to-end harness that loads the extension into Chromium.
 * [Iteration 2: annotate and save](iteration-2-annotate.md) - Drawing tools on the page (element, box, arrow, pen, note) with a comment each, element details, and saving a named case with annotated screenshots and crops into IndexedDB; the side panel lists and shows cases.
 * [Iteration 3: export, import and loading onto another build](iteration-3-reload.md) - Export a case as a zip with case.json, case.md and WebP images; import it; load a case onto the tab in front, find each annotation's element by a weighted similarity score, and highlight it with its confidence.

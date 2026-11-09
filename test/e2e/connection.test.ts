@@ -209,11 +209,22 @@ describe.skipIf(browserBinary === undefined)(
 			).toContain("Last AI call: Record the verdict");
 			expect(await panel.eval(`${byId("relay")}.value`)).toBe(relay.url);
 			expect(await panel.eval(`${byId("stop-ai")}.hidden`)).toBe(false);
-			await panel.eval(`${byId("ai-button")}.click()`);
+			// The same address: shown with the code at once with no app paired
+			// (the relay lists it), else after "+ Add another AI app".
+			const state = `${byId("ai-state")}.dataset.state`;
+			await panel.waitFor(`["on", "waiting"].includes(${state})`);
+			const paired = (await panel.eval<string>(state)) === "on";
+			if (paired) {
+				expect(await panel.eval(`${byId("pairing")}.hidden`)).toBe(true);
+				await panel.eval(`${byId("add-app")}.click()`);
+			}
 			await panel.waitFor(
 				`${byId("pair-address")}.textContent === ${JSON.stringify(address)}`,
 			);
-			await panel.eval(`${byId("pair-close")}.click()`);
+			if (paired) {
+				await panel.eval(`${byId("pair-done")}.click()`);
+				expect(await panel.eval(`${byId("pairing")}.hidden`)).toBe(true);
+			}
 		});
 
 		test("the worker stopped by Chrome connects again by itself, with the same address", async () => {
@@ -257,6 +268,44 @@ describe.skipIf(browserBinary === undefined)(
 				10_000,
 			);
 			expect((await call("list_cases")).isError).toBeFalsy();
+		});
+
+		test("a side panel covered by another extension's panel hands its questions to notifications", async () => {
+			/**
+			 * What Chrome does when another extension's panel for the tab (Claude
+			 * in Chrome's) covers ours: the page stays open, hidden.
+			 */
+			const cover = (hidden: boolean) =>
+				panel.eval(`(() => {
+					Object.defineProperty(document, "visibilityState", {
+						configurable: true,
+						get: () => ${JSON.stringify(hidden ? "hidden" : "visible")},
+					});
+					document.dispatchEvent(new Event("visibilitychange"));
+				})()`);
+			// Asked while our panel is on screen: there, no notification.
+			const first = call("set_verdict", { caseId: "c_1", verdict: "Covered" });
+			await panel.waitFor(`document.querySelector("[data-question]")`, 10_000);
+			expect(await notifications(h)).toEqual([]);
+			await cover(true);
+			const handed = await newNotification(h);
+			await Bun.sleep(600);
+			await clickNotification(h, handed, 1);
+			expect((await first).isError).toBeFalsy();
+			expect(await verdictOf(h, "c_1")).toBe("Covered");
+			// Asked while covered: a notification at once.
+			const second = call("set_verdict", { caseId: "c_1", verdict: "Hidden" });
+			const asked = await newNotification(h, [handed]);
+			await Bun.sleep(600);
+			await clickNotification(h, asked, 1);
+			expect((await second).isError).toBeFalsy();
+			// On screen again: the panel asks, no notification.
+			await cover(false);
+			const third = call("set_verdict", { caseId: "c_1", verdict: "Shown" });
+			await panel.waitFor(`document.querySelector("[data-question]")`, 10_000);
+			expect(await notifications(h)).toEqual([]);
+			await answerInPanel(panel, "allow");
+			expect((await third).isError).toBeFalsy();
 		});
 	},
 );
@@ -642,6 +691,7 @@ describe.skipIf(browserBinary === undefined)(
 			).toContain("AI access is not available");
 			expect(await panel.eval(`${byId("blur-forms")}.disabled`)).toBe(true);
 			expect(await panel.eval(`${byId("connect")}.disabled`)).toBe(true);
+			expect(await panel.eval(`${byId("ai-switch")}.disabled`)).toBe(true);
 			// Without the worker's value the panel blurs: the safe side.
 			await panel.eval(`${byId("annotate")}.click()`);
 			await until(

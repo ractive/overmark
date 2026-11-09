@@ -698,12 +698,11 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			return panel;
 		}
 
-		/** A paired MCP client, through the pairing view's address. */
+		/** A paired MCP client, through the address the card shows (none paired yet). */
 		async function pairedClient(
 			panel: Page,
 			store: Parameters<typeof mcpClient>[0],
 		) {
-			await panel.eval(`${id("connect")}.click()`);
 			await panel.waitFor(
 				`${id("pair-address")}.textContent.endsWith("/mcp")`,
 				10_000,
@@ -711,7 +710,6 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			const address = await panel.eval<string>(
 				`${id("pair-address")}.textContent`,
 			);
-			await panel.eval(`${id("pair-close")}.click()`);
 			return mcpClient(store, address);
 		}
 
@@ -772,7 +770,6 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 						"the panel to connect",
 					);
 					expect((await list()).isError).toBeFalsy();
-					await panel.eval(`${id("pair-close")}.click()`);
 				} finally {
 					await client.close();
 					await relay.stop();

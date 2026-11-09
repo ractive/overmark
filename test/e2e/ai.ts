@@ -91,7 +91,7 @@ export async function setRelay(panel: Page, relay: string): Promise<void> {
 
 /**
  * Connect the panel to `relay` (optionally with "Keep AI access on") and
- * return the address the pairing view shows.
+ * return the address the card shows: at once, with no AI app paired yet.
  */
 export async function connectAi(
 	panel: Page,
@@ -103,16 +103,13 @@ export async function connectAi(
 		await panel.eval(
 			`${byId("keep-on")}.checked || ${byId("keep-on")}.click()`,
 		);
-	await panel.eval(`${byId("connect")}.click()`);
+	// "Turn on AI access", unless Keep AI access on turned it on already.
+	await panel.eval(`${byId("connect")}.hidden || ${byId("connect")}.click()`);
 	await panel.waitFor(
 		`${byId("pair-address")}.textContent.startsWith(${JSON.stringify(relay)}) && ${byId("pair-address")}.textContent.endsWith("/mcp")`,
 		10_000,
 	);
-	const address = await panel.eval<string>(
-		`${byId("pair-address")}.textContent`,
-	);
-	await panel.eval(`${byId("pair-close")}.click()`);
-	return address;
+	return panel.eval<string>(`${byId("pair-address")}.textContent`);
 }
 
 /** An MCP client paired with `address` (a token straight from the relay's store). */
