@@ -32,7 +32,7 @@ import type {
 } from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
-import { byId, h, isWebPage, shortUrl } from "./dom.ts";
+import { byId, h, isWebPage, shortUrl, sitePattern } from "./dom.ts";
 import {
 	createConnection,
 	DEFAULT_RELAY,
@@ -78,6 +78,17 @@ function writeSetting(key: string, value: string): void {
 	} catch {
 		// Storage blocked: the setting lasts until the panel closes.
 	}
+}
+
+/**
+ * Chrome's prompt to let Overmark run on the site of `url` from now on. It
+ * shows only during a click, so call it before anything is awaited; it
+ * answers yes at once where Overmark may run already.
+ */
+function askForSite(url: string): Promise<boolean> {
+	const pattern = sitePattern(url);
+	if (pattern === undefined) return Promise.resolve(false);
+	return chrome.permissions.request({ origins: [pattern] }).catch(() => false);
 }
 
 const message = (error: unknown) =>
@@ -536,10 +547,22 @@ const actions: Actions = {
 
 	loadOntoTab(c) {
 		const hint = caseHintWriter();
+		// Chrome hides the address of a tab Overmark may not run on: ask for
+		// the case's site, the likeliest one. Another site needs the icon.
+		const asked =
+			state.tab !== undefined && !state.tab.url
+				? askForSite(c.page.url)
+				: undefined;
 		void (async () => {
 			const work = loadWork.start();
 			const tab = await activeTab();
-			if (tab?.id !== undefined) await loadInto(c, tab.id, hint, work);
+			if (tab?.id === undefined) return;
+			const loaded = await loadInto(c, tab.id, hint, work);
+			// Allowed by Chrome's prompt only now: once more.
+			if (loaded !== undefined || asked === undefined || !(await asked)) return;
+			if (!work.current()) return;
+			await refreshTab();
+			await loadInto(c, tab.id, hint, work);
 		})();
 	},
 
@@ -574,6 +597,9 @@ const actions: Actions = {
 	openPage(c) {
 		if (!isWebPage(c.page.url)) return;
 		const hint = caseHintWriter();
+		// Now, while the click allows Chrome's prompt. The tab opens meanwhile,
+		// and without a yes the icon's click lets Overmark run there (below).
+		const asked = askForSite(c.page.url);
 		void (async () => {
 			try {
 				const opened = await chrome.tabs.create({ url: c.page.url });
@@ -589,16 +615,25 @@ const actions: Actions = {
 					return hint("");
 				// Chrome tells the address only where Overmark may run. Elsewhere
 				// the icon's click lets it: the case loads then (see onMessage).
-				if (tab.url === undefined) {
+				let url = tab.url;
+				if (url === undefined) {
 					pendingLoad = { tabId: opened.id, caseId: c.id };
-					return hint(
+					hint(
 						"Click the Overmark icon in the toolbar (or press Alt+Shift+O) to load the case onto this tab.",
 					);
+					// A yes to Chrome's prompt after the page loaded: load it now,
+					// unless the icon's click did already.
+					if (!(await asked)) return;
+					const now = await chrome.tabs.get(opened.id).catch(() => undefined);
+					if (now?.url === undefined || pendingLoad?.tabId !== opened.id)
+						return;
+					pendingLoad = undefined;
+					url = now.url;
 				}
 				// The page may have sent the tab elsewhere, to a sign-in say.
-				if (!isPageOf(c, tab.url))
+				if (!isPageOf(c, url))
 					return hint(
-						`The page went on to ${shortUrl(tab.url)}, so the case was not loaded there.`,
+						`The page went on to ${shortUrl(url)}, so the case was not loaded there.`,
 					);
 				await loadOnLoaded(c, opened.id, hint);
 			} catch (error) {

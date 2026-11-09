@@ -45,8 +45,10 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    on the same path it loads at once; a case of another page has a Load button for this
    tab. In the case, "Show marks on this tab" and "Hide marks on this tab" put its marks
    on the page and take them off. On a tab Overmark may not run on yet (after reloading the extension, say), Chrome
-   hides the address: click the Overmark icon there and the case loads. The case's address
-   opens its page in a new tab and loads it there (marks a script draws late are looked for
+   hides the address: click the Overmark icon there and the case loads, or press "Show
+   marks on this tab", and Chrome asks whether Overmark may run on the case's site from
+   then on. The case's address asks the same, then opens its page in a new tab and loads
+   it there (marks a script draws late are looked for
    again for a few seconds), and when the
    tab's size is not the one the marks were made at, Match size resizes the window to it
    (as far as the screen allows; page zoom is counted). Overmark looks for each mark's element and draws the mark on it again,

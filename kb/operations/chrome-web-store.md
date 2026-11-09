@@ -126,7 +126,7 @@ of the same pages, alone or with an AI app the user connects.
 | `scripting` | Inject the toolbar and outlines into that tab. |
 | `sidePanel` | The side panel lists cases, loads them onto the tab and connects the AI app. |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
-| `<all_urls>` (optional) | Only when the user turns on "allow on all sites", so Overmark works without clicking its icon on each tab. |
+| `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page from its address or shows a case's marks on a tab Overmark may not run on yet, so the marks load without clicking the icon. All sites only when the user turns on "allow on all sites". |
 
 **Remote code:** No. All code is in the package; the connection to the relay carries
 data only, and no tool runs code an AI app sends.
