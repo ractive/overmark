@@ -1049,9 +1049,24 @@ function connectTo(relay: string): TabMcp {
 	});
 }
 
+/**
+ * The relay to use. Until 2026-11-09 the default was a relay on this
+ * computer, and nothing was saved for it: a panel that connected there (the
+ * library keeps an address secret per relay) stays with it.
+ */
+function savedRelay(): string {
+	const saved = readSetting(RELAY_KEY);
+	if (saved !== null) return saved;
+	const old = "http://localhost:8080";
+	if (readSetting(`tab-mcp:secret:${old}:overmark`) === null)
+		return DEFAULT_RELAY;
+	writeSetting(RELAY_KEY, old);
+	return old;
+}
+
 /** Shown while disconnected when the saved relay could not be used. */
 let relayNote: string | undefined;
-let relay = readSetting(RELAY_KEY) ?? DEFAULT_RELAY;
+let relay = savedRelay();
 let mcp: TabMcp;
 try {
 	mcp = connectTo(relay);

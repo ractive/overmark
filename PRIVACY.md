@@ -1,7 +1,8 @@
 # Overmark privacy policy
 
-Overmark is a browser extension for annotating web pages. It has no server, no
-account and no analytics. Its author receives nothing from it.
+Overmark is a browser extension for annotating web pages. It has no account and no
+analytics. Its author receives nothing from it, except what passes through the hosted
+relay when you connect an AI app through it (see "An AI app" below).
 
 ## What Overmark keeps, and where
 

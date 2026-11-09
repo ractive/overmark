@@ -67,8 +67,10 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
 The side panel offers the cases to an AI app (Claude Code, Claude, ChatGPT, Codex)
 through a [tab-mcp](https://github.com/ractive/tab-mcp) relay. The side panel uses
-the hosted relay `https://tab-mcp.ractive.ch` unless you enter another one; it allows
-the development build's ID, `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`.
+the hosted relay `https://tab-mcp.ractive.ch` unless you enter another one. It allows
+only builds with the fixed key in `manifest-key.txt` (ID
+`chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`); the store package has none, so
+it gets another ID and needs a relay of its own until the store's key is set.
 The side panel's tools:
 
 | Tool | What it does |

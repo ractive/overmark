@@ -694,10 +694,12 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			"the connect dialog's primary button stays readable under the pointer",
 			async () => {
 				const relay = startTestRelay({ pageWaitMs: 0 });
+				const selector = ".tab-mcp-dialog[open] button.tab-mcp-primary";
+				const copy = `document.querySelector(${JSON.stringify(selector)})`;
+				let nodeId: unknown;
 				try {
 					await keepOnWith(relay.url);
 					await h.control.eval(`${id("connect")}.click()`);
-					const copy = `document.querySelector(".tab-mcp-dialog[open] button.tab-mcp-primary")`;
 					await h.control.waitFor(copy);
 					const colours = `(() => { const s = getComputedStyle(${copy}); return [s.color, s.backgroundColor]; })()`;
 					const [colour, background] =
@@ -711,10 +713,10 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					await h.control.send("DOM.enable");
 					await h.control.send("CSS.enable");
 					const { root } = await h.control.send("DOM.getDocument");
-					const { nodeId } = await h.control.send("DOM.querySelector", {
+					({ nodeId } = await h.control.send("DOM.querySelector", {
 						nodeId: (root as { nodeId: number }).nodeId,
-						selector: ".tab-mcp-dialog[open] button.tab-mcp-primary",
-					});
+						selector,
+					}));
 					await h.control.send("CSS.forcePseudoState", {
 						nodeId,
 						forcedPseudoClasses: ["hover"],
@@ -725,14 +727,18 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 						colour,
 						background,
 					]);
-					await h.control.send("CSS.forcePseudoState", {
-						nodeId,
-						forcedPseudoClasses: [],
-					});
-					await h.control.eval(
-						`document.querySelector("dialog[open]").close(); ${id("no-transitions")}.remove()`,
-					);
 				} finally {
+					if (nodeId !== undefined)
+						await h.control
+							.send("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: [] })
+							.catch(() => undefined);
+					await h.control.send("CSS.disable").catch(() => undefined);
+					await h.control.send("DOM.disable").catch(() => undefined);
+					await h.control
+						.eval(
+							`document.querySelector("dialog[open]")?.close(); document.getElementById("no-transitions")?.remove()`,
+						)
+						.catch(() => undefined);
 					await relay.stop();
 				}
 			},
