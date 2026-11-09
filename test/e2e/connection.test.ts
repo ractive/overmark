@@ -3,7 +3,9 @@
  * while the side panel is closed; a question shows in the side panel of the
  * window in front, or else as a Chrome notification (answered through the
  * worker's own button handler); only the side panel's own page may command
- * the connection; the panel's old address is kept.
+ * the connection; the panel's old address is kept, and so is the one the
+ * build before kept in chrome.storage.local (DEC-016); what is written there
+ * later is not taken.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -25,7 +27,14 @@ import {
 } from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
-import { READ_DB, worker } from "./steps.ts";
+import {
+	KV,
+	READ_DB,
+	restartWorker,
+	settingsOf,
+	until,
+	worker,
+} from "./steps.ts";
 
 interface CallResult {
 	isError?: boolean;
@@ -146,13 +155,15 @@ describe.skipIf(browserBinary === undefined)(
 				};
 			})()`);
 			await tab.page.activate();
+			// The box is the side panel's: it sends the change over its port.
+			const side = await openSidePanel(h);
 			const blurBox = byId("blur-forms");
 			const set = async (on: boolean) => {
-				await h.control.waitFor(`${blurBox}.checked !== undefined`);
-				if ((await h.control.eval<boolean>(`${blurBox}.checked`)) !== on)
-					await h.control.eval(`${blurBox}.click()`);
-				await h.control.waitFor(
-					`chrome.storage.local.get("blurForms").then((s) => s.blurForms === ${on})`,
+				if ((await side.eval<boolean>(`${blurBox}.checked`)) !== on)
+					await side.eval(`${blurBox}.click()`);
+				await until(
+					() => settingsOf(h),
+					(kv) => kv["blurForms"] === on,
 				);
 			};
 			/** What the page was asked to blur for one screenshot. */
@@ -166,6 +177,7 @@ describe.skipIf(browserBinary === undefined)(
 				expect(await blurOfCapture()).toEqual([on]);
 			}
 			await set(false);
+			await closeSidePanel(h, side);
 		});
 
 		test("with the side panel closed a question is a notification: Don't allow, Allow, late clicks", async () => {
@@ -236,11 +248,7 @@ describe.skipIf(browserBinary === undefined)(
 				`${byId("ai-status")}.textContent === "Not connected"`,
 			);
 			expect(relay.relay.sessionCount).toBe(0);
-			expect(
-				await (await worker(h)).eval(
-					`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn)`,
-				),
-			).toBe(false);
+			expect((await settingsOf(h))["keepAiOn"]).toBe(false);
 			expect(await badge()).toBe("");
 			// The pairing is still there: the same token works after a connect.
 			await panel.eval(`${byId("connect")}.click()`);
@@ -283,13 +291,9 @@ describe.skipIf(browserBinary === undefined)("who may command it", () => {
 			}).then(([injected]) => injected.result)`,
 		);
 		expect(answer).toBe("closed");
-		const w = await worker(h);
-		expect(
-			await w.eval(
-				`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn ?? null)`,
-			),
-		).toBeNull();
-		// The settings and the secret are neither readable nor writable there.
+		expect((await settingsOf(h))["keepAiOn"]).toBeUndefined();
+		// chrome.storage.local is closed to content scripts where Chrome can
+		// (best effort, DEC-016); nothing of the AI connection is kept there.
 		const tried = await h.control.eval<string[]>(
 			`chrome.scripting.executeScript({
 				target: { tabId: ${tabId} },
@@ -303,16 +307,14 @@ describe.skipIf(browserBinary === undefined)("who may command it", () => {
 			"Access to storage is not allowed from this context.",
 			"Access to storage is not allowed from this context.",
 		]);
-		expect(
-			await w.eval(
-				`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn ?? null)`,
-			),
-		).toBeNull();
+		expect((await settingsOf(h))["keepAiOn"]).toBeUndefined();
 	});
 
 	test("the panel's page in a tab is no side panel: closed too, and its AI buttons are off", async () => {
 		expect(await h.control.eval<string>(PROBE)).toBe("closed");
 		await h.control.waitFor(`${byId("connect")}.disabled`);
+		// Nor can it change Blur form fields: that goes over the port too.
+		expect(await h.control.eval(`${byId("blur-forms")}.disabled`)).toBe(true);
 		expect(await h.control.eval(`${byId("ai-status")}.textContent`)).toContain(
 			"side panel",
 		);
@@ -397,11 +399,145 @@ describe.skipIf(browserBinary === undefined)(
 			port.postMessage({ type: "migrate", keepOn: false, secrets: {} });
 		})()`);
 			await Bun.sleep(300);
-			expect(
-				await (await worker(h)).eval(
-					`chrome.storage.local.get("keepAiOn").then((s) => s.keepAiOn)`,
-				),
-			).toBe(true);
+			expect((await settingsOf(h))["keepAiOn"]).toBe(true);
+		}, 60_000);
+	},
+);
+
+describe.skipIf(browserBinary === undefined)(
+	"the settings the build before kept in chrome.storage.local",
+	() => {
+		let h: Harness;
+		const relay = startTestRelay();
+		const secret = "R".repeat(43);
+		const key = () => `tab-mcp:secret:${relay.url}:overmark`;
+		let address: string;
+
+		const listCases = async () => {
+			const client = await mcpClient(relay.store, address);
+			try {
+				return (await client.callTool({
+					name: "list_cases",
+					arguments: {},
+				})) as CallResult;
+			} finally {
+				await client.close();
+			}
+		};
+
+		/** The same address answers an AI app (after a worker start, in a while). */
+		async function answers(): Promise<void> {
+			const end = Date.now() + 20_000;
+			for (;;) {
+				const result = await listCases().catch((e: Error) => e);
+				if (!(result instanceof Error) && !result.isError) return;
+				if (Date.now() > end)
+					throw new Error(
+						`the address did not answer: ${result instanceof Error ? result.message : JSON.stringify(result)}; ${JSON.stringify(await settingsOf(h))}`,
+					);
+				await Bun.sleep(250);
+			}
+		}
+
+		// In the control page, an extension page too: a session on the worker
+		// would keep Chrome from stopping it.
+		const localAll = () =>
+			h.control.eval<Record<string, unknown>>("chrome.storage.local.get(null)");
+
+		beforeAll(async () => {
+			h = await startHarness(browserBinary as string);
+			const before = new TabMcp({
+				relay: relay.url,
+				server: { name: "overmark", version: "1.0.0" },
+				storage: {
+					getItem: (k) => (k === key() ? secret : null),
+					setItem() {},
+				},
+			});
+			({ address } = await before.connect({ resume: true }));
+			before.disconnect();
+		}, 60_000);
+
+		afterAll(async () => {
+			await h?.stop();
+			await relay.stop();
+		});
+
+		test("after the update the same address answers, and the settings are in IndexedDB", async () => {
+			// The worker's first start is done: it found nothing to move.
+			await until(
+				() => settingsOf(h),
+				(kv) => kv["movedFromStorage"] === 1,
+				10_000,
+			);
+			// As before this version: no settings database yet, everything in
+			// chrome.storage.local as overmark#26 wrote it.
+			await h.control.eval(KV("store.clear()", "readwrite"));
+			const old = {
+				[key()]: secret,
+				relay: relay.url,
+				keepAiOn: true,
+				blurForms: true,
+				migrated: true,
+			};
+			await h.control.eval(`chrome.storage.local.set(${JSON.stringify(old)})`);
+			await restartWorker(h);
+			// Keep AI access on: the new worker connects by itself.
+			await answers();
+			const kv = await settingsOf(h);
+			expect(kv).toEqual({
+				[key()]: secret,
+				relay: relay.url,
+				keepAiOn: true,
+				blurForms: true,
+				panelHandedOver: true,
+				movedFromStorage: 1,
+			});
+			expect(await localAll()).toEqual({});
+			await (await h.open("v1")).page.activate();
+			const panel = await openSidePanel(h);
+			await panel.waitFor(
+				`${byId("relay")}.value === ${JSON.stringify(relay.url)}`,
+			);
+			expect(await panel.eval(`${byId("keep-on")}.checked`)).toBe(true);
+			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(true);
+			await panel.eval(`${byId("ai-button")}.click()`);
+			await panel.waitFor(
+				`${byId("pair-address")}.textContent === ${JSON.stringify(address)}`,
+			);
+			await closeSidePanel(h, panel);
+		}, 60_000);
+
+		test("a relay a content script writes into chrome.storage.local is never used", async () => {
+			const before = await settingsOf(h);
+			const evil = {
+				relay: "https://evil.example",
+				keepAiOn: true,
+				blurForms: false,
+				"tab-mcp:secret:https://evil.example:overmark": "E".repeat(43),
+			};
+			// From a content script: Chrome refuses it where it closes the area.
+			const { tabId } = await h.open("v1");
+			await h.control.eval(
+				`chrome.scripting.executeScript({
+					target: { tabId: ${tabId} },
+					func: (items) => chrome.storage.local.set(items).then(() => "written", (e) => e.message),
+					args: [${JSON.stringify(evil)}],
+				})`,
+			);
+			// And as one could where Chrome lets it: written there all the same.
+			await h.control.eval(`chrome.storage.local.set(${JSON.stringify(evil)})`);
+			await restartWorker(h);
+			// The new worker only removes it from there.
+			await until(localAll, (local) => Object.keys(local).length === 0, 10_000);
+			expect(await settingsOf(h)).toEqual(before);
+			await answers();
+			await (await h.open("v1")).page.activate();
+			const panel = await openSidePanel(h);
+			await panel.waitFor(
+				`${byId("relay")}.value === ${JSON.stringify(relay.url)}`,
+			);
+			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(true);
 		}, 60_000);
 	},
 );

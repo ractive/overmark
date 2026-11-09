@@ -138,16 +138,21 @@ panel when it is open in the window in front, otherwise in a system notification
 Don't allow and Allow (the icon shows "?" while a question waits). No answer within 60
 seconds is Don't allow.
 
-Overmark needs Chrome 140 or later: from then on Chrome keeps the extension's storage,
-which holds the connection's address secret, from the scripts it runs in web pages.
-Where it cannot, AI access stays off.
+Overmark needs Chrome 116 or later. The connection's settings and its address secret
+are in a database of the extension's own (IndexedDB in the extension's origin), which
+only its background service worker uses and the scripts Overmark runs in web pages
+cannot reach; the side panel changes them through the worker. Whether AI access is on
+until the browser closes is in Chrome's session storage, also out of those scripts'
+reach.
 
 Permissions for this: `alarms` wakes the service worker once a minute while AI access is
 on, so the connection comes back after a sleep; `notifications` asks the questions when
 the side panel is not in front (Chrome mentions it when installing: "Display
 notifications"). In earlier builds the connection lived in the side panel, and its
 address secret in the panel's own storage; the first time the side panel opens after the
-update, it hands the secret over, so the address an AI app has stays the same.
+update, it hands the secret over, so the address an AI app has stays the same. The build
+just before this one kept the settings in the extension's local storage; the worker
+moves them into its database once, at its first start, and deletes them there.
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
 relay with a public HTTPS address that allows Overmark's ID, such as the hosted one.

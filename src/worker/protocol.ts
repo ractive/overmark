@@ -4,6 +4,8 @@
  * worker; the side panel is a view that sends commands over one named port
  * and gets the state back. Content scripts reach the same `chrome.runtime`
  * events, so the port's sender is checked: only the side panel's own page.
+ * The settings are changed only this way too: the panel neither reads nor
+ * writes them in storage (DEC-016).
  */
 
 /** The name of the side panel's port (`chrome.runtime.connect`). */
@@ -24,6 +26,8 @@ export type PanelCommand =
 	/** "Stop AI access": end the session, keep the pairing, Keep AI access off. */
 	| { type: "stop" }
 	| { type: "keep-on"; on: boolean }
+	/** "Blur form fields in screenshots" (DEC-016: only the worker keeps it). */
+	| { type: "blur-forms"; on: boolean }
 	/** The pairing view opened (`on`) or closed: codes only while it is open. */
 	| { type: "pair"; on: boolean }
 	| { type: "revoke"; grantId: string }
@@ -80,6 +84,8 @@ export interface AiState {
 	/** The saved relay could not be used, and the default is used instead. */
 	relayNote?: string;
 	keepOn: boolean;
+	/** "Blur form fields in screenshots". */
+	blurForms: boolean;
 	/** The library's state. */
 	state: "disconnected" | "connecting" | "connected";
 	/** The library is reconnecting by itself. */
@@ -149,6 +155,7 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "new-address":
 			return { type: m["type"] };
 		case "keep-on":
+		case "blur-forms":
 		case "pair":
 			return isBoolean(m["on"]) ? { type: m["type"], on: m["on"] } : undefined;
 		case "revoke":

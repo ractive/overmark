@@ -66,9 +66,10 @@ describe("manifest", () => {
 		]);
 		expect(m["optional_host_permissions"]).toEqual(["<all_urls>"]);
 		expect(m["host_permissions"]).toBeUndefined();
-		// storage.local.setAccessLevel(), which keeps the address secret from
-		// content scripts, works from Chrome 140.
-		expect(m["minimum_chrome_version"]).toBe("140");
+		// A WebSocket that carries messages keeps the service worker alive from
+		// Chrome 116 (DEC-015); the settings in IndexedDB need nothing newer
+		// (DEC-016).
+		expect(m["minimum_chrome_version"]).toBe("116");
 	});
 
 	test("test builds get host access", () => {

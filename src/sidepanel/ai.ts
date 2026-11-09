@@ -7,6 +7,8 @@
  *
  * All of the panel's AI access UI is in this module, so that it can be
  * replaced as a whole (by the tab-mcp extension's, once that is settled).
+ * "Blur form fields in screenshots" goes the same way: the worker keeps it,
+ * and the panel neither reads nor writes it in storage (DEC-016).
  */
 
 import {
@@ -17,8 +19,11 @@ import {
 	type QuestionView,
 	type WorkerMessage,
 } from "../worker/protocol.ts";
-import { SECRET_PREFIX } from "../worker/secret.ts";
-import { DEFAULT_RELAY, relayProblem } from "../worker/settings.ts";
+import {
+	DEFAULT_RELAY,
+	relayProblem,
+	SECRET_PREFIX,
+} from "../worker/settings.ts";
 import { byId, h } from "./dom.ts";
 import type { PanelState } from "./state.ts";
 
@@ -26,6 +31,30 @@ import type { PanelState } from "./state.ts";
 const ALLOW_DELAY_MS = 750;
 /** After a first click on New address with apps connected: the second makes it. */
 const NEW_ADDRESS_ARMED_MS = 4000;
+
+/** How long the panel waits for the worker's Blur form fields before it starts an overlay. */
+const BLUR_KNOWN_MS = 2000;
+
+let blurKnown: (on: boolean) => void = () => {};
+const blurReady = new Promise<boolean>((resolve) => {
+	blurKnown = resolve;
+});
+
+/**
+ * "Blur form fields in screenshots", for an overlay the panel starts: the
+ * worker's value once its first state came (a moment after the panel
+ * opened), else what the box shows.
+ */
+export function blurFormsNow(): Promise<boolean> {
+	const box = byId<HTMLInputElement>("blur-forms");
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	return Promise.race([
+		blurReady.then(() => box.checked),
+		new Promise<boolean>((resolve) => {
+			timer = setTimeout(() => resolve(box.checked), BLUR_KNOWN_MS);
+		}),
+	]).finally(() => clearTimeout(timer));
+}
 
 /** What the panel kept in `localStorage` before the connection moved. */
 const OLD_KEYS = {
@@ -114,6 +143,7 @@ export async function startAi(
 ): Promise<void> {
 	const relayInput = byId<HTMLInputElement>("relay");
 	const keepOn = byId<HTMLInputElement>("keep-on");
+	const blurForms = byId<HTMLInputElement>("blur-forms");
 	const buttons = [
 		byId<HTMLButtonElement>("ai-button"),
 		byId<HTMLButtonElement>("connect"),
@@ -133,6 +163,8 @@ export async function startAi(
 		for (const b of buttons) b.disabled = true;
 		keepOn.disabled = true;
 		relayInput.disabled = true;
+		blurForms.disabled = true;
+		blurKnown(false);
 		return;
 	}
 
@@ -207,6 +239,8 @@ export async function startAi(
 				lastCall: a.lastCall,
 			};
 		});
+		blurForms.checked = a.blurForms;
+		blurKnown(a.blurForms);
 		if (document.activeElement !== relayInput) {
 			relayInput.value = a.relay;
 			relayInput.setCustomValidity("");
@@ -236,6 +270,11 @@ export async function startAi(
 
 	keepOn.addEventListener("change", () =>
 		send({ type: "keep-on", on: keepOn.checked }),
+	);
+
+	// The worker keeps it and tells the overlays already open.
+	blurForms.addEventListener("change", () =>
+		send({ type: "blur-forms", on: blurForms.checked }),
 	);
 
 	relayInput.addEventListener("change", () => {

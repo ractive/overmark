@@ -11,3 +11,4 @@
 
 - Owner feedback: adding marks to a case needed "Save…" and then "Add to case" or "Back". DEC-014: marks for a case go into it as each is done, Undo takes the last one out again, failures stay on the page with "Add mark N"; the new-case save keeps its title, its form says "Keep drawing" instead of "Back"
 - The owner asked for the AI connection to stay while the side panel is closed. DEC-015, iteration 8: the connection in the service worker, the panel a view with a plain pairing view (the tab-mcp extension's AI access UI replaces it later), questions in the panel or a Chrome notification, the panel's address kept
+- DEC-016, iteration 9: the AI settings and the address secret move from chrome.storage.local into the worker's own IndexedDB (moved once, never taken from there again), the side panel changes them only over its port, setAccessLevel is best effort and Chrome 116 the minimum again; ported from the tab-mcp extension's PR 89

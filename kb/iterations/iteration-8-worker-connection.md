@@ -21,7 +21,7 @@ DEC-015.
   active tab of the last focused normal window; screenshots go through the worker's own
   capture queue, no message any more (the panel's `capture:tab` is gone).
 - The address secret in a write-through cache over `chrome.storage.local`
-  (`CachedSecretStorage`), `connect({ resume: true })`, no dynamic `import()` in the
+  (`CachedSecretStorage`; moved into the worker's IndexedDB in iteration 9, DEC-016), `connect({ resume: true })`, no dynamic `import()` in the
   worker's bundle (a unit test checks the build).
 - "Keep AI access on" (`KeepOn`, moved) in the worker: it connects at every worker start,
   after an idle or expired session, and goes on trying. Without it a connection lasts
@@ -33,7 +33,9 @@ DEC-015.
   panel's path, not in a tab. Content scripts cannot command; their one-off messages are
   the old ones (`isWorkerRequest`). `chrome.storage.local` is for trusted contexts only
   (`setAccessLevel` for the local area works from Chrome 140, now the manifest's
-  minimum); where Chrome refuses, no secret is kept and AI access stays off.
+  minimum); where Chrome refuses, no secret is kept and AI access stays off. Iteration 9
+  replaced this: the settings are in IndexedDB, `setAccessLevel` is best effort, the
+  minimum is Chrome 116 again (DEC-016).
 - The panel as a view: the header (status, Connect/Manage, Stop AI access, last AI call),
   "Keep AI access on" and the relay field as before; the library's dialog cannot draw from
   the worker, so a plain pairing view of its own (`src/sidepanel/ai.ts`): the address
