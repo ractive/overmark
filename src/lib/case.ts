@@ -342,9 +342,18 @@ export function samePath(a: string, b: string): boolean {
  * home page has the same path.
  */
 export function isPageOf(c: Case, url: string): boolean {
-	if (!samePath(c.page.url, url)) return false;
-	const { origin, pathname } = new URL(url);
-	return pathname !== "/" || origin === new URL(c.page.url).origin;
+	return isPageUrl(c.page.url, url);
+}
+
+/** `isPageOf` for a case's page address. */
+export function isPageUrl(caseUrl: string, url: string): boolean {
+	if (!samePath(caseUrl, url)) return false;
+	try {
+		const { origin, pathname } = new URL(url);
+		return pathname !== "/" || origin === new URL(caseUrl).origin;
+	} catch {
+		return false;
+	}
 }
 
 /** Move a shape by `dx`, `dy`. */

@@ -3,12 +3,20 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import { describeElement } from "../lib/element.ts";
+import { isPageUrl } from "../lib/case.ts";
+import { cssSelector, describeElement } from "../lib/element.ts";
+import {
+	inspectElement,
+	isOffLimits,
+	type Relation,
+	resolveSelector,
+} from "../lib/inspect.ts";
 import type {
 	BlurResult,
 	Broadcast,
 	ContentRequest,
 	DescribedElement,
+	InspectResult,
 	Released,
 } from "../lib/messages.ts";
 import { PageActivity } from "./activity.ts";
@@ -84,6 +92,79 @@ function mark(
 		scroll: { x: scrollX, y: scrollY },
 		url: location.href,
 		title: document.title,
+	};
+}
+
+/** An annotation's element read for an AI app (`get_mark_element`). */
+function inspect(
+	overlay: Overlay,
+	reviewer: Reviewer,
+	request: {
+		caseId: string;
+		annotationId: string;
+		casePage: string;
+		selector?: string;
+	},
+): InspectResult | null {
+	// A save or a screenshot blurs fields with inline styles: not the page's.
+	if (activity.busy !== undefined)
+		return { ok: false, reason: "busy", error: activity.busy };
+	if (reviewer.caseId !== request.caseId) return null;
+	const target = reviewer.target(request.annotationId);
+	if (target === undefined) return null;
+	const { match } = target;
+	const n = match.number;
+	if (match.status === "no-element") {
+		if (request.selector === undefined)
+			return {
+				ok: false,
+				reason: "no-element",
+				error: `Mark ${n} was not drawn on an element.`,
+				match,
+			};
+		// Without an element to start from, a selector could name anything
+		// of any page; only the case's own page is searched.
+		if (!isPageUrl(request.casePage, location.href))
+			return {
+				ok: false,
+				reason: "other-page",
+				error: `Mark ${n} was not drawn on an element, and the tab in front does not show the case's page, so the selector is not looked for here.`,
+				match,
+			};
+	} else if (target.element === undefined)
+		return {
+			ok: false,
+			reason: "lost",
+			error: `Mark ${n}'s element was not found on this page.`,
+			match,
+		};
+	let element = target.element;
+	let relation: Relation = "mark";
+	if (request.selector !== undefined) {
+		const found = resolveSelector(document, element, request.selector, {
+			skip: overlay.host,
+			pageWide: element === undefined,
+		});
+		if ("error" in found)
+			return { ok: false, reason: "selector", error: found.error, match };
+		element = found.element;
+		relation = found.relation;
+	}
+	if (element === undefined || isOffLimits(element))
+		return {
+			ok: false,
+			reason: "selector",
+			error: "That element is not part of the page's content.",
+			match,
+		};
+	return {
+		ok: true,
+		url: location.href,
+		title: document.title,
+		match,
+		relation,
+		selector: cssSelector(element),
+		inspection: inspectElement(element, overlay.host),
 	};
 }
 
@@ -178,6 +259,9 @@ function start(): void {
 					sendResponse(
 						mark(overlay, message.selector, message.number, message.blurForms),
 					);
+					break;
+				case "element:inspect":
+					sendResponse(inspect(overlay, reviewer, message));
 					break;
 				case "element:unmark": {
 					const held = activity.now.kind === "ai-mark";

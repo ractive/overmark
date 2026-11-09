@@ -185,16 +185,19 @@ loading is searched for again.
 | `get_image` | One screenshot or crop, scaled to at most 1568 px | no |
 | `load_case` | Loads a case onto the tab in front and reports what was found | no |
 | `highlight` | Scrolls to and outlines one annotation's element (or another candidate) | no |
+| `get_mark_element` | Reads one annotation's element (or, by selector, an ancestor or an element inside it; for an annotation without an element, an element of the case's page) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
 | `capture` | A screenshot of the tab in front | no |
 | `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes |
 | `set_verdict` | Writes the case's verdict | yes |
+| `set_mark_status` | Resolves a mark (fixed, won't fix, can't reproduce) or opens it again | yes |
 | `delete_case` | Deletes a case | yes |
 
 Every call that changes something asks in the side panel, every time (DEC-008). The
 question names the case (title, page, number of marks) and, for `add_annotation`, the page
 in front, next to the raw arguments.
 
-The tools that act on the tab (`load_case`, `highlight`, `capture`, `add_annotation`) run
+The tools that act on the tab (`load_case`, `highlight`, `get_mark_element`, `capture`,
+`add_annotation`) run
 one at a time: they share the page's one loaded case and one temporary mark. An AI app's
 screenshots blur form fields as the user's own do (password fields always, all fields
 with the side panel's setting), go through the service worker's capture queue, and are

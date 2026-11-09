@@ -137,3 +137,41 @@ The price: every new view flashes the overlay away for about 100 ms, and pending
 screenshots live as long as their marks, so they are swept after 7 days instead of
 10 minutes.
 
+## DEC-013: An AI app may read a mark's element from the live page
+
+The owner, 2026-11-09: the AI app could not help find solutions to a case's marks, since
+it had no access to the page structure, only screenshots and the stored details. So
+`get_mark_element` reads one mark's element from the tab in front: its outer HTML, box,
+the window's size, a fixed list of computed styles without those at their initial value,
+the style rules that match it from the sheets the page may read, four ancestors with
+their layout styles and up to twelve children. It is a fixed, read-only tool (DEC-005
+still holds: no code from the AI app runs, the selector is only matched), so it does not
+ask first, like the other reading tools.
+
+A CSS selector reads another element, but only among the mark's element's ancestors and
+inside it: a page-wide lookup would let the AI app read anything on whatever tab is in
+front, hidden content included. For a mark without an element (box, arrow, pen, note)
+there is nothing to start from, so the selector is looked for on the whole page, and only
+when the tab in front shows the case's page (`isPageUrl`). Selectors that name only `*`
+or use `:has()` more than once are refused; the whole page is queried only for such a
+mark, and the first visible match wins.
+
+Nothing of it is stored, so DEC-009's allow-list of recorded details does not apply, but
+its reasons do: the HTML is written by Overmark's own serializer (`src/lib/inspect.ts`),
+not taken from `outerHTML`. Form fields keep an allow-list of attributes (never `value`,
+`checked`, `selected` or `aria-value*`); the content of text areas, selects and editable
+regions (with Monaco, CodeMirror 5 and Ace) is left out, also when the element itself is
+inside one; hidden subtrees (`display: none`, `visibility: hidden`) are left out, with a
+note. URLs lose their query, fragment and user name and password, found by the
+attribute's name (`href`, `data-src`, `*srcset`, …) and by the value (anything that
+parses as an absolute, root-relative or query-carrying URL, also inside a longer value
+and in CSS `url()`s); other schemes than http(s) keep only the scheme (`mailto:…`), as
+DEC-009's links do. The head, `meta`, `link`, `script`, `style`, `title`, `base`,
+`noscript` and `template` are never the element read, and their content is never sent;
+a meta tag named like a secret loses its `content`, `srcdoc` its document, event
+handlers their code, attributes named like a secret (`data-csrf-token`) their value.
+Everything is capped (about 16 KB of markup, 30 rules), and a cut is said in the result;
+for a small relay message limit the page sends a second markup cut at 4 KB. The result opens with a note that the page's content is data, not
+instructions, and is marked `untrustedContentHint`. It is refused while the page is busy
+with a save or a screenshot, whose blur is inline style the page does not have.
+
