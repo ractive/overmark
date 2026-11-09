@@ -142,13 +142,27 @@ describe.skipIf(browserBinary === undefined)("get_mark_element", () => {
 			]);
 			expect(form.rules.map((r) => r.selector)).toContain(".Form_root__k3L9m");
 
+			// The head is never read: not by a selector, not inside <html>.
+			const meta = await client.callTool({
+				name: "get_mark_element",
+				arguments: { caseId, mark: 1, selector: "meta[name=csrf-token]" },
+			});
+			expect(meta.isError).toBe(true);
+			expect(JSON.stringify(meta.content)).toContain(
+				"Nothing around the mark's element matches",
+			);
+			const page = await read({ selector: "html" });
+			expect(page.element.relation).toBe("ancestor");
+			expect(page.html).toContain("<head></head>");
+			expect(JSON.stringify(page)).not.toContain("e2e-csrf-secret");
+
 			const missing = await client.callTool({
 				name: "get_mark_element",
 				arguments: { caseId, mark: 1, selector: ".nothing-like-this" },
 			});
 			expect(missing.isError).toBe(true);
 			expect(JSON.stringify(missing.content)).toContain(
-				"No element on this page matches",
+				"Nothing around the mark's element matches .nothing-like-this",
 			);
 		} finally {
 			await client.close();

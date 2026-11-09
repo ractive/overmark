@@ -10,11 +10,14 @@
  * - No field value and no typed text: form fields keep only the attributes of
  *   `FIELD_ATTRIBUTES` (never `value`, `checked` or `selected`), and the
  *   content of text areas, selects and editable regions is left out.
- * - No query string or fragment of a URL, in attributes and in CSS `url()`s;
- *   `data:` keeps its type only, `javascript:` nothing.
- * - Comments, the content of the head, scripts, styles, `noscript` and
- *   `template`, inline event handlers' code, and the values of attributes
- *   named like a secret (`data-csrf-token`) are left out.
+ * - No query string, fragment, user name or password of a URL, found by the
+ *   attribute's name and by its value, also inside longer values and CSS
+ *   `url()`s; another scheme than http(s) keeps only the scheme, `data:` its
+ *   type.
+ * - Nothing of the head, and no head-only element (`NOT_CONTENT`) is read.
+ *   Comments, hidden subtrees, the content of scripts, styles, `noscript`,
+ *   `template` and `srcdoc`, inline event handlers' code, and the values of
+ *   attributes (and meta tags) named like a secret are left out.
  * - Everything is capped: the markup (`LIMITS.html`), each text and attribute,
  *   the rules and their declarations, ancestors and children.
  */
@@ -43,6 +46,8 @@ export const LIMITS = {
 	selector: 300,
 	/** Style rules looked at, at most: a page can have tens of thousands. */
 	scannedRules: 30_000,
+	/** The markup again, for a relay with a small message limit. */
+	shortHtml: 4000,
 	ancestors: 4,
 	children: 12,
 	classes: 10,
@@ -111,8 +116,6 @@ const URL_ATTRIBUTES = new Set([
 	"codebase",
 ]);
 
-const SRCSET = new Set(["srcset", "imagesrcset"]);
-
 /**
  * Their content is no page content (the head's meta tags can hold tokens);
  * the element itself stays.
@@ -142,17 +145,56 @@ const VOID = new Set([
 const cut = (value: string, max: number) =>
 	value.length > max ? `${value.slice(0, max)}…` : value;
 
+const SCHEME = /^([a-z][a-z0-9+.-]*):/i;
+
 /**
- * A URL without its query string and fragment (marked `?…`, `#…`); a `data:`
- * URL keeps its type, a `javascript:` URL nothing.
+ * A URL without its query string and fragment (marked `?…`, `#…`) and
+ * without a user name or password. Of another scheme than http(s) only the
+ * scheme stays (`mailto:…`), of `data:` its type.
  */
 export function cleanUrl(value: string): string {
 	const v = value.trim();
-	const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(v)?.[1]?.toLowerCase();
+	const scheme = SCHEME.exec(v)?.[1]?.toLowerCase();
+	if (scheme === undefined && !v.startsWith("//")) {
+		// Relative: no user name, no host; only the query and fragment go.
+		const at = v.search(/[?#]/);
+		return cut(at < 0 ? v : `${v.slice(0, at)}${v[at]}…`, LIMITS.url);
+	}
 	if (scheme === "data") return `data:${v.slice(5).split(/[;,]/)[0] ?? ""}…`;
-	if (scheme === "javascript" || scheme === "vbscript") return `${scheme}:…`;
+	let u: URL;
+	try {
+		u = new URL(v, "https://base.invalid/");
+	} catch {
+		return "…";
+	}
+	if (u.protocol !== "http:" && u.protocol !== "https:")
+		return `${u.protocol}…`;
+	const marks = `${u.search === "" ? "" : "?…"}${u.hash === "" ? "" : "#…"}`;
+	const prefix = scheme === undefined ? "//" : `${u.protocol}//`;
+	return cut(`${prefix}${u.host}${u.pathname}${marks}`, LIMITS.url);
+}
+
+/**
+ * A value that is a URL: absolute, protocol- or root-relative, of a scheme
+ * such as `mailto:`, or a path with a query or fragment (`img/a.png?sig=…`).
+ */
+export function looksLikeUrl(value: string): boolean {
+	const v = value.trim();
+	if (v === "" || /\s/.test(v)) return false;
+	if (
+		/^(?:[a-z][a-z0-9+.-]*:\/\/|\/|(?:mailto|tel|sms|callto|javascript|vbscript|data|blob|file):)/i.test(
+			v,
+		)
+	)
+		return true;
 	const at = v.search(/[?#]/);
-	return cut(at < 0 ? v : `${v.slice(0, at)}${v[at]}…`, LIMITS.url);
+	const path = v.slice(0, at);
+	return at > 0 && /^[\w.~%@:+/-]+$/.test(path) && /[/.]/.test(path);
+}
+
+/** Absolute URLs inside a longer value (JSON, a list) cleaned. */
+function cleanUrlsIn(value: string): string {
+	return value.replace(/\bhttps?:\/\/[^\s"'<>()\\]+/gi, (url) => cleanUrl(url));
 }
 
 /** Every `url(…)` in CSS text cleaned like `cleanUrl`. */
@@ -174,6 +216,16 @@ function cleanSrcset(value: string): string {
 		.join(", ");
 }
 
+/** `data-src`, `data-href`, `data-bg-url`, … */
+const DATA_URL = /^data-.*(src|href|url|link|bg|background|image|img|poster)/i;
+
+/** A meta tag's name that says its content is a secret. */
+function secretMeta(el: Element): boolean {
+	return ["name", "property", "http-equiv", "itemprop"].some((a) =>
+		SECRET.test(el.getAttribute(a) ?? ""),
+	);
+}
+
 /** An attribute's value as it may leave the page, or `undefined` to drop it. */
 export function attributeValue(
 	el: Element,
@@ -182,13 +234,20 @@ export function attributeValue(
 ): string | undefined {
 	if (FIELDS.has(el.localName) && !fieldKeeps(name)) return undefined;
 	if (name === "nonce") return undefined;
-	if (SECRET.test(name)) return value === "" ? "" : "…";
+	const gone = value === "" ? "" : "…";
+	// A whole document of its own.
+	if (name === "srcdoc") return gone;
+	if (SECRET.test(name)) return gone;
 	// The handler's code is the page's, and may hold anything.
-	if (name.startsWith("on")) return value === "" ? "" : "…";
-	if (URL_ATTRIBUTES.has(name)) return cleanUrl(value);
-	if (SRCSET.has(name)) return cut(cleanSrcset(value), LIMITS.url);
+	if (name.startsWith("on")) return gone;
+	if (el.localName === "meta" && name === "content" && secretMeta(el))
+		return gone;
+	if (name.endsWith("srcset")) return cut(cleanSrcset(value), LIMITS.url);
+	if (URL_ATTRIBUTES.has(name) || DATA_URL.test(name)) return cleanUrl(value);
 	if (name === "style") return cut(cleanCssUrls(value), LIMITS.style);
-	return cut(value, LIMITS.attribute);
+	if (name === "id" || name === "class") return cut(value, LIMITS.attribute);
+	if (looksLikeUrl(value)) return cleanUrl(value);
+	return cut(cleanUrlsIn(value), LIMITS.attribute);
 }
 
 const escapeText = (s: string) =>
@@ -237,7 +296,22 @@ export interface Markup {
 	html: string;
 	/** Elements left out at the size limit. */
 	leftOut: number;
+	/** Hidden elements left out (`display: none`, `visibility: hidden`), inside ones included. */
+	hidden: number;
 }
+
+/** Not rendered, or rendered invisible: such content is no part of the view. */
+export function isHidden(el: Element): boolean {
+	const style = el.ownerDocument.defaultView?.getComputedStyle(el);
+	if (style === undefined || style === null) return false;
+	return (
+		style.getPropertyValue("display") === "none" ||
+		["hidden", "collapse"].includes(style.getPropertyValue("visibility"))
+	);
+}
+
+const HIDDEN_NOTE = (tag: string) =>
+	`<!-- overmark: hidden ${tag} left out -->`;
 
 /** A node written whole, in part (the limit was reached inside), or not at all. */
 type Written = "whole" | "part" | "none";
@@ -256,6 +330,7 @@ export function markupOf(
 	const max = options.max ?? LIMITS.html;
 	let out = "";
 	let dropped = 0;
+	let hidden = 0;
 	// The closing tags still to come count against the limit.
 	let closing = 0;
 	const fits = (s: string) => out.length + s.length + closing <= max;
@@ -294,6 +369,13 @@ export function markupOf(
 		const e = node as Element;
 		if (e === options.skip) return "whole";
 		const name = e.localName;
+		if (e !== el && !EMPTIED.has(name) && isHidden(e)) {
+			const note = HIDDEN_NOTE(name);
+			if (!fits(note)) return "none";
+			out += note;
+			hidden += countElements([e]);
+			return "whole";
+		}
 		const open = openTag(e);
 		const close = VOID.has(name) ? "" : `</${name}>`;
 		if (!fits(open + close)) return "none";
@@ -305,6 +387,9 @@ export function markupOf(
 			// Nothing inside: code, styles, another document.
 		} else if (holdsInput(e) || (e === el && typedRoot)) {
 			if (e.firstChild !== null) out += LEFT_OUT_INPUT;
+		} else if (e === el && isHidden(e)) {
+			if (e.firstChild !== null) out += HIDDEN_NOTE("element's content");
+			hidden += countElements(e.childNodes);
 		} else {
 			const root = shadowOf(e);
 			if (root !== null) {
@@ -329,7 +414,7 @@ export function markupOf(
 	};
 
 	if (write(el) === "none") note(countElements([el]));
-	return { html: out, leftOut: dropped };
+	return { html: out, leftOut: dropped, hidden };
 }
 
 /** One computed style property's value. */
@@ -835,6 +920,10 @@ export interface Inspection {
 	html: string;
 	/** Elements the markup left out at its size limit. */
 	htmlLeftOut?: number;
+	/** Hidden elements the markup left out. */
+	htmlHidden?: number;
+	/** The markup cut at `LIMITS.shortHtml`, when it is longer. */
+	short?: { html: string; leftOut: number; hidden: number };
 	styles: Record<string, string>;
 	rules: MatchedRule[];
 	rulesLeftOut?: number;
@@ -844,6 +933,8 @@ export interface Inspection {
 	ancestors: Neighbour[];
 	children: Neighbour[];
 	childrenLeftOut?: number;
+	/** Hidden children, not listed. */
+	childrenHidden?: number;
 	/** The element is inside a shadow root, so no selector reaches it. */
 	inShadowRoot?: boolean;
 }
@@ -919,9 +1010,10 @@ export function inspectElement(el: Element, skip?: Element): Inspection {
 		ancestors.push(neighbour(at, "layout", false));
 		if (at.localName === "html") break;
 	}
-	const kids = [...el.children].filter(
+	const all = [...el.children].filter(
 		(c) => c !== skip && !EMPTIED.has(c.localName),
 	);
+	const kids = all.filter((c) => !isHidden(c));
 	const root = doc.documentElement;
 	const out: Inspection = {
 		tag: el.localName,
@@ -949,6 +1041,13 @@ export function inspectElement(el: Element, skip?: Element): Inspection {
 			.map((c) => neighbour(c, "child", true)),
 	};
 	if (markup.leftOut > 0) out.htmlLeftOut = markup.leftOut;
+	if (markup.hidden > 0) out.htmlHidden = markup.hidden;
+	if (markup.html.length > LIMITS.shortHtml)
+		out.short = markupOf(el, {
+			max: LIMITS.shortHtml,
+			...(skip === undefined ? {} : { skip }),
+		});
+	if (all.length > kids.length) out.childrenHidden = all.length - kids.length;
 	if (matched.leftOut > 0) out.rulesLeftOut = matched.leftOut;
 	if (matched.unreadable.length > 0)
 		out.unreadableSheets = matched.unreadable.slice(0, 10);
@@ -962,38 +1061,102 @@ export function inspectElement(el: Element, skip?: Element): Inspection {
 /** How a `selector` found the element to inspect, relative to the mark's. */
 export type Relation = "mark" | "ancestor" | "descendant" | "page";
 
+/** Elements that are no part of the page's content, or hold secrets (meta tags). */
+const NOT_CONTENT = new Set([
+	"head",
+	"meta",
+	"link",
+	"script",
+	"style",
+	"title",
+	"base",
+	"noscript",
+	"template",
+]);
+
+/** An element `get_mark_element` never reads: the head and what is not content. */
+export function isOffLimits(el: Element): boolean {
+	return NOT_CONTENT.has(el.localName) || el.closest("head") !== null;
+}
+
+/** Why `selector` is not looked for, if it is not. */
+export function selectorProblem(
+	doc: Document,
+	selector: string,
+): string | undefined {
+	try {
+		// Checks the syntax without matching anything.
+		doc.createDocumentFragment().querySelector(selector);
+	} catch {
+		return `Not a valid CSS selector: ${cut(selector, 200)}`;
+	}
+	if ((selector.match(/:has\(/gi)?.length ?? 0) > 1)
+		return "A selector may use :has() once at most.";
+	if (/^[\s*>+~,()]*$/.test(selector.replace(/\|\*/g, "*")))
+		return "A selector of only * names no element; use a tag, class, id or attribute.";
+	return undefined;
+}
+
+const rendered = (e: Element) => {
+	const r = e.getBoundingClientRect();
+	return r.width > 0 && r.height > 0;
+};
+
+/** The first visible match of `selector` in `root` that `ok` allows, else the first allowed. */
+function firstMatch(
+	root: ParentNode,
+	selector: string,
+	ok: (e: Element) => boolean,
+): Element | undefined {
+	const first = root.querySelector(selector);
+	if (first === null) return undefined;
+	if (ok(first) && rendered(first)) return first;
+	let fallback: Element | undefined;
+	for (const e of root.querySelectorAll(selector)) {
+		if (!ok(e)) continue;
+		if (rendered(e)) return e;
+		fallback ??= e;
+	}
+	return fallback;
+}
+
 /**
- * The element `selector` names, relative to `base` (the mark's element): the
- * nearest ancestor (or `base` itself) that matches, else the first match
- * inside it, else the first visible match on the page. Never `skip`.
+ * The element `selector` names. With the mark's element `base`, only around
+ * it: the nearest ancestor (or `base` itself) that matches, else the first
+ * match inside it, visible ones first. Without one, on the whole page, but
+ * only when `pageWide` (the tab shows the case's page). Never `skip`, the
+ * head, scripts, styles or templates.
  */
 export function resolveSelector(
 	doc: Document,
 	base: Element | undefined,
 	selector: string,
-	skip?: Element,
+	options: { skip?: Element; pageWide?: boolean } = {},
 ): { element: Element; relation: Relation } | { error: string } {
-	try {
-		doc.querySelector(selector);
-	} catch {
-		return { error: `Not a valid CSS selector: ${cut(selector, 200)}` };
-	}
-	const own = (e: Element | null) =>
-		e !== null && (skip === undefined || !skip.contains(e));
+	const problem = selectorProblem(doc, selector);
+	if (problem !== undefined) return { error: problem };
+	const { skip } = options;
+	const ok = (e: Element) =>
+		!isOffLimits(e) && (skip === undefined || !skip.contains(e));
+	const shown = cut(selector, 200);
 	if (base !== undefined) {
 		const up = closestAcross(base, selector);
-		if (up !== null && own(up))
+		if (up !== null && ok(up))
 			return { element: up, relation: up === base ? "mark" : "ancestor" };
-		const down = [...base.querySelectorAll(selector)].find(own);
+		const down = firstMatch(base, selector, ok);
 		if (down !== undefined) return { element: down, relation: "descendant" };
+		return {
+			error: `Nothing around the mark's element matches ${shown}: a selector is looked for among its ancestors and inside it.`,
+		};
 	}
-	const all = [...doc.querySelectorAll(selector)].filter(own);
-	const visible = all.find((e) => {
-		const r = e.getBoundingClientRect();
-		return r.width > 0 && r.height > 0;
-	});
-	const element = visible ?? all[0];
+	if (options.pageWide !== true)
+		return {
+			error: `A selector for a mark without an element is looked for only on the case's page.`,
+		};
+	const element = firstMatch(doc, selector, ok);
 	if (element === undefined)
-		return { error: `No element on this page matches ${cut(selector, 200)}` };
+		return {
+			error: `No element of this page's content matches ${shown}.`,
+		};
 	return { element, relation: "page" };
 }

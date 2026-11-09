@@ -865,23 +865,58 @@ describe("tools", () => {
 		const big = inspectedButton();
 		if (!big.ok) throw new Error("unreachable");
 		big.inspection.html = `<div>${"x".repeat(15_000)}</div>`;
+		big.inspection.htmlLeftOut = 2;
+		big.inspection.short = {
+			html: `<div>${"x".repeat(3000)}</div>`,
+			leftOut: 7,
+			hidden: 0,
+		};
 		big.inspection.rules = Array.from({ length: 30 }, (_, i) => ({
 			selector: `.r${i}`,
 			declarations: "y".repeat(500),
 			sheet: "<style> 1",
 		}));
+		big.inspection.rulesLeftOut = 4;
+		big.inspection.children = [
+			{ tag: "p", rect: { x: 0, y: 0, width: 1, height: 1 }, styles: {} },
+		];
+		big.inspection.childrenLeftOut = 3;
 		tab.inspected = big;
 		build({ maxMessageBytes: () => 20_000 });
 		const read = json(
 			await call("get_mark_element", { caseId: "c_1", mark: 1 }),
 		);
+		// Counts add up; the shorter markup is whole, and the note says so.
+		expect(read.children).toEqual([]);
+		expect(read.childrenLeftOut).toBe(4);
 		expect(read.rules).toEqual([]);
-		expect(read.rulesLeftOut).toBe(30);
-		expect(read.html.length).toBeLessThan(9000);
+		expect(read.rulesLeftOut).toBe(34);
+		expect(read.html).toBe(big.inspection.short.html);
+		expect(read.htmlLeftOut).toBe(7);
+		expect(read.htmlNote).toContain("about 3 KB: 7 elements are left out");
+		expect(read.short).toBeUndefined();
 		build({ maxMessageBytes: () => 4000 });
 		await expect(
 			call("get_mark_element", { caseId: "c_1", mark: 1 }),
 		).rejects.toThrow("do not fit");
+	});
+
+	test("get_mark_element sends the case's page along and passes on refusals", async () => {
+		await seed();
+		await call("get_mark_element", { caseId: "c_1", mark: 1 });
+		const asked = tab.sent.find((r) => r.type === "element:inspect");
+		expect(asked?.type === "element:inspect" && asked.casePage).toBe(
+			"https://www.example.com/kk",
+		);
+		tab.inspected = {
+			ok: false,
+			reason: "other-page",
+			error:
+				"Mark 1 was not drawn on an element, and the tab in front does not show the case's page, so the selector is not looked for here.",
+		};
+		await expect(
+			call("get_mark_element", { caseId: "c_1", mark: 1, selector: "p" }),
+		).rejects.toThrow("Open https://www.example.com/kk in the user's tab");
 	});
 
 	test("highlight passes on that the page is busy", async () => {

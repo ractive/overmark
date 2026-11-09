@@ -46,6 +46,16 @@ describe("URLs", () => {
 		expect(cleanUrl("javascript:alert(document.cookie)")).toBe("javascript:…");
 	});
 
+	test("lose a user name and password; other schemes keep only the scheme", () => {
+		expect(cleanUrl("https://user:pw@shop.example/a?x=1")).toBe(
+			"https://shop.example/a?…",
+		);
+		expect(cleanUrl("//user:pw@cdn.example/x.png")).toBe("//cdn.example/x.png");
+		expect(cleanUrl("mailto:jane@example.com?subject=hi")).toBe("mailto:…");
+		expect(cleanUrl("tel:+41441234567")).toBe("tel:…");
+		expect(cleanUrl("sms:+41791234567")).toBe("sms:…");
+	});
+
 	test("in CSS too", () => {
 		expect(
 			cleanCssUrls(
@@ -78,10 +88,50 @@ describe("attributes", () => {
 		expect(attributeValue(button, "nonce", "abc")).toBeUndefined();
 		expect(attributeValue(button, "data-csrf-token", "abc")).toBe("…");
 		expect(attributeValue(button, "data-session-id", "abc")).toBe("…");
-		expect(attributeValue(button, "srcset", "a.png?x=1 1x, b.png?y=2 2x")).toBe(
+	});
+
+	test("URLs are cleaned by name and by value, srcdoc goes", () => {
+		page(
+			`<img><iframe></iframe><meta name="csrf-token"><meta name="viewport">`,
+		);
+		const img = $("img");
+		const signed = "https://bucket.s3.example/a.jpg?X-Amz-Signature=abc";
+		for (const name of [
+			"data-src",
+			"data-href",
+			"data-url",
+			"data-bg",
+			"data-lazy-image",
+		])
+			expect(attributeValue(img, name, signed)).toBe(
+				"https://bucket.s3.example/a.jpg?…",
+			);
+		expect(
+			attributeValue(img, "data-srcset", "a.jpg?sig=1 1x, b.jpg?sig=2 2x"),
+		).toBe("a.jpg?… 1x, b.jpg?… 2x");
+		expect(attributeValue(img, "data-next", "/reset?token=1")).toBe("/reset?…");
+		expect(attributeValue(img, "data-whatever", "img/a.png?sig=1")).toBe(
+			"img/a.png?…",
+		);
+		expect(attributeValue(img, "data-mail", "mailto:jane@example.com")).toBe(
+			"mailto:…",
+		);
+		expect(
+			attributeValue(img, "data-config", `{"u":"https://x.example/p?k=1"}`),
+		).toBe(`{"u":"https://x.example/p?…"}`);
+		expect(attributeValue(img, "alt", "What is this? Read on.")).toBe(
+			"What is this? Read on.",
+		);
+		expect(attributeValue($("iframe"), "srcdoc", "<p>doc</p>")).toBe("…");
+		const [csrf, viewport] = [...doc.querySelectorAll("meta")];
+		expect(attributeValue(csrf as Element, "content", "s3cret")).toBe("…");
+		expect(
+			attributeValue(viewport as Element, "content", "width=device-width"),
+		).toBe("width=device-width");
+		expect(attributeValue(img, "srcset", "a.png?x=1 1x, b.png?y=2 2x")).toBe(
 			"a.png?… 1x, b.png?… 2x",
 		);
-		expect(attributeValue(button, "style", "background:url(/i.png?t=1)")).toBe(
+		expect(attributeValue(img, "style", "background:url(/i.png?t=1)")).toBe(
 			"background:url(/i.png?…)",
 		);
 	});
@@ -156,6 +206,31 @@ describe("markup", () => {
 		const { html } = markupOf(doc.documentElement);
 		expect(html).not.toContain("s3cret");
 		expect(html).toContain("<head></head><body><p>x</p></body>");
+	});
+
+	test("leaves out hidden elements and says so", () => {
+		page(
+			`<div id="d"><p>shown</p><p style="display:none">gone <b>too</b></p><span style="visibility:hidden">x</span></div>`,
+		);
+		const { html, hidden } = markupOf($("#d"));
+		expect(html).toBe(
+			'<div id="d"><p>shown</p><!-- overmark: hidden p left out --><!-- overmark: hidden span left out --></div>',
+		);
+		expect(hidden).toBe(3);
+		const inspected = inspectElement($("#d"));
+		expect(inspected.children.map((c) => c.text)).toEqual(["shown"]);
+		expect(inspected.childrenHidden).toBe(2);
+	});
+
+	test("a long markup comes with a short one", () => {
+		page(`<ul id="l">${"<li>an item of the list</li>".repeat(400)}</ul>`);
+		const inspected = inspectElement($("#l"));
+		expect(inspected.html.length).toBeGreaterThan(10_000);
+		expect(inspected.short?.html.length).toBeLessThan(4200);
+		expect(inspected.short?.html.endsWith("</ul>")).toBe(true);
+		expect(inspected.short?.leftOut).toBeGreaterThan(
+			inspected.htmlLeftOut ?? 0,
+		);
 	});
 
 	test("leaves out Overmark's own overlay", () => {
@@ -355,9 +430,10 @@ describe("the element on the page", () => {
 		]);
 	});
 
-	test("a selector looks around the mark's element first", () => {
+	test("with a mark's element, a selector is looked for only around it", () => {
 		page(
 			`<form class="f"><div class="row"><button class="b">Go</button></div></form><div class="row">other</div>`,
+			`<meta name="csrf-token" content="s3cret">`,
 		);
 		const button = $("button");
 		const up = resolveSelector(doc, button, ".row");
@@ -367,13 +443,42 @@ describe("the element on the page", () => {
 		expect("element" in self && self.relation).toBe("mark");
 		const down = resolveSelector(doc, $("form"), "button");
 		expect("element" in down && down.relation).toBe("descendant");
-		const elsewhere = resolveSelector(doc, button, "body > div.row");
-		expect("element" in elsewhere && elsewhere.relation).toBe("page");
+		// No page-wide fallback: the other row, the head's meta tag.
+		for (const selector of ["body > div.row", "meta[name=csrf-token]"])
+			expect(resolveSelector(doc, button, selector)).toEqual({
+				error: `Nothing around the mark's element matches ${selector}: a selector is looked for among its ancestors and inside it.`,
+			});
 		expect(resolveSelector(doc, button, "[[")).toEqual({
 			error: "Not a valid CSS selector: [[",
 		});
-		expect(resolveSelector(doc, button, ".none")).toEqual({
-			error: "No element on this page matches .none",
+	});
+
+	test("without one, on the whole page only when allowed, never in the head", () => {
+		page(
+			`<p class="a" style="display:none">hidden</p><p class="a">shown</p><script class="s"></script>`,
+			`<meta name="csrf-token" content="s3cret">`,
+		);
+		expect(resolveSelector(doc, undefined, "p")).toEqual({
+			error:
+				"A selector for a mark without an element is looked for only on the case's page.",
 		});
+		const found = resolveSelector(doc, undefined, ".a", { pageWide: true });
+		expect("element" in found && found.relation).toBe("page");
+		for (const selector of ["meta[name=csrf-token]", "head", "title", ".s"])
+			expect(
+				resolveSelector(doc, undefined, selector, { pageWide: true }),
+			).toEqual({
+				error: `No element of this page's content matches ${selector}.`,
+			});
+	});
+
+	test("selectors that are too broad or nest :has() are refused", () => {
+		page(`<p>x</p>`);
+		for (const selector of ["*", "* > *", "*, *"])
+			expect("error" in resolveSelector(doc, $("p"), selector)).toBe(true);
+		expect(resolveSelector(doc, $("p"), "div:has(p):has(span)")).toEqual({
+			error: "A selector may use :has() once at most.",
+		});
+		expect("element" in resolveSelector(doc, $("p"), "*:not(div)")).toBe(true);
 	});
 });

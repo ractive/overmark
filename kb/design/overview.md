@@ -185,7 +185,7 @@ loading is searched for again.
 | `get_image` | One screenshot or crop, scaled to at most 1568 px | no |
 | `load_case` | Loads a case onto the tab in front and reports what was found | no |
 | `highlight` | Scrolls to and outlines one annotation's element (or another candidate) | no |
-| `get_mark_element` | Reads one annotation's element (or one near it, by selector) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
+| `get_mark_element` | Reads one annotation's element (or, by selector, an ancestor or an element inside it; for an annotation without an element, an element of the case's page) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
 | `capture` | A screenshot of the tab in front | no |
 | `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes |
 | `set_verdict` | Writes the case's verdict | yes |

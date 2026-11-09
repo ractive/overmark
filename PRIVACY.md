@@ -52,17 +52,23 @@ Only in two cases, both started by you:
 2. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
    address (cut as above), title, element details and screenshots of the tab in front.
-   When the app asks about a mark's element, Overmark also reads that element (or one
-   near it the app names) from the page in front and sends it without storing it: up to
-   about 16 KB of its HTML with the page's text, its position and size, the window's
-   size, a list of its computed styles, up to 30 of the page's CSS rules that apply to
-   it, and the tag, id, classes, position and layout styles of up to four elements
-   around it and twelve inside it (with up to 80 characters of each one's text). That
-   HTML holds no form field values: form fields keep only attributes such as their
-   name, type and placeholder, and what is inside text areas, selects and editable
-   regions is left out. Addresses in it, in attributes and in CSS, lose their query
-   string and fragment; comments, the content of the page's head, scripts and styles,
-   and the values of attributes named like a token or secret are left out.
+   When the app asks about a mark's element, Overmark also reads that element from the
+   page in front and sends it without storing it. Instead of the element, the app can
+   name (by a CSS selector) one of the elements around it or inside it; for a mark not
+   drawn on an element (a box, an arrow, a pen mark or a note), any element of the
+   case's page, and only while the tab in front shows that page. What is sent: up to
+   about 16 KB of the element's HTML with the page's text, its position and size, the
+   window's size, a list of its computed styles, up to 30 of the page's CSS rules that
+   apply to it, and the tag, id, classes, position and layout styles of up to four
+   elements around it and twelve inside it (with up to 80 characters of each one's
+   text). Hidden elements (`display: none`, `visibility: hidden`) are left out. That HTML
+   holds no form field values: form fields keep only attributes such as their name,
+   type and placeholder, and what is inside text areas, selects and editable regions is
+   left out. Addresses in it, wherever they appear in attributes and in CSS, lose their
+   query string, fragment, user name and password; of a mail, phone or other address
+   that is not a web address only its kind stays (`mailto:`). The page's head (with its
+   meta tags), comments, the content of scripts, styles and embedded documents, and the
+   values of attributes named like a token or secret are never sent.
    They travel
    through a tab-mcp relay and on to the AI app you paired with a code. Unless you enter
    another relay in the side panel, that is `tab-mcp.ractive.ch`, run by Overmark's

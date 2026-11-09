@@ -140,9 +140,10 @@ data only, and no tool runs code an AI app sends.
     address and title of the tab in front when an AI app asks for them.
   - **Website content:** screenshots, page text excerpts and element details (see
     PRIVACY.md for the full list); when the AI app asks about a mark, also the marked
-    element's trimmed HTML, computed styles and matching CSS rules from the page in
-    front, sent to the AI app and not stored, without form field values or text typed
-    into editable regions, and with addresses cut to their path.
+    element's (or an element around or inside it) trimmed HTML, computed styles and
+    matching CSS rules from the page in front, sent to the AI app and not stored,
+    without form field values, text typed into editable regions, hidden elements or
+    the page's head, and with addresses cut to their path.
   - **User activity:** limited to the marks the user draws and their comments.
 - Stored locally in the browser. Transmitted only to the relay (by default the hosted
   relay tab-mcp.ractive.ch, run by the developer; the user can enter another) and the

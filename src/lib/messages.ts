@@ -73,6 +73,8 @@ export type ContentRequest =
 			type: "element:inspect";
 			caseId: string;
 			annotationId: string;
+			/** The case's page: a mark without an element is looked for only there. */
+			casePage: string;
 			selector?: string;
 	  }
 	/** Remove that mark and the blur again (`Released`). */
@@ -125,8 +127,12 @@ export type InspectResult =
 	  }
 	| {
 			ok: false;
-			/** `lost` and `no-element`: the mark has no element on this page. */
-			reason: "busy" | "lost" | "no-element" | "selector";
+			/**
+			 * `lost` and `no-element`: the mark has no element on this page;
+			 * `other-page`: a selector for a mark without an element, and the tab
+			 * does not show the case's page.
+			 */
+			reason: "busy" | "lost" | "no-element" | "other-page" | "selector";
 			error: string;
 			match?: AnnotationMatch;
 	  };

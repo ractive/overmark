@@ -3,9 +3,11 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
+import { isPageUrl } from "../lib/case.ts";
 import { cssSelector, describeElement } from "../lib/element.ts";
 import {
 	inspectElement,
+	isOffLimits,
 	type Relation,
 	resolveSelector,
 } from "../lib/inspect.ts";
@@ -97,7 +99,12 @@ function mark(
 function inspect(
 	overlay: Overlay,
 	reviewer: Reviewer,
-	request: { caseId: string; annotationId: string; selector?: string },
+	request: {
+		caseId: string;
+		annotationId: string;
+		casePage: string;
+		selector?: string;
+	},
 ): InspectResult | null {
 	// A save or a screenshot blurs fields with inline styles: not the page's.
 	if (activity.busy !== undefined)
@@ -106,34 +113,50 @@ function inspect(
 	const target = reviewer.target(request.annotationId);
 	if (target === undefined) return null;
 	const { match } = target;
+	const n = match.number;
+	if (match.status === "no-element") {
+		if (request.selector === undefined)
+			return {
+				ok: false,
+				reason: "no-element",
+				error: `Mark ${n} was not drawn on an element.`,
+				match,
+			};
+		// Without an element to start from, a selector could name anything
+		// of any page; only the case's own page is searched.
+		if (!isPageUrl(request.casePage, location.href))
+			return {
+				ok: false,
+				reason: "other-page",
+				error: `Mark ${n} was not drawn on an element, and the tab in front does not show the case's page, so the selector is not looked for here.`,
+				match,
+			};
+	} else if (target.element === undefined)
+		return {
+			ok: false,
+			reason: "lost",
+			error: `Mark ${n}'s element was not found on this page.`,
+			match,
+		};
 	let element = target.element;
 	let relation: Relation = "mark";
 	if (request.selector !== undefined) {
-		const found = resolveSelector(
-			document,
-			element,
-			request.selector,
-			overlay.host,
-		);
+		const found = resolveSelector(document, element, request.selector, {
+			skip: overlay.host,
+			pageWide: element === undefined,
+		});
 		if ("error" in found)
 			return { ok: false, reason: "selector", error: found.error, match };
 		element = found.element;
 		relation = found.relation;
 	}
-	if (element === undefined)
-		return match.status === "no-element"
-			? {
-					ok: false,
-					reason: "no-element",
-					error: `Mark ${match.number} was not drawn on an element.`,
-					match,
-				}
-			: {
-					ok: false,
-					reason: "lost",
-					error: `Mark ${match.number}'s element was not found on this page.`,
-					match,
-				};
+	if (element === undefined || isOffLimits(element))
+		return {
+			ok: false,
+			reason: "selector",
+			error: "That element is not part of the page's content.",
+			match,
+		};
 	return {
 		ok: true,
 		url: location.href,
