@@ -67,6 +67,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 			"activeTab",
 			"scripting",
 			"sidePanel",
+			"storage",
 			"unlimitedStorage",
 		]);
 	});
@@ -78,7 +79,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		expect(start).toBe("(()=>{"); // a test build has spaces and line breaks here
 	});
 
-	test("unlimitedStorage adds no install warning", async () => {
+	test("storage and unlimitedStorage add no install warning", async () => {
 		const warnings = (manifest: object) =>
 			h.control.eval<string[]>(
 				`chrome.management.getPermissionWarningsByManifest(${JSON.stringify(JSON.stringify(manifest))})`,

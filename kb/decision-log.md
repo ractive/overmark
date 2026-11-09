@@ -175,3 +175,53 @@ for a small relay message limit the page sends a second markup cut at 4 KB. The 
 instructions, and is marked `untrustedContentHint`. It is refused while the page is busy
 with a save or a screenshot, whose blur is inline style the page does not have.
 
+## DEC-014: Marks for a case go into it as they are done
+
+The owner's feedback: after "Add marks" a new mark was only stored after "Save…",
+which then asked "Add to case" or "Back"; nobody expects either step. Now the toolbar
+has two modes. Without a case, marks are drafts and "Save case…" stores them as a new
+case with a title, as before (its form's other button is "Keep drawing"). With a case
+(the side panel's "Add marks", "Continue annotating", or after that first save), the
+toolbar says "Adding to “<case>”" and each mark goes into the case as soon as it is done:
+its comment confirmed, or the comment closed with the mark kept. Done tries the marks
+not in the case yet once more and closes the toolbar when all are in; while one is not,
+the toolbar stays up and says so, and Done again discards it.
+
+- One queue in the content script adds the marks in order, one save each, and also
+  runs Undo and New case, so nothing overtakes an add. Before each add the worker says
+  whether the mark's number is still free (`case:number`); if an AI app took it, the
+  marks not added yet are renumbered; a number taken between that check and the save is
+  checked once more and the save tried again.
+- Each queued mark records the case it was queued for. When the side panel switches the
+  toolbar to another case meanwhile, the mark is not added there: it waits as a failed
+  mark that names its case, until "Add mark N" (the user's choice) puts it into the
+  case the toolbar adds to now.
+- The screenshot is taken when the mark is drawn, as before (DEC-012). Each added mark
+  gets a shot of its own in the case, drawn with its mark and the lower-numbered marks
+  this toolbar added before on the same view (so it looks as one save would have; the
+  worker draws no higher number, so Undo never leaves a pin behind). Marks on one view
+  still share the one capture: its pending image stays (`keepPending`) until the page
+  no longer looks like it and no mark waits for it. No extra captures, and Undo never
+  has to redraw a screenshot. The price is storage: a case grows by one full screenshot
+  per mark (some 100 to 300 KB each), so a case may hold as many shots as marks (1000;
+  it was 200), and a full case says so before anything is drawn.
+- Undo takes the mark with the highest number: a draft from the page, or a mark added
+  since the toolbar was last shown out of the case (`case:undo-add`), with its crop and
+  its shot. Since its pin was on no other screenshot, its number is free again, unlike a
+  delete in the side panel, which keeps the number (a pin may stay on shared shots).
+- `case:undo-add` deletes, so the worker allows it only for a mark it recorded when
+  that add was saved, from the same tab and document (`chrome.storage.session`, hence
+  the `storage` permission; it has no install warning and is gone when the browser
+  closes), and only once. The mark must also still be as the add stored it (not
+  resolved, comment unchanged, the user's), the highest number in the case, on a
+  screenshot of its own taken less than a day ago. Anything else is deleted in the
+  side panel.
+- A failed add leaves the mark on the page as a draft with the reason and an "Add mark
+  N" button; a mark whose screenshot was given up (the page moved before its turn)
+  waits for that button or for Done, when nobody is using the page and scrolling back
+  to take it is safe ("Add mark N" turns the tool off first). A failure shows the
+  toolbar again if it was closed meanwhile. The status is one element with
+  `role="status"`, changed in place; the reason of a failure is in one with
+  `role="alert"`; the button that had the focus has it again after the toolbar changes.
+- A new case gets its own id instead of the pending images' id, so one id holds a
+  page's pending screenshots for as long as the page is open.

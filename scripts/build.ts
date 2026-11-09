@@ -100,7 +100,13 @@ export function createManifest(
 		action: { default_title: "Overmark", default_icon: icons },
 		background: { service_worker: "background.js", type: "module" },
 		side_panel: { default_path: "sidepanel/index.html" },
-		permissions: ["activeTab", "scripting", "sidePanel", "unlimitedStorage"],
+		permissions: [
+			"activeTab",
+			"scripting",
+			"sidePanel",
+			"storage",
+			"unlimitedStorage",
+		],
 		optional_host_permissions: ["<all_urls>"],
 		...(options.test ? { host_permissions: ["<all_urls>"] } : {}),
 		commands: {

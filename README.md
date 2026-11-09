@@ -37,11 +37,20 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
 1. Click the Overmark icon on a tab. The side panel opens there.
 2. "Annotate this page" shows the toolbar: Element (click one), Box, Arrow, Pen and Note,
-   each followed by a comment. Save the marks as a case with a title. Overmark takes
-   screenshots with the marks on them and records each marked element's details. Saved
-   marks stay on the page, fainter, and further marks go to the same case, also after
-   stopping and annotating again on that page; New case in the toolbar starts another.
-3. On another build of the page (say `localhost:3000`), click the case in the side panel:
+   each followed by a comment. "Save case…" saves the marks as a new case with a title.
+   Overmark takes screenshots with the marks on them and records each marked element's
+   details. Saved marks stay on the page, fainter.
+3. From then on, and whenever the toolbar was started with "Add marks" in a case, the
+   toolbar says "Adding to “<case>”": each mark goes into that case as soon as its
+   comment is done (Done, or the comment closed with Escape or a click elsewhere); there
+   is no save step, and the case in the side panel shows it at once. Undo takes the last
+   mark added since the toolbar was shown out of the case again, while nobody has
+   resolved or edited it. A mark that could not be added stays on the page with the
+   reason and an "Add mark N" button to try again; it never moves to another case unless
+   you click that button. Done tries such marks once more and closes the toolbar when all
+   are in; while one is not, the toolbar stays up and says so, and Done again discards
+   it. New case stops adding to the case, and the next marks wait for "Save case…".
+4. On another build of the page (say `localhost:3000`), click the case in the side panel:
    on the same path it loads at once; a case of another page has a Load button for this
    tab. In the case, "Show marks on this tab" and "Hide marks on this tab" put its marks
    on the page and take them off. On a tab Overmark may not run on yet (after reloading the extension, say), Chrome
@@ -57,11 +66,11 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    container changed its size. A mark without an element goes where it was, in amber.
    Show scrolls to a mark; Next candidate tries the next best element. The screenshots
    stay the record, so a mark makes sense even when its element is not found.
-4. Each mark in the side panel can be resolved (Fixed, Won't fix or Can't reproduce, with
+5. Each mark in the side panel can be resolved (Fixed, Won't fix or Can't reproduce, with
    an optional note), opened again, have its comment edited, or be deleted. A resolved
    mark is drawn grey on a loaded page and no longer counted as open. A deleted mark's
    number is not given again, and its pin stays on screenshots that other marks share.
-5. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
+6. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
    on; Import reads one back and, when it is for the page in front, loads it right
    away. An AI app can read `case.md` and the images without the extension.
 

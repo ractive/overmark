@@ -188,6 +188,10 @@ export type WorkerRequest =
 	/** Capture the visible tab as the pending screenshot `shotId` (save.ts). */
 	| { type: "capture"; caseId: string; shotId: string }
 	| { type: "case:save"; request: SaveRequest }
+	/** Whether a mark can take `number` in the case (`NumberCheck`). */
+	| { type: "case:number"; caseId: string; number: number }
+	/** The toolbar's Undo: take out the mark it just added (`UndoResult`, save.ts `undoAdd`). */
+	| { type: "case:undo-add"; caseId: string; annotationId: string }
 	/** Remove the pending screenshots of a save that was given up. */
 	| { type: "images:discard"; caseId: string; shotIds: string[] }
 	/**
@@ -208,6 +212,18 @@ export interface CaptureResult {
 	/** Pixels of the stored screenshot. */
 	width: number;
 	height: number;
+}
+
+export interface NumberCheck {
+	free: boolean;
+	/** The case's next mark number. */
+	next: number;
+}
+
+export interface UndoResult {
+	/** `false`: the mark was gone already. */
+	removed: boolean;
+	next: number;
 }
 
 export interface SaveResult {

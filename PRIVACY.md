@@ -6,7 +6,7 @@ relay when you connect an AI app through it (see "An AI app" below).
 
 ## What Overmark keeps, and where
 
-When you save marks as a case, Overmark stores in your browser, on your computer
+When you save marks as a case, or add marks to a case, Overmark stores in your browser, on your computer
 (IndexedDB of the extension):
 
 - the case's title, your comments, the verdict, when the case and its screenshots were
@@ -37,7 +37,7 @@ ordinary page content, it recognises only Monaco, CodeMirror 5 and Ace; to Overm
 text of any other such editor is page text, and it is kept when you mark it (and sent
 when an AI app reads that element). A
 screenshot shows what was on the screen, though, form fields included. Whenever Overmark
-takes a screenshot (when you save marks, and when an AI app asks for one, see below),
+takes a screenshot (when you draw a mark, and when an AI app asks for one, see below),
 password fields are blurred, and with "Blur form fields in screenshots" all form fields
 and text editors are. This covers fields in the page itself and inside its web
 components, not fields inside embedded frames (for example a payment form from another
@@ -101,6 +101,10 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   its shortcut), and only until that tab navigates elsewhere.
 - **scripting:** to add its toolbar and outlines to that tab.
 - **sidePanel:** for its side panel.
+- **storage:** for the browser's session storage, which forgets everything when the
+  browser closes: Overmark notes there which marks the toolbar on a tab just added (case,
+  mark, screenshot and comment), so that the toolbar's Undo can take back those marks
+  and no others.
 - **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
   free disk space, and they may grow beyond its usual limit. They stay in your browser.
 - **Single sites (optional):** when you open a case's page from its address, or show a

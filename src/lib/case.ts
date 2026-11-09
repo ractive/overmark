@@ -172,6 +172,13 @@ export interface Case {
 /** The longest case title. */
 export const MAX_TITLE = 500;
 
+/**
+ * The most marks and screenshots a case holds. Marks added one by one have a
+ * screenshot each (DEC-014), so there can be as many shots as marks.
+ */
+export const MAX_ANNOTATIONS = 1000;
+export const MAX_SHOTS = MAX_ANNOTATIONS;
+
 export class CaseError extends Error {
 	override name = "CaseError";
 }
@@ -523,7 +530,7 @@ export function validateCase(value: unknown): Case {
 		fail("case.format", `must be "${CASE_FORMAT}"`);
 	const page = obj(o["page"], "case.page");
 	const shotIds = new Set<string>();
-	const shots = arr(o["shots"], "case.shots", 200).map((v, i): Shot => {
+	const shots = arr(o["shots"], "case.shots", MAX_SHOTS).map((v, i): Shot => {
 		const s = obj(v, `case.shots[${i}]`);
 		const shotId = id(s["id"], `case.shots[${i}].id`);
 		if (!SHOT_ID.test(shotId))
@@ -547,48 +554,50 @@ export function validateCase(value: unknown): Case {
 	});
 	const numbers = new Set<number>();
 	const ids = new Set<string>();
-	const annotations = arr(o["annotations"], "case.annotations", 1000).map(
-		(v, i): Annotation => {
-			const p = `case.annotations[${i}]`;
-			const a = obj(v, p);
-			const annotationId = id(a["id"], `${p}.id`);
-			if (ids.has(annotationId)) fail(`${p}.id`, "is used twice");
-			ids.add(annotationId);
-			const number = num(a["number"], `${p}.number`);
-			if (
-				!Number.isInteger(number) ||
-				number < 1 ||
-				number > MAX_NUMBER ||
-				numbers.has(number)
-			)
-				fail(`${p}.number`, `must be a unique integer from 1 to ${MAX_NUMBER}`);
-			numbers.add(number);
-			// Saving names new marks a<number>: another scheme would collide later.
-			if (annotationId !== `a${number}`)
-				fail(`${p}.id`, `must be a${number}, after its number`);
-			const shot = str(a["shot"], `${p}.shot`, 64);
-			if (!shotIds.has(shot)) fail(`${p}.shot`, "names no shot of the case");
-			const crop = str(a["crop"], `${p}.crop`);
-			if (crop !== cropImage(annotationId))
-				fail(`${p}.crop`, `must be ${cropImage(annotationId)}`);
-			const author = a["author"];
-			if (author !== "user" && author !== "ai")
-				fail(`${p}.author`, `must be "user" or "ai"`);
-			return {
-				id: annotationId,
-				number,
-				shot,
-				comment: str(a["comment"], `${p}.comment`, MAX_COMMENT),
-				author,
-				shape: shape(a["shape"], `${p}.shape`),
-				crop,
-				element: element(a["element"], `${p}.element`),
-				...(a["resolution"] === undefined
-					? {}
-					: { resolution: resolution(a["resolution"], `${p}.resolution`) }),
-			};
-		},
-	);
+	const annotations = arr(
+		o["annotations"],
+		"case.annotations",
+		MAX_ANNOTATIONS,
+	).map((v, i): Annotation => {
+		const p = `case.annotations[${i}]`;
+		const a = obj(v, p);
+		const annotationId = id(a["id"], `${p}.id`);
+		if (ids.has(annotationId)) fail(`${p}.id`, "is used twice");
+		ids.add(annotationId);
+		const number = num(a["number"], `${p}.number`);
+		if (
+			!Number.isInteger(number) ||
+			number < 1 ||
+			number > MAX_NUMBER ||
+			numbers.has(number)
+		)
+			fail(`${p}.number`, `must be a unique integer from 1 to ${MAX_NUMBER}`);
+		numbers.add(number);
+		// Saving names new marks a<number>: another scheme would collide later.
+		if (annotationId !== `a${number}`)
+			fail(`${p}.id`, `must be a${number}, after its number`);
+		const shot = str(a["shot"], `${p}.shot`, 64);
+		if (!shotIds.has(shot)) fail(`${p}.shot`, "names no shot of the case");
+		const crop = str(a["crop"], `${p}.crop`);
+		if (crop !== cropImage(annotationId))
+			fail(`${p}.crop`, `must be ${cropImage(annotationId)}`);
+		const author = a["author"];
+		if (author !== "user" && author !== "ai")
+			fail(`${p}.author`, `must be "user" or "ai"`);
+		return {
+			id: annotationId,
+			number,
+			shot,
+			comment: str(a["comment"], `${p}.comment`, MAX_COMMENT),
+			author,
+			shape: shape(a["shape"], `${p}.shape`),
+			crop,
+			element: element(a["element"], `${p}.element`),
+			...(a["resolution"] === undefined
+				? {}
+				: { resolution: resolution(a["resolution"], `${p}.resolution`) }),
+		};
+	});
 	const verdict = o["verdict"];
 	const importedAt = o["importedAt"];
 	const lastNumber = o["lastNumber"];

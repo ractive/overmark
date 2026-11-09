@@ -127,6 +127,7 @@ of the same pages, alone or with an AI app the user connects.
 | `activeTab` | Add the annotation toolbar to the tab where the user clicked the icon, read the marked elements' details, and take screenshots of that tab. |
 | `scripting` | Inject the toolbar and outlines into that tab. |
 | `sidePanel` | The side panel lists cases, loads them onto the tab and connects the AI app. |
+| `storage` | Session storage only, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others. |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
 | `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page from its address or shows a case's marks on a tab Overmark may not run on yet ("Show marks on this tab" or the case's Load button), so the marks load without clicking the icon. All sites only when the user turns on "allow on all sites". |
 
