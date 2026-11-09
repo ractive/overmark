@@ -690,6 +690,54 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			return client;
 		}
 
+		slowTest(
+			"the connect dialog's primary button stays readable under the pointer",
+			async () => {
+				const relay = startTestRelay({ pageWaitMs: 0 });
+				try {
+					await keepOnWith(relay.url);
+					await h.control.eval(`${id("connect")}.click()`);
+					const copy = `document.querySelector(".tab-mcp-dialog[open] button.tab-mcp-primary")`;
+					await h.control.waitFor(copy);
+					const colours = `(() => { const s = getComputedStyle(${copy}); return [s.color, s.backgroundColor]; })()`;
+					const [colour, background] =
+						await h.control.eval<[string, string]>(colours);
+					expect(colour).not.toBe(background);
+					// A tab behind others does not run transitions: the buttons'
+					// background would stay at its start.
+					await h.control.eval(
+						`document.head.append(Object.assign(document.createElement("style"), { id: "no-transitions", textContent: "* { transition: none !important; }" }))`,
+					);
+					await h.control.send("DOM.enable");
+					await h.control.send("CSS.enable");
+					const { root } = await h.control.send("DOM.getDocument");
+					const { nodeId } = await h.control.send("DOM.querySelector", {
+						nodeId: (root as { nodeId: number }).nodeId,
+						selector: ".tab-mcp-dialog[open] button.tab-mcp-primary",
+					});
+					await h.control.send("CSS.forcePseudoState", {
+						nodeId,
+						forcedPseudoClasses: ["hover"],
+					});
+					// The panel's own hover rule gives its buttons a light background;
+					// the dialog's primary button keeps its dark one.
+					expect(await h.control.eval<[string, string]>(colours)).toEqual([
+						colour,
+						background,
+					]);
+					await h.control.send("CSS.forcePseudoState", {
+						nodeId,
+						forcedPseudoClasses: [],
+					});
+					await h.control.eval(
+						`document.querySelector("dialog[open]").close(); ${id("no-transitions")}.remove()`,
+					);
+				} finally {
+					await relay.stop();
+				}
+			},
+		);
+
 		const visible = (page: Page, name: string) =>
 			page.eval<boolean>(`${id(name)}.getClientRects().length > 0`);
 

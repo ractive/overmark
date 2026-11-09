@@ -974,7 +974,7 @@ describe.skipIf(browserBinary === undefined)(
 			).toContain("cannot be used");
 			expect(
 				await h.control.eval<string>(`document.getElementById("relay").value`),
-			).toBe("http://localhost:8080");
+			).toBe("https://tab-mcp.ractive.ch");
 
 			// The side panel connects to the test relay by itself ("keep AI access on").
 			await h.control.eval(
