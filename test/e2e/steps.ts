@@ -77,6 +77,35 @@ function hostNode(node: DomNode): DomNode | undefined {
 }
 
 /**
+ * Wait until the side panel has taken its width from the page and the
+ * viewport keeps its size: the panel takes it a moment after the icon's
+ * click, and a click measured before that lands beside the element (on Linux
+ * in CI, past the overlay onto the page).
+ */
+export async function viewportSettled(page: Page): Promise<void> {
+	// The panel is at least this wide (Chrome's minimum is 320 px).
+	const PANEL_MIN = 200;
+	const size = () =>
+		page.eval<{ inner: number; outer: number; height: number }>(
+			"({ inner: innerWidth, outer: outerWidth, height: innerHeight })",
+		);
+	const end = Date.now() + 5000;
+	let last = await size();
+	let steady = 0;
+	while (last.outer - last.inner < PANEL_MIN || steady < 3) {
+		if (Date.now() > end)
+			throw new Error(
+				`the viewport did not settle beside the side panel: ${JSON.stringify(last)}`,
+			);
+		await Bun.sleep(150);
+		const now = await size();
+		steady =
+			now.inner === last.inner && now.height === last.height ? steady + 1 : 0;
+		last = now;
+	}
+}
+
+/**
  * Let `shadow` reach the overlay of a build that ships: its shadow root is
  * closed to the page, but not to CDP. Afterwards the host's `shadowRoot`
  * answers, for the page's world only.
@@ -133,6 +162,10 @@ export async function markElement(
 	);
 	if (pressed !== "true")
 		await page.click(shadow('[data-action="tool-element"]'));
+	// Without the tool, the click below would go to the page itself.
+	await page.waitFor(
+		`${shadow('[data-action="tool-element"]')}.getAttribute("aria-pressed") === "true"`,
+	);
 	// Near the left edge: the toolbar sits in the middle at the bottom.
 	const at = await page.eval<{ x: number; y: number }>(
 		`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + Math.min(12, r.width / 2), y: r.y + r.height / 2 }; })()`,

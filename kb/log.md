@@ -13,3 +13,7 @@
 - The owner asked for the AI connection to stay while the side panel is closed. DEC-015, iteration 8: the connection in the service worker, the panel a view with a plain pairing view (the tab-mcp extension's AI access UI replaces it later), questions in the panel or a Chrome notification, the panel's address kept
 - DEC-016, iteration 9: the AI settings and the address secret move from chrome.storage.local into the worker's own IndexedDB (what an unreleased build kept there is deleted, never taken over; the panel's localStorage handover stays, in one transaction), the side panel changes them only over its port, setAccessLevel is best effort and Chrome 116 the minimum again; ported from the tab-mcp extension's PR 89
 - DEC-017, iteration 10: the tab-mcp extension's AI app card (its PR 88) replaces the plain pairing view: an AI access switch, "Turn on AI access", the address and code at once with no app paired, "+ Add another AI app", Disconnect asking first; a panel covered by another extension's panel (Claude in Chrome's) hands its questions to notifications. Notifications keep Don't allow and Allow (DEC-008). The tab-mcp extension's `sidePanel.open({ tabId, windowId })` is left out: it broke the store package's e2e test in CI on Linux
+
+## 2026-11-10
+
+- The owner saw Overmark's icon do nothing while Claude in Chrome's panel was open. The panel now opens with the tab, as in the tab-mcp extension (DEC-017); the store package's e2e test, which failed with it in CI, waits for the viewport to keep its size before it clicks

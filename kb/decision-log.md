@@ -360,14 +360,17 @@ pairing view gives way to it.
   Chrome's) can cover Overmark's while it stays open. The panel tells the worker its
   visibility (`visible`); a hidden panel's questions go out as notifications, as a
   closed panel's do, and a question asked meanwhile is a notification at once.
-- **The panel still opens for the window, not yet with the tab.** The tab-mcp extension
-  opens it with `sidePanel.open({ tabId, windowId })`, so that it shows over a panel
-  another extension opened for the tab (with the window alone Chrome resolves and shows
-  nothing). In Overmark that call made the store package's end-to-end test fail in CI
-  (Chrome for Testing 156 on Linux, twice in a row; a probe without it passed, and main
-  had been green all day): after the icon's click a click with the Element tool went
-  past the overlay to the page. It passes on macOS, so the cause is not known yet; the
-  call stays out until it is. The covered-panel test hides the panel's page itself: in
-  Overmark's harness a second extension's worker did not start.
+- **The panel opens with the tab** (2026-11-10). As in the tab-mcp extension,
+  `sidePanel.open({ tabId, windowId })`, so that it shows over a panel another extension
+  opened for the tab: with the window alone Chrome resolves and shows nothing, and the
+  owner saw exactly that in branded Chrome with Claude in Chrome's panel open. The call
+  was left out of iteration 10 because the store package's end-to-end test failed in CI
+  (Chrome for Testing 156 on Linux, twice in a row; it passed on macOS). The likely
+  cause: the panel takes its width a moment after the click, and a click measured
+  before that went past the overlay onto the test page's submit button (the log shows
+  `#overmark-root` gone after it). The icon-click tests now wait until the panel has
+  taken its width and the viewport keeps its size, and marking waits for the Element
+  tool to be on; with that the test passed in CI on Linux. The covered-panel test hides the panel's page itself: in Overmark's harness a
+  second extension's worker did not start.
 - **Notifications keep Don't allow and Allow.** The tab-mcp extension's Allow and Always
   allow do not apply: every change asks each time (DEC-008).
