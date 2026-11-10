@@ -69,7 +69,7 @@ Zip reading and writing (store and deflate through `CompressionStream`), base64,
 that to packages for such things. The only runtime dependency is
 `@ractive-ch/tab-mcp-client`.
 
-## DEC-008: Every change an AI app asks for is confirmed, every time
+## DEC-008: Every change an AI app asks for is confirmed, every time (replaced in part by DEC-018)
 
 The PR #4 review found that `alwaysAllow: true` let one click on "Always allow" wave
 through every later `delete_case` of that AI app, for example one steered by
@@ -373,4 +373,44 @@ pairing view gives way to it.
   tool to be on; with that the test passed in CI on Linux. The covered-panel test hides the panel's page itself: in Overmark's harness a
   second extension's worker did not start.
 - **Notifications keep Don't allow and Allow.** The tab-mcp extension's Allow and Always
-  allow do not apply: every change asks each time (DEC-008).
+  allow do not apply: every change asks each time (DEC-008). (Replaced by DEC-018: Allow
+  and Always allow, closing it is Don't allow.)
+
+## DEC-018: Always allow, per tool or for all, until the AI app is disconnected (owner)
+
+The owner, 2026-11-10: bring "Always allow" back, per tool and also as "allow
+everything" for an AI app, lasting until that app is disconnected. This replaces
+DEC-008's "every time"; its reason stays true and is the risk accepted here: an AI app
+steered by instructions hidden in page text (or in a case's own texts) can run an
+always-allowed tool, `delete_case` included, without the user seeing it. The user takes
+that on knowingly, for one app and one tool at a time, or for all of one app's changes.
+
+- **Per AI app and tool.** A question in the side panel has "Don't allow", "Allow" and
+  "Always allow", with one line under them: "Always allow: <tool> runs without asking for
+  <app>, until you disconnect it." Always allow arms with Allow (the panel visible and
+  focused for 750 ms). A notification has "Allow" and "Always allow" (Chrome allows two
+  buttons); closing it or a click on its body is Don't allow, and either button within
+  500 ms of showing does not count, as before. The app is the grant (one pairing), not
+  its name: an app paired again, or another app with the same name, is asked again.
+  Unlike the tab-mcp extension's Always allow, it is not tied to the page: Overmark's
+  tools are fixed and act on cases, not on a page's own tools.
+- **Allow all changes.** Under each app in the AI app card, a switch "Allow all
+  changes" lets every tool that changes something run without asking (adding a mark,
+  the verdict, a mark's status, deleting a case), with a line saying so while it is on.
+  Below it, the tools always allowed for the app, each with "Ask again".
+- **Where and how long.** In the worker's settings database (`overmark-settings`, key
+  `alwaysAllowed`, by grant id; DEC-016), so it survives the panel closing, a worker
+  restart and a browser restart. An app's entry goes when its grant goes: each list of
+  grants the relay sends (at every connection, and when one is added or removed) drops
+  the entries of apps not on it. That covers Disconnect, New address (which revokes
+  every grant), and a takeover the user answers with New address. "Stop AI access" and
+  the AI access switch keep the pairing, and so keep the entry. Switching to another
+  relay drops the entries of the first relay's apps at its first connection (the safe
+  side: they ask again after switching back).
+- **What limits it.** Only tools that change something ask at all; the reading tools
+  never did. An Always allow from a question is kept only if the app is still connected
+  when the answer comes; the panel's switch works only for an app the card lists, so
+  nothing is allowed that the card does not show. The panel changes them only over its
+  port, its commands checked in `protocol.ts` (DEC-015). A write that fails changes
+  nothing: the call that was answered runs, the next one asks. The last AI call shows in
+  the panel's header as before, also for calls that did not ask.

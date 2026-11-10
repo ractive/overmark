@@ -22,7 +22,13 @@ const base: AiState = {
 	migrated: true,
 };
 const ADDRESS = "https://relay.example/a/x/mcp";
-const claude = { grantId: "g1", name: "Claude", host: "claude.ai" };
+const claude = {
+	grantId: "g1",
+	name: "Claude",
+	host: "claude.ai",
+	allowAll: false,
+	always: [],
+};
 
 describe("the AI app card", () => {
 	test.each([
@@ -82,7 +88,16 @@ describe("the AI app card", () => {
 			...base,
 			state: "connected",
 			address: ADDRESS,
-			grants: [claude, { grantId: "g2", name: "", host: "chatgpt.com" }],
+			grants: [
+				claude,
+				{
+					grantId: "g2",
+					name: "",
+					host: "chatgpt.com",
+					allowAll: false,
+					always: [],
+				},
+			],
 		};
 		expect(cardView(state, false)).toEqual({
 			status: "on",

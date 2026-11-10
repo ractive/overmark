@@ -1017,8 +1017,8 @@ describe.skipIf(browserBinary === undefined)(
 				const shot = await client.callTool({ name: "capture", arguments: {} });
 				expect((shot.content as { type: string }[])[1]?.type).toBe("image");
 
-				// A change asks in the side panel, names the case, and offers no
-				// "Always allow" (DEC-008).
+				// A change asks in the side panel, names the case, and offers
+				// Always allow (DEC-018).
 				const verdict = client.callTool({
 					name: "set_verdict",
 					arguments: { caseId: listed?.caseId, verdict: "Darker" },
@@ -1029,7 +1029,7 @@ describe.skipIf(browserBinary === undefined)(
 					await panel.eval<string[]>(
 						`[...${question}.querySelectorAll("button")].map((b) => b.textContent.trim())`,
 					),
-				).toEqual(["Don't allow", "Allow"]);
+				).toEqual(["Don't allow", "Allow", "Always allow"]);
 				expect(await panel.eval<string>(`${question}.textContent`)).toContain(
 					"Case: “AI test”",
 				);

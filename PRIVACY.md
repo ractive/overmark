@@ -88,11 +88,14 @@ Only in two cases, both started by you:
    The connection is held by Overmark's background service worker, so it stays while the
    side panel is closed; the Overmark icon shows "on" while it is up. Changes the AI app
    wants to make (adding a mark, recording a verdict, changing a mark's status, deleting
-   a case) are asked first, every time, naming the case and the page: in the side panel
-   when it is open in the window in front, otherwise also in a notification of your
-   system (with Don't allow and Allow; the icon shows "?" meanwhile). Nothing changes
-   until you allow it; no answer within 60 seconds is Don't allow. The side panel shows
-   the app's last call.
+   a case) are asked first, naming the case and the page: in the side panel when it is
+   open in the window in front, otherwise also in a notification of your system (with
+   Allow and Always allow, closing it is Don't allow; the icon shows "?" meanwhile).
+   Nothing changes until you allow it; no answer within 60 seconds is Don't allow. If
+   you choose "Always allow" for a tool, or turn on "Allow all changes" for an app in
+   the side panel, that app's calls of it run without asking until you disconnect the
+   app; Overmark keeps which, by the app's pairing, in its own database on your
+   computer, and forgets it with the pairing. The side panel shows the app's last call.
 
    "Stop AI access" at the top of the side panel, or the AI access switch, pauses the connection; it does not end
    the pairing, and it turns "Keep AI access on" off. Without "Keep AI access on" the

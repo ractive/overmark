@@ -296,8 +296,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 /**
- * A notification's answer: its button Don't allow (0) or Allow (1); a click
- * on its body, or the user closing it, is Don't allow. On the worker's
+ * A notification's answer: its button Allow (0) or Always allow (1); a
+ * click on its body, or the user closing it, is Don't allow. On the worker's
  * global object too, for the DevTools Protocol, which cannot click a
  * notification: the end-to-end tests answer through the same functions a
  * click calls.

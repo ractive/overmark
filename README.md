@@ -135,11 +135,17 @@ or click "Stop AI access" (either keeps the pairing), the relay's end of an idle
 or reload of the extension (or turning it off) ends it too. "Keep AI access on" connects
 again by itself after all of these but "Stop AI access".
 
-A tool that changes something (marked "asks first" above) asks every time: in the side
+A tool that changes something (marked "asks first" above) asks first: in the side
 panel when it is open and on screen in the window in front (another extension's panel,
 such as Claude in Chrome's, can cover it), otherwise in a system notification with
-Don't allow and Allow (the icon shows "?" while a question waits). No answer within 60
-seconds is Don't allow.
+Allow and Always allow, where closing it is Don't allow (the icon shows "?" while a
+question waits). No answer within 60 seconds is Don't allow. "Always allow" lets that
+tool run without asking for that AI app from then on; "Allow all changes", under the
+app in the side panel's AI app card, does so for every tool that changes something,
+deleting a case too. The card lists the tools always allowed for each app, each with
+"Ask again". Both last until you disconnect the app (or make a new address), also
+across browser restarts. An AI app can be steered by text on a page it reads, so allow
+always only what you would not need to check.
 
 Overmark needs Chrome 116 or later. The connection's settings and its address secret
 are in a database of the extension's own (IndexedDB in the extension's origin), which

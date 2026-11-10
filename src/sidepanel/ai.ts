@@ -8,7 +8,8 @@
  * The card is the tab-mcp extension's (its `sidepanel/card.ts`), with
  * Overmark's relay and "Keep AI access on" under it.
  * "Blur form fields in screenshots" goes the same way: the worker keeps it,
- * and the panel neither reads nor writes it in storage (DEC-016).
+ * and the panel neither reads nor writes it in storage (DEC-016), as do
+ * Always allow and "Allow all changes" for each AI app (DEC-018).
  */
 
 import {
@@ -34,7 +35,7 @@ import {
 import { byId, h } from "./dom.ts";
 import type { PanelState } from "./state.ts";
 
-/** How long the panel must be visible and focused before Allow counts. */
+/** How long the panel must be visible and focused before Allow and Always allow count. */
 const ALLOW_DELAY_MS = 750;
 /** After a first click on New address with apps connected: the second makes it. */
 const NEW_ADDRESS_ARMED_MS = 4000;
@@ -435,6 +436,7 @@ export async function startAi(
 			"button",
 			{
 				type: "button",
+				"data-focus": "disconnect",
 				"data-armed": armed ? "" : false,
 				onclick: () => {
 					const first = disconnectArmed.get(grant.grantId);
@@ -459,6 +461,69 @@ export async function startAi(
 			},
 			armed ? "Disconnect? Click again" : "Disconnect",
 		);
+	}
+
+	/**
+	 * What the card lets the user change for an AI app: "Allow all changes",
+	 * and the tools always allowed, each with "Ask again".
+	 */
+	function grantAllows(grant: AiState["grants"][number]): HTMLElement[] {
+		const app = grant.name || grant.host;
+		const parts: HTMLElement[] = [
+			h(
+				"label",
+				{ class: "switch small" },
+				h("input", {
+					type: "checkbox",
+					role: "switch",
+					"data-focus": "allow-all",
+					"aria-checked": String(grant.allowAll),
+					checked: grant.allowAll,
+					onchange: (event: Event) =>
+						send({
+							type: "allow-all",
+							grantId: grant.grantId,
+							on: (event.currentTarget as HTMLInputElement).checked,
+						}),
+				}),
+				h("span", {}, "Allow all changes"),
+			),
+		];
+		if (grant.allowAll)
+			parts.push(
+				h(
+					"p",
+					{ class: "meta" },
+					`Every change ${app} asks for runs without asking you, deleting a case too, until you disconnect it.`,
+				),
+			);
+		if (grant.always.length > 0)
+			parts.push(
+				h(
+					"ul",
+					{ class: "always", "aria-label": `Always allowed for ${app}` },
+					...grant.always.map(({ tool, title }) =>
+						h(
+							"li",
+							{ "data-tool": tool },
+							h("span", { class: "meta" }, `Always allowed: ${title}`),
+							h(
+								"button",
+								{
+									type: "button",
+									class: "link",
+									"data-focus": `ask-again:${tool}`,
+									"aria-label": `Ask again before ${title}`,
+									onclick: () =>
+										send({ type: "ask-again", grantId: grant.grantId, tool }),
+								},
+								"Ask again",
+							),
+						),
+					),
+				),
+			);
+		return parts;
 	}
 
 	function showCard(a: AiState): void {
@@ -490,30 +555,38 @@ export async function startAi(
 				clearTimeout(disconnectArmed.get(id)?.timer);
 				disconnectArmed.delete(id);
 			}
-		// Redrawn on every state: the Disconnect that had the keyboard's focus
-		// keeps it, so Enter can confirm it.
-		const focused = (
-			document.activeElement as HTMLElement | null
-		)?.closest<HTMLElement>("#pair-grants li[data-grant]")?.dataset["grant"];
+		// Redrawn on every state: the control that had the keyboard's focus
+		// keeps it, so Enter can confirm a Disconnect.
+		const active = document.activeElement as HTMLElement | null;
+		const focused = active?.closest<HTMLElement>("#pair-grants li[data-grant]")
+			?.dataset["grant"];
+		const focusedControl = active?.dataset["focus"];
 		byId("pair-grants").replaceChildren(
 			...a.grants.map((grant) =>
 				h(
 					"li",
 					{ "data-grant": grant.grantId },
 					h(
-						"span",
-						{},
-						grant.name || grant.host,
-						grant.name ? h("span", { class: "meta" }, ` ${grant.host}`) : null,
+						"div",
+						{ class: "grant-head" },
+						h(
+							"span",
+							{},
+							grant.name || grant.host,
+							grant.name
+								? h("span", { class: "meta" }, ` ${grant.host}`)
+								: null,
+						),
+						disconnectButton(grant),
 					),
-					disconnectButton(grant),
+					...grantAllows(grant),
 				),
 			),
 		);
 		if (focused !== undefined)
 			byId("pair-grants")
-				.querySelector<HTMLButtonElement>(
-					`li[data-grant="${CSS.escape(focused)}"] button`,
+				.querySelector<HTMLElement>(
+					`li[data-grant="${CSS.escape(focused)}"] [data-focus="${CSS.escape(focusedControl ?? "disconnect")}"]`,
 				)
 				?.focus();
 		syncPairing(view.pairing);
@@ -543,9 +616,9 @@ export async function startAi(
 					type: "button",
 					"data-answer": value,
 					class: primary ? "primary" : false,
-					// Allow only once the panel has been in front a while: the click
-					// that brings it forward cannot approve.
-					disabled: value === "allow",
+					// Allow and Always allow only once the panel has been in front a
+					// while: the click that brings it forward cannot approve.
+					disabled: value !== "deny",
 					onclick: (event: Event) => {
 						if (!(event.currentTarget as HTMLButtonElement).disabled)
 							send({ type: "answer", id: q.id, answer: value });
@@ -569,6 +642,12 @@ export async function startAi(
 				{ class: "row" },
 				answer("Don't allow", "deny"),
 				answer("Allow", "allow", true),
+				answer("Always allow", "always"),
+			),
+			h(
+				"p",
+				{ class: "meta" },
+				`Always allow: ${q.title ?? q.tool} runs without asking for ${q.app}, until you disconnect it.`,
 			),
 		);
 	}
@@ -594,7 +673,7 @@ export async function startAi(
 	}
 
 	/**
-	 * Allow counts once the panel has been visible and focused for
+	 * Allow and Always allow count once the panel has been visible and focused for
 	 * ALLOW_DELAY_MS with the question shown; leaving it starts the wait again.
 	 */
 	function arm(): void {
@@ -607,7 +686,7 @@ export async function startAi(
 				focusedSince !== undefined &&
 				now - Math.max(shownAt, focusedSince) >= ALLOW_DELAY_MS;
 			for (const b of card.querySelectorAll<HTMLButtonElement>(
-				'button[data-answer="allow"]',
+				'button[data-answer="allow"], button[data-answer="always"]',
 			))
 				b.disabled = !ready;
 		}
