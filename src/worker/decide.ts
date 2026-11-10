@@ -17,6 +17,8 @@ export interface Decider {
 	connected(grantId: string): boolean;
 	/** Always allow could not be kept; the call runs all the same. */
 	notKept(error: unknown): void;
+	/** Always allow was kept: questions it now covers need no answer. */
+	kept(): void;
 }
 
 export async function decide(
@@ -30,6 +32,6 @@ export async function decide(
 	// Kept only for an app still connected: one disconnected while the
 	// question was open gets nothing from it.
 	if (answer === "always" && d.connected(grantId))
-		await d.always.addTool(grantId, tool).catch(d.notKept);
+		await d.always.addTool(grantId, tool).then(d.kept, d.notKept);
 	return answer === "allow" || answer === "always";
 }

@@ -154,12 +154,18 @@ describe.skipIf(browserBinary === undefined)(
 
 		test("Ask again in the card takes it back: the tool asks again", async () => {
 			await panel.eval(
-				`${GRANT}.querySelector('[data-focus="ask-again:set_verdict"]').click()`,
+				`(() => { const b = ${GRANT}.querySelector('[data-focus="ask-again:set_verdict"]'); b.focus(); b.click(); })()`,
 			);
 			await panel.waitFor(
 				`!${GRANT}.textContent.includes("Always allowed")`,
 				10_000,
 			);
+			// Its button went with it: the focus stays in that app's card.
+			expect(
+				await panel.eval<string | undefined>(
+					"document.activeElement?.dataset.focus",
+				),
+			).toBe("allow-all");
 			expect(await kept()).toBeUndefined();
 			expect(
 				(await asks("set_verdict", { caseId: "c_1", verdict: "Four" }, "deny"))

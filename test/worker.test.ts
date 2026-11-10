@@ -178,12 +178,14 @@ function fakeHost(options: { panel?: boolean } = {}) {
 function request(
 	args: Record<string, unknown> = { caseId: "c_1" },
 	signal = new AbortController().signal,
+	tool = "delete_case",
+	grantId = "g1",
 ): ConfirmRequest {
 	return {
-		tool: { name: "delete_case", title: "Delete case", description: "" },
+		tool: { name: tool, title: "Delete case", description: "" },
 		arguments: args,
 		client: {
-			grantId: "g1",
+			grantId,
 			id: "https://claude.ai/oauth",
 			name: "Claude",
 			host: "claude.ai",
@@ -223,6 +225,35 @@ describe("questions", () => {
 		expect(await answer).toBe("allow");
 		expect(questions.list).toEqual([]);
 		expect(host.shown.size).toBe(0);
+	});
+
+	test("questions an Always allow given meanwhile covers are allowed; others still wait", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		const signal = new AbortController().signal;
+		const same = questions.ask(request(undefined, signal), CASE, 7);
+		const otherTool = questions.ask(
+			request(undefined, signal, "set_verdict"),
+			CASE,
+			7,
+		);
+		const otherApp = questions.ask(
+			request(undefined, signal, "delete_case", "g2"),
+			CASE,
+			7,
+		);
+		await settle();
+		questions.allowCovered(
+			(grantId, tool) => grantId === "g1" && tool === "delete_case",
+		);
+		expect(await same).toBe("allow");
+		expect(questions.list.map((q) => q.tool)).toEqual([
+			"set_verdict",
+			"delete_case",
+		]);
+		for (const q of questions.list) questions.answer(q.id, "deny");
+		expect(await otherTool).toBe("deny");
+		expect(await otherApp).toBe("deny");
 	});
 
 	test("without lines, the notification shows the arguments in short", async () => {

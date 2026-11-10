@@ -142,16 +142,22 @@ async function decider(answer: Answer | "timeout", connected = true) {
 	const d: Decider & {
 		always: AlwaysAllowed;
 		asked: number;
+		kept: () => void;
+		keptCount: number;
 		problems: unknown[];
 	} = {
 		always,
 		asked: 0,
+		keptCount: 0,
 		problems: [],
 		ask: async () => {
 			d.asked++;
 			return answer;
 		},
 		connected: () => connected,
+		kept: () => {
+			d.keptCount++;
+		},
 		notKept: (error) => d.problems.push(error),
 	};
 	return d;
@@ -180,6 +186,8 @@ describe("a call of a tool that changes something", () => {
 		await decide(d, request("delete_case"));
 		await decide(d, request("set_verdict", "g2"));
 		expect(d.asked).toBe(3);
+		// Each kept Always allow lets the questions it covers through.
+		expect(d.keptCount).toBe(3);
 	});
 
 	test("Allow all changes: nothing asks for that app", async () => {
@@ -196,6 +204,7 @@ describe("a call of a tool that changes something", () => {
 		const d = await decider("always", false);
 		expect(await decide(d, request())).toBe(true);
 		expect(d.always.has("g1", "delete_case")).toBe(false);
+		expect(d.keptCount).toBe(0);
 	});
 
 	test("Always allow that cannot be kept allows this call and says why", async () => {
@@ -209,9 +218,11 @@ describe("a call of a tool that changes something", () => {
 			},
 			ask: async () => "always",
 			connected: () => true,
+			kept: () => problems.push("kept"),
 			notKept: (error) => problems.push(error),
 		};
 		expect(await decide(d, request())).toBe(true);
+		expect(problems).toHaveLength(1);
 		expect(String(problems[0])).toContain("disk full");
 	});
 });

@@ -266,6 +266,13 @@ export class Connection {
 	 * Always allow for it, or Allow all changes, for this AI app (DEC-018);
 	 * otherwise asks. The "Last AI call" is recorded either way ("toolcall").
 	 */
+	/** Questions an Always allow given meanwhile covers are allowed. */
+	#allowCovered(): void {
+		this.#questions.allowCovered((grantId, tool) =>
+			this.#always.has(grantId, tool),
+		);
+	}
+
 	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<boolean> {
 		return decide(
 			{
@@ -278,6 +285,7 @@ export class Connection {
 					return this.#questions.ask(r, lines, front?.id);
 				},
 				connected: (grantId) => mcp.grants.some((g) => g.grantId === grantId),
+				kept: () => this.#allowCovered(),
 				notKept: (error) => {
 					console.warn("Overmark: keeping Always allow", error);
 					this.#problem = `Always allow could not be saved: ${message(error)}`;
@@ -566,6 +574,7 @@ export class Connection {
 				if (!this.#mcp.grants.some((g) => g.grantId === command.grantId))
 					return;
 				await this.#always.setAll(command.grantId, command.on);
+				if (command.on) this.#allowCovered();
 				this.#changed();
 				return;
 			case "ask-again":

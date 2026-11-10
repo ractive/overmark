@@ -583,12 +583,22 @@ export async function startAi(
 				),
 			),
 		);
-		if (focused !== undefined)
-			byId("pair-grants")
-				.querySelector<HTMLElement>(
-					`li[data-grant="${CSS.escape(focused)}"] [data-focus="${CSS.escape(focusedControl ?? "disconnect")}"]`,
-				)
-				?.focus();
+		if (focused !== undefined) {
+			const item = byId("pair-grants").querySelector(
+				`li[data-grant="${CSS.escape(focused)}"]`,
+			);
+			// The same control, or, when it went (an "Ask again" takes its own
+			// tool away), the nearest one still there in the same app.
+			const at = (selector: string) =>
+				item?.querySelector<HTMLElement>(selector) ?? null;
+			(
+				at(`[data-focus="${CSS.escape(focusedControl ?? "disconnect")}"]`) ??
+				(focusedControl?.startsWith("ask-again:")
+					? (at('[data-focus^="ask-again:"]') ?? at('[data-focus="allow-all"]'))
+					: null) ??
+				at('[data-focus="disconnect"]')
+			)?.focus();
+		}
 		syncPairing(view.pairing);
 		byId("pairing").hidden = !view.pairing;
 		byId("add-app").hidden = !view.addApp;

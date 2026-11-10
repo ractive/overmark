@@ -92,6 +92,8 @@ export function notificationText(
 
 interface Pending {
 	view: QuestionView;
+	/** The AI app that asked. */
+	grantId: string;
 	summary: string;
 	windowId: number | undefined;
 	/** The notification showing it, if one does, and its creation. */
@@ -151,6 +153,7 @@ export class Questions {
 			const cancelled = () => pending.settle("deny");
 			const pending: Pending = {
 				view,
+				grantId: request.client.grantId,
 				summary,
 				windowId: undefined,
 				shownAt: 0,
@@ -211,6 +214,16 @@ export class Questions {
 	}
 
 	/** An answer from a side panel. */
+	/**
+	 * Allow every waiting question that `covered` now lets through (an
+	 * Always allow or Allow all changes given meanwhile for its AI app and
+	 * tool): it would otherwise still wait, and time out as a no.
+	 */
+	allowCovered(covered: (grantId: string, tool: string) => boolean): void {
+		for (const pending of [...this.#pending.values()])
+			if (covered(pending.grantId, pending.view.tool)) pending.settle("allow");
+	}
+
 	answer(id: string, answer: Answer): void {
 		this.#pending.get(id)?.settle(answer);
 	}
