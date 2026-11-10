@@ -77,6 +77,24 @@ function hostNode(node: DomNode): DomNode | undefined {
 }
 
 /**
+ * Wait until the page's viewport keeps its size: a side panel opened for the
+ * tab takes its width a moment later, and a click measured before that lands
+ * beside the element (on Linux in CI, past the overlay onto the page).
+ */
+export async function viewportSettled(page: Page): Promise<void> {
+	const size = () => page.eval<string>("`${innerWidth}x${innerHeight}`");
+	const end = Date.now() + 5000;
+	let last = await size();
+	let steady = 0;
+	while (steady < 3 && Date.now() < end) {
+		await Bun.sleep(150);
+		const now = await size();
+		steady = now === last ? steady + 1 : 0;
+		last = now;
+	}
+}
+
+/**
  * Let `shadow` reach the overlay of a build that ships: its shadow root is
  * closed to the page, but not to CDP. Afterwards the host's `shadowRoot`
  * answers, for the page's world only.

@@ -17,6 +17,7 @@ import {
 	reachOverlay,
 	saveAs,
 	shadow,
+	viewportSettled,
 	worker,
 } from "./steps.ts";
 
@@ -122,6 +123,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		const panel = await sidePanel();
 		await panel.waitFor(`document.getElementById("annotate")`);
 		await clicked.page.waitFor(HOST);
+		await viewportSettled(clicked.page);
 		// The page's scripts cannot reach into the overlay.
 		expect(await clicked.page.eval(`${HOST}.shadowRoot`)).toBeNull();
 		expect((await capture(clicked.tabId)).ok).toBe(true);
@@ -159,6 +161,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		const panel = await sidePanel();
 		await panel.waitFor(`document.getElementById("annotate")`);
 		await first.page.waitFor(HOST);
+		await viewportSettled(first.page);
 		await panel.click(`document.getElementById("annotate")`);
 		await reachOverlay(first.page);
 		await first.page.waitFor(`!${shadow(".toolbar")}.hidden`);
@@ -250,6 +253,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 		await panel.waitFor(`document.getElementById("annotate")`);
 		await first.page.waitFor(HOST);
+		await viewportSettled(first.page);
 		await panel.click(`document.getElementById("annotate")`);
 		await reachOverlay(first.page);
 		await first.page.waitFor(`!${shadow(".toolbar")}.hidden`);
