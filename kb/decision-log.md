@@ -365,10 +365,12 @@ pairing view gives way to it.
   opened for the tab: with the window alone Chrome resolves and shows nothing, and the
   owner saw exactly that in branded Chrome with Claude in Chrome's panel open. The call
   was left out of iteration 10 because the store package's end-to-end test failed in CI
-  (Chrome for Testing 156 on Linux): the panel takes its width a moment after the
-  click, and a click measured before that went past the overlay onto the test page's
-  submit button, which navigated away. The test now waits for the viewport to keep its
-  size. The covered-panel test hides the panel's page itself: in Overmark's harness a
+  (Chrome for Testing 156 on Linux, twice in a row; it passed on macOS). The likely
+  cause: the panel takes its width a moment after the click, and a click measured
+  before that went past the overlay onto the test page's submit button (the log shows
+  `#overmark-root` gone after it). The icon-click tests now wait until the panel has
+  taken its width and the viewport keeps its size, and marking waits for the Element
+  tool to be on; with that the test passed in CI on Linux. The covered-panel test hides the panel's page itself: in Overmark's harness a
   second extension's worker did not start.
 - **Notifications keep Don't allow and Allow.** The tab-mcp extension's Allow and Always
   allow do not apply: every change asks each time (DEC-008).
