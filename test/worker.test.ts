@@ -420,18 +420,24 @@ describe("questions", () => {
 	});
 
 	test("arguments, lines and names show invisible and direction characters as \\u escapes", async () => {
-		expect(visible("pay‮evil​")).toBe("pay\\u202eevil\\u200b");
-		expect(visible("a b")).toBe("a\\u00a0b");
-		expect(visible('{\n\t"a": 1\r}')).toBe('{\n\t"a": 1\\u000d}');
+		expect(visible("pay‮evil​")).toBe("pay\\u202Eevil\\u200B");
+		expect(visible("a b")).toBe("a\\u00A0b");
+		expect(visible('{\n\t"a": 1\r}')).toBe('{\n\t"a": 1\\u000D}');
+		// Also variation selectors, private use, lone surrogates, tags (as JSON writes them).
+		expect(visible("ok\ufe0f")).toBe("ok\\uFE0F");
+		expect(visible("a\ue000b")).toBe("a\\uE000b");
+		expect(visible("a\ud800b")).toBe("a\\uD800b");
+		expect(visible("a\u{e0041}b")).toBe("a\\uDB40\\uDC41b");
+		expect(visible("a\u2800b\u3000c")).toBe("a\\u2800b\\u3000c");
 		const questions = new Questions(fakeHost());
 		const r = request({ caseId: "c‮1" });
 		r.client = { ...r.client, name: "Cl​aude" };
 		void questions.ask(r, ["Case: “x‮”"], 7);
 		await settle();
 		const [view] = questions.list;
-		expect(view?.app).toBe("Cl\\u200baude (claude.ai)");
-		expect(view?.lines).toEqual(["Case: “x\\u202e”"]);
-		expect(view?.args).toContain("c\\u202e1");
+		expect(view?.app).toBe("Cl\\u200Baude (claude.ai)");
+		expect(view?.lines).toEqual(["Case: “x\\u202E”"]);
+		expect(view?.args).toContain("c\\u202E1");
 	});
 });
 

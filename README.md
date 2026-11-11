@@ -116,7 +116,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_STORE=memory \
   -e TAB_MCP_SITES='[{"origin":"chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg","name":"Overmark"}]' \
-  ractive/tab-mcp:0.8.0
+  ractive/tab-mcp:0.9.0
 ```
 
 Then, in the side panel's "AI app" card, set the relay to `http://localhost:8080`
