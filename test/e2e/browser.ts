@@ -9,7 +9,13 @@
  * download.
  */
 
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
@@ -98,6 +104,27 @@ const pipe =
 			close: () => void writer.end(),
 		};
 	};
+
+/**
+ * A new profile. Its downloads go to `<profile>/Downloads` without asking, as
+ * Chrome's own settings would send them (`Browser.downloads`); the
+ * `downloads` API names its files only that way, not under CDP's
+ * `Browser.setDownloadBehavior` "allow".
+ */
+function newProfile(): string {
+	const profile = mkdtempSync(join(tmpdir(), "overmark-chrome-"));
+	mkdirSync(join(profile, "Default"));
+	writeFileSync(
+		join(profile, "Default", "Preferences"),
+		JSON.stringify({
+			download: {
+				default_directory: join(profile, "Downloads"),
+				prompt_for_download: false,
+			},
+		}),
+	);
+	return profile;
+}
 
 function chromeArguments(profile: string): string[] {
 	return [
@@ -205,6 +232,11 @@ export class Browser {
 	readonly #listeners = new Set<Listener>();
 	#nextId = 0;
 
+	/** Where Chrome's own settings save downloads (see `newProfile`). */
+	get downloads(): string {
+		return join(this.#profile, "Downloads");
+	}
+
 	private constructor(proc: ChromeProcess, profile: string, connect: Connect) {
 		this.#proc = proc;
 		this.#profile = profile;
@@ -230,7 +262,7 @@ export class Browser {
 	}
 
 	static async launch(binary: string, extensionDir: string): Promise<Browser> {
-		const profile = mkdtempSync(join(tmpdir(), "overmark-chrome-"));
+		const profile = newProfile();
 		const proc = started(
 			Bun.spawn(
 				[
@@ -260,7 +292,7 @@ export class Browser {
 	 * the `Extensions` domain, for `loadExtension` and `clickIcon`.
 	 */
 	static async launchPiped(binary: string): Promise<Browser> {
-		const profile = mkdtempSync(join(tmpdir(), "overmark-chrome-"));
+		const profile = newProfile();
 		const proc = started(
 			Bun.spawn(
 				[

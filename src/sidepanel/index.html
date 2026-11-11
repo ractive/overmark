@@ -14,7 +14,7 @@
 				<span id="ai-status">Not connected</span>
 				<span id="ai-action" class="ai-action">Connect</span>
 			</button>
-			<button id="stop-ai" type="button" hidden>Stop AI access</button>
+			<button id="stop-ai" type="button" hidden title="Pause AI access now, from any view: AI apps can no longer reach Overmark, and they stay paired. The same as turning off the AI access switch in the AI app card; both also turn off Keep AI access on.">Stop AI access</button>
 			<p id="ai-call" class="meta" hidden></p>
 		</header>
 		<!-- The AI connection lives in the service worker; the questions and the AI app card show it (ai.ts). -->
@@ -30,9 +30,12 @@
 				<h2 id="cases-heading">Cases</h2>
 				<div id="cases"></div>
 				<div class="row import">
-					<button id="import" type="button">Import a case…</button>
+					<button id="import" type="button" title="Choose an Overmark .zip file: one exported case, or a file of all cases. For a case that is here already, Overmark asks first whether to replace it or keep both.">Import a case…</button>
+					<button id="export-all" type="button" title="Save every case in one .zip file, a folder per case with its marks, comments, findings, summary and screenshots. Import a case… reads it back, in this browser or another.">Export all cases</button>
 					<input id="import-file" type="file" accept=".zip,application/zip" hidden />
 				</div>
+				<div id="export-all-saved" hidden></div>
+				<p id="import-done" class="hint" role="status" hidden></p>
 				<div id="import-error" class="hint" hidden>
 					<p id="import-error-text"></p>
 					<button id="import-dismiss" type="button">Dismiss</button>
@@ -41,7 +44,7 @@
 			<section id="ai-card" class="ai-card" aria-labelledby="ai-heading">
 				<div class="card-head">
 					<h2 id="ai-heading">AI app</h2>
-					<label class="switch">
+					<label class="switch" title="On: paired AI apps can reach Overmark. Off pauses that, like Stop AI access; the apps stay paired.">
 						<input id="ai-switch" type="checkbox" role="switch" aria-checked="false" />
 						<span>AI access</span>
 					</label>
@@ -54,14 +57,14 @@
 				<div id="pair-replaced" class="hint" hidden>
 					<p id="pair-replaced-text"></p>
 					<div class="row">
-						<button id="pair-take-back" type="button">Connect again</button>
-						<button id="pair-replaced-new-address" type="button">New address</button>
+						<button id="pair-take-back" type="button" title="Take Overmark's address back for this browser, so your paired AI apps reach this Overmark again">Connect again</button>
+						<button id="pair-replaced-new-address" type="button" title="Make a new address for AI apps: every app paired with the old one is disconnected and has to be added and paired again">New address</button>
 					</div>
 				</div>
 				<div class="row">
 					<button id="connect" type="button" class="primary">Turn on AI access</button>
 				</div>
-				<p><button id="add-app" type="button" class="link add-app" hidden>+ Add another AI app</button></p>
+				<p><button id="add-app" type="button" class="link add-app" hidden title="Show the address and a code to pair one more AI app; the apps paired already stay">+ Add another AI app</button></p>
 				<div id="pairing" class="pairing" hidden>
 					<h3 class="group-title">Pair an AI app</h3>
 					<p>
@@ -70,24 +73,24 @@
 					</p>
 					<div class="row">
 						<code id="pair-address" class="address"></code>
-						<button id="pair-copy" type="button">Copy</button>
+						<button id="pair-copy" type="button" title="Copy the address, to add it to your AI app">Copy</button>
 					</div>
 					<p>When the AI app opens the sign-in page, type this code there:</p>
 					<div class="row">
 						<code id="pair-code" class="code">––– –––</code>
-						<button id="pair-copy-code" type="button" disabled>Copy</button>
+						<button id="pair-copy-code" type="button" disabled title="Copy the code, to type it on the AI app's sign-in page">Copy</button>
 					</div>
 					<p class="meta">The code changes every 2 minutes and after each use.</p>
 					<div class="row">
-						<button id="pair-done" type="button" class="primary" hidden>Done</button>
-						<button id="pair-new-address" type="button">New address</button>
+						<button id="pair-done" type="button" class="primary" hidden title="Hide the address and the code; the paired apps stay connected">Done</button>
+						<button id="pair-new-address" type="button" title="Make a new address for AI apps: every app paired with the old one is disconnected and has to be added and paired again">New address</button>
 					</div>
 				</div>
 				<label class="field">
 					Relay
 					<input id="relay" type="url" spellcheck="false" autocomplete="off" />
 				</label>
-				<label class="check">
+				<label class="check" title="Connect again by itself after an idle or expired session, after an update of Overmark, and when the browser starts. Stop AI access and the AI access switch turn it off.">
 					<input id="keep-on" type="checkbox" />
 					Keep AI access on
 				</label>
@@ -98,7 +101,7 @@
 			</section>
 			<section aria-labelledby="options-heading">
 				<h2 id="options-heading">Options</h2>
-				<label class="check">
+				<label class="check" title="Blur every form field and text editor in the screenshots Overmark takes. Password fields are always blurred.">
 					<input id="blur-forms" type="checkbox" />
 					Blur form fields in screenshots
 				</label>

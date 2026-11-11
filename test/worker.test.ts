@@ -637,7 +637,7 @@ describe("the side panel's bundle", () => {
 				const code = await Bun.file(join(outdir, file)).text();
 				// Neither chrome.storage (any area) nor the worker's database.
 				expect(code).not.toMatch(/\bstorage\s*\.\s*(local|session|sync)\b/);
-				expect(code).not.toContain("onChanged");
+				expect(code).not.toMatch(/\bstorage\s*\.\s*onChanged\b/);
 				expect(code).not.toContain(DATABASE);
 			}
 			// The worker's does use both.

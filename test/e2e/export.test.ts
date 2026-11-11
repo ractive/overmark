@@ -5,13 +5,16 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readZip } from "../../src/lib/zip.ts";
+import { sampleCase } from "../fixtures.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
 	type Db,
+	download,
+	downloadShown,
 	exportOpenCase,
 	imageBytes,
 	imagesOf,
@@ -77,8 +80,36 @@ describe.skipIf(browserBinary === undefined)(
 			// Export: the file holds the case and the stored images, byte for byte.
 			const panel = await panelHome(h);
 			await openCase(panel, "Round trip");
-			const file = await exportOpenCase(h, panel, folder);
-			expect(file.endsWith("round-trip.overmark.zip")).toBe(true);
+			const file = await exportOpenCase(h, panel);
+			// Where it went (DEC-020: the test build has "downloads"): the name
+			// Overmark gave it, in Chrome's downloads folder, with Copy and Show
+			// in folder.
+			expect(realpathSync(file)).toBe(
+				realpathSync(join(h.browser.downloads, "round-trip.overmark.zip")),
+			);
+			const shown = file;
+			// The system's clipboard and file manager stay out of the test.
+			await panel.eval(`(() => {
+				window.copied = [];
+				window.shown = [];
+				navigator.clipboard.writeText = (text) => (window.copied.push(text), Promise.resolve());
+				chrome.downloads.show = (id) => window.shown.push(id);
+			})()`);
+			await panel.click(
+				`document.querySelector('#export-saved [data-action="copy-path"]')`,
+			);
+			await panel.waitFor(
+				`document.querySelector('#export-saved [data-action="copy-path"]').textContent === "Copied"`,
+			);
+			expect(await panel.eval<string[]>("window.copied")).toEqual([shown]);
+			await panel.click(
+				`document.querySelector('#export-saved [data-action="show-file"]')`,
+			);
+			const [downloadId] = await panel.eval<number[]>("window.shown");
+			const [item] = await panel.eval<{ filename: string }[]>(
+				`chrome.downloads.search({ id: ${downloadId} })`,
+			);
+			expect(item?.filename).toBe(shown);
 			const zip = await readZip(
 				new Uint8Array(await Bun.file(file).arrayBuffer()),
 			);
@@ -165,6 +196,120 @@ describe.skipIf(browserBinary === undefined)(
 			expect(imagesOf(left, saved.id)).toEqual([]);
 			expect(imagesOf(left, copy.id)).toEqual(paths);
 			expect(left.images).toHaveLength(paths.length);
+		}, 60_000);
+
+		test("without the downloads permission, Export saves the file as before and shows no path", async () => {
+			const panel = await panelHome(h);
+			await openCase(panel, "Round trip (copy)");
+			// The buttons say what they do (DEC-020).
+			const titled = (ids: string[]) =>
+				panel.eval<string[]>(
+					`${JSON.stringify(ids)}.filter((id) => !document.getElementById(id)?.title)`,
+				);
+			expect(await titled(["export-case", "delete-case", "load-case"])).toEqual(
+				[],
+			);
+			// Chrome's prompt answered no.
+			await panel.eval(`(() => {
+				window.asked = [];
+				chrome.permissions.request = (p) => (window.asked.push(p), Promise.resolve(false));
+			})()`);
+			const into = join(folder, "declined");
+			mkdirSync(into);
+			const file = await download(
+				h,
+				panel,
+				into,
+				`document.getElementById("export-case")`,
+			);
+			expect(file.endsWith("round-trip-copy.overmark.zip")).toBe(true);
+			const zip = await readZip(
+				new Uint8Array(await Bun.file(file).arrayBuffer()),
+			);
+			expect(zip.has("case.json")).toBe(true);
+			expect(await panel.eval("window.asked")).toEqual([
+				{ permissions: ["downloads"] },
+			]);
+			await Bun.sleep(300);
+			expect(
+				await panel.eval<boolean>(
+					`document.getElementById("export-saved").hidden && !document.getElementById("case-hint").textContent.startsWith("Could not")`,
+				),
+			).toBe(true);
+		}, 30_000);
+
+		test("Export all cases: one file, imported again case by case", async () => {
+			await h.control.eval(
+				write(`
+				tx.objectStore("cases").put(${JSON.stringify(sampleCase("c_all1"))});
+				tx.objectStore("cases").put(${JSON.stringify({ ...sampleCase("c_all2", "2026-11-05T10:00:00Z"), title: "Second" })});
+			`),
+			);
+			const before = await readDb();
+			const panel = await panelHome(h);
+			expect(
+				await panel.eval<string[]>(
+					`["import", "export-all", "stop-ai", "pair-new-address", "pair-replaced-new-address", "pair-take-back", "add-app"].filter((id) => !document.getElementById(id).title)`,
+				),
+			).toEqual([]);
+			expect(
+				await panel.eval<string>(
+					`document.getElementById("keep-on").closest("label").title`,
+				),
+			).toContain("Stop AI access");
+			const file = await downloadShown(
+				h,
+				panel,
+				`document.getElementById("export-all")`,
+				"export-all-saved",
+			);
+			expect(file).toMatch(/overmark-cases-\d{4}-\d\d-\d\d\.overmark\.zip$/);
+			expect(
+				await panel.eval<number>(
+					`document.querySelectorAll('#export-all-saved [data-action="copy-path"], #export-all-saved [data-action="show-file"]').length`,
+				),
+			).toBe(2);
+			const zip = await readZip(
+				new Uint8Array(await Bun.file(file).arrayBuffer()),
+			);
+			const folders = [...zip.keys()].filter((n) => n.endsWith("/case.json"));
+			expect(folders).toHaveLength(before.cases.length);
+			expect(folders).toContain("second/case.json");
+
+			// Into an empty browser: every case comes back, with its images.
+			await h.control.eval(
+				write(
+					`tx.objectStore("cases").clear(); tx.objectStore("images").clear()`,
+				),
+			);
+			await panelHome(h);
+			await importFile(panel, file);
+			const back = await until(
+				readDb,
+				(db) => db.cases.length === before.cases.length,
+			);
+			const ids = (db: Db) => db.cases.map((c) => c.id).sort();
+			expect(ids(back)).toEqual(ids(before));
+			expect(back.images.map((i) => i.key).sort()).toEqual(
+				before.images.map((i) => i.key).sort(),
+			);
+			await panel.waitFor(
+				`document.getElementById("import-done").textContent === "Imported all ${before.cases.length} cases of ${file.split("/").pop()}."`,
+			);
+			// Again: each one is here already, so each asks; Skip leaves it.
+			await importFile(panel, file);
+			for (let i = 1; i <= before.cases.length; i++) {
+				await panel.waitFor(
+					`document.getElementById("import-prompt").textContent.includes("Case ${i} of ${before.cases.length}")`,
+				);
+				await panel.click(
+					`document.querySelector('[data-action="import-cancel"]')`,
+				);
+			}
+			await panel.waitFor(
+				`document.getElementById("import-done").textContent.startsWith("Imported 0 of the ${before.cases.length} cases")`,
+			);
+			expect(ids(await readDb())).toEqual(ids(before));
 		}, 60_000);
 
 		test("an imported file the panel cannot read changes nothing", async () => {

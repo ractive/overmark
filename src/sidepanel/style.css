@@ -376,8 +376,22 @@ ul.cases .load {
 	margin-top: 10px;
 }
 
-#import-error {
+#import-error,
+#import-done,
+#export-all-saved {
 	margin-top: 8px;
+}
+
+/* Where an export went: the path, Copy and Show in folder (DEC-020). */
+.saved p {
+	margin: 0 0 4px;
+}
+
+.saved .path {
+	display: block;
+	margin-bottom: 6px;
+	overflow-wrap: anywhere;
+	font-size: 12px;
 }
 
 #import-error p {

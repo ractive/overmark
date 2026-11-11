@@ -21,7 +21,7 @@ import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
 import { type Size, sameSize } from "./size.ts";
-import type { AiCall, PanelState } from "./state.ts";
+import type { AiCall, Exported, PanelState } from "./state.ts";
 
 /** What the user can do; main.ts carries it out and updates the state. */
 export interface Actions {
@@ -45,6 +45,10 @@ export interface Actions {
 	matchSize(c: Case): void;
 	addMarks(c: Case): void;
 	exportCase(c: Case): void;
+	/** Copy an exported file's path; whether it worked. */
+	copyPath(path: string): Promise<boolean>;
+	/** Show an exported file in the system's file manager. */
+	showFile(e: Exported): void;
 	deleteCase(c: Case): void;
 	typeVerdict(caseId: string, text: string): void;
 	saveVerdict(caseId: string, text: string): void;
@@ -69,6 +73,9 @@ const aiCall = byId<HTMLParagraphElement>("ai-call");
 const stopAi = byId<HTMLButtonElement>("stop-ai");
 const keepOn = byId<HTMLInputElement>("keep-on");
 const importError = byId<HTMLDivElement>("import-error");
+const importDone = byId<HTMLParagraphElement>("import-done");
+const exportAll = byId<HTMLButtonElement>("export-all");
+const exportAllSaved = byId<HTMLDivElement>("export-all-saved");
 const importErrorText = byId<HTMLParagraphElement>("import-error-text");
 const importPrompt = h("div", {
 	class: "hint",
@@ -88,6 +95,72 @@ const percent = (score: number) => `${Math.round(score * 100)}%`;
 function setHint(el: HTMLElement, text: string | undefined): void {
 	el.hidden = text === undefined;
 	el.textContent = text ?? "";
+}
+
+/** Under Export while Chrome's prompt is open: what the answer does. */
+export const ASKING_DOWNLOADS =
+	"Chrome asks whether Overmark may manage your downloads. With a yes, Overmark shows here where the file went; with a no, it saves the file as before.";
+
+/**
+ * Under an Export button: where the file went, with Copy and Show in folder
+ * (DEC-020); or, while Chrome asks for downloads, what that is for. `el`
+ * keeps what it shows, so Copy's "Copied" survives a render.
+ */
+function renderSaved(
+	el: HTMLElement,
+	exported: Exported | undefined,
+	asking: boolean,
+	actions: Actions,
+): void {
+	const key = asking ? "asking" : exported ? String(exported.downloadId) : "";
+	if (el.dataset["key"] === key) return;
+	el.dataset["key"] = key;
+	el.hidden = key === "";
+	el.className = key === "" ? "" : "hint saved";
+	if (asking) {
+		el.replaceChildren(h("p", {}, ASKING_DOWNLOADS));
+		return;
+	}
+	if (exported === undefined) {
+		el.replaceChildren();
+		return;
+	}
+	const copy: HTMLButtonElement = h(
+		"button",
+		{
+			type: "button",
+			"data-action": "copy-path",
+			title: "Copy the file's full path",
+			onclick: () =>
+				void actions.copyPath(exported.path).then((ok) => {
+					if (!ok) return;
+					copy.textContent = "Copied";
+					setTimeout(() => {
+						copy.textContent = "Copy";
+					}, 1500);
+				}),
+		},
+		"Copy",
+	);
+	el.replaceChildren(
+		h("p", {}, "Saved as"),
+		h("code", { class: "path" }, exported.path),
+		h(
+			"div",
+			{ class: "row" },
+			copy,
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "show-file",
+					title: "Open the folder with the file in your system's file manager",
+					onclick: () => actions.showFile(exported),
+				},
+				"Show in folder",
+			),
+		),
+	);
 }
 
 // --- home ----------------------------------------------------------------------
@@ -131,7 +204,7 @@ function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 						type: "button",
 						class: "load",
 						"data-load": c.id,
-						title: `Load “${c.title}” onto this tab`,
+						title: `Open “${c.title}” and show its marks on the page in this tab`,
 						onclick: () => actions.openAndLoad(c),
 					},
 					"Load",
@@ -187,10 +260,12 @@ function renderCases(state: PanelState, actions: Actions): void {
 
 function renderImportPrompt(state: PanelState, actions: Actions): void {
 	const importing = state.importing;
+	const batch = importing?.batch;
 	const key = JSON.stringify([
 		importing?.existing.id,
 		importing?.existing.updatedAt,
 		importing?.parsed.case.updatedAt,
+		batch ? [batch.name, batch.rest.length] : null,
 	]);
 	if (key === importKey) return;
 	importKey = key;
@@ -205,6 +280,15 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 			{},
 			`“${importing.existing.title}” is here already (changed ${formatDate(importing.existing.updatedAt)}); the file's copy was changed ${formatDate(importing.parsed.case.updatedAt)}.`,
 		),
+		...(batch
+			? [
+					h(
+						"p",
+						{ class: "meta" },
+						`Case ${batch.total - batch.rest.length} of ${batch.total} in ${batch.name}.`,
+					),
+				]
+			: []),
 		h(
 			"div",
 			{ class: "row" },
@@ -213,6 +297,8 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 				{
 					type: "button",
 					"data-action": "import-replace",
+					title:
+						"Put the file's copy in place of the case here, with its marks and screenshots; what only the case here has is lost",
 					onclick: () => actions.importReplace(),
 				},
 				"Replace it",
@@ -222,14 +308,23 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 				{
 					type: "button",
 					"data-action": "import-copy",
+					title:
+						"Import the file's copy as a new case beside this one, its title ending in (copy)",
 					onclick: () => actions.importCopy(),
 				},
 				"Keep both",
 			),
 			h(
 				"button",
-				{ type: "button", onclick: () => actions.importCancel() },
-				"Cancel",
+				{
+					type: "button",
+					"data-action": "import-cancel",
+					title: batch
+						? "Leave the case here as it is, and go on with the next case in the file"
+						: "Import nothing; the case here stays as it is",
+					onclick: () => actions.importCancel(),
+				},
+				batch ? "Skip" : "Cancel",
 			),
 		),
 	);
@@ -252,6 +347,14 @@ function renderHome(state: PanelState, actions: Actions): void {
 	allSites.checked = state.allSites;
 	importError.hidden = state.importError === undefined;
 	importErrorText.textContent = state.importError ?? "";
+	setHint(importDone, state.importDone);
+	exportAll.disabled = state.exportingAll || state.cases.length === 0;
+	renderSaved(
+		exportAllSaved,
+		state.exported?.of === "all" ? state.exported : undefined,
+		state.askingDownloads === "all",
+		actions,
+	);
 	renderCases(state, actions);
 	renderImportPrompt(state, actions);
 }
@@ -325,6 +428,7 @@ function cropView(caseId: string, a: Annotation, src: string): HTMLElement {
 			"data-action": "zoom",
 			"aria-pressed": String(zoomed.has(key)),
 			"aria-label": `Mark ${a.number}, shown large`,
+			title: "Show the crop larger, or small again",
 			onclick: () => {
 				const large = !zoomed.delete(key);
 				if (large) zoomed.add(key);
@@ -352,6 +456,7 @@ function matchView(
 				{
 					type: "button",
 					"data-action": "next",
+					title: "Show the next element on the page that could be this mark's",
 					onclick: () => actions.showMatch(caseId, a, m.current + 1),
 				},
 				"Next candidate",
@@ -395,6 +500,8 @@ interface CaseParts {
 	loadButton: HTMLButtonElement;
 	loadedHere: boolean;
 	deleteButton: HTMLButtonElement;
+	/** Where Export saved the file. */
+	saved: HTMLElement;
 	hint: HTMLElement;
 	verdict: HTMLTextAreaElement;
 	verdictStatus: HTMLSpanElement;
@@ -444,6 +551,8 @@ function createParts(c: Case, actions: Actions): CaseParts {
 				{
 					type: "button",
 					id: "match-size",
+					title:
+						"Resize the browser window so this tab is as large as it was when the marks were made",
 					onclick: () => actions.matchSize(created.current),
 				},
 				"Match size",
@@ -467,6 +576,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			id: "delete-case",
 			onclick: () => actions.deleteCase(created.current),
 		}),
+		saved: h("div", { id: "export-saved", hidden: true }),
 		hint: h("p", { class: "hint", id: "case-hint", hidden: true }),
 		verdict,
 		verdictStatus,
@@ -507,12 +617,15 @@ function createParts(c: Case, actions: Actions): CaseParts {
 				{
 					type: "button",
 					id: "export-case",
+					title:
+						"Save this case as one .zip file: its marks, comments, AI findings, summary and screenshots, and case.md to read them without Overmark. Someone imports it with Import a case…",
 					onclick: () => actions.exportCase(created.current),
 				},
 				"Export",
 			),
 			created.deleteButton,
 		),
+		created.saved,
 		created.hint,
 		// What the whole case comes to: the case's, not a mark's. Stored as
 		// verdict, its name before (DEC-019).
@@ -600,28 +713,59 @@ function markActions(
 	armed: boolean,
 	actions: Actions,
 ): HTMLElement {
-	const button = (label: string, action: string, onclick: () => void) =>
+	const button = (
+		label: string,
+		action: string,
+		title: string | undefined,
+		onclick: () => void,
+	) =>
 		h(
 			"button",
-			{ type: "button", class: "small", "data-mark-action": action, onclick },
+			{
+				type: "button",
+				class: "small",
+				"data-mark-action": action,
+				title,
+				onclick,
+			},
 			label,
 		);
 	return h(
 		"div",
 		{ class: "mark-actions" },
 		a.resolution
-			? button("Reopen", "reopen", () => actions.reopenMark(c, a))
-			: button("Resolve…", "resolve", () => actions.editMark(c, a, "resolve")),
+			? button(
+					"Reopen",
+					"reopen",
+					"Make the mark open again; its resolution and note go",
+					() => actions.reopenMark(c, a),
+				)
+			: button(
+					"Resolve…",
+					"resolve",
+					"Mark it fixed, won't fix or can't reproduce, with a note if you like",
+					() => actions.editMark(c, a, "resolve"),
+				),
 		a.resolution
-			? button("Change…", "resolve", () => actions.editMark(c, a, "resolve"))
+			? button(
+					"Change…",
+					"resolve",
+					"Change how it was resolved, or its note",
+					() => actions.editMark(c, a, "resolve"),
+				)
 			: null,
-		button("Edit comment", "comment", () => actions.editMark(c, a, "comment")),
+		button("Edit comment", "comment", undefined, () =>
+			actions.editMark(c, a, "comment"),
+		),
 		h(
 			"button",
 			{
 				type: "button",
 				class: "small danger",
 				"data-mark-action": "delete",
+				title: armed
+					? "Click again to delete this mark"
+					: "Delete this mark and its crop (click twice); its number is not given again",
 				...(armed ? { "data-armed": true } : {}),
 				onclick: () => actions.deleteMark(c, a),
 			},
@@ -824,10 +968,24 @@ function renderCase(state: PanelState, actions: Actions): void {
 	p.loadButton.textContent = p.loadedHere
 		? "Hide marks on this tab"
 		: "Show marks on this tab";
+	p.loadButton.title = p.loadedHere
+		? "Take this case's marks off the page in this tab; the case stays as it is"
+		: "Look for each mark's element on the page in this tab and draw the marks there";
 	p.loadButton.classList.toggle("primary", !p.loadedHere);
 	const armed = state.deleteArmedAt !== undefined;
 	p.deleteButton.toggleAttribute("data-armed", armed);
 	p.deleteButton.textContent = armed ? "Really delete?" : "Delete";
+	p.deleteButton.title = armed
+		? "Click again to delete this case and its screenshots"
+		: "Delete this case and its screenshots from this browser (click twice). Files exported before stay.";
+	const of = (e: Exported["of"] | undefined) =>
+		e !== undefined && e !== "all" && e.caseId === c.id;
+	renderSaved(
+		p.saved,
+		of(state.exported?.of) ? state.exported : undefined,
+		of(state.askingDownloads),
+		actions,
+	);
 	setHint(p.hint, state.caseHint);
 
 	const images = state.images?.caseId === c.id ? state.images : undefined;
@@ -1011,6 +1169,7 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 					class: "small show",
 					"data-action": "show",
 					"aria-label": `Show mark ${a.number} on the page`,
+					title: "Scroll the page to this mark and outline it",
 					onclick: () => actions.showMatch(c.id, a, m.current),
 				},
 				"Show",
@@ -1084,6 +1243,10 @@ function findingsList(
 									armed === f.id
 										? `Really delete this finding on mark ${a.number}?`
 										: `Delete this finding on mark ${a.number}`,
+								title:
+									armed === f.id
+										? "Click again to delete this finding"
+										: "Delete this AI finding (click twice); the mark and your comment stay",
 								...(armed === f.id ? { "data-armed": true } : {}),
 								onclick: () => actions.deleteFinding(c, a, f.id),
 							},
@@ -1106,7 +1269,12 @@ function callText(call: AiCall): string {
 function renderAi({ ai }: PanelState): void {
 	aiStatus.textContent = ai.status;
 	// A long problem is cut to one line: then its whole is the button's title.
-	aiButton.title = aiStatus.scrollWidth > aiStatus.clientWidth ? ai.status : "";
+	aiButton.title =
+		aiStatus.scrollWidth > aiStatus.clientWidth
+			? ai.status
+			: ai.active
+				? "Go to the AI app card: the paired apps and what they may do"
+				: "Turn AI access on and go to the AI app card";
 	// Waiting for an app to pair: nothing to do but wait (a click shows how).
 	aiAction.hidden = ai.active && !ai.connected;
 	aiAction.textContent = ai.connected ? "Manage" : "Turn on";

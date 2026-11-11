@@ -340,11 +340,49 @@ export async function openCase(panel: Page, title: string): Promise<void> {
 	await panel.waitFor(`document.getElementById("export-case")`);
 }
 
-/** Click Export on the open case; answers the path of the file in `folder`. */
-export async function exportOpenCase(
+/**
+ * Click Export on the open case; answers the path the panel shows (the test
+ * build has "downloads").
+ */
+export function exportOpenCase(h: Harness, panel: Page): Promise<string> {
+	return downloadShown(
+		h,
+		panel,
+		`document.getElementById("export-case")`,
+		"export-saved",
+	);
+}
+
+/**
+ * Click the button `button` (an expression) that saves through the
+ * `downloads` API (DEC-020), into Chrome's own downloads folder; answers the
+ * path the panel shows in `saved` (an element's id) once the file is there.
+ */
+export async function downloadShown(
+	h: Harness,
+	panel: Page,
+	button: string,
+	saved: string,
+): Promise<string> {
+	// Chrome's own way, by its settings: CDP's "allow" names a file by a GUID.
+	await h.browser.send("Browser.setDownloadBehavior", { behavior: "default" });
+	await panel.click(button);
+	const code = `document.querySelector("#${saved} code")?.textContent`;
+	await panel.waitFor(code, 15_000);
+	const path = await panel.eval<string>(code);
+	if (Bun.file(path).size === 0) throw new Error(`${path} is empty or missing`);
+	return path;
+}
+
+/**
+ * Click the button `button` (an expression) that saves a file; answers its
+ * path in `folder` once Chrome has written it.
+ */
+export async function download(
 	h: Harness,
 	panel: Page,
 	folder: string,
+	button: string,
 ): Promise<string> {
 	await h.browser.send("Browser.setDownloadBehavior", {
 		behavior: "allow",
@@ -352,7 +390,7 @@ export async function exportOpenCase(
 		eventsEnabled: true,
 	});
 	const begun = h.browser.event("Browser.downloadWillBegin");
-	await panel.click(`document.getElementById("export-case")`);
+	await panel.click(button);
 	const { suggestedFilename } = (await begun) as { suggestedFilename: string };
 	const path = join(folder, suggestedFilename);
 	// Chrome may still be writing it: it is done when it has stopped growing.

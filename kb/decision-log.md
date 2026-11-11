@@ -471,3 +471,64 @@ the developer".
   build still open in an older one. The panel's internal names and element ids
   (`verdict`, `save-verdict`) stay with the field. An Always allow kept for
   `set_verdict` names a tool that no longer exists and allows nothing.
+
+## DEC-020: Export says where the file went; Export all cases; tooltips (owner)
+
+The owner, 2026-11-10: after Export the side panel shows where the file went; one more
+button exports every case at once; the panel's buttons say in a tooltip what they do.
+
+- **Where the file went, with the optional `downloads` permission.** The manifest lists
+  `downloads` under `optional_permissions`; nothing is asked at install. A click on
+  Export (or Export all cases) calls `chrome.permissions.request` first, before anything
+  is awaited, since Chrome shows its prompt only during a click; where Overmark has the
+  permission already the answer is yes at once and nothing shows. While Chrome's prompt
+  is open, the panel says under the button what the answer does. With a yes the file
+  goes through `chrome.downloads.download({ url: <blob URL>, filename: <the export's
+  name> })`; the panel waits for the download to complete (`downloads.onChanged`),
+  reads its absolute path with `downloads.search({ id })` and shows it under the button
+  ("Saved as", the path, Copy and Show in folder, `downloads.show(id)`), then revokes
+  the blob URL. Chrome's own settings decide the folder, and a name that exists already
+  becomes `name (1)`, which is why the path is worth showing.
+- **A no changes nothing.** Declined, or no `downloads` API, or `downloads.download`
+  refusing the file: the export is saved exactly as before (a link's `download`) and the
+  panel shows nothing more. Overmark asks again only at the next click on Export, never
+  otherwise: Chrome shows its own prompt each time, the panel nags in no other way. A
+  Save as dialog cancelled by the user shows nothing; a download Chrome stopped
+  (`interrupted`) says so under the button.
+- **Export all cases: one zip, a folder per case.** `overmark-cases-<YYYY-MM-DD>.overmark.zip`
+  holds one folder per case, named after its title as an export's file name is
+  (`login-button-contrast/`), with `-2`, `-3` for a title that comes again; inside each,
+  exactly the single-case layout (`case.json`, `case.md`, `shots/`, `crops/`). Nothing
+  else at the top: a single-case export has `case.json` at the top, a file of all cases
+  does not, which is how Import tells them apart. Cases in the order of the list (newest
+  change first). The file may be at most 512 MB (the images uncompressed), and Export all
+  refuses a larger one ("Export them one at a time"): a file Import would refuse is no
+  use. The button sits next to "Import a case…" and is disabled with no cases.
+- **Import a case… reads both.** A `case.json` at the top: one case, as before (at most
+  150 MB). Otherwise each `<folder>/case.json` is a case, read and checked with the same
+  rules as a single case; one bad case, or a case id twice, refuses the whole file with
+  a message naming the folder (`In login-button-contrast/: The export lacks
+  crops/a1.webp.`), and nothing is stored. Then the cases go in one after the other: one
+  that is not here is stored at once; one whose id is here already asks the same
+  question as a single import ("Replace it", "Keep both", and "Skip" instead of
+  "Cancel"), saying which case of the file it is. Each case is stored in its own
+  transaction, as a single import. At the end the panel says how many were imported
+  (`Imported all 3 cases of …`, or `Imported 1 of the 3 cases of …, 2 left as they
+  were`); a file of several cases opens none of them. A file with one folder imports
+  as a single file does.
+- **Tooltips.** A `title` on the buttons whose label does not say enough: Export and
+  Export all cases (what the file holds, that it is one .zip, that Import a case… reads
+  it), Import a case…, Show and Hide marks on this tab and the list's Load, Delete (case,
+  mark, finding), New address, Connect again, + Add another AI app, Done, the copy
+  buttons, Stop AI access (pauses from any view; the same as the AI access switch, both
+  turn Keep AI access on off), the switch, Keep AI access on, Blur form fields, Match
+  size, Resolve, Reopen, Change, Show, Next candidate, Disconnect, Allow all changes, Ask
+  again, the question's three answers, the import prompt's answers and the header's
+  status. What a user needs before clicking stays visible text (the note while Chrome
+  asks, the import prompt, the AI card's explanations). The page's toolbar keeps its
+  tooltips as they were.
+- **The test build has `downloads` at install** (required, not optional), since CDP
+  cannot answer Chrome's prompt; the end-to-end tests stub `chrome.permissions.request`
+  to answer no for the old way. The test browser's profile sends downloads to a folder
+  of its own: under CDP's `Browser.setDownloadBehavior` "allow" the `downloads` API's
+  `filename` is ignored and files are named by a GUID.

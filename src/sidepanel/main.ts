@@ -16,11 +16,13 @@ import {
 	withResolution,
 } from "../lib/case.ts";
 import {
+	exportAllCases,
+	exportAllFileName,
 	exportCase,
 	exportFileName,
-	MAX_IMPORT_BYTES,
+	MAX_IMPORT_ALL_BYTES,
 	type ParsedExport,
-	readExport,
+	readExports,
 	storeImport,
 } from "../lib/export.ts";
 import type {
@@ -32,15 +34,28 @@ import type {
 import { IdbStore } from "../lib/store.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { blurFormsNow, startAi } from "./ai.ts";
-import { byId, h, isWebPage, shortUrl, sitePattern } from "./dom.ts";
+import { byId, isWebPage, shortUrl, sitePattern } from "./dom.ts";
+import {
+	askForDownloads,
+	DOWNLOADS,
+	type SavedFile,
+	saveFile,
+} from "./download.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
-import { Latest, Panel, type PanelState } from "./state.ts";
+import {
+	type Exported,
+	type ImportBatch,
+	Latest,
+	Panel,
+	type PanelState,
+} from "./state.ts";
 import { type Actions, NO_ACCESS, render } from "./view.ts";
 
 const store = new IdbStore();
 
 const importButton = byId<HTMLButtonElement>("import");
 const importFile = byId<HTMLInputElement>("import-file");
+const exportAllButton = byId<HTMLButtonElement>("export-all");
 const allSites = byId<HTMLInputElement>("all-sites");
 
 const ALL_SITES = { origins: ["<all_urls>"] };
@@ -97,6 +112,7 @@ const caseWork = new Latest();
 const imagesWork = new Latest();
 const hintWork = new Latest();
 const sitesWork = new Latest();
+const downloadsWork = new Latest();
 
 /** Refreshes of the tab running now. */
 let refreshing = 0;
@@ -470,22 +486,107 @@ async function startAnnotating(target?: Case): Promise<void> {
 	}
 }
 
+/** Store one case of a file; the drawn marks of the version it replaced go. */
+async function storeOne(parsed: ParsedExport, copy: boolean): Promise<Case> {
+	const c = await storeImport(store, parsed, { copy });
+	// Results (and drawn marks) of the version it replaced describe other marks.
+	if (state.loaded?.caseId === c.id) await forgetLoaded({ clearTab: true });
+	announce(c.id);
+	return c;
+}
+
+/**
+ * Store the case asked about. A file's only case opens (and loads onto the
+ * tab when it is that case's page); in a file of several the next one follows.
+ */
 async function finishImport(
 	parsed: ParsedExport,
 	copy: boolean,
+	batch?: ImportBatch,
 ): Promise<void> {
 	update((s) => (s.importing = undefined));
 	try {
-		const c = await storeImport(store, parsed, { copy });
-		// Results (and drawn marks) of the version it replaced describe other marks.
-		if (state.loaded?.caseId === c.id) await forgetLoaded({ clearTab: true });
-		announce(c.id);
+		const c = await storeOne(parsed, copy);
+		if (batch !== undefined) {
+			batch.stored++;
+			return await importRest(batch);
+		}
 		openCase(c.id);
 		const url = state.tab?.url;
 		if (url && isPageOf(c, url)) actions.loadOntoTab(c);
 	} catch (error) {
-		update((s) => (s.importError = `Could not import: ${message(error)}`));
+		update(
+			(s) =>
+				(s.importError =
+					batch === undefined
+						? `Could not import: ${message(error)}`
+						: `Could not import every case of ${batch.name}: ${message(error)} ${batchText(batch)}`),
+		);
+		if (batch !== undefined) void refreshCases();
 	}
+}
+
+/** "Imported all 3 cases of cases.zip." */
+function batchText(b: ImportBatch): string {
+	const skipped = b.skipped > 0 ? `, ${b.skipped} left as they were` : "";
+	return b.stored === b.total
+		? `Imported all ${b.total} cases of ${b.name}.`
+		: `Imported ${b.stored} of the ${b.total} cases of ${b.name}${skipped}.`;
+}
+
+/**
+ * Import a file's cases one after the other: a new one at once, one that is
+ * here already after the same question as a single case (DEC-020).
+ */
+async function importRest(batch: ImportBatch): Promise<void> {
+	try {
+		for (let next = batch.rest.shift(); next; next = batch.rest.shift()) {
+			const parsed = next;
+			const existing = await store.getCase(parsed.case.id);
+			if (existing !== undefined) {
+				update((s) => (s.importing = { parsed, existing, batch }));
+				return;
+			}
+			await storeOne(parsed, false);
+			batch.stored++;
+		}
+		update((s) => (s.importDone = batchText(batch)));
+	} catch (error) {
+		update(
+			(s) =>
+				(s.importError = `Could not import every case of ${batch.name}: ${message(error)} ${batchText(batch)}`),
+		);
+	} finally {
+		void refreshCases();
+	}
+}
+
+/** The visible note while Chrome's prompt for downloads is open. */
+function asking(of: Exported["of"], allowed: Promise<boolean>): void {
+	if (state.downloads) return;
+	update((s) => (s.askingDownloads = of));
+	void allowed.then(() =>
+		update((s) => {
+			if (s.askingDownloads === of) s.askingDownloads = undefined;
+		}),
+	);
+}
+
+/** Save an export, and show where it went when Chrome tells. */
+async function saveExport(
+	of: Exported["of"],
+	bytes: Uint8Array,
+	name: string,
+	allowed: Promise<boolean>,
+): Promise<void> {
+	const saved: SavedFile | undefined = await saveFile(bytes, name, allowed);
+	if (saved !== undefined) update((s) => (s.exported = { of, ...saved }));
+}
+
+async function refreshDownloads(): Promise<void> {
+	const work = downloadsWork.start();
+	const granted = await chrome.permissions.contains(DOWNLOADS);
+	if (work.current()) update((s) => (s.downloads = granted));
 }
 
 const actions: Actions = {
@@ -717,24 +818,36 @@ const actions: Actions = {
 	addMarks: (c) => void startAnnotating(c),
 
 	exportCase(c) {
+		// Chrome asks only during a click: nothing may be awaited before this.
+		const allowed = askForDownloads();
+		const of = { caseId: c.id };
+		asking(of, allowed);
 		const hint = caseHintWriter();
+		update((s) => (s.exported = undefined));
 		void (async () => {
 			try {
 				const zip = await exportCase(store, c);
-				const url = URL.createObjectURL(
-					new Blob([zip as Uint8Array<ArrayBuffer>], {
-						type: "application/zip",
-					}),
-				);
-				const link = h("a", { href: url, download: exportFileName(c) });
-				document.body.append(link);
-				link.click();
-				link.remove();
-				setTimeout(() => URL.revokeObjectURL(url), 30_000);
+				await saveExport(of, zip, exportFileName(c), allowed);
 			} catch (error) {
 				hint(`Could not export: ${message(error)}`);
 			}
 		})();
+	},
+
+	copyPath: (path) =>
+		navigator.clipboard.writeText(path).then(
+			() => true,
+			() => false,
+		),
+
+	showFile(e) {
+		try {
+			chrome.downloads.show(e.downloadId);
+		} catch (error) {
+			const text = `Could not show the file: ${message(error)}`;
+			if (e.of === "all") update((s) => (s.importError = text));
+			else caseHintWriter()(text);
+		}
 	},
 
 	deleteCase(c) {
@@ -941,15 +1054,24 @@ const actions: Actions = {
 			// It changed under the prompt: ask again, with the new date.
 			if (now !== undefined && now.updatedAt !== importing.existing.updatedAt)
 				update((s) => (s.importing = { ...importing, existing: now }));
-			else await finishImport(importing.parsed, false);
+			else await finishImport(importing.parsed, false, importing.batch);
 		})().catch((error: unknown) =>
 			update((s) => (s.importError = `Could not import: ${message(error)}`)),
 		);
 	},
 	importCopy() {
-		if (state.importing) void finishImport(state.importing.parsed, true);
+		const importing = state.importing;
+		if (importing) void finishImport(importing.parsed, true, importing.batch);
 	},
-	importCancel: () => update((s) => (s.importing = undefined)),
+	importCancel() {
+		const batch = state.importing?.batch;
+		update((s) => (s.importing = undefined));
+		// In a file of several: this one stays as it is, the next one follows.
+		if (batch !== undefined) {
+			batch.skipped++;
+			void importRest(batch);
+		}
+	},
 };
 
 // --- settings and import -------------------------------------------------------------
@@ -978,10 +1100,12 @@ allSites.addEventListener("change", () => {
 });
 chrome.permissions.onAdded.addListener(() => {
 	void refreshAllSites();
+	void refreshDownloads();
 	void refreshTab();
 });
 chrome.permissions.onRemoved.addListener(() => {
 	void refreshAllSites();
+	void refreshDownloads();
 	void refreshTab();
 });
 
@@ -989,16 +1113,56 @@ byId<HTMLButtonElement>("annotate").addEventListener("click", () =>
 	actions.toggleAnnotate(),
 );
 
+exportAllButton.addEventListener("click", () => {
+	// Chrome asks only during a click: nothing may be awaited before this.
+	const allowed = askForDownloads();
+	asking("all", allowed);
+	update((s) => {
+		s.exported = undefined;
+		s.importError = undefined;
+		s.importDone = undefined;
+		s.exportingAll = true;
+	});
+	void (async () => {
+		try {
+			const zip = await exportAllCases(store, await store.listCases());
+			await saveExport("all", zip, exportAllFileName(), allowed);
+		} catch (error) {
+			update(
+				(s) =>
+					(s.importError = `Could not export all cases: ${message(error)}`),
+			);
+		} finally {
+			update((s) => (s.exportingAll = false));
+		}
+	})();
+});
+
 importButton.addEventListener("click", () => importFile.click());
 importFile.addEventListener("change", async () => {
 	const file = importFile.files?.[0];
 	importFile.value = "";
 	if (file === undefined) return;
-	update((s) => (s.importError = undefined));
+	update((s) => {
+		s.importError = undefined;
+		s.importDone = undefined;
+		s.importing = undefined;
+	});
 	try {
-		if (file.size > MAX_IMPORT_BYTES)
-			throw new Error(`it is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB`);
-		const parsed = await readExport(new Uint8Array(await file.arrayBuffer()));
+		if (file.size > MAX_IMPORT_ALL_BYTES)
+			throw new Error(
+				`it is larger than ${MAX_IMPORT_ALL_BYTES / 1024 / 1024} MB`,
+			);
+		const cases = await readExports(new Uint8Array(await file.arrayBuffer()));
+		const [parsed] = cases;
+		if (cases.length > 1 || parsed === undefined)
+			return await importRest({
+				name: file.name,
+				rest: cases,
+				total: cases.length,
+				stored: 0,
+				skipped: 0,
+			});
 		const existing = await store.getCase(parsed.case.id);
 		// Ask only when it would replace a case that is here already.
 		if (existing === undefined) await finishImport(parsed, false);
@@ -1171,3 +1335,4 @@ chrome.tabs.onRemoved.addListener((id) => {
 
 void refreshTab();
 void refreshAllSites();
+void refreshDownloads();

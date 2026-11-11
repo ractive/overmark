@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { Annotation, Case, Finding } from "../src/lib/case.ts";
 import {
+	caseFolders,
+	exportAllCases,
+	exportAllFileName,
 	exportCase,
 	exportFileName,
 	readExport,
+	readExports,
 	storeImport,
 	webpSize,
 } from "../src/lib/export.ts";
@@ -426,5 +430,132 @@ describe("second review", () => {
 		const zip = await writeZip([{ name: "case.json", data: huge }]);
 		expect(zip.length).toBeLessThan(1024 * 1024);
 		await expect(readExport(zip)).rejects.toThrow("more than");
+	});
+});
+
+describe("all cases in one file", () => {
+	/** The sample case, and a second one of the same title with an image of its own. */
+	async function two(): Promise<{ store: MemoryStore; cases: Case[] }> {
+		const { store, c } = await stored();
+		const other: Case = {
+			...c,
+			id: "c_def",
+			title: "Prämien-Button: Kontrast!",
+			annotations: [annotation(1)],
+			verdict: null,
+		};
+		await putCase(store, other);
+		for (const path of ["shots/s1.webp", "crops/a1.webp"])
+			await store.putImage(other.id, path, {
+				blob: webp(`other ${path}`),
+				width: 10,
+				height: 10,
+			});
+		return { store, cases: [c, other] };
+	}
+
+	const text = (s: string) => new TextEncoder().encode(s);
+	const zipOf = (files: Map<string, Uint8Array>) =>
+		writeZip([...files].map(([name, data]) => ({ name, data })));
+
+	test("file name and folders", () => {
+		expect(exportAllFileName(new Date(2026, 10, 2))).toBe(
+			"overmark-cases-2026-11-02.overmark.zip",
+		);
+		const named = (title: string) => ({ ...sampleCase(), title });
+		expect(
+			caseFolders([named("A b"), named("a B"), named("!!"), named("a-b")]),
+		).toEqual(["a-b", "a-b-2", "case", "a-b-3"]);
+	});
+
+	test("a folder per case, each laid out as a single export", async () => {
+		const { store, cases } = await two();
+		const files = await readZip(await exportAllCases(store, cases));
+		expect([...files.keys()].sort()).toEqual([
+			"pramien-button-kontrast-2/case.json",
+			"pramien-button-kontrast-2/case.md",
+			"pramien-button-kontrast-2/crops/a1.webp",
+			"pramien-button-kontrast-2/shots/s1.webp",
+			"pramien-button-kontrast/case.json",
+			"pramien-button-kontrast/case.md",
+			"pramien-button-kontrast/crops/a1.webp",
+			"pramien-button-kontrast/crops/a2.webp",
+			"pramien-button-kontrast/shots/s1.webp",
+		]);
+		const single = await readZip(await exportCase(store, cases[0] as Case));
+		for (const [name, data] of single)
+			expect(files.get(`pramien-button-kontrast/${name}`)).toEqual(data);
+	});
+
+	test("round trip: every case and its images into another store", async () => {
+		const { store, cases } = await two();
+		const parsed = await readExports(await exportAllCases(store, cases));
+		expect(parsed.map((p) => p.case)).toEqual(cases);
+		const target = new MemoryStore();
+		for (const p of parsed) await storeImport(target, p);
+		expect((await target.listCases()).map((c) => c.id).sort()).toEqual([
+			"c_abc",
+			"c_def",
+		]);
+		for (const c of cases)
+			for (const path of ["shots/s1.webp", "crops/a1.webp"]) {
+				const want = await (await store.getImage(c.id, path))?.blob.text();
+				const got = await (await target.getImage(c.id, path))?.blob.text();
+				expect(got).toBe(want as string);
+			}
+		expect(await target.getImage("c_def", "crops/a2.webp")).toBeUndefined();
+	});
+
+	test("a file of one case reads as that case", async () => {
+		const { store, c } = await stored();
+		const parsed = await readExports(await exportCase(store, c));
+		expect(parsed).toHaveLength(1);
+		expect(parsed[0]?.case).toEqual(c);
+		expect(parsed[0]?.images.size).toBe(3);
+	});
+
+	test("refuses a file that is no export, naming what is wrong", async () => {
+		await expect(readExports(text("not a zip"))).rejects.toThrow(
+			"not a zip archive",
+		);
+		await expect(
+			readExports(
+				await writeZip([{ name: "a/b/case.json", data: text("{}") }]),
+			),
+		).rejects.toThrow("This is not an Overmark export: case.json is missing.");
+		await expect(readExports(await writeZip([]))).rejects.toThrow(
+			"case.json is missing",
+		);
+
+		const { store, cases } = await two();
+		const files = await readZip(await exportAllCases(store, cases));
+		const broken = new Map(files);
+		broken.delete("pramien-button-kontrast-2/crops/a1.webp");
+		await expect(readExports(await zipOf(broken))).rejects.toThrow(
+			"In pramien-button-kontrast-2/: The export lacks crops/a1.webp.",
+		);
+		const json = new Map(files);
+		json.set("pramien-button-kontrast/case.json", text("{"));
+		await expect(readExports(await zipOf(json))).rejects.toThrow(
+			"In pramien-button-kontrast/: case.json is not valid JSON.",
+		);
+	});
+
+	test("refuses a file that holds a case twice", async () => {
+		const { store, cases } = await two();
+		const c = cases[0] as Case;
+		const files = await readZip(await exportCase(store, c));
+		const twice = new Map<string, Uint8Array>();
+		for (const folder of ["one", "two"])
+			for (const [name, data] of files) twice.set(`${folder}/${name}`, data);
+		await expect(readExports(await zipOf(twice))).rejects.toThrow(
+			`The file holds the case ${c.id} twice (in two/).`,
+		);
+	});
+
+	test("nothing to export is said so", async () => {
+		await expect(exportAllCases(new MemoryStore(), [])).rejects.toThrow(
+			"There are no cases to export.",
+		);
 	});
 });

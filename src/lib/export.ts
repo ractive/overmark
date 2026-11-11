@@ -1,5 +1,6 @@
 /**
- * A case as a zip (`case.json`, `case.md`, `shots/`, `crops/`) and back.
+ * A case as a zip (`case.json`, `case.md`, `shots/`, `crops/`) and back; and
+ * all cases as one zip, a folder per case in that layout (DEC-020).
  */
 
 import {
@@ -17,8 +18,8 @@ import { readZip, writeZip, type ZipEntry } from "./zip.ts";
 
 export const EXPORT_SUFFIX = ".overmark.zip";
 
-/** `login-button-contrast.overmark.zip` */
-export function exportFileName(c: Case): string {
+/** `login-button-contrast`: a case's title as a file or folder name. */
+function slugOf(c: Case): string {
 	const slug = c.title
 		.normalize("NFKD")
 		.replace(/[̀-ͯ]/g, "")
@@ -27,29 +28,90 @@ export function exportFileName(c: Case): string {
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 60)
 		.replace(/-+$/, "");
-	return `${slug || "case"}${EXPORT_SUFFIX}`;
+	return slug || "case";
+}
+
+/** `login-button-contrast.overmark.zip` */
+export function exportFileName(c: Case): string {
+	return `${slugOf(c)}${EXPORT_SUFFIX}`;
+}
+
+/** `overmark-cases-2026-11-12.overmark.zip`, by the local date. */
+export function exportAllFileName(now = new Date()): string {
+	const two = (n: number) => String(n).padStart(2, "0");
+	return `overmark-cases-${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}${EXPORT_SUFFIX}`;
+}
+
+/** A case's files, each name after `folder` (`""`: at the top). */
+async function caseEntries(
+	store: CaseStore,
+	c: Case,
+	folder: string,
+): Promise<ZipEntry[]> {
+	const encoder = new TextEncoder();
+	const entries: ZipEntry[] = [
+		{
+			name: `${folder}case.json`,
+			data: encoder.encode(`${JSON.stringify(c, null, "\t")}\n`),
+		},
+		{ name: `${folder}case.md`, data: encoder.encode(caseMarkdown(c)) },
+	];
+	for (const path of caseImages(c)) {
+		const image = await store.getImage(c.id, path);
+		if (image === undefined)
+			throw new CaseError(`the image ${path} of “${c.title}” is missing`);
+		entries.push({
+			name: `${folder}${path}`,
+			data: new Uint8Array(await image.blob.arrayBuffer()),
+		});
+	}
+	return entries;
 }
 
 export async function exportCase(
 	store: CaseStore,
 	c: Case,
 ): Promise<Uint8Array> {
-	const encoder = new TextEncoder();
-	const entries: ZipEntry[] = [
-		{
-			name: "case.json",
-			data: encoder.encode(`${JSON.stringify(c, null, "\t")}\n`),
-		},
-		{ name: "case.md", data: encoder.encode(caseMarkdown(c)) },
-	];
-	for (const path of caseImages(c)) {
-		const image = await store.getImage(c.id, path);
-		if (image === undefined)
-			throw new CaseError(`the image ${path} is missing`);
-		entries.push({
-			name: path,
-			data: new Uint8Array(await image.blob.arrayBuffer()),
-		});
+	return writeZip(await caseEntries(store, c, ""));
+}
+
+/**
+ * The folder of each case in a file of all cases, in their order: its title
+ * as a file name, with `-2`, `-3` for a title that comes again.
+ */
+export function caseFolders(cases: readonly Case[]): string[] {
+	const used = new Set<string>();
+	return cases.map((c) => {
+		const slug = slugOf(c);
+		let name = slug;
+		for (let n = 2; used.has(name); n++) name = `${slug}-${n}`;
+		used.add(name);
+		return name;
+	});
+}
+
+/** The largest file of all cases the side panel reads (and writes). */
+export const MAX_IMPORT_ALL_BYTES = 512 * 1024 * 1024;
+
+/** Every case in one zip: a folder per case, each as `exportCase` lays it out. */
+export async function exportAllCases(
+	store: CaseStore,
+	cases: readonly Case[],
+): Promise<Uint8Array> {
+	if (cases.length === 0) throw new CaseError("There are no cases to export.");
+	const folders = caseFolders(cases);
+	const entries: ZipEntry[] = [];
+	let bytes = 0;
+	for (const [i, c] of cases.entries()) {
+		for (const entry of await caseEntries(store, c, `${folders[i]}/`)) {
+			bytes += entry.data.length;
+			entries.push(entry);
+		}
+		// A file the panel would refuse to import again is no use.
+		if (bytes > MAX_IMPORT_ALL_BYTES)
+			throw new CaseError(
+				`All cases together are larger than ${MAX_IMPORT_ALL_BYTES / 1024 / 1024} MB. Export them one at a time.`,
+			);
 	}
 	return writeZip(entries);
 }
@@ -107,20 +169,26 @@ export interface ParsedExport {
 	images: Map<string, StoredImage>;
 }
 
-/** Read and check an exported case without touching the store. */
-export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
-	if (zip.length > MAX_IMPORT_BYTES)
-		throw new CaseError(
-			`The file is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB.`,
-		);
-	const limits = { maxEntries: 2500, maxTotalBytes: MAX_IMPORT_BYTES };
+/** Entries in any one file of all cases: the zip format's own limit. */
+const MAX_ALL_ENTRIES = 0xffff;
+
+/**
+ * Read and check the case in `folder` (`""`: at the top) of a zip already
+ * checked for its size.
+ */
+async function readCaseIn(
+	zip: Uint8Array,
+	folder: string,
+	maxEntries: number,
+): Promise<ParsedExport> {
+	const limits = { maxEntries, maxTotalBytes: MAX_IMPORT_BYTES };
 	const json = (
 		await readZip(zip, {
 			...limits,
 			maxTotalBytes: MAX_CASE_JSON_BYTES,
-			include: (n) => n === "case.json",
+			include: (n) => n === `${folder}case.json`,
 		})
-	).get("case.json");
+	).get(`${folder}case.json`);
 	if (json === undefined)
 		throw new CaseError(
 			"This is not an Overmark export: case.json is missing.",
@@ -135,11 +203,11 @@ export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
 	const wanted = caseImages(c);
 	const files = await readZip(zip, {
 		...limits,
-		include: (n) => wanted.has(n),
+		include: (n) => n.startsWith(folder) && wanted.has(n.slice(folder.length)),
 	});
 	const images = new Map<string, StoredImage>();
 	for (const path of wanted) {
-		const data = files.get(path);
+		const data = files.get(`${folder}${path}`);
 		if (data === undefined) throw new CaseError(`The export lacks ${path}.`);
 		const size = webpSize(data);
 		if (size === undefined) throw new CaseError(`${path} is not a WebP image.`);
@@ -158,6 +226,62 @@ export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
 		images.set(path, { blob, ...size });
 	}
 	return { case: c, images };
+}
+
+/** Read and check an exported case without touching the store. */
+export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
+	if (zip.length > MAX_IMPORT_BYTES)
+		throw new CaseError(
+			`The file is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB.`,
+		);
+	return readCaseIn(zip, "", 2500);
+}
+
+/**
+ * Read and check a file with one case (`exportCase`) or all of them
+ * (`exportAllCases`): one case for a `case.json` at the top, else one for
+ * each `<folder>/case.json`. One bad case refuses the whole file.
+ */
+export async function readExports(zip: Uint8Array): Promise<ParsedExport[]> {
+	if (zip.length > MAX_IMPORT_ALL_BYTES)
+		throw new CaseError(
+			`The file is larger than ${MAX_IMPORT_ALL_BYTES / 1024 / 1024} MB.`,
+		);
+	// Only the names: nothing is unpacked.
+	const names: string[] = [];
+	await readZip(zip, {
+		maxEntries: MAX_ALL_ENTRIES,
+		include: (n) => {
+			names.push(n);
+			return false;
+		},
+	});
+	if (names.includes("case.json")) return [await readExport(zip)];
+	const folders = names.flatMap(
+		(n) => /^([^/]+\/)case\.json$/.exec(n)?.[1] ?? [],
+	);
+	if (folders.length === 0)
+		throw new CaseError(
+			"This is not an Overmark export: case.json is missing.",
+		);
+	const cases: ParsedExport[] = [];
+	const ids = new Set<string>();
+	for (const folder of folders) {
+		let parsed: ParsedExport;
+		try {
+			parsed = await readCaseIn(zip, folder, MAX_ALL_ENTRIES);
+		} catch (error) {
+			const why = error instanceof Error ? error.message : String(error);
+			throw new CaseError(`In ${folder}: ${why}`);
+		}
+		if (ids.has(parsed.case.id))
+			throw new CaseError(
+				`The file holds the case ${parsed.case.id} twice (in ${folder}).`,
+			);
+		ids.add(parsed.case.id);
+		cases.push(parsed);
+	}
+	return cases;
 }
 
 /**
