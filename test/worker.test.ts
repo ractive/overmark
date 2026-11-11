@@ -27,6 +27,7 @@ import {
 	parseCommand,
 } from "../src/worker/protocol.ts";
 import {
+	NOTIFICATION_BUTTONS,
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
 	Questions,
@@ -49,9 +50,12 @@ const COMMANDS: PanelCommand[] = [
 	{ type: "blur-forms", on: false },
 	{ type: "pair", on: true },
 	{ type: "revoke", grantId: "g" },
+	{ type: "allow-all", grantId: "g", on: true },
+	{ type: "ask-again", grantId: "g", tool: "delete_case" },
 	{ type: "new-address" },
 	{ type: "set-relay", relay: "https://relay.example" },
 	{ type: "answer", id: "q", answer: "allow" },
+	{ type: "answer", id: "q", answer: "always" },
 	{
 		type: "migrate",
 		relay: "https://relay.example",
@@ -118,7 +122,11 @@ describe("who may send what", () => {
 			{ type: "pair" },
 			{ type: "revoke", grantId: 1 },
 			{ type: "set-relay" },
-			{ type: "answer", id: "q", answer: "always" },
+			{ type: "answer", id: "q", answer: "never" },
+			{ type: "allow-all", grantId: "g" },
+			{ type: "allow-all", grantId: 1, on: true },
+			{ type: "ask-again", grantId: "g" },
+			{ type: "ask-again", tool: "delete_case" },
 			{ type: "answer", id: 1, answer: "allow" },
 			{ type: "migrate" },
 			{ type: "migrate", secrets: {}, keepOn: "true" },
@@ -170,12 +178,14 @@ function fakeHost(options: { panel?: boolean } = {}) {
 function request(
 	args: Record<string, unknown> = { caseId: "c_1" },
 	signal = new AbortController().signal,
+	tool = "delete_case",
+	grantId = "g1",
 ): ConfirmRequest {
 	return {
-		tool: { name: "delete_case", title: "Delete case", description: "" },
+		tool: { name: tool, title: "Delete case", description: "" },
 		arguments: args,
 		client: {
-			grantId: "g1",
+			grantId,
 			id: "https://claude.ai/oauth",
 			name: "Claude",
 			host: "claude.ai",
@@ -208,13 +218,42 @@ describe("questions", () => {
 		expect(text).toEqual({
 			title: "Allow Delete case?",
 			message: `Claude (claude.ai) wants to run delete_case: ${CASE[0]}`,
-			contextMessage: "Overmark",
+			contextMessage: "Overmark · close it to not allow",
 		});
 		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton(id, 1);
+		questions.notificationButton(id, 0);
 		expect(await answer).toBe("allow");
 		expect(questions.list).toEqual([]);
 		expect(host.shown.size).toBe(0);
+	});
+
+	test("questions an Always allow given meanwhile covers are allowed; others still wait", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		const signal = new AbortController().signal;
+		const same = questions.ask(request(undefined, signal), CASE, 7);
+		const otherTool = questions.ask(
+			request(undefined, signal, "set_verdict"),
+			CASE,
+			7,
+		);
+		const otherApp = questions.ask(
+			request(undefined, signal, "delete_case", "g2"),
+			CASE,
+			7,
+		);
+		await settle();
+		questions.allowCovered(
+			(grantId, tool) => grantId === "g1" && tool === "delete_case",
+		);
+		expect(await same).toBe("allow");
+		expect(questions.list.map((q) => q.tool)).toEqual([
+			"set_verdict",
+			"delete_case",
+		]);
+		for (const q of questions.list) questions.answer(q.id, "deny");
+		expect(await otherTool).toBe("deny");
+		expect(await otherApp).toBe("deny");
 	});
 
 	test("without lines, the notification shows the arguments in short", async () => {
@@ -227,21 +266,28 @@ describe("questions", () => {
 		);
 	});
 
-	test("Don't allow and a click on the body are Don't allow", async () => {
+	test("the buttons are Allow and Always allow; closing it or a click on the body is Don't allow", async () => {
+		expect([...NOTIFICATION_BUTTONS]).toEqual(["Allow", "Always allow"]);
 		const host = fakeHost();
 		const questions = new Questions(host);
-		for (const act of [
-			(id: string) => questions.notificationButton(id, 0),
-			(id: string) => questions.notificationDismissed(id),
-		]) {
-			const answer = questions.ask(request(), CASE, 7);
-			await settle();
-			act([...host.shown.keys()].at(-1) as string);
-			expect(await answer).toBe("deny");
-		}
+		const always = questions.ask(request(), CASE, 7);
+		await settle();
+		host.advance(NOTIFICATION_GUARD_MS);
+		questions.notificationButton([...host.shown.keys()].at(-1) as string, 1);
+		expect(await always).toBe("always");
+		const answer = questions.ask(request(), CASE, 7);
+		await settle();
+		host.advance(NOTIFICATION_GUARD_MS);
+		// A button there is not answers nothing.
+		const id = [...host.shown.keys()].at(-1) as string;
+		questions.notificationButton(id, 2);
+		await settle();
+		expect(questions.list).toHaveLength(1);
+		questions.notificationDismissed(id);
+		expect(await answer).toBe("deny");
 	});
 
-	test("an Allow within the guard does not count: the notification shows again", async () => {
+	test("an Allow or Always allow within the guard does not count: the notification shows again", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
 		let settled = false;
@@ -250,21 +296,25 @@ describe("questions", () => {
 			settled = true;
 		});
 		await settle();
-		const first = [...host.shown.keys()][0] as string;
+		let shown = [...host.shown.keys()][0] as string;
+		const first = shown;
 		host.advance(NOTIFICATION_GUARD_MS - 1);
-		questions.notificationButton(first, 1);
-		await settle();
-		expect(settled).toBe(false);
-		const second = [...host.shown.keys()][0] as string;
-		expect(second).not.toBe(first);
-		expect(host.cleared).toContain(first);
+		for (const index of [1, 0]) {
+			questions.notificationButton(shown, index);
+			await settle();
+			expect(settled).toBe(false);
+			const again = [...host.shown.keys()][0] as string;
+			expect(again).not.toBe(shown);
+			expect(host.cleared).toContain(shown);
+			shown = again;
+		}
 		// The old one closing (as it was cleared) answers nothing.
 		questions.notificationDismissed(first);
 		await settle();
 		expect(settled).toBe(false);
 		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton(second, 1);
-		expect(await answer).toBe("allow");
+		questions.notificationButton(shown, 1);
+		expect(await answer).toBe("always");
 	});
 
 	test("a click answers only its own call; one on a settled call is dropped", async () => {
@@ -275,15 +325,15 @@ describe("questions", () => {
 		await settle();
 		const [idA, idB] = [...host.shown.keys()] as [string, string];
 		host.advance(NOTIFICATION_GUARD_MS);
-		questions.notificationButton(idB, 0);
+		questions.notificationDismissed(idB);
 		expect(await b).toBe("deny");
 		// A late Allow on b's notification does not go to a.
-		questions.notificationButton(idB, 1);
+		questions.notificationButton(idB, 0);
 		await settle();
 		expect(questions.list.map((q) => q.args)).toEqual([
 			'{\n  "caseId": "c_a"\n}',
 		]);
-		questions.notificationButton(idA, 1);
+		questions.notificationButton(idA, 0);
 		expect(await a).toBe("allow");
 	});
 

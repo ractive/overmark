@@ -14,8 +14,11 @@ export const PANEL_PORT = "ai";
 /** The side panel's page in the build. */
 export const PANEL_PATH = "/sidepanel/index.html";
 
-/** The answer to a question: no "Always allow" (DEC-008). */
-export type Answer = "allow" | "deny";
+/**
+ * The answer to a question. "always": allow, and from now on this tool runs
+ * without asking for this AI app, until it is disconnected (DEC-018).
+ */
+export type Answer = "allow" | "deny" | "always";
 
 /** From the side panel. */
 export type PanelCommand =
@@ -36,6 +39,10 @@ export type PanelCommand =
 	/** The card shows the address and code (`on`) or not: codes only while it does. */
 	| { type: "pair"; on: boolean }
 	| { type: "revoke"; grantId: string }
+	/** "Allow all changes" for an AI app, on or off (DEC-018). */
+	| { type: "allow-all"; grantId: string; on: boolean }
+	/** A tool always allowed for an AI app asks again. */
+	| { type: "ask-again"; grantId: string; tool: string }
 	| { type: "new-address" }
 	| { type: "set-relay"; relay: string }
 	| { type: "answer"; id: string; answer: Answer }
@@ -58,6 +65,10 @@ export interface GrantView {
 	name: string;
 	/** The host of its client id: the verified part. */
 	host: string;
+	/** "Allow all changes": every tool that changes something runs without asking. */
+	allowAll: boolean;
+	/** The tools that run without asking (Always allow), with their titles. */
+	always: { tool: string; title: string }[];
 }
 
 /** A question waiting for the user (a tool that changes something). */
@@ -174,13 +185,23 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 			return isString(m["grantId"])
 				? { type: "revoke", grantId: m["grantId"] }
 				: undefined;
+		case "allow-all":
+			return isString(m["grantId"]) && isBoolean(m["on"])
+				? { type: "allow-all", grantId: m["grantId"], on: m["on"] }
+				: undefined;
+		case "ask-again":
+			return isString(m["grantId"]) && isString(m["tool"])
+				? { type: "ask-again", grantId: m["grantId"], tool: m["tool"] }
+				: undefined;
 		case "set-relay":
 			return isString(m["relay"])
 				? { type: "set-relay", relay: m["relay"] }
 				: undefined;
 		case "answer":
 			return isString(m["id"]) &&
-				(m["answer"] === "allow" || m["answer"] === "deny")
+				(m["answer"] === "allow" ||
+					m["answer"] === "deny" ||
+					m["answer"] === "always")
 				? { type: "answer", id: m["id"], answer: m["answer"] }
 				: undefined;
 		case "migrate": {

@@ -153,7 +153,7 @@ export async function newNotification(
 }
 
 /**
- * A click on a notification's button (0 Don't allow, 1 Allow): the worker's
+ * A click on a notification's button (0 Allow, 1 Always allow): the worker's
  * own handler, which the DevTools Protocol can call; it cannot click one.
  */
 export async function clickNotification(
@@ -165,10 +165,22 @@ export async function clickNotification(
 	await w.eval(`overmarkNotificationButton(${JSON.stringify(id)}, ${index})`);
 }
 
-/** Answer the panel's oldest question, once its Allow counts. */
+/**
+ * Closing a notification, or a click on its body: Don't allow. The worker's
+ * own handler, as for `clickNotification`.
+ */
+export async function dismissNotification(
+	h: Harness,
+	id: string,
+): Promise<void> {
+	const w = await worker(h);
+	await w.eval(`overmarkNotificationDismissed(${JSON.stringify(id)})`);
+}
+
+/** Answer the panel's oldest question, once its Allow (or Always allow) counts. */
 export async function answerInPanel(
 	panel: Page,
-	answer: "allow" | "deny",
+	answer: "allow" | "deny" | "always",
 ): Promise<void> {
 	await panel.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 	const button = `document.querySelector('[data-question] button[data-answer="${answer}"]')`;

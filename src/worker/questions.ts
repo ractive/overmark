@@ -1,10 +1,13 @@
 /**
- * The questions of tools that change something (DEC-008: every call asks),
- * now that the connection has no page of its own to ask in (DEC-015). A
+ * The questions of tools that change something (DEC-008; DEC-018: unless
+ * the user chose Always allow for the tool, or Allow all changes, for that
+ * AI app), now that the connection has no page of its own to ask in
+ * (DEC-015). A
  * question shows in every open side panel; unless a side panel is open, on
  * screen, in the focused window of the tab in front, it also goes out as a Chrome
- * notification. The first answer counts; nobody answering within the time
- * limit, or the AI app cancelling, is Don't allow. Each notification carries
+ * notification, with Allow and Always allow. The first answer counts;
+ * closing the notification or a click on its body, nobody answering within
+ * the time limit, or the AI app cancelling, is Don't allow. Each notification carries
  * its call: a click answers only that call, and a click on a call that is
  * already settled is dropped.
  */
@@ -14,7 +17,7 @@ import type { Answer, QuestionView } from "./protocol.ts";
 
 /** A question nobody answers in this time is Don't allow. */
 export const QUESTION_TIMEOUT_MS = 60_000;
-/** An Allow this soon after a notification showed does not count. */
+/** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
 /** The arguments shown in the panel, and in a notification, are cut to this. */
 export const MAX_ARGS = 4000;
@@ -22,8 +25,11 @@ export const MAX_ARGS_NOTIFICATION = 150;
 /** A tool's title in a notification's title is cut to this. */
 export const MAX_NOTIFICATION_TITLE = 60;
 
-/** The buttons of a notification, in order: Don't allow first. */
-export const NOTIFICATION_BUTTONS = ["Don't allow", "Allow"] as const;
+/**
+ * The buttons of a notification, in order. Don't allow is closing it (or a
+ * click on its body): Chrome gives a notification at most two buttons.
+ */
+export const NOTIFICATION_BUTTONS = ["Allow", "Always allow"] as const;
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -80,12 +86,14 @@ export function notificationText(
 	return {
 		title: `Allow ${what}?`,
 		message: cut(`${view.app} wants to run ${view.tool}: ${about}`, 300),
-		contextMessage: "Overmark",
+		contextMessage: "Overmark · close it to not allow",
 	};
 }
 
 interface Pending {
 	view: QuestionView;
+	/** The AI app that asked. */
+	grantId: string;
 	summary: string;
 	windowId: number | undefined;
 	/** The notification showing it, if one does, and its creation. */
@@ -145,6 +153,7 @@ export class Questions {
 			const cancelled = () => pending.settle("deny");
 			const pending: Pending = {
 				view,
+				grantId: request.client.grantId,
 				summary,
 				windowId: undefined,
 				shownAt: 0,
@@ -205,6 +214,16 @@ export class Questions {
 	}
 
 	/** An answer from a side panel. */
+	/**
+	 * Allow every waiting question that `covered` now lets through (an
+	 * Always allow or Allow all changes given meanwhile for its AI app and
+	 * tool): it would otherwise still wait, and time out as a no.
+	 */
+	allowCovered(covered: (grantId: string, tool: string) => boolean): void {
+		for (const pending of [...this.#pending.values()])
+			if (covered(pending.grantId, pending.view.tool)) pending.settle("allow");
+	}
+
 	answer(id: string, answer: Answer): void {
 		this.#pending.get(id)?.settle(answer);
 	}
@@ -215,14 +234,13 @@ export class Questions {
 		return undefined;
 	}
 
-	/** A button of notification `id`: 0 Don't allow, 1 Allow. */
+	/** A button of notification `id`: 0 Allow, 1 Always allow. */
 	notificationButton(id: string, index: number): void {
 		const pending = this.#byNotification(id);
 		if (pending === undefined) return; // settled, or an older notification
-		if (index !== 1) {
-			pending.settle("deny");
-			return;
-		}
+		const answer: Answer | undefined =
+			index === 0 ? "allow" : index === 1 ? "always" : undefined;
+		if (answer === undefined) return;
 		if (this.#host.now() - pending.shownAt < NOTIFICATION_GUARD_MS) {
 			// Too soon to be read: show it again rather than take it.
 			const created = pending.created;
@@ -230,7 +248,7 @@ export class Questions {
 			this.#clear(id, created);
 			return;
 		}
-		pending.settle("allow");
+		pending.settle(answer);
 	}
 
 	/** A click on the notification's body, or its closing: Don't allow. */

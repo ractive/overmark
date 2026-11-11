@@ -17,3 +17,4 @@
 ## 2026-11-10
 
 - The owner saw Overmark's icon do nothing while Claude in Chrome's panel was open. The panel now opens with the tab, as in the tab-mcp extension (DEC-017); the store package's e2e test, which failed with it in CI, waits for the viewport to keep its size before it clicks
+- The owner brought "Always allow" back. DEC-018, iteration 11: per AI app and tool from a question (the panel's "Always allow", a notification's Allow and Always allow, closing it is Don't allow), and "Allow all changes" per app in the AI app card with "Ask again" for each tool; kept in the worker's settings database until the app is disconnected (Disconnect, New address, the relay no longer listing it). Replaces DEC-008's "every time"

@@ -1322,12 +1322,69 @@ ul.grants {
 	padding: 0;
 }
 
-ul.grants li {
+ul.grants > li {
+	padding: 4px 0;
+}
+
+ul.grants > li + li {
+	border-top: 1px solid var(--rule);
+}
+
+.grant-head,
+ul.always li {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
 	gap: 8px;
-	padding: 4px 0;
+}
+
+/* An app's "Allow all changes" and its tools always allowed (DEC-018). */
+.switch.small {
+	margin-top: 4px;
+	font-weight: normal;
+	color: var(--muted);
+}
+
+.switch.small input {
+	width: 28px;
+	height: 16px;
+}
+
+.switch.small input::after {
+	width: 12px;
+	height: 12px;
+}
+
+.switch.small input:checked {
+	background: var(--amber);
+}
+
+.switch.small input:checked::after {
+	transform: translateX(12px);
+}
+
+ul.grants > li > .meta {
+	margin: 2px 0 0;
+}
+
+ul.always {
+	list-style: none;
+	margin: 4px 0 0;
+	padding: 0;
+}
+
+ul.always .meta {
+	min-width: 0;
+}
+
+ul.always button.link {
+	color: var(--link);
+	font-size: 12px;
+}
+
+ul.always button.link:hover:not(:disabled) {
+	color: var(--link);
+	text-decoration: underline;
 }
 
 @media (prefers-reduced-motion: reduce) {

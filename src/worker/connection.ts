@@ -9,7 +9,8 @@
  * access on", else until the browser closes or the extension is updated,
  * reloaded or disabled (all of which clear `chrome.storage.session`). The
  * settings and the address secret are in the worker's own IndexedDB
- * (`kv.ts`, DEC-016), out of content scripts' reach.
+ * (`kv.ts`, DEC-016), out of content scripts' reach, as is what each AI app
+ * may do without asking (`always.ts`, DEC-018).
  */
 
 import {
@@ -22,6 +23,8 @@ import {
 import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
+import { AlwaysAllowed } from "./always.ts";
+import { decide } from "./decide.ts";
 import { KeepOn } from "./keep-on.ts";
 import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
@@ -31,7 +34,11 @@ import {
 	parseCommand,
 	type WorkerMessage,
 } from "./protocol.ts";
-import { Questions, type QuestionsHost } from "./questions.ts";
+import {
+	NOTIFICATION_BUTTONS,
+	Questions,
+	type QuestionsHost,
+} from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
@@ -127,6 +134,10 @@ export class Connection {
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
 	readonly #keep: KeepOn;
+	/** Always allow and Allow all changes, by AI app (DEC-018). */
+	readonly #always: AlwaysAllowed;
+	/** The tools' titles, by name, for the card's list. */
+	#titles = new Map<string, string>();
 	#settings: Settings;
 	/** AI access is on for this browser session (without "Keep AI access on"). */
 	#sessionOn: boolean;
@@ -149,9 +160,11 @@ export class Connection {
 		storage: CachedSecretStorage,
 		settings: Settings,
 		sessionOn: boolean,
+		always: AlwaysAllowed,
 	) {
 		this.#deps = deps;
 		this.#kv = kv;
+		this.#always = always;
 		this.#tab = workerTab(deps.capture);
 		this.#storage = storage;
 		this.#settings = settings;
@@ -193,10 +206,11 @@ export class Connection {
 		);
 		// A previous worker's questions died with it.
 		await clearNotifications();
-		const [storage, settings, session] = await Promise.all([
+		const [storage, settings, session, always] = await Promise.all([
 			CachedSecretStorage.load(kv),
 			loadSettings(kv),
 			chrome.storage.session.get(SESSION_ON),
+			AlwaysAllowed.load(kv),
 		]);
 		const connection = new Connection(
 			deps,
@@ -204,6 +218,7 @@ export class Connection {
 			storage,
 			settings,
 			session[SESSION_ON] === true,
+			always,
 		);
 		connection.#showBadge();
 		connection.keepUp();
@@ -216,7 +231,8 @@ export class Connection {
 
 	/** A connection to `relay`; throws a `TypeError` for an address the library refuses. */
 	#create(relay: string): TabMcp {
-		// No "Always allow" (DEC-008): every call that changes something asks.
+		// The library's own "Always allow" stays off: Overmark asks itself, and
+		// keeps Always allow per AI app and tool (DEC-018).
 		const mcp: TabMcp = new TabMcp({
 			relay,
 			server: {
@@ -228,7 +244,7 @@ export class Connection {
 			},
 			appName: "Overmark",
 			storage: this.#storage,
-			onConfirm: (request) => this.#decide(request),
+			onConfirm: (request) => this.#decide(mcp, request),
 		});
 		const tools = createTools({
 			store: this.#deps.store,
@@ -241,17 +257,51 @@ export class Connection {
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
 		});
 		for (const tool of tools) void mcp.registerTool(tool);
+		this.#titles = new Map(tools.map((t) => [t.name, t.title ?? t.name]));
 		return mcp;
 	}
 
-	/** A tool that changes something: asks, every time. */
-	async #decide(request: ConfirmRequest): Promise<boolean> {
-		const lines = await confirmLines(this.#deps.store, this.#tab, request);
-		const front = await tabInFront().catch(() => undefined);
-		// No answer in time is Don't allow; the library tells the AI app
-		// "The user declined" for that as for any no.
-		const answer = await this.#questions.ask(request, lines, front?.id);
-		return answer === "allow";
+	/**
+	 * A tool that changes something: runs without asking if the user chose
+	 * Always allow for it, or Allow all changes, for this AI app (DEC-018);
+	 * otherwise asks. The "Last AI call" is recorded either way ("toolcall").
+	 */
+	/** Questions an Always allow given meanwhile covers are allowed. */
+	#allowCovered(): void {
+		this.#questions.allowCovered((grantId, tool) =>
+			this.#always.has(grantId, tool),
+		);
+	}
+
+	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<boolean> {
+		return decide(
+			{
+				always: this.#always,
+				ask: async (r) => {
+					const lines = await confirmLines(this.#deps.store, this.#tab, r);
+					const front = await tabInFront().catch(() => undefined);
+					// No answer in time is Don't allow; the library tells the AI
+					// app "The user declined" for that as for any no.
+					return this.#questions.ask(r, lines, front?.id);
+				},
+				connected: (grantId) => mcp.grants.some((g) => g.grantId === grantId),
+				kept: () => this.#allowCovered(),
+				notKept: (error) => {
+					console.warn("Overmark: keeping Always allow", error);
+					this.#problem = `Always allow could not be saved: ${message(error)}`;
+				},
+			},
+			request,
+		).finally(() => this.#changed());
+	}
+
+	/** An app whose grant is gone takes its Always allow with it. */
+	#keepGrants(grants: readonly { grantId: string }[]): void {
+		this.#always.keepGrants(grants.map((g) => g.grantId)).then(
+			() => this.#changed(),
+			(error: unknown) =>
+				console.warn("Overmark: forgetting Always allow", error),
+		);
 	}
 
 	#watch(mcp: TabMcp): void {
@@ -266,6 +316,11 @@ export class Connection {
 			"grantschange",
 		] as const)
 			mcp.addEventListener(type, changed, { signal });
+		// The relay's list of the apps connected to this address: only it, so
+		// a start or a lost connection (no list yet) forgets nothing.
+		mcp.addEventListener("grantschange", () => this.#keepGrants(mcp.grants), {
+			signal,
+		});
 		mcp.addEventListener(
 			"toolcall",
 			(event) => {
@@ -514,6 +569,18 @@ export class Connection {
 			case "revoke":
 				this.#mcp.revoke(command.grantId);
 				return;
+			case "allow-all":
+				// Only for an app the card shows.
+				if (!this.#mcp.grants.some((g) => g.grantId === command.grantId))
+					return;
+				await this.#always.setAll(command.grantId, command.on);
+				if (command.on) this.#allowCovered();
+				this.#changed();
+				return;
+			case "ask-again":
+				await this.#always.removeTool(command.grantId, command.tool);
+				this.#changed();
+				return;
 			case "new-address":
 				await this.#newAddress();
 				return;
@@ -637,7 +704,7 @@ export class Connection {
 					type: "basic",
 					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
 					...text,
-					buttons: [{ title: "Don't allow" }, { title: "Allow" }],
+					buttons: NOTIFICATION_BUTTONS.map((title) => ({ title })),
 					requireInteraction: true,
 					priority: 2,
 				});
@@ -666,11 +733,19 @@ export class Connection {
 			retrying: this.#keep.retrying,
 			...(problem !== undefined ? { problem } : {}),
 			...(address !== undefined ? { address } : {}),
-			grants: mcp.grants.map((g) => ({
-				grantId: g.grantId,
-				name: g.client.name,
-				host: g.client.host,
-			})),
+			grants: mcp.grants.map((g) => {
+				const always = this.#always.entry(g.grantId);
+				return {
+					grantId: g.grantId,
+					name: g.client.name,
+					host: g.client.host,
+					allowAll: always.all,
+					always: always.tools.map((tool) => ({
+						tool,
+						title: this.#titles.get(tool) ?? tool,
+					})),
+				};
+			}),
 			pairing: [...this.#panels].some((p) => p.pairing),
 			...(code !== undefined ? { code } : {}),
 			...(replaced !== undefined

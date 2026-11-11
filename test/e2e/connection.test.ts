@@ -20,6 +20,7 @@ import {
 	clickNotification,
 	closeSidePanel,
 	connectAi,
+	dismissNotification,
 	mcpClient,
 	newNotification,
 	notifications,
@@ -104,7 +105,7 @@ describe.skipIf(browserBinary === undefined)(
 			const asked = call("set_verdict", { caseId: "c_1", verdict: "Panel" });
 			await panel.waitFor(`document.querySelector("[data-question]")`, 10_000);
 			expect(await badge()).toBe("?");
-			// It names the case, and offers no "Always allow" (DEC-008).
+			// It names the case, and offers Always allow (DEC-018).
 			const text = await panel.eval<string>(
 				`document.querySelector("[data-question]").textContent`,
 			);
@@ -113,7 +114,7 @@ describe.skipIf(browserBinary === undefined)(
 				await panel.eval<string[]>(
 					`[...document.querySelectorAll("[data-question] button")].map((b) => b.textContent)`,
 				),
-			).toEqual(["Don't allow", "Allow"]);
+			).toEqual(["Don't allow", "Allow", "Always allow"]);
 			await answerInPanel(panel, "allow");
 			expect((await asked).isError).toBeFalsy();
 			expect(await verdictOf(h, "c_1")).toBe("Panel");
@@ -129,7 +130,7 @@ describe.skipIf(browserBinary === undefined)(
 			const id = await newNotification(h);
 			// After the guard against an Allow that came too soon.
 			await Bun.sleep(600);
-			await clickNotification(h, id, 1);
+			await clickNotification(h, id, 0);
 			expect((await asked).isError).toBeFalsy();
 			expect(await verdictOf(h, "c_1")).toBe("Handed");
 			// Answered: the notification is gone.
@@ -180,21 +181,21 @@ describe.skipIf(browserBinary === undefined)(
 			await closeSidePanel(h, side);
 		});
 
-		test("with the side panel closed a question is a notification: Don't allow, Allow, late clicks", async () => {
+		test("with the side panel closed a question is a notification: closing it is Don't allow, Allow, late clicks", async () => {
 			const denied = call("set_verdict", { caseId: "c_1", verdict: "No" });
 			const first = await newNotification(h);
 			expect(await badge()).toBe("?");
-			await clickNotification(h, first, 0);
+			await dismissNotification(h, first);
 			expect((await denied).isError).toBe(true);
 			expect(await verdictOf(h, "c_1")).toBe("Handed");
 			// A click on a notification whose call is settled answers nothing.
 			const allowed = call("set_verdict", { caseId: "c_1", verdict: "Yes" });
 			const second = await newNotification(h, [first]);
 			await Bun.sleep(600);
-			await clickNotification(h, first, 1);
+			await clickNotification(h, first, 0);
 			await Bun.sleep(200);
 			expect(await notifications(h)).toEqual([second]);
-			await clickNotification(h, second, 1);
+			await clickNotification(h, second, 0);
 			expect((await allowed).isError).toBeFalsy();
 			expect(await verdictOf(h, "c_1")).toBe("Yes");
 		});
@@ -290,14 +291,14 @@ describe.skipIf(browserBinary === undefined)(
 			await cover(true);
 			const handed = await newNotification(h);
 			await Bun.sleep(600);
-			await clickNotification(h, handed, 1);
+			await clickNotification(h, handed, 0);
 			expect((await first).isError).toBeFalsy();
 			expect(await verdictOf(h, "c_1")).toBe("Covered");
 			// Asked while covered: a notification at once.
 			const second = call("set_verdict", { caseId: "c_1", verdict: "Hidden" });
 			const asked = await newNotification(h, [handed]);
 			await Bun.sleep(600);
-			await clickNotification(h, asked, 1);
+			await clickNotification(h, asked, 0);
 			expect((await second).isError).toBeFalsy();
 			// On screen again: the panel asks, no notification.
 			await cover(false);
