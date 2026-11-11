@@ -1020,8 +1020,8 @@ describe.skipIf(browserBinary === undefined)(
 				// A change asks in the side panel, names the case, and offers
 				// Always allow (DEC-018).
 				const verdict = client.callTool({
-					name: "set_verdict",
-					arguments: { caseId: listed?.caseId, verdict: "Darker" },
+					name: "set_summary",
+					arguments: { caseId: listed?.caseId, summary: "Darker" },
 				});
 				const question = `document.querySelector("[data-question]")`;
 				await panel.waitFor(question, 10_000);

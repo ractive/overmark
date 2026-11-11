@@ -24,7 +24,8 @@ a [tab-mcp](https://github.com/ractive/tab-mcp) relay.
 
 1. A PO, designer or PM sees an issue on `https://www.example.com/…`, clicks the
    Overmark icon, annotates the page and saves the case. They talk it through with
-   their AI app, which records a verdict in the case.
+   their AI app, which adds its findings to the marks and records the summary for the
+   developer in the case (DEC-019).
 2. A dev opens `http://localhost:3000/…` themselves, loads the case onto that tab
    (from the extension, or from an exported file), sees what was meant, and fixes it
    with their AI app.
@@ -63,7 +64,7 @@ is what a case is about, and finding the element again is a best-effort extra:
 |---|---|
 | Content script (`src/content/`) | Toolbar and drawing overlay in a shadow DOM, element picker, element details, a screenshot per mark as it is drawn, highlighting a loaded case |
 | Service worker (`src/background.ts`, `src/worker/`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases; `TabMcp` with the tools and their questions (DEC-015) |
-| Side panel (`src/sidepanel/`) | Case list, case viewer, verdict, export and import; a view of the AI connection (status, pairing, questions) |
+| Side panel (`src/sidepanel/`) | Case list, case viewer, summary for the developer, AI findings, export and import; a view of the AI connection (status, pairing, questions) |
 | Library (`src/lib/`) | Case format, element details, matching, zip, export, IndexedDB store, images |
 
 Storage is IndexedDB in the extension's origin (database `overmark`, stores `cases` and
@@ -121,7 +122,7 @@ plus its images:
 ```text
 <title>.overmark.zip
   case.json      the case
-  case.md        generated: comments, element details, verdict, image links
+  case.md        generated: summary, comments, AI findings, element details, image links
   shots/s1.webp  annotated screenshots
   crops/a1.webp  one crop per annotation
 ```
@@ -139,11 +140,17 @@ plus its images:
     "id": "a1", "number": 1, "shot": "s1", "comment": "…", "author": "user",
     "shape": { "kind": "box", "rect": { "x": 10, "y": 20, "width": 200, "height": 40 } },
     "crop": "crops/a1.webp",
-    "element": { "tag": "button", "role": "button", "name": "Anmelden", "…": "…" }
+    "element": { "tag": "button", "role": "button", "name": "Anmelden", "…": "…" },
+    "findings": [{ "id": "f_…", "text": "…", "at": "…",
+                   "app": { "id": "https://claude.ai/oauth", "name": "Claude", "host": "claude.ai" } }]
   }],
   "verdict": null
 }
 ```
+
+`verdict` holds the summary for the developer: the field kept its name from before
+DEC-019. `findings` is there only when a mark has some; a finding has `editedAt` once its
+app changed it, and `imported: true` once it came in from a file.
 
 Shape kinds: `element` (a picked element's box), `box`, `arrow` (`from`, `to`), `pen`
 (`points`), `note` (`at`). The element details carry a best-effort CSS selector as a
@@ -195,16 +202,19 @@ loading is searched for again.
 
 | Tool | What it does | Asks first |
 |---|---|---|
-| `list_cases` | Cases with title, page, number of annotations, verdict | no |
-| `get_case` | A case's annotations, element details and crops | no |
+| `list_cases` | Cases with title, page, number of annotations, the start of the summary for the developer | no |
+| `get_case` | A case's summary, annotations with their findings (`own` for the caller's), element details and crops | no |
 | `get_image` | One screenshot or crop, scaled to at most 1568 px | no |
 | `load_case` | Loads a case onto the tab in front and reports what was found | no |
 | `highlight` | Scrolls to and outlines one annotation's element (or another candidate) | no |
 | `get_mark_element` | Reads one annotation's element (or, by selector, an ancestor or an element inside it; for an annotation without an element, an element of the case's page) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
 | `capture` | A screenshot of the tab in front | no |
 | `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes |
-| `set_verdict` | Writes the case's verdict | yes |
+| `set_summary` | Writes the case's summary for the developer (stored as `verdict`, DEC-019) | yes |
 | `set_mark_status` | Resolves a mark (fixed, won't fix, can't reproduce) or opens it again | yes |
+| `add_finding` | Adds a finding of the calling AI app to a mark (DEC-019) | yes |
+| `edit_finding` | Changes the text of one of the calling app's own findings | yes |
+| `delete_finding` | Deletes one of the calling app's own findings | yes |
 | `delete_case` | Deletes a case | yes |
 
 Every call that changes something asks, every time (DEC-008): in the side panel of the

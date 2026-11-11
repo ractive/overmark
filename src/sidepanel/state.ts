@@ -73,9 +73,19 @@ export interface PanelState {
 	markEdit: MarkEdit | undefined;
 	/** A mark's Delete, clicked once: the second click deletes. */
 	markDeleteArmed: { annotationId: string; at: number } | undefined;
-	/** Next to "Save verdict": "Saved", or why not. */
+	/**
+	 * A finding's Delete, clicked once: the second click deletes. A finding's
+	 * id is unique on its mark only (a case from a file).
+	 */
+	findingDeleteArmed:
+		| { annotationId: string; findingId: string; at: number }
+		| undefined;
+	/**
+	 * Next to "Save summary": "Saved", or why not. The summary for the
+	 * developer is stored as `verdict` (DEC-019).
+	 */
 	verdictStatus: string | undefined;
-	/** Verdicts typed and not saved yet, by case. */
+	/** Summaries typed and not saved yet, by case. */
 	verdictDrafts: Map<string, string>;
 	/** Overmark may run on every site ("Allow on all sites"). */
 	allSites: boolean;
@@ -105,6 +115,7 @@ export const initialState = (): PanelState => ({
 	deleteArmedAt: undefined,
 	markEdit: undefined,
 	markDeleteArmed: undefined,
+	findingDeleteArmed: undefined,
 	verdictStatus: undefined,
 	verdictDrafts: new Map(),
 	allSites: false,

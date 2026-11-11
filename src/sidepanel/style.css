@@ -972,6 +972,44 @@ button.crop:hover img {
 	overflow-wrap: anywhere;
 }
 
+/* An AI app's findings: apart from the user's comment, with a rule beside them. */
+.findings {
+	display: grid;
+	gap: 4px;
+	padding-left: 8px;
+	border-left: 2px solid var(--rule);
+}
+
+.findings h3 {
+	margin: 0;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--muted);
+}
+
+.findings ul {
+	display: grid;
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.finding-text {
+	margin: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.finding-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 8px;
+	align-items: center;
+	justify-content: space-between;
+	overflow-wrap: anywhere;
+}
+
 .mark-actions {
 	display: flex;
 	flex-wrap: wrap;

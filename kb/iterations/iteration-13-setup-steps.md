@@ -1,12 +1,12 @@
 ---
 type: iteration
-title: "Iteration 12: setup steps per AI app in the pairing box"
+title: "Iteration 13: setup steps per AI app in the pairing box"
 status: completed
 description: "Client 0.12.1 and relay 0.9.0; the pairing box gets a collapsed \"How do I add it?\" with the client library's steps per AI app (Claude, ChatGPT, Claude Code, Codex), each command with its own Copy, the guide link last; the questions escape with the library's escapeInvisible."
 timestamp: 2026-11-11T12:00:00+01:00
 tags: [iteration, mcp, ui]
 ---
-# Iteration 12: setup steps per AI app in the pairing box
+# Iteration 13: setup steps per AI app in the pairing box
 
 tab-mcp client 0.12.0 offers the connect dialog's steps per AI app as data
 (`@ractive-ch/tab-mcp-client/setup`), and tab-mcp for Chrome shows them in its pairing

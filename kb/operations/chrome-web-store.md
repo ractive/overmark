@@ -126,7 +126,7 @@ of the same pages, alone or with an AI app the user connects.
 |---|---|
 | `activeTab` | Add the annotation toolbar to the tab where the user clicked the icon, read the marked elements' details, and take screenshots of that tab. |
 | `alarms` | While the user has the AI app connected, wake the background service worker once a minute, so the connection comes back after the computer slept. |
-| `notifications` | When the connected AI app wants to change something (add a mark, record a verdict, change a mark's status, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Don't allow. Nothing changes without that answer. |
+| `notifications` | When the connected AI app wants to change something (add a mark, record the summary for the developer, change a mark's status, add, change or delete one of its findings on a mark, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Don't allow. Nothing changes without that answer. |
 | `scripting` | Inject the toolbar and outlines into that tab. |
 | `sidePanel` | The side panel lists cases, loads them onto the tab, and shows the AI app's connection and its questions. |
 | `storage` | Session storage, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others, and whether AI access is on. (The AI connection's settings and the secret from which its address is derived are in the extension's own IndexedDB, used by its service worker only; local storage only to delete what an unreleased build kept there.) |
