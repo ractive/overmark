@@ -414,3 +414,60 @@ that on knowingly, for one app and one tool at a time, or for all of one app's c
   port, its commands checked in `protocol.ts` (DEC-015). A write that fails changes
   nothing: the call that was answered runs, the next one asks. The last AI call shows in
   the panel's header as before, also for calls that did not ask.
+
+## DEC-019: AI findings on marks, and the summary for the developer (owner)
+
+The owner, 2026-11-10: an AI app records what it finds out about a mark as findings of
+its own, apart from the user's comment; and the case's "Verdict" becomes the "Summary for
+the developer".
+
+- **Findings per mark.** A mark has a list of findings (`findings`, oldest first, absent
+  when there are none): each with its text (at most 5,000 characters), the AI app that
+  wrote it (`app`: its client id, its declared name and the verified host, as the relay
+  gave them for the call), when it was written (`at`) and last changed (`editedAt`). A
+  mark holds at most 20. The user's comment stays the user's: no tool changes it.
+- **A case holds at most 200,000 characters of findings.** All marks' finding texts
+  together: `add_finding` and `edit_finding` refuse a change past it ("The case holds
+  too much finding text … Shorten or delete findings of your own first"); a change
+  that shrinks the total passes, so a case from a file over the limit can still be
+  tidied. Why this value: get_case sends a case whole while it takes at most half of the
+  result budget (768 KiB of the relay's 1 MiB message, so 384 KiB); a case of 30 marks
+  with comments of a few lines and 200,000 characters of plain findings is about 250 KB,
+  well under it. Text that is not ASCII is larger in UTF-8; such a case goes compact,
+  where each finding shows its first 200 characters with `cut: true`, so a large case
+  stays readable.
+- **Characters are code points.** Every length limit of the case (findings, comments,
+  notes, the summary) counts characters as JSON Schema's `maxLength` does, an emoji
+  one: the tools' schemas, the case's validation and the cuts agree, and a cut never
+  splits a surrogate pair.
+- **Own is the client id.** An app may edit or delete only its own findings: those whose
+  `app.id` is the calling app's client id (its Client ID Metadata Document URL, such as
+  `https://claude.ai/oauth`). Not the grant: that changes when the app pairs again or
+  the address is renewed, and the app's findings stay its own. Not the name: any app can
+  declare any name. get_case says `own` for each finding. Another app's finding is
+  refused with a message that says whose it is. The user can delete any finding in the
+  side panel (Delete, then "Really delete?"); a finding's id is unique on its mark only,
+  so the panel keys this on the mark and the finding, and a mark's open, unsaved
+  comment or resolve form stays open through it.
+- **A finding from a file is no app's own.** An import marks every finding
+  `imported: true`, whatever the file says: the app a file names is whoever wrote the
+  file's, so no app may change it, and the panel and case.md say "as the file says".
+  Findings are AI-written text the next AI app reads: the instructions and case.md say
+  they are data, never instructions, like the comments and the summary.
+- **They ask first.** `add_finding`, `edit_finding` and `delete_finding` change the case,
+  so they go through the same question as the other changing tools, and DEC-018's Always
+  allow and Allow all changes cover them per tool. The question names the case, the mark
+  and, for an edit or a delete, the finding and its app; for another app's finding it
+  says the change will be refused whatever the answer. (Refusing before the question
+  would need a check the library does not offer; the tool refuses in the same
+  transaction that would write.)
+- **Summary for the developer.** What should change overall, as agreed; whoever loads
+  the case reads it first. The panel's label, its placeholder ("What should change, as
+  agreed. Whoever loads this case sees it first."), "Save summary", the case list's
+  preview, case.md's heading, the tool `set_summary` (replacing `set_verdict`, argument
+  `summary`) and the `summary` key in list_cases and get_case.
+- **The stored field stays `verdict`.** Cases in IndexedDB and exported files keep the
+  field `verdict`: no migration, old files import as they are, and files from this
+  build still open in an older one. The panel's internal names and element ids
+  (`verdict`, `save-verdict`) stay with the field. An Always allow kept for
+  `set_verdict` names a tool that no longer exists and allows nothing.

@@ -9,8 +9,10 @@ relay when you connect an AI app through it (see "An AI app" below).
 When you save marks as a case, or add marks to a case, Overmark stores in your browser, on your computer
 (IndexedDB of the extension):
 
-- the case's title, your comments, the verdict, when the case and its screenshots were
-  made and changed, and for an imported case when it was imported;
+- the case's title, your comments, the summary for the developer, when the case and its
+  screenshots were made and changed, and for an imported case when it was imported;
+- the findings a connected AI app wrote on a mark: their text, when they were written
+  and changed, and the app's id, name and host as the relay gave them;
 - the page's address, its title, its language, the window size and pixel density, and
   the browser's user agent. The address is kept without its query string or fragment,
   which can carry personal data or tokens, and without a user name or password. Only a
@@ -87,8 +89,8 @@ Only in two cases, both started by you:
 
    The connection is held by Overmark's background service worker, so it stays while the
    side panel is closed; the Overmark icon shows "on" while it is up. Changes the AI app
-   wants to make (adding a mark, recording a verdict, changing a mark's status, deleting
-   a case) are asked first, naming the case and the page: in the side panel when it is
+   wants to make (adding a mark, recording the summary for the developer, changing a
+   mark's status, adding, changing or deleting one of its findings, deleting a case) are asked first, naming the case and the page: in the side panel when it is
    open in the window in front, otherwise also in a notification of your system (with
    Allow and Always allow, closing it is Don't allow; the icon shows "?" meanwhile).
    Nothing changes until you allow it; no answer within 60 seconds is Don't allow. If

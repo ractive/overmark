@@ -18,3 +18,7 @@
 
 - The owner saw Overmark's icon do nothing while Claude in Chrome's panel was open. The panel now opens with the tab, as in the tab-mcp extension (DEC-017); the store package's e2e test, which failed with it in CI, waits for the viewport to keep its size before it clicks
 - The owner brought "Always allow" back. DEC-018, iteration 11: per AI app and tool from a question (the panel's "Always allow", a notification's Allow and Always allow, closing it is Don't allow), and "Allow all changes" per app in the AI app card with "Ask again" for each tool; kept in the worker's settings database until the app is disconnected (Disconnect, New address, the relay no longer listing it). Replaces DEC-008's "every time"
+
+## 2026-11-11
+
+- The owner's decisions of 2026-11-10: AI findings on marks and the summary for the developer. DEC-019, iteration 12: a mark's findings, apart from the user's comment, each with its app and time; an AI app adds them and edits or deletes only its own, by its client id; the user deletes any in the side panel; findings from a file are no app's own. "Verdict" becomes "Summary for the developer", `set_verdict` becomes `set_summary`; the stored field stays `verdict`

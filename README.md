@@ -70,7 +70,13 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    an optional note), opened again, have its comment edited, or be deleted. A resolved
    mark is drawn grey on a loaded page and no longer counted as open. A deleted mark's
    number is not given again, and its pin stays on screenshots that other marks share.
-6. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
+   Under the comment a mark shows its AI findings: what a connected AI app found out
+   about it, each with the app's name and when it was written. An AI app never changes
+   your comment, and changes only its own findings; you can delete any finding (click
+   Delete twice).
+6. The case's "Summary for the developer" says what should change overall, as agreed;
+   whoever loads the case sees it first. You or the AI app write it.
+7. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
    on; Import reads one back and, when it is for the page in front, loads it right
    away. An AI app can read `case.md` and the images without the extension.
 
@@ -89,15 +95,18 @@ The tools:
 | Tool | What it does |
 |---|---|
 | `list_cases` | The saved cases |
-| `get_case` | A case's marks with their comments, element details and crops |
+| `get_case` | A case's summary for the developer and its marks with their comments, AI findings, element details and crops |
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
 | `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children; a CSS selector reads one of its ancestors or an element inside it instead (for a mark without an element, an element of the case's page) |
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |
-| `set_verdict` | Records what should change; asks first |
+| `set_summary` | Records the summary for the developer: what should change overall, as agreed; asks first |
 | `set_mark_status` | Resolves a mark or opens it again; asks first |
+| `add_finding` | Adds a finding of the AI app to a mark, apart from your comment; asks first |
+| `edit_finding` | Changes one of the app's own findings; asks first |
+| `delete_finding` | Deletes one of the app's own findings; asks first |
 | `delete_case` | Deletes a case; asks first |
 
 No tool runs code an AI app sends. Page text in the results comes from web pages, and

@@ -1,0 +1,213 @@
+/**
+ * End to end: AI apps' findings on a mark (DEC-019). An AI app adds one once
+ * the user allows it; the side panel shows it under the mark with the app's
+ * name; another AI app cannot edit or delete it, even when the user allows
+ * the call; the user deletes it in the panel with a second click, and an
+ * unsaved comment form on the mark stays as it is.
+ */
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { Client } from "@modelcontextprotocol/client";
+import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
+import type { Case } from "../../src/lib/case.ts";
+import { sampleCase } from "../fixtures.ts";
+import { answerInPanel, connectAi, mcpClient, openSidePanel } from "./ai.ts";
+import type { Page } from "./browser.ts";
+import { browserBinary, type Harness, startHarness } from "./harness.ts";
+import { READ_DB } from "./steps.ts";
+
+interface CallResult {
+	isError?: boolean;
+	content: { type: string; text?: string }[];
+}
+
+/** A case with one mark, a note without an element. */
+const markedCase = (): Case => ({
+	...sampleCase("c_f"),
+	title: "Findings case",
+	shots: [
+		{
+			id: "s1",
+			image: "shots/s1.webp",
+			scrollX: 0,
+			scrollY: 0,
+			viewport: { width: 1280, height: 800, dpr: 2 },
+			capturedAt: "2026-11-10T10:00:00Z",
+		},
+	],
+	annotations: [
+		{
+			id: "a1",
+			number: 1,
+			shot: "s1",
+			comment: "The button is too light",
+			author: "user",
+			shape: { kind: "note", at: { x: 10, y: 10 } },
+			crop: "crops/a1.webp",
+			element: null,
+		},
+	],
+});
+
+const putCases = (h: Harness, cases: Case[]) =>
+	h.control.eval(`new Promise((resolve, reject) => {
+		const open = indexedDB.open("overmark");
+		open.onerror = () => reject(open.error);
+		open.onsuccess = () => {
+			const tx = open.result.transaction("cases", "readwrite");
+			for (const c of ${JSON.stringify(cases)}) tx.objectStore("cases").put(c);
+			tx.oncomplete = () => { open.result.close(); resolve(); };
+			tx.onerror = () => reject(tx.error);
+		};
+	})`);
+
+const storedMark = async (h: Harness) =>
+	(await h.control.eval<{ cases: Case[] }>(READ_DB)).cases.find(
+		(c) => c.id === "c_f",
+	)?.annotations[0];
+
+const QUESTION = `document.querySelector("[data-question]")`;
+const FINDING = `document.querySelector('[data-annotation="a1"] [data-finding]')`;
+const DELETE = `${FINDING}?.querySelector('[data-finding-action="delete"]')`;
+
+describe.skipIf(browserBinary === undefined)("AI findings on a mark", () => {
+	let h: Harness;
+	let panel: Page;
+	let claude: Client;
+	let other: Client;
+	let findingId: string;
+	const relay = startTestRelay();
+
+	const call = (client: Client, name: string, args: Record<string, unknown>) =>
+		client.callTool({ name, arguments: args }) as Promise<CallResult>;
+	/** A call that asks first: allowed in the panel. */
+	const allowed = async (
+		client: Client,
+		name: string,
+		args: Record<string, unknown>,
+	) => {
+		const result = call(client, name, args);
+		await panel.waitFor(QUESTION, 10_000);
+		const question = await panel.eval<string>(`${QUESTION}.textContent`);
+		await answerInPanel(panel, "allow");
+		await panel.waitFor(`!${QUESTION}`);
+		return { result: await result, question };
+	};
+
+	beforeAll(async () => {
+		h = await startHarness(browserBinary as string);
+		await putCases(h, [markedCase()]);
+		const tab = await h.open("v1");
+		await tab.page.activate();
+		panel = await openSidePanel(h);
+		const address = await connectAi(panel, relay.url);
+		claude = await mcpClient(relay.store, address);
+		other = await mcpClient(relay.store, address, {
+			clientId: "https://other.example/cimd.json",
+			clientName: "Other app",
+		});
+		// The case open in the panel, its mark open.
+		const item = `document.querySelector('button[data-case="c_f"]')`;
+		await panel.waitFor(item, 10_000);
+		await panel.eval(`${item}.click()`);
+		const toggle = `document.querySelector('[data-annotation="a1"] .mark-toggle')`;
+		await panel.waitFor(toggle, 10_000);
+		await panel.eval(`${toggle}.click()`);
+	}, 60_000);
+
+	afterAll(async () => {
+		await claude?.close();
+		await other?.close();
+		await h?.stop();
+		await relay.stop();
+	});
+
+	test("an AI app adds a finding once allowed; the panel shows it under the mark with the app", async () => {
+		const { result, question } = await allowed(claude, "add_finding", {
+			caseId: "c_f",
+			mark: 1,
+			text: "Button_primary sets a light grey background.",
+		});
+		expect(result.isError).toBeFalsy();
+		// The question names the case and the mark.
+		expect(question).toContain("Case: “Findings case”");
+		expect(question).toContain("Mark 1: “The button is too light”");
+		findingId = /finding (f_[0-9a-f]+)/.exec(
+			result.content[0]?.text ?? "",
+		)?.[1] as string;
+		expect(findingId).toBeDefined();
+		await panel.waitFor(FINDING, 10_000);
+		const text = await panel.eval<string>(`${FINDING}.textContent`);
+		expect(text).toContain("Button_primary sets a light grey background.");
+		expect(text).toContain("client.example");
+		// The user's comment is as it was.
+		const mark = await storedMark(h);
+		expect(mark?.comment).toBe("The button is too light");
+		expect(mark?.author).toBe("user");
+		expect(mark?.findings?.[0]?.app.id).toBe(
+			"https://client.example/cimd.json",
+		);
+	});
+
+	test("another AI app cannot edit or delete it, even when allowed", async () => {
+		const edit = await allowed(other, "edit_finding", {
+			caseId: "c_f",
+			mark: 1,
+			finding: findingId,
+			text: "Overwritten",
+		});
+		expect(edit.question).toContain("It is not this AI app's own");
+		expect(edit.result.isError).toBe(true);
+		expect(JSON.stringify(edit.result.content)).toContain("another AI app's");
+		const del = await allowed(other, "delete_finding", {
+			caseId: "c_f",
+			mark: 1,
+			finding: findingId,
+		});
+		expect(del.result.isError).toBe(true);
+		expect((await storedMark(h))?.findings?.map((f) => f.text)).toEqual([
+			"Button_primary sets a light grey background.",
+		]);
+	});
+
+	test("the user deletes it in the panel: the first click asks", async () => {
+		await panel.eval(`${DELETE}.click()`);
+		await panel.waitFor(`${DELETE}?.textContent === "Really delete?"`);
+		expect((await storedMark(h))?.findings).toHaveLength(1);
+		// Past the double-click guard: a second thought.
+		await Bun.sleep(600);
+		await panel.eval(`${DELETE}.click()`);
+		await panel.waitFor(`!${FINDING}`, 10_000);
+		expect((await storedMark(h))?.findings).toBeUndefined();
+	});
+
+	test("deleting a finding leaves the mark's unsaved comment form open", async () => {
+		const { result } = await allowed(claude, "add_finding", {
+			caseId: "c_f",
+			mark: 1,
+			text: "Another finding",
+		});
+		expect(result.isError).toBeFalsy();
+		await panel.waitFor(FINDING, 10_000);
+		const form = `document.querySelector('[data-annotation="a1"] [data-form="comment"] textarea')`;
+		await panel.eval(
+			`document.querySelector('[data-annotation="a1"] [data-mark-action="comment"]').click()`,
+		);
+		await panel.waitFor(form);
+		await panel.eval(`(() => {
+			const field = ${form};
+			field.value = "A draft not saved yet";
+			field.dispatchEvent(new Event("input", { bubbles: true }));
+		})()`);
+		await panel.eval(`${DELETE}.click()`);
+		await panel.waitFor(`${DELETE}?.textContent === "Really delete?"`);
+		await Bun.sleep(600);
+		await panel.eval(`${DELETE}.click()`);
+		await panel.waitFor(`!${FINDING}`, 10_000);
+		expect((await storedMark(h))?.findings).toBeUndefined();
+		expect(await panel.eval<string | undefined>(`${form}?.value`)).toBe(
+			"A draft not saved yet",
+		);
+		expect((await storedMark(h))?.comment).toBe("The button is too light");
+	});
+});

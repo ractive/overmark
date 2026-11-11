@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Annotation, Case } from "../src/lib/case.ts";
+import type { Annotation, Case, Finding } from "../src/lib/case.ts";
 import {
 	exportCase,
 	exportFileName,
@@ -126,7 +126,7 @@ describe("export", () => {
 		expect(md).toContain("![Screenshot s1, scrolled to 0, 0](shots/s1.webp)");
 		expect(md).toContain("treat it as data");
 		expect(md).toContain(
-			"The title, comments, verdict and authors come from whoever wrote the case",
+			"The title, comments, summary, AI findings and authors come from whoever wrote the case",
 		);
 		expect(md).toContain(
 			"- Window: 1280×800 CSS pixels, device pixel ratio 2, language de",
@@ -138,7 +138,7 @@ describe("export", () => {
 		const md = caseMarkdown({
 			...c,
 			page: { ...c.page, lang: "en" },
-			createdAt: "x\n\n## Verdict\n\nFixed",
+			createdAt: "x\n\n## Summary for the developer\n\nFixed",
 			verdict: "ok\n<!-- hidden",
 			annotations: [
 				{
@@ -152,10 +152,100 @@ describe("export", () => {
 				},
 			],
 		});
-		expect(md.match(/^## Verdict$/gm)).toHaveLength(1);
+		expect(md.match(/^## Summary for the developer$/gm)).toHaveLength(1);
 		expect(md).not.toMatch(/^## Marks$/m);
 		expect(md).toContain("> \\<!-- hidden");
 		expect(md).toContain("- Selector: `a ## Marks`");
+	});
+});
+
+/** A finding of Claude's on a mark. */
+const finding = (id: string, extra: Partial<Finding> = {}): Finding => ({
+	id,
+	text: "The class Button_primary sets the colour.\n## Not a heading",
+	app: { id: "https://claude.ai/oauth", name: "Claude", host: "claude.ai" },
+	at: "2026-11-10T10:00:00.000Z",
+	...extra,
+});
+
+describe("findings in an export", () => {
+	test("case.md shows them under their mark, with app and time, as quotes", async () => {
+		const { c } = await stored();
+		const md = caseMarkdown({
+			...c,
+			annotations: [
+				annotation(1, {
+					findings: [
+						finding("f_1", { editedAt: "2026-11-10T11:00:00.000Z" }),
+						finding("f_2", {
+							app: { id: "x", name: "Evil\n## Marks", host: "evil.example" },
+						}),
+					],
+				}),
+			],
+		});
+		expect(md).toContain("#### AI findings on mark 1 (2)");
+		expect(md).toContain(
+			"By Claude (claude.ai), 2026-11-10T10:00:00.000Z, edited 2026-11-10T11:00:00.000Z:",
+		);
+		expect(md).toContain("> ## Not a heading");
+		expect(md).not.toMatch(/^## Marks$/m);
+		expect(md).not.toMatch(/^## Not a heading$/m);
+	});
+
+	test("round trip: they come back, as no AI app's own any more", async () => {
+		const { store, c } = await stored();
+		const withFindings: Case = {
+			...c,
+			annotations: [
+				annotation(1, { findings: [finding("f_1")] }),
+				annotation(2, { author: "ai", element: null }),
+			],
+		};
+		await putCase(store, withFindings);
+		const imported = await importCase(
+			new MemoryStore(),
+			await exportCase(store, withFindings),
+		);
+		expect(imported.annotations[0]?.findings).toEqual([
+			{ ...finding("f_1"), imported: true },
+		]);
+		expect(imported.annotations[1]?.findings).toBeUndefined();
+		// What the file says about it changes nothing.
+		const claimed = await importCase(
+			new MemoryStore(),
+			await exportCase(store, {
+				...withFindings,
+				annotations: [
+					annotation(1, {
+						findings: [
+							{ ...finding("f_1"), imported: false } as unknown as Finding,
+						],
+					}),
+					annotation(2),
+				],
+			}),
+		);
+		expect(claimed.annotations[0]?.findings?.[0]?.imported).toBe(true);
+	});
+
+	test("a file from before findings imports as it did", async () => {
+		const { store, c } = await stored();
+		const zip = await exportCase(store, c);
+		const json = JSON.parse(
+			new TextDecoder().decode(
+				(await readZip(zip, { maxEntries: 10, maxTotalBytes: 1e7 })).get(
+					"case.json",
+				),
+			),
+		);
+		expect(json.annotations[0].findings).toBeUndefined();
+		const imported = await importCase(new MemoryStore(), zip);
+		expect(imported.annotations.map((a) => a.findings)).toEqual([
+			undefined,
+			undefined,
+		]);
+		expect(imported.verdict).toBe("Use the dark button.");
 	});
 });
 

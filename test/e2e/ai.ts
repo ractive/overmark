@@ -112,12 +112,16 @@ export async function connectAi(
 	return panel.eval<string>(`${byId("pair-address")}.textContent`);
 }
 
-/** An MCP client paired with `address` (a token straight from the relay's store). */
+/**
+ * An MCP client paired with `address` (a token straight from the relay's
+ * store); `app` names another AI app than the default test client.
+ */
 export async function mcpClient(
 	store: Parameters<typeof tokenFor>[0],
 	address: string,
+	app: { clientId?: string; clientName?: string } = {},
 ): Promise<Client> {
-	const token = await tokenFor(store, address);
+	const token = await tokenFor(store, address, app);
 	const client = new Client(
 		{ name: "e2e", version: "1.0.0" },
 		{ versionNegotiation: { mode: { pin: "2026-07-28" } } },

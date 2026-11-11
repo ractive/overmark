@@ -233,7 +233,7 @@ describe("questions", () => {
 		const signal = new AbortController().signal;
 		const same = questions.ask(request(undefined, signal), CASE, 7);
 		const otherTool = questions.ask(
-			request(undefined, signal, "set_verdict"),
+			request(undefined, signal, "set_summary"),
 			CASE,
 			7,
 		);
@@ -248,7 +248,7 @@ describe("questions", () => {
 		);
 		expect(await same).toBe("allow");
 		expect(questions.list.map((q) => q.tool)).toEqual([
-			"set_verdict",
+			"set_summary",
 			"delete_case",
 		]);
 		for (const q of questions.list) questions.answer(q.id, "deny");

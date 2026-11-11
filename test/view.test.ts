@@ -232,6 +232,108 @@ describe("a mark's status and actions", () => {
 		expect(window.document.activeElement).toBe(el("verdict") as never);
 	});
 
+	test("AI findings show under the comment with their app; Delete asks once more", () => {
+		const c: Case = {
+			...twoMarks(),
+			annotations: [
+				{
+					...mark(1),
+					findings: [
+						{
+							id: "f_1",
+							text: "Padding in Card.tsx",
+							app: {
+								id: "https://claude.ai/oauth",
+								name: "Claude",
+								host: "claude.ai",
+							},
+							at: "2026-11-10T10:00:00Z",
+						},
+						{
+							id: "f_2",
+							text: "From a file",
+							app: { id: "x", host: "other.example" },
+							at: "2026-11-10T10:00:00Z",
+							imported: true,
+						},
+					],
+				},
+				mark(2),
+			],
+		};
+		const deleted: string[] = [];
+		const actions = actionsWith({
+			deleteFinding: (_c, a, id) => void deleted.push(`${a.id}:${id}`),
+		});
+		render(
+			caseState(c, (s) => {
+				s.findingDeleteArmed = {
+					annotationId: "a1",
+					findingId: "f_2",
+					at: 1,
+				};
+			}),
+			actions,
+		);
+		const finding = (id: string) =>
+			row("a1").querySelector(
+				`[data-finding="${id}"]`,
+			) as unknown as HTMLElement;
+		expect(row("a1").querySelector(".findings-count")?.textContent).toBe(
+			"2 AI findings",
+		);
+		expect(row("a2").querySelector(".findings")).toBeNull();
+		expect(finding("f_1").querySelector(".finding-text")?.textContent).toBe(
+			"Padding in Card.tsx",
+		);
+		expect(finding("f_1").textContent).toContain("Claude (claude.ai), ");
+		expect(finding("f_2").textContent).toContain(
+			"other.example, as the file says",
+		);
+		const button = (id: string) =>
+			finding(id).querySelector(
+				'[data-finding-action="delete"]',
+			) as unknown as HTMLButtonElement;
+		expect(button("f_1").textContent).toBe("Delete");
+		expect(button("f_2").textContent).toBe("Really delete?");
+		button("f_1").click();
+		expect(deleted).toEqual(["a1:f_1"]);
+	});
+
+	test("a finding's Delete, clicked once, asks on its own mark only: ids repeat on other marks", () => {
+		const finding = (id: string) => ({
+			id,
+			text: "Same id elsewhere",
+			app: { id: "x", host: "other.example" },
+			at: "2026-11-10T10:00:00Z",
+		});
+		const c: Case = {
+			...twoMarks(),
+			annotations: [
+				{ ...mark(1), findings: [finding("f_1")] },
+				{ ...mark(2), findings: [finding("f_1")] },
+			],
+		};
+		render(
+			caseState(c, (s) => {
+				s.findingDeleteArmed = {
+					annotationId: "a2",
+					findingId: "f_1",
+					at: 1,
+				};
+			}),
+			noActions,
+		);
+		const button = (annotationId: string) =>
+			row(annotationId).querySelector(
+				'[data-finding="f_1"] [data-finding-action="delete"]',
+			) as unknown as HTMLButtonElement;
+		expect(button("a1").textContent).toBe("Delete");
+		expect(button("a1").hasAttribute("data-armed")).toBe(false);
+		expect(button("a2").textContent).toBe("Really delete?");
+		expect(button("a2").hasAttribute("data-armed")).toBe(true);
+	});
+
 	test("Delete asks once more", () => {
 		const c = twoMarks();
 		render(
@@ -601,8 +703,26 @@ describe("what stays between renders", () => {
 	});
 });
 
-describe("the verdict", () => {
+describe("the summary for the developer", () => {
 	const value = () => el<HTMLTextAreaElement>("verdict").value;
+
+	test("is labelled so, says what it is for, and shows in the case list", () => {
+		const c = { ...sampleCase("c_s"), verdict: "Darker button" };
+		render(caseState(c), noActions);
+		expect(
+			window.document.querySelector('label[for="verdict"]')?.textContent,
+		).toBe("Summary for the developer");
+		expect(el<HTMLTextAreaElement>("verdict").placeholder).toContain(
+			"Whoever loads this case sees it first.",
+		);
+		expect(el("save-verdict").textContent).toBe("Save summary");
+		const home = initialState();
+		home.cases = [c];
+		render(home, noActions);
+		expect(
+			window.document.querySelector('[data-case="c_s"]')?.textContent,
+		).toContain("Summary for the developer: Darker button");
+	});
 
 	test("a draft stays while the case changes, and comes back after leaving", () => {
 		const c = sampleCase("c_v");
