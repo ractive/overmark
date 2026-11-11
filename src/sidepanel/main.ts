@@ -12,6 +12,7 @@ import {
 	validateCase,
 	withComment,
 	withoutAnnotation,
+	withoutFinding,
 	withResolution,
 } from "../lib/case.ts";
 import {
@@ -361,6 +362,7 @@ function openCase(id: string, caseHint?: string): void {
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
 		s.markDeleteArmed = undefined;
+		s.findingDeleteArmed = undefined;
 	});
 	void refreshCase();
 }
@@ -827,6 +829,34 @@ const actions: Actions = {
 		).finally(() => deleting.delete(a.id));
 	},
 
+	deleteFinding(c, a, findingId) {
+		const armed = state.findingDeleteArmed;
+		if (armed?.findingId !== findingId) {
+			const at = Date.now();
+			update((s) => (s.findingDeleteArmed = { findingId, at }));
+			setTimeout(() => {
+				update((s) => {
+					if (s.findingDeleteArmed?.at === at) s.findingDeleteArmed = undefined;
+				});
+			}, DELETE_ARMED_MS);
+			return;
+		}
+		// A double click is no second thought, nor a second delete.
+		if (Date.now() - armed.at < DELETE_CLICK_GAP_MS) return;
+		if (deleting.has(findingId)) return;
+		deleting.add(findingId);
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) => ({
+			value: withoutFinding(current, a.id, findingId, now),
+		})).finally(() => {
+			deleting.delete(findingId);
+			update((s) => {
+				if (s.findingDeleteArmed?.findingId === findingId)
+					s.findingDeleteArmed = undefined;
+			});
+		});
+	},
+
 	typeVerdict(caseId, text) {
 		update((s) => {
 			if (s.current?.id === caseId && text === (s.current.verdict ?? ""))
@@ -1013,7 +1043,7 @@ async function redrawLoaded(c: Case): Promise<void> {
 	}
 }
 
-/** Marks being deleted now: a second click waits for the first. */
+/** Marks and findings being deleted now: a second click waits for the first. */
 const deleting = new Set<string>();
 
 /** Change a mark of a case in one transaction, then show and draw the result. */

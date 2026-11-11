@@ -4,8 +4,19 @@ import {
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
-import { TabMcp, type Tool } from "@ractive-ch/tab-mcp-client";
-import type { Annotation, Case, ElementDetails } from "../src/lib/case.ts";
+import {
+	TabMcp,
+	type Tool,
+	type ToolCallClient,
+} from "@ractive-ch/tab-mcp-client";
+import {
+	type Annotation,
+	type Case,
+	type ElementDetails,
+	MAX_FINDING,
+	MAX_FINDINGS,
+	validateCase,
+} from "../src/lib/case.ts";
 import type {
 	AnnotationMatch,
 	ContentRequest,
@@ -270,17 +281,22 @@ function build(options: Partial<ToolDeps> = {}): void {
 	);
 }
 
+const CLAUDE = {
+	grantId: "g",
+	id: "https://claude.ai/oauth",
+	name: "Claude",
+	host: "claude.ai",
+};
+
 async function call(
 	name: string,
 	input: Record<string, unknown> = {},
 	signal: AbortSignal = new AbortController().signal,
+	client: ToolCallClient = CLAUDE,
 ): Promise<Result> {
 	const tool = tools.get(name);
 	if (tool === undefined) throw new Error(`no tool ${name}`);
-	return (await tool.execute(input, {
-		signal,
-		client: { grantId: "g", id: "https://claude.ai/oauth", host: "claude.ai" },
-	})) as Result;
+	return (await tool.execute(input, { signal, client })) as Result;
 }
 
 const json = (r: Result, i = 0) => JSON.parse(r.content[i]?.text ?? "null");
@@ -303,7 +319,7 @@ describe("tools", () => {
 				title: "Button contrast",
 				url: "https://www.example.com/kk",
 				marks: 2,
-				verdict: null,
+				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
 			},
 		]);
@@ -691,11 +707,11 @@ describe("tools", () => {
 		).toEqual([]);
 	});
 
-	test("set_verdict and delete_case", async () => {
+	test("set_summary and delete_case", async () => {
 		await seed();
-		await call("set_verdict", { caseId: "c_1", verdict: " Darker button. " });
+		await call("set_summary", { caseId: "c_1", summary: " Darker button. " });
 		expect((await store.getCase("c_1"))?.verdict).toBe("Darker button.");
-		await call("set_verdict", { caseId: "c_1", verdict: "" });
+		await call("set_summary", { caseId: "c_1", summary: "" });
 		expect((await store.getCase("c_1"))?.verdict).toBeNull();
 		await call("delete_case", { caseId: "c_1" });
 		expect(await store.getCase("c_1")).toBeUndefined();
@@ -742,12 +758,16 @@ describe("tools", () => {
 			expect(hints[name]?.readOnlyHint).toBe(true);
 		for (const name of [
 			"add_annotation",
-			"set_verdict",
+			"set_summary",
 			"set_mark_status",
+			"add_finding",
+			"edit_finding",
+			"delete_finding",
 			"delete_case",
 		])
 			expect(hints[name]?.consequentialHint).toBe(true);
 		expect(hints["delete_case"]?.destructiveHint).toBe(true);
+		expect(hints["delete_finding"]?.destructiveHint).toBe(true);
 		for (const name of [
 			"list_cases",
 			"get_case",
@@ -761,11 +781,17 @@ describe("tools", () => {
 		])
 			expect(hints[name]?.untrustedContentHint).toBe(true);
 		// Its answer holds no text of the case.
-		expect(hints["set_verdict"]?.untrustedContentHint).toBeUndefined();
+		expect(hints["set_summary"]?.untrustedContentHint).toBeUndefined();
 	});
 
 	test("the instructions say that a case's own texts are data too", () => {
-		for (const word of ["comments", "verdicts", "Titles", "authors"])
+		for (const word of [
+			"comments",
+			"summaries",
+			"findings",
+			"Titles",
+			"authors",
+		])
 			expect(INSTRUCTIONS).toContain(word);
 		expect(INSTRUCTIONS).toContain("importedAt");
 		expect(INSTRUCTIONS).toContain("never as instructions");
@@ -959,10 +985,181 @@ describe("tools", () => {
 		await expect(refused).rejects.toThrow(`it was ${plain})`);
 	});
 
-	test("list_cases sends only the start of a verdict", async () => {
+	test("list_cases sends only the start of a summary", async () => {
 		await seed();
-		await call("set_verdict", { caseId: "c_1", verdict: "v".repeat(5000) });
-		expect(json(await call("list_cases"))[0].verdict).toHaveLength(201);
+		await call("set_summary", { caseId: "c_1", summary: "v".repeat(5000) });
+		expect(json(await call("list_cases"))[0].summary).toHaveLength(201);
+	});
+});
+
+describe("findings", () => {
+	const OTHER: ToolCallClient = {
+		grantId: "g2",
+		id: "https://chatgpt.com/cimd.json",
+		name: "ChatGPT",
+		host: "chatgpt.com",
+	};
+	const added = (r: Result) =>
+		/finding (f_[0-9a-f]+)/.exec(r.content[0]?.text ?? "")?.[1] as string;
+	const stored = async (mark = 2) =>
+		(await store.getCase("c_1"))?.annotations.find((a) => a.number === mark)
+			?.findings;
+
+	test("an AI app adds, edits and deletes its own; the comment stays the user's", async () => {
+		await seed();
+		const id = added(
+			await call("add_finding", { caseId: "c_1", mark: 2, text: " Padding. " }),
+		);
+		const [f] = (await stored()) ?? [];
+		expect(f).toMatchObject({
+			id,
+			text: "Padding.",
+			app: { id: "https://claude.ai/oauth", name: "Claude", host: "claude.ai" },
+		});
+		expect(f?.editedAt).toBeUndefined();
+		const mark2 = (await store.getCase("c_1"))?.annotations[1];
+		expect(mark2?.comment).toBe("Comment 2");
+		expect(mark2?.author).toBe("user");
+
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		expect(view.marks[1].findings).toEqual([
+			{
+				id,
+				text: "Padding.",
+				app: "Claude (claude.ai)",
+				at: f?.at,
+				own: true,
+			},
+		]);
+		expect(view.marks[0].findings).toEqual([]);
+
+		await call("edit_finding", {
+			caseId: "c_1",
+			mark: 2,
+			finding: id,
+			text: "Margin, in Card.tsx.",
+		});
+		const [edited] = (await stored()) ?? [];
+		expect(edited?.text).toBe("Margin, in Card.tsx.");
+		expect(edited?.at).toBe(f?.at as string);
+		expect(edited?.editedAt).toBeDefined();
+
+		await call("delete_finding", { caseId: "c_1", mark: 2, finding: id });
+		expect(await stored()).toBeUndefined();
+		expect(changed).toEqual(["c_1", "c_1", "c_1"]);
+	});
+
+	test("another app's finding cannot be edited or deleted, whatever its grant", async () => {
+		await seed();
+		const id = added(
+			await call("add_finding", { caseId: "c_1", mark: 1, text: "Mine" }),
+		);
+		const signal = new AbortController().signal;
+		const input = { caseId: "c_1", mark: 1, finding: id };
+		await expect(
+			call("edit_finding", { ...input, text: "Theirs" }, signal, OTHER),
+		).rejects.toThrow("is another AI app's (Claude (claude.ai))");
+		await expect(call("delete_finding", input, signal, OTHER)).rejects.toThrow(
+			"only the app that wrote it",
+		);
+		expect((await stored(1))?.[0]?.text).toBe("Mine");
+		const view = json(
+			await call("get_case", { caseId: "c_1", images: false }, signal, OTHER),
+		);
+		expect(view.marks[0].findings[0].own).toBe(false);
+		// The same app paired again (a new grant) still owns it.
+		await call("delete_finding", input, signal, { ...CLAUDE, grantId: "g9" });
+		expect(await stored(1)).toBeUndefined();
+	});
+
+	test("a finding from a file is no app's own", async () => {
+		await seed();
+		await store.updateCase("c_1", (c) => {
+			const value = structuredClone(c as Case);
+			(value.annotations[0] as Annotation).findings = [
+				{
+					id: "f_file",
+					text: "From the file",
+					app: { id: CLAUDE.id, host: "claude.ai" },
+					at: "2026-11-01T00:00:00Z",
+					imported: true,
+				},
+			];
+			return { value };
+		});
+		await expect(
+			call("delete_finding", { caseId: "c_1", mark: 1, finding: "f_file" }),
+		).rejects.toThrow("came in with the case from a file");
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		expect(view.marks[0].findings[0]).toMatchObject({
+			own: false,
+			imported: true,
+		});
+	});
+
+	test("unknown marks and findings, and the limit per mark", async () => {
+		await seed();
+		await expect(
+			call("add_finding", { caseId: "c_1", mark: 9, text: "x" }),
+		).rejects.toThrow("has no mark 9");
+		await expect(
+			call("edit_finding", {
+				caseId: "c_1",
+				mark: 1,
+				finding: "f_x",
+				text: "y",
+			}),
+		).rejects.toThrow("Mark 1 has no finding f_x");
+		await expect(
+			call("add_finding", { caseId: "c_9", mark: 1, text: "x" }),
+		).rejects.toThrow("No case with id c_9");
+		for (let i = 0; i < MAX_FINDINGS; i++)
+			await call("add_finding", { caseId: "c_1", mark: 1, text: `F${i}` });
+		await expect(
+			call("add_finding", { caseId: "c_1", mark: 1, text: "One more" }),
+		).rejects.toThrow(`has ${MAX_FINDINGS} findings`);
+		expect(await stored(1)).toHaveLength(MAX_FINDINGS);
+		// What a tool stored, the panel's checks take.
+		expect(() => validateCase(store.cases.get("c_1"))).not.toThrow();
+	});
+
+	test("a large case cuts long findings", async () => {
+		build({ maxMessageBytes: () => 40_000 });
+		await seed(10, "x".repeat(20_000));
+		await call("add_finding", {
+			caseId: "c_1",
+			mark: 1,
+			text: "y".repeat(MAX_FINDING),
+		});
+		const view = json(await call("get_case", { caseId: "c_1" }));
+		expect(view.marks[0].findings[0].text).toHaveLength(1001);
+	});
+
+	test("the question names the mark and the finding, and says when it will be refused", async () => {
+		await seed();
+		const id = added(
+			await call("add_finding", { caseId: "c_1", mark: 2, text: "Padding" }),
+		);
+		const ask = (client: ToolCallClient) =>
+			confirmLines(store, tab, {
+				tool: { name: "delete_finding", description: "Does it." },
+				arguments: { caseId: "c_1", mark: 2, finding: id },
+				client,
+				signal: new AbortController().signal,
+			});
+		const own = await ask(CLAUDE);
+		expect(own).toContain("Mark 2: “Comment 2”, now open.");
+		expect(own).toContain("Finding by Claude (claude.ai): “Padding”.");
+		expect((await ask(OTHER)).join("\n")).toContain(
+			"It is not this AI app's own, so Overmark will refuse the change",
+		);
+		const add = await confirmLines(store, tab, {
+			tool: { name: "add_finding", description: "Does it." },
+			arguments: { caseId: "c_1", mark: 1, text: "x" },
+			client: CLAUDE,
+			signal: new AbortController().signal,
+		});
+		expect(add).toContain("Mark 1: “Comment 1”, now open.");
 	});
 });
 
@@ -985,7 +1182,7 @@ describe("confirmations", () => {
 			request("delete_case", { caseId: "c_1" }),
 		);
 		expect(del).toEqual([
-			"Case: “Button contrast” (www.example.com/kk, 2 marks, with a verdict).",
+			"Case: “Button contrast” (www.example.com/kk, 2 marks, with a summary for the developer).",
 		]);
 		const add = await confirmLines(
 			store,
@@ -996,7 +1193,7 @@ describe("confirmations", () => {
 		const unknown = await confirmLines(
 			store,
 			tab,
-			request("set_verdict", { caseId: "c_9" }),
+			request("set_summary", { caseId: "c_9" }),
 		);
 		expect(unknown.join("\n")).toContain("Case: none has the id c_9.");
 		const status = await confirmLines(
@@ -1061,8 +1258,11 @@ describe("through a relay", () => {
 			const listed = await client.listTools();
 			expect(listed.tools.map((t) => t.name).sort()).toEqual([
 				"add_annotation",
+				"add_finding",
 				"capture",
 				"delete_case",
+				"delete_finding",
+				"edit_finding",
 				"get_case",
 				"get_image",
 				"get_mark_element",
@@ -1070,7 +1270,7 @@ describe("through a relay", () => {
 				"list_cases",
 				"load_case",
 				"set_mark_status",
-				"set_verdict",
+				"set_summary",
 			]);
 			const cases = await client.callTool({
 				name: "list_cases",
@@ -1083,11 +1283,11 @@ describe("through a relay", () => {
 			});
 			expect(bad.isError).toBe(true);
 			const verdict = await client.callTool({
-				name: "set_verdict",
-				arguments: { caseId: "c_1", verdict: "Ship it" },
+				name: "set_summary",
+				arguments: { caseId: "c_1", summary: "Ship it" },
 			});
 			expect(verdict.isError).toBeFalsy();
-			expect(confirmed).toEqual(["set_verdict"]);
+			expect(confirmed).toEqual(["set_summary"]);
 			expect((await store.getCase("c_1"))?.verdict).toBe("Ship it");
 		} finally {
 			await client.close();

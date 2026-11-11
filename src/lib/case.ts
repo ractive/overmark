@@ -23,11 +23,20 @@ export const LANGUAGE = /^[A-Za-z0-9-]{0,35}$/;
 /** The highest annotation number a case may use. */
 export const MAX_NUMBER = 99_999;
 
-/** The longest verdict a case may hold, in characters. */
+/**
+ * The longest summary for the developer a case may hold, in characters. It is
+ * stored as `verdict`, its name before (DEC-019).
+ */
 export const MAX_VERDICT = 50_000;
 
 /** The longest comment on a mark, in characters. */
 export const MAX_COMMENT = 20_000;
+
+/** The longest finding an AI app may write on a mark, in characters. */
+export const MAX_FINDING = 5000;
+
+/** The most findings a mark may have. */
+export const MAX_FINDINGS = 20;
 
 /** The most points a freehand mark may have. */
 export const MAX_PEN_POINTS = 5000;
@@ -123,6 +132,44 @@ export interface Annotation {
 	element: ElementDetails | null;
 	/** How the mark was settled; none: still open. */
 	resolution?: Resolution;
+	/** What AI apps found about the mark, oldest first; none: no findings. */
+	findings?: Finding[];
+}
+
+/** The AI app that wrote a finding, as the relay named it then. */
+export interface FindingApp {
+	/** Its client id (a URL, e.g. `https://claude.ai/oauth`): the same for every pairing. */
+	id: string;
+	/** The name it declares, when the relay knew one. */
+	name?: string;
+	/** The host of its client id: the verified part. */
+	host: string;
+}
+
+/**
+ * A finding of an AI app on a mark (DEC-019): apart from the user's comment,
+ * which no AI app changes. Only the app that wrote it may edit or delete it;
+ * the user may delete any.
+ */
+export interface Finding {
+	id: string;
+	text: string;
+	app: FindingApp;
+	at: string;
+	/** When its app last changed its text. */
+	editedAt?: string;
+	/** Came in from a file: no app's own, whichever app it names. */
+	imported?: true;
+}
+
+/** An AI app as the panel and the questions name it: its name beside its host. */
+export function appLabel(app: FindingApp): string {
+	return app.name ? `${app.name} (${app.host})` : app.host;
+}
+
+/** A finding the AI app `clientId` wrote here, not one from a file. */
+export function isOwnFinding(f: Finding, clientId: string): boolean {
+	return f.imported !== true && f.app.id === clientId;
 }
 
 /** What became of a mark: fixed, or left as it is and why. */
@@ -159,6 +206,7 @@ export interface Case {
 	page: PageInfo;
 	shots: Shot[];
 	annotations: Annotation[];
+	/** The summary for the developer: what should change, as agreed (DEC-019). */
 	verdict: string | null;
 	/** When this copy came in from a file: its texts are whoever wrote the file's. */
 	importedAt?: string;
@@ -596,6 +644,7 @@ export function validateCase(value: unknown): Case {
 			...(a["resolution"] === undefined
 				? {}
 				: { resolution: resolution(a["resolution"], `${p}.resolution`) }),
+			...findingsOf(a["findings"], `${p}.findings`),
 		};
 	});
 	const verdict = o["verdict"];
@@ -642,6 +691,42 @@ function resolution(value: unknown, path: string): Resolution {
 			: { note: str(note, `${path}.note`, MAX_COMMENT) }),
 		at: str(o["at"], `${path}.at`, 64),
 	};
+}
+
+/** A mark's findings; none, or an empty list: no `findings` at all. */
+function findingsOf(value: unknown, path: string): { findings?: Finding[] } {
+	if (value === undefined) return {};
+	const ids = new Set<string>();
+	const findings = arr(value, path, MAX_FINDINGS).map((v, i): Finding => {
+		const p = `${path}[${i}]`;
+		const f = obj(v, p);
+		const findingId = id(f["id"], `${p}.id`);
+		if (ids.has(findingId)) fail(`${p}.id`, "is used twice");
+		ids.add(findingId);
+		const app = obj(f["app"], `${p}.app`);
+		const name = app["name"];
+		const editedAt = f["editedAt"];
+		const imported = f["imported"];
+		if (imported !== undefined && typeof imported !== "boolean")
+			fail(`${p}.imported`, "must be true or false");
+		return {
+			id: findingId,
+			text: str(f["text"], `${p}.text`, MAX_FINDING),
+			app: {
+				id: str(app["id"], `${p}.app.id`, 2000),
+				...(name === undefined
+					? {}
+					: { name: str(name, `${p}.app.name`, 200) }),
+				host: str(app["host"], `${p}.app.host`, 255),
+			},
+			at: str(f["at"], `${p}.at`, 64),
+			...(editedAt === undefined
+				? {}
+				: { editedAt: str(editedAt, `${p}.editedAt`, 64) }),
+			...(imported === true ? { imported: true } : {}),
+		};
+	});
+	return findings.length > 0 ? { findings } : {};
 }
 
 function highest(value: unknown, annotations: readonly Annotation[]): number {
@@ -753,4 +838,90 @@ export function withoutAnnotation(
 			...(shotUsed || shot === undefined ? [] : [shot.image]),
 		],
 	};
+}
+
+// --- findings of AI apps on a mark (DEC-019) ---------------------------------
+
+const withFindings = (a: Annotation, findings: Finding[]): Annotation => {
+	const { findings: _, ...rest } = a;
+	return findings.length > 0 ? { ...rest, findings } : rest;
+};
+
+function findingOf(a: Annotation, findingId: string): Finding {
+	const f = a.findings?.find((x) => x.id === findingId);
+	if (f === undefined)
+		throw new CaseError(`Mark ${a.number} has no finding ${findingId}.`);
+	return f;
+}
+
+/** The case with `finding` added to the mark, after its others. */
+export function withFinding(
+	c: Case,
+	annotationId: string,
+	finding: Finding,
+	now: string,
+): Case {
+	return changed(
+		c,
+		annotationId,
+		(a) => {
+			const findings = a.findings ?? [];
+			if (findings.length >= MAX_FINDINGS)
+				throw new CaseError(
+					`Mark ${a.number} has ${MAX_FINDINGS} findings, the most a mark may have. Edit or delete one of your own instead.`,
+				);
+			return withFindings(a, [
+				...findings,
+				{ ...finding, text: finding.text.trim().slice(0, MAX_FINDING) },
+			]);
+		},
+		now,
+	);
+}
+
+/** The case with the finding's text replaced; `editedAt` is `now`. */
+export function withFindingText(
+	c: Case,
+	annotationId: string,
+	findingId: string,
+	text: string,
+	now: string,
+): Case {
+	return changed(
+		c,
+		annotationId,
+		(a) => {
+			findingOf(a, findingId);
+			return withFindings(
+				a,
+				(a.findings ?? []).map((f) =>
+					f.id === findingId
+						? { ...f, text: text.trim().slice(0, MAX_FINDING), editedAt: now }
+						: f,
+				),
+			);
+		},
+		now,
+	);
+}
+
+/** The case without the finding. */
+export function withoutFinding(
+	c: Case,
+	annotationId: string,
+	findingId: string,
+	now: string,
+): Case {
+	return changed(
+		c,
+		annotationId,
+		(a) => {
+			findingOf(a, findingId);
+			return withFindings(
+				a,
+				(a.findings ?? []).filter((f) => f.id !== findingId),
+			);
+		},
+		now,
+	);
 }

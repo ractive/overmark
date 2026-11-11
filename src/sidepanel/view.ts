@@ -1,12 +1,13 @@
 /**
  * Drawing the side panel from its state (DEC-011). `render` is the only code
- * that touches the panel's DOM. The open case's verdict and buttons stay the
+ * that touches the panel's DOM. The open case's summary and buttons stay the
  * same elements while it is open, so typing, focus and clicks survive every
  * render; the other parts are redrawn when what they show changed.
  */
 
 import {
 	type Annotation,
+	appLabel,
 	type Case,
 	isPageOf,
 	MAX_COMMENT,
@@ -37,6 +38,8 @@ export interface Actions {
 	reopenMark(c: Case, a: Annotation): void;
 	saveComment(c: Case, a: Annotation, text: string): void;
 	deleteMark(c: Case, a: Annotation): void;
+	/** An AI app's finding on a mark: the first click asks, the second deletes. */
+	deleteFinding(c: Case, a: Annotation, findingId: string): void;
 	openAndLoad(c: Case): void;
 	openPage(c: Case): void;
 	matchSize(c: Case): void;
@@ -113,7 +116,11 @@ function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 			),
 			progress(c),
 			c.verdict
-				? h("span", { class: "meta" }, `Verdict: ${c.verdict.slice(0, 80)}`)
+				? h(
+						"span",
+						{ class: "meta" },
+						`Summary for the developer: ${c.verdict.slice(0, 80)}`,
+					)
 				: null,
 		),
 		here
@@ -402,7 +409,8 @@ let parts: CaseParts | undefined;
 function createParts(c: Case, actions: Actions): CaseParts {
 	const verdict: HTMLTextAreaElement = h("textarea", {
 		id: "verdict",
-		placeholder: "What should change, as agreed?",
+		placeholder:
+			"What should change, as agreed. Whoever loads this case sees it first.",
 		maxlength: String(MAX_VERDICT),
 		"data-case": c.id,
 		oninput: () => actions.typeVerdict(c.id, verdict.value),
@@ -506,14 +514,15 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			created.deleteButton,
 		),
 		created.hint,
-		// What the whole case comes to: the case's, not a mark's.
+		// What the whole case comes to: the case's, not a mark's. Stored as
+		// verdict, its name before (DEC-019).
 		h(
 			"div",
 			{ class: "verdict" },
 			h(
 				"div",
 				{ class: "verdict-head" },
-				h("label", { for: "verdict" }, "Verdict"),
+				h("label", { for: "verdict" }, "Summary for the developer"),
 				verdictStatus,
 				h(
 					"button",
@@ -523,7 +532,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 						id: "save-verdict",
 						onclick: () => actions.saveVerdict(c.id, verdict.value),
 					},
-					"Save verdict",
+					"Save summary",
 				),
 			),
 			verdict,
@@ -782,7 +791,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	if (parts?.current.id !== c.id) parts = createParts(c, actions);
 	const p = parts;
 	p.current = c;
-	// The verdict: what the store has, unless the user typed another.
+	// The summary: what the store has, unless the user typed another.
 	const draft = state.verdictDrafts.get(c.id);
 	const verdict = draft ?? c.verdict ?? "";
 	if (p.verdict.value !== verdict) p.verdict.value = verdict;
@@ -806,7 +815,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		p.origin,
 		c.importedAt === undefined
 			? undefined
-			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments and verdict are whoever wrote the file's, whatever author they name.`,
+			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, summary and findings are whoever wrote the file's, whatever author or AI app they name.`,
 	);
 	// Marks the panel loaded, or an AI app (the page says so).
 	p.loadedHere =
@@ -826,6 +835,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	const edit = state.markEdit;
 	if (edit === undefined) focusedForm = undefined;
 	const markArmed = state.markDeleteArmed?.annotationId;
+	const findingArmed = state.findingDeleteArmed?.findingId;
 	const marksKey = JSON.stringify([
 		c.updatedAt,
 		images?.version,
@@ -833,6 +843,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		// What is typed stays out: a key press redraws nothing.
 		edit ? [edit.annotationId, edit.mode] : null,
 		markArmed ?? null,
+		findingArmed ?? null,
 	]);
 	if (marksKey !== p.marksKey) {
 		const sorted = [...c.annotations].sort((x, y) => x.number - y.number);
@@ -842,6 +853,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 				match: loaded?.matches.get(a.id),
 				edit: edit?.annotationId === a.id ? edit : undefined,
 				armed: markArmed === a.id,
+				findingArmed,
 				actions,
 				changed: () => syncToggleAll(),
 			}),
@@ -937,6 +949,8 @@ interface MarkContext {
 	match: AnnotationMatch | undefined;
 	edit: PanelState["markEdit"];
 	armed: boolean;
+	/** The finding whose Delete was clicked once. */
+	findingArmed: string | undefined;
 	actions: Actions;
 	/** A mark opened or closed by its own head. */
 	changed: () => void;
@@ -977,6 +991,13 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 			a.comment || "No comment",
 		),
 		a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
+		a.findings?.length
+			? h(
+					"span",
+					{ class: "tag findings-count" },
+					`${a.findings.length} AI finding${a.findings.length === 1 ? "" : "s"}`,
+				)
+			: null,
 		state ? h("span", { class: "state" }, state) : null,
 	);
 	const show = canShow(m)
@@ -997,6 +1018,7 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 		{ class: "body", id: bodyId },
 		x.crop ? cropView(c.id, a, x.crop) : null,
 		a.resolution ? resolutionLine(a) : null,
+		findingsList(c, a, x.findingArmed, actions),
 		a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
 		m ? matchView(c.id, a, m, actions) : null,
 		edit
@@ -1008,6 +1030,67 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 	li.append(h("div", { class: "mark-head" }, toggle, show), body);
 	setOpen(c.id, li, edit !== undefined || openMarks.has(`${c.id}:${a.id}`));
 	return li;
+}
+
+/** When a finding was written, and last changed. */
+function findingTime(at: string, editedAt: string | undefined): string {
+	return editedAt
+		? `${formatDate(at)}, edited ${formatDate(editedAt)}`
+		: formatDate(at);
+}
+
+/**
+ * The AI apps' findings on a mark, under the user's comment and apart from
+ * it: each with its app and time, and a Delete that asks once more.
+ */
+function findingsList(
+	c: Case,
+	a: Annotation,
+	armed: string | undefined,
+	actions: Actions,
+): HTMLElement | null {
+	const findings = a.findings ?? [];
+	if (findings.length === 0) return null;
+	return h(
+		"section",
+		{ class: "findings", "aria-label": `AI findings on mark ${a.number}` },
+		h("h3", {}, "AI findings"),
+		h(
+			"ul",
+			{},
+			...findings.map((f) =>
+				h(
+					"li",
+					{ "data-finding": f.id },
+					h("p", { class: "finding-text" }, f.text),
+					h(
+						"div",
+						{ class: "finding-meta" },
+						h(
+							"span",
+							{ class: "meta" },
+							`${appLabel(f.app)}${f.imported ? ", as the file says" : ""}, ${findingTime(f.at, f.editedAt)}`,
+						),
+						h(
+							"button",
+							{
+								type: "button",
+								class: "small danger",
+								"data-finding-action": "delete",
+								"aria-label":
+									armed === f.id
+										? `Really delete this finding on mark ${a.number}?`
+										: `Delete this finding on mark ${a.number}`,
+								...(armed === f.id ? { "data-armed": true } : {}),
+								onclick: () => actions.deleteFinding(c, a, f.id),
+							},
+							armed === f.id ? "Really delete?" : "Delete",
+						),
+					),
+				),
+			),
+		),
+	);
 }
 
 // --- the AI app ------------------------------------------------------------------

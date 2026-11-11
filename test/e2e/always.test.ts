@@ -121,10 +121,10 @@ describe.skipIf(browserBinary === undefined)(
 		});
 
 		test("the question explains Always allow, which arms with Allow", async () => {
-			const result = call("set_verdict", { caseId: "c_1", verdict: "One" });
+			const result = call("set_summary", { caseId: "c_1", summary: "One" });
 			await panel.waitFor(QUESTION, 10_000);
 			expect(await panel.eval<string>(`${QUESTION}.textContent`)).toContain(
-				"Always allow: Record the verdict runs without asking for Test client (client.example), until you disconnect it.",
+				"Always allow: Record the summary for the developer runs without asking for Test client (client.example), until you disconnect it.",
 			);
 			expect(
 				await panel.eval(
@@ -137,10 +137,10 @@ describe.skipIf(browserBinary === undefined)(
 
 		test("Always allow skips the next question of that tool for that app, not of another tool", async () => {
 			expect(
-				(await asks("set_verdict", { caseId: "c_1", verdict: "Two" }, "always"))
+				(await asks("set_summary", { caseId: "c_1", summary: "Two" }, "always"))
 					.isError,
 			).toBeFalsy();
-			await runs("set_verdict", { caseId: "c_1", verdict: "Three" });
+			await runs("set_summary", { caseId: "c_1", summary: "Three" });
 			// Another tool still asks.
 			expect(
 				(await asks("delete_case", { caseId: "c_2" }, "deny")).isError,
@@ -148,13 +148,13 @@ describe.skipIf(browserBinary === undefined)(
 			expect(await caseIds(h)).toContain("c_2");
 			// The card lists it under the app.
 			await panel.waitFor(
-				`${GRANT}.textContent.includes("Always allowed: Record the verdict")`,
+				`${GRANT}.textContent.includes("Always allowed: Record the summary for the developer")`,
 			);
 		});
 
 		test("Ask again in the card takes it back: the tool asks again", async () => {
 			await panel.eval(
-				`(() => { const b = ${GRANT}.querySelector('[data-focus="ask-again:set_verdict"]'); b.focus(); b.click(); })()`,
+				`(() => { const b = ${GRANT}.querySelector('[data-focus="ask-again:set_summary"]'); b.focus(); b.click(); })()`,
 			);
 			await panel.waitFor(
 				`!${GRANT}.textContent.includes("Always allowed")`,
@@ -168,7 +168,7 @@ describe.skipIf(browserBinary === undefined)(
 			).toBe("allow-all");
 			expect(await kept()).toBeUndefined();
 			expect(
-				(await asks("set_verdict", { caseId: "c_1", verdict: "Four" }, "deny"))
+				(await asks("set_summary", { caseId: "c_1", summary: "Four" }, "deny"))
 					.isError,
 			).toBe(true);
 		});
@@ -183,13 +183,13 @@ describe.skipIf(browserBinary === undefined)(
 				10_000,
 			);
 			await panel.waitFor(`${allowAll}.checked`);
-			await runs("set_verdict", { caseId: "c_1", verdict: "Five" });
+			await runs("set_summary", { caseId: "c_1", summary: "Five" });
 			await runs("delete_case", { caseId: "c_2" });
 			expect(await caseIds(h)).not.toContain("c_2");
 			await panel.eval(`${allowAll}.click()`);
 			await until(kept, (k) => k === undefined, 10_000);
 			expect(
-				(await asks("set_verdict", { caseId: "c_1", verdict: "Six" }, "deny"))
+				(await asks("set_summary", { caseId: "c_1", summary: "Six" }, "deny"))
 					.isError,
 			).toBe(true);
 		});
@@ -198,7 +198,7 @@ describe.skipIf(browserBinary === undefined)(
 			// The panel's window in front: the one closing it acts on.
 			await tab.page.activate();
 			await closeSidePanel(h, panel);
-			const result = call("set_verdict", { caseId: "c_1", verdict: "Seven" });
+			const result = call("set_summary", { caseId: "c_1", summary: "Seven" });
 			const id = await newNotification(h);
 			// After the guard against a click that came too soon.
 			await Bun.sleep(600);
@@ -207,12 +207,12 @@ describe.skipIf(browserBinary === undefined)(
 			await until(
 				kept,
 				(k) =>
-					Object.values(k ?? {}).some((e) => e.tools.includes("set_verdict")),
+					Object.values(k ?? {}).some((e) => e.tools.includes("set_summary")),
 				10_000,
 			);
 			// No notification for the next call.
 			expect(
-				(await call("set_verdict", { caseId: "c_1", verdict: "Eight" }))
+				(await call("set_summary", { caseId: "c_1", summary: "Eight" }))
 					.isError,
 			).toBeFalsy();
 			expect(await notifications(h)).toEqual([]);
@@ -232,9 +232,9 @@ describe.skipIf(browserBinary === undefined)(
 			);
 			const end = Date.now() + 20_000;
 			for (;;) {
-				const again = await call("set_verdict", {
+				const again = await call("set_summary", {
 					caseId: "c_1",
-					verdict: "Nine",
+					summary: "Nine",
 				}).catch(() => undefined);
 				if (again !== undefined && !again.isError) break;
 				if (Date.now() > end) throw new Error("the address did not answer");
@@ -247,7 +247,7 @@ describe.skipIf(browserBinary === undefined)(
 			await tab.page.activate();
 			panel = await openSidePanel(h);
 			await panel.waitFor(
-				`${GRANT}?.textContent.includes("Always allowed: Record the verdict")`,
+				`${GRANT}?.textContent.includes("Always allowed: Record the summary for the developer")`,
 				10_000,
 			);
 		}, 60_000);
@@ -265,7 +265,7 @@ describe.skipIf(browserBinary === undefined)(
 			await client.close();
 			await pairApp();
 			expect(
-				(await asks("set_verdict", { caseId: "c_3", verdict: "Ten" }, "deny"))
+				(await asks("set_summary", { caseId: "c_3", summary: "Ten" }, "deny"))
 					.isError,
 			).toBe(true);
 		}, 60_000);

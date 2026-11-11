@@ -819,8 +819,8 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				const client = await pairedClient(panel, relay.store);
 				try {
 					const verdict = client.callTool({
-						name: "set_verdict",
-						arguments: { caseId: "c_tool", verdict: "Darker" },
+						name: "set_summary",
+						arguments: { caseId: "c_tool", summary: "Darker" },
 					});
 					await answerInPanel(panel, "allow");
 					expect((await verdict).isError).toBeFalsy();

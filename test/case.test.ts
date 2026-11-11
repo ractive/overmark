@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	type Finding,
+	isOwnFinding,
 	isPageOf,
+	MAX_FINDING,
+	MAX_FINDINGS,
 	MAX_URL,
 	newId,
 	nextNumbers,
@@ -11,7 +15,10 @@ import {
 	shapeOnBox,
 	validateCase,
 	withComment,
+	withFinding,
+	withFindingText,
 	withoutAnnotation,
+	withoutFinding,
 	withResolution,
 } from "../src/lib/case.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -155,6 +162,99 @@ describe("validateCase limits", () => {
 			),
 		);
 		expect(c.annotations[0]?.element?.attributes).toEqual({ href: "/x" });
+	});
+});
+
+describe("findings on a mark", () => {
+	const claude = {
+		id: "https://claude.ai/oauth",
+		name: "Claude",
+		host: "claude.ai",
+	};
+	const finding = (id: string, extra: Partial<Finding> = {}): Finding => ({
+		id,
+		text: "Padding",
+		app: claude,
+		at: "2026-11-10T10:00:00Z",
+		...extra,
+	});
+	const withOne = (f: unknown) => {
+		const c = withMarks();
+		(c.annotations[0] as unknown as Record<string, unknown>)["findings"] = f;
+		return c;
+	};
+
+	test("are kept through validation; an empty list is none", () => {
+		const c = withOne([finding("f_1", { editedAt: "2026-11-10T11:00:00Z" })]);
+		expect(validateCase(JSON.parse(JSON.stringify(c)))).toEqual(c);
+		expect(validateCase(withOne([])).annotations[0]).not.toHaveProperty(
+			"findings",
+		);
+		// Only a finding from a file says so.
+		expect(
+			validateCase(withOne([finding("f_1", { imported: false } as never)]))
+				.annotations[0]?.findings?.[0],
+		).toEqual(finding("f_1"));
+	});
+
+	test("are refused when malformed, too long, too many or twice the same", () => {
+		const bad = (f: unknown, what: string) =>
+			expect(() => validateCase(withOne(f))).toThrow(what);
+		bad({}, "findings: must be an array");
+		bad([finding("f_1", { text: "x".repeat(MAX_FINDING + 1) })], "text");
+		bad([finding("f_1"), finding("f_1")], "is used twice");
+		bad([finding("../x")], "not a valid id");
+		bad([{ ...finding("f_1"), app: { name: "x" } }], "app.id");
+		bad([finding("f_1", { imported: "yes" } as never)], "imported");
+		bad(
+			Array.from({ length: MAX_FINDINGS + 1 }, (_, i) => finding(`f_${i}`)),
+			`more than ${MAX_FINDINGS}`,
+		);
+	});
+
+	test("are added, edited and deleted; the comment and its author stay", () => {
+		const c = withMarks();
+		const added = withFinding(c, "a1", finding("f_1", { text: " x " }), "t1");
+		expect(added.annotations[0]?.findings).toEqual([
+			finding("f_1", { text: "x" }),
+		]);
+		expect(added.annotations[0]?.comment).toBe("x");
+		expect(added.annotations[0]?.author).toBe("user");
+		expect(added.updatedAt).toBe("t1");
+		const edited = withFindingText(added, "a1", "f_1", "y", "t2");
+		expect(edited.annotations[0]?.findings?.[0]).toMatchObject({
+			text: "y",
+			at: "2026-11-10T10:00:00Z",
+			editedAt: "t2",
+		});
+		const gone = withoutFinding(edited, "a1", "f_1", "t3");
+		expect(gone.annotations[0]).not.toHaveProperty("findings");
+		expect(() => withoutFinding(gone, "a1", "f_1", "t4")).toThrow(
+			"Mark 1 has no finding f_1",
+		);
+		// The user's edit of the comment keeps them.
+		expect(
+			withComment(added, "a1", "new", "t5").annotations[0]?.findings,
+		).toHaveLength(1);
+	});
+
+	test("a mark holds at most MAX_FINDINGS", () => {
+		let c = withMarks();
+		for (let i = 0; i < MAX_FINDINGS; i++)
+			c = withFinding(c, "a1", finding(`f_${i}`), "t");
+		expect(() => withFinding(c, "a1", finding("f_more"), "t")).toThrow(
+			`${MAX_FINDINGS} findings`,
+		);
+	});
+
+	test("are an app's own by its client id, unless they came from a file", () => {
+		expect(isOwnFinding(finding("f_1"), claude.id)).toBe(true);
+		expect(isOwnFinding(finding("f_1"), "https://chatgpt.com/cimd.json")).toBe(
+			false,
+		);
+		expect(isOwnFinding(finding("f_1", { imported: true }), claude.id)).toBe(
+			false,
+		);
 	});
 });
 

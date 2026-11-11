@@ -164,7 +164,8 @@ export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
  * Store a read export: replacing a case with the same id, or as a copy with
  * a new id. Either everything is stored or nothing changes. It is marked as
  * imported, whatever the file says, and keeps no more of the page's address
- * than a saved case does.
+ * than a saved case does. Its findings are no AI app's own: the app a finding
+ * names is whatever the file says (DEC-019).
  */
 export async function storeImport(
 	store: CaseStore,
@@ -180,6 +181,14 @@ export async function storeImport(
 				}
 			: {}),
 		page: { ...parsed.case.page, url: plainUrl(parsed.case.page.url) },
+		annotations: parsed.case.annotations.map((a) =>
+			a.findings === undefined
+				? a
+				: {
+						...a,
+						findings: a.findings.map((f) => ({ ...f, imported: true })),
+					},
+		),
 		importedAt: (options.now ?? new Date()).toISOString(),
 	};
 	await store.replaceCase(c, parsed.images);
