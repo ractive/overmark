@@ -18,3 +18,7 @@
 
 - The owner saw Overmark's icon do nothing while Claude in Chrome's panel was open. The panel now opens with the tab, as in the tab-mcp extension (DEC-017); the store package's e2e test, which failed with it in CI, waits for the viewport to keep its size before it clicks
 - The owner brought "Always allow" back. DEC-018, iteration 11: per AI app and tool from a question (the panel's "Always allow", a notification's Allow and Always allow, closing it is Don't allow), and "Allow all changes" per app in the AI app card with "Ask again" for each tool; kept in the worker's settings database until the app is disconnected (Disconnect, New address, the relay no longer listing it). Replaces DEC-008's "every time"
+
+## 2026-11-11
+
+- Iteration 12: tab-mcp client 0.12.1 and relay 0.9.0; the pairing box gets a collapsed "How do I add it?" with the client library's steps per AI app (Claude, ChatGPT, Claude Code, Codex), each command with its own Copy and a status line for what a Copy did, the guide link last in it instead of the separate how-to link (as tab-mcp for Chrome). The questions escape with the library's `escapeInvisible`, which also covers variation selectors, private-use and lone surrogates

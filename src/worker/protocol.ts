@@ -11,6 +11,12 @@
 /** The name of the side panel's port (`chrome.runtime.connect`). */
 export const PANEL_PORT = "ai";
 
+/**
+ * The MCP server's name, which Overmark registers with the relay: the side
+ * panel's setup steps name the server by it in their commands.
+ */
+export const SERVER_NAME = "overmark";
+
 /** The side panel's page in the build. */
 export const PANEL_PATH = "/sidepanel/index.html";
 

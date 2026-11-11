@@ -32,6 +32,7 @@ import {
 	type CallView,
 	type PanelCommand,
 	parseCommand,
+	SERVER_NAME,
 	type WorkerMessage,
 } from "./protocol.ts";
 import {
@@ -236,7 +237,7 @@ export class Connection {
 		const mcp: TabMcp = new TabMcp({
 			relay,
 			server: {
-				name: "overmark",
+				name: SERVER_NAME,
 				title: "Overmark",
 				version: chrome.runtime.getManifest().version,
 				instructions: INSTRUCTIONS,
