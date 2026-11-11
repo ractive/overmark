@@ -15,12 +15,14 @@ becomes the "Summary for the developer". The decision is DEC-019.
 ## Scope
 
 - `src/lib/case.ts`: `Finding` and `FindingApp` on `Annotation.findings`, their
-  validation and limits (`MAX_FINDING`, `MAX_FINDINGS`), `withFinding`,
-  `withFindingText`, `withoutFinding`, `isOwnFinding`, `appLabel`.
+  validation and limits (`MAX_FINDING`, `MAX_FINDINGS`, `MAX_FINDINGS_TEXT` per case),
+  `withFinding`, `withFindingText`, `withoutFinding`, `isOwnFinding`, `appLabel`;
+  lengths in code points (`textLength`, `cutText`).
 - Tools: `add_finding`, `edit_finding`, `delete_finding` (own findings only, by the
   caller's client id); get_case's findings with `own`; `set_verdict` becomes
   `set_summary`, and `verdict` becomes `summary` in list_cases and get_case; the
-  instructions; the questions name the mark and the finding.
+  instructions; the questions name the mark and the finding; a large case's get_case
+  shows each finding as a 200-character preview (`cut: true`).
 - Side panel: a mark's AI findings under its comment with the app and the time, Delete
   asking once more, the count in the mark's head; "Summary for the developer" with its
   placeholder, "Save summary", the case list's preview.
@@ -39,6 +41,9 @@ becomes the "Summary for the developer". The decision is DEC-019.
       app, another app's edit and delete are refused, the user deletes it
 - [x] Tests that called set_verdict updated
 - [x] Docs
+- [x] Review of PR 33: deleting a finding keeps the mark's unsaved form; the panel's
+      Delete state per mark and finding; lengths in code points; at most 200,000
+      characters of findings per case, and previews in a large get_case
 
 ## Left open
 

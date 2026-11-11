@@ -2,17 +2,22 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	cutText,
 	type Finding,
+	findingsTextOf,
 	isOwnFinding,
 	isPageOf,
+	MAX_COMMENT,
 	MAX_FINDING,
 	MAX_FINDINGS,
+	MAX_FINDINGS_TEXT,
 	MAX_URL,
 	newId,
 	nextNumbers,
 	plainUrl,
 	samePath,
 	shapeOnBox,
+	textLength,
 	validateCase,
 	withComment,
 	withFinding,
@@ -245,6 +250,116 @@ describe("findings on a mark", () => {
 		expect(() => withFinding(c, "a1", finding("f_more"), "t")).toThrow(
 			`${MAX_FINDINGS} findings`,
 		);
+	});
+
+	test("a case holds at most MAX_FINDINGS_TEXT of finding text; an edit that shrinks it may pass", () => {
+		const base = withMarks();
+		const first = base.annotations[0] as Annotation;
+		// One mark more than the limit needs, each to hold its most.
+		const marks = MAX_FINDINGS_TEXT / (MAX_FINDING * MAX_FINDINGS) + 1;
+		let c: Case = {
+			...base,
+			annotations: Array.from({ length: marks }, (_, i) => ({
+				...first,
+				id: `a${i + 1}`,
+				number: i + 1,
+			})),
+		};
+		const full = "x".repeat(MAX_FINDING);
+		let added = 0;
+		let refused: unknown;
+		try {
+			for (let m = 1; m <= marks; m++)
+				for (let i = 0; i < MAX_FINDINGS; i++) {
+					c = withFinding(c, `a${m}`, finding(`f_${i}`, { text: full }), "t");
+					added++;
+				}
+		} catch (error) {
+			refused = error;
+		}
+		expect(added).toBe(MAX_FINDINGS_TEXT / MAX_FINDING);
+		expect(findingsTextOf(c)).toBe(MAX_FINDINGS_TEXT);
+		expect(String(refused)).toContain("too much finding text");
+		expect(String(refused)).toContain("Shorten or delete findings");
+		// Growing one is refused too; shortening one is not.
+		expect(() => withFindingText(c, "a1", "f_0", full, "t")).not.toThrow();
+		const shorter = withFindingText(c, "a1", "f_0", "short", "t");
+		expect(findingsTextOf(shorter)).toBe(MAX_FINDINGS_TEXT - MAX_FINDING + 5);
+		expect(() =>
+			withFinding(shorter, `a${marks}`, finding("f_more", { text: full }), "t"),
+		).toThrow("too much finding text");
+		// Full again, then the short one grows: refused.
+		const refilled = withFinding(
+			shorter,
+			`a${marks}`,
+			finding("f_fill", { text: "z".repeat(MAX_FINDING - 5) }),
+			"t",
+		);
+		expect(findingsTextOf(refilled)).toBe(MAX_FINDINGS_TEXT);
+		expect(() =>
+			withFindingText(refilled, "a1", "f_0", "y".repeat(10), "t"),
+		).toThrow("too much finding text");
+		// A case over the limit, from a file, may still shrink.
+		const bigger: Case = {
+			...c,
+			annotations: [
+				...c.annotations,
+				{ ...first, id: "a9", number: 9, findings: [finding("f_1")] },
+			],
+		};
+		expect(findingsTextOf(bigger)).toBeGreaterThan(MAX_FINDINGS_TEXT);
+		expect(() => withFindingText(bigger, "a9", "f_1", "P", "t")).not.toThrow();
+	});
+
+	test("lengths count characters as JSON Schema does: an emoji is one, and no pair is cut", () => {
+		const emoji = "\u{1F600}";
+		expect(emoji.length).toBe(2);
+		expect(textLength(`a${emoji}b`)).toBe(3);
+		expect(cutText(`a${emoji}b`, 2)).toBe(`a${emoji}`);
+		expect(cutText(`${emoji}${emoji}`, 1)).toBe(emoji);
+		expect(cutText("abc", 5)).toBe("abc");
+		// A finding of MAX_FINDING emoji is valid and kept whole.
+		const astral = emoji.repeat(MAX_FINDING);
+		const added = withFinding(
+			withMarks(),
+			"a1",
+			finding("f_1", { text: astral }),
+			"t",
+		);
+		expect(added.annotations[0]?.findings?.[0]?.text).toBe(astral);
+		expect(validateCase(JSON.parse(JSON.stringify(added)))).toEqual(added);
+		// One more is cut to MAX_FINDING, between two pairs.
+		const edited = withFindingText(
+			added,
+			"a1",
+			"f_1",
+			`${astral}${emoji}`,
+			"t",
+		);
+		expect(edited.annotations[0]?.findings?.[0]?.text).toBe(astral);
+		const odd = `x${astral}`;
+		const cut = withFindingText(added, "a1", "f_1", odd, "t").annotations[0]
+			?.findings?.[0]?.text as string;
+		expect(cut).toBe(`x${emoji.repeat(MAX_FINDING - 1)}`);
+		expect(textLength(cut)).toBe(MAX_FINDING);
+		expect(() =>
+			validateCase(withOne([finding("f_1", { text: `${astral}${emoji}` })])),
+		).toThrow(`longer than ${MAX_FINDING} characters`);
+		// The comment and the resolution note are cut the same way.
+		const long = emoji.repeat(MAX_COMMENT + 1);
+		const commented = withComment(withMarks(), "a1", long, "t");
+		expect(commented.annotations[0]?.comment).toBe(emoji.repeat(MAX_COMMENT));
+		expect(validateCase(commented)).toEqual(commented);
+		const resolved = withResolution(
+			withMarks(),
+			"a1",
+			{ kind: "fixed", note: long },
+			"t",
+		);
+		expect(resolved.annotations[0]?.resolution?.note).toBe(
+			emoji.repeat(MAX_COMMENT),
+		);
+		expect(validateCase(resolved)).toEqual(resolved);
 	});
 
 	test("are an app's own by its client id, unless they came from a file", () => {

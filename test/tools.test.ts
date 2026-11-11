@@ -15,6 +15,7 @@ import {
 	type ElementDetails,
 	MAX_FINDING,
 	MAX_FINDINGS,
+	MAX_FINDINGS_TEXT,
 	validateCase,
 } from "../src/lib/case.ts";
 import type {
@@ -29,6 +30,8 @@ import {
 	type CurrentTab,
 	confirmLines,
 	createTools,
+	DEFAULT_MESSAGE_BYTES,
+	FINDING_PREVIEW,
 	type ImageTools,
 	INSTRUCTIONS,
 	type TabBridge,
@@ -1123,7 +1126,7 @@ describe("findings", () => {
 		expect(() => validateCase(store.cases.get("c_1"))).not.toThrow();
 	});
 
-	test("a large case cuts long findings", async () => {
+	test("a large case shows long findings as a preview, and says so", async () => {
 		build({ maxMessageBytes: () => 40_000 });
 		await seed(10, "x".repeat(20_000));
 		await call("add_finding", {
@@ -1131,8 +1134,83 @@ describe("findings", () => {
 			mark: 1,
 			text: "y".repeat(MAX_FINDING),
 		});
+		await call("add_finding", { caseId: "c_1", mark: 1, text: "Short" });
+		const result = await call("get_case", { caseId: "c_1" });
+		const [long, short] = json(result).marks[0].findings;
+		expect(long.text).toBe(`${"y".repeat(FINDING_PREVIEW)}…`);
+		expect(long.cut).toBe(true);
+		expect(short.text).toBe("Short");
+		expect(short).not.toHaveProperty("cut");
+		expect(result.content[1]?.text).toContain(
+			`a finding with cut: true shows its first ${FINDING_PREVIEW} characters only`,
+		);
+		// Emoji count as one character each, and no pair is cut.
+		const emoji = "\u{1F600}";
+		await store.updateCase("c_1", (c) => {
+			const value = structuredClone(c as Case);
+			const f = value.annotations[0]?.findings?.[1];
+			if (f) f.text = emoji.repeat(FINDING_PREVIEW + 1);
+			return { value };
+		});
 		const view = json(await call("get_case", { caseId: "c_1" }));
-		expect(view.marks[0].findings[0].text).toHaveLength(1001);
+		expect(view.marks[0].findings[1].text).toBe(
+			`${emoji.repeat(FINDING_PREVIEW)}…`,
+		);
+	});
+
+	test("a case holds at most MAX_FINDINGS_TEXT of finding text: add and edit refuse past it", async () => {
+		const marks = MAX_FINDINGS_TEXT / (MAX_FINDING * MAX_FINDINGS) + 1;
+		await seed(10, undefined, marks);
+		const full = "y".repeat(MAX_FINDING);
+		let id = "";
+		for (let m = 1; m < marks; m++)
+			for (let i = 0; i < MAX_FINDINGS; i++)
+				id = added(
+					await call("add_finding", { caseId: "c_1", mark: m, text: full }),
+				);
+		await expect(
+			call("add_finding", { caseId: "c_1", mark: marks, text: "One more" }),
+		).rejects.toThrow(
+			"The case holds too much finding text: at most 200000 characters on all marks together. Shorten or delete findings of your own first.",
+		);
+		const input = { caseId: "c_1", mark: marks - 1, finding: id };
+		await call("edit_finding", { ...input, text: "Short" });
+		await call("add_finding", {
+			caseId: "c_1",
+			mark: marks,
+			text: "z".repeat(MAX_FINDING - 5),
+		});
+		await expect(
+			call("edit_finding", { ...input, text: "Longer now" }),
+		).rejects.toThrow("too much finding text");
+		expect(() => validateCase(store.cases.get("c_1"))).not.toThrow();
+	});
+
+	test("a case of typical size with the most finding text comes whole", async () => {
+		build({ maxMessageBytes: () => DEFAULT_MESSAGE_BYTES });
+		// 30 marks with comments of a few lines, findings on some.
+		await seed(10, "The label is cut off on small screens. ".repeat(8), 30);
+		const text = `${"The padding comes from Card.tsx, line 42.\n".repeat(116)}`;
+		expect(text.length).toBeLessThanOrEqual(MAX_FINDING);
+		for (
+			let n = 0, m = 1;
+			n + text.length <= MAX_FINDINGS_TEXT;
+			n += text.length
+		)
+			await call("add_finding", {
+				caseId: "c_1",
+				mark: (m++ % 30) + 1,
+				text,
+			});
+		const c = await store.getCase("c_1");
+		const total = (c?.annotations ?? []).reduce(
+			(n, a) => n + (a.findings ?? []).reduce((k, f) => k + f.text.length, 0),
+			0,
+		);
+		expect(total).toBeGreaterThan(MAX_FINDINGS_TEXT - MAX_FINDING);
+		const result = await call("get_case", { caseId: "c_1", images: false });
+		expect(result.content).toHaveLength(1);
+		expect(JSON.stringify(json(result))).not.toContain('"cut"');
 	});
 
 	test("the question names the mark and the finding, and says when it will be refused", async () => {

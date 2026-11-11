@@ -73,8 +73,13 @@ export interface PanelState {
 	markEdit: MarkEdit | undefined;
 	/** A mark's Delete, clicked once: the second click deletes. */
 	markDeleteArmed: { annotationId: string; at: number } | undefined;
-	/** A finding's Delete, clicked once: the second click deletes. */
-	findingDeleteArmed: { findingId: string; at: number } | undefined;
+	/**
+	 * A finding's Delete, clicked once: the second click deletes. A finding's
+	 * id is unique on its mark only (a case from a file).
+	 */
+	findingDeleteArmed:
+		| { annotationId: string; findingId: string; at: number }
+		| undefined;
 	/**
 	 * Next to "Save summary": "Saved", or why not. The summary for the
 	 * developer is stored as `verdict` (DEC-019).

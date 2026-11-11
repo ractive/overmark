@@ -426,13 +426,29 @@ the developer".
   wrote it (`app`: its client id, its declared name and the verified host, as the relay
   gave them for the call), when it was written (`at`) and last changed (`editedAt`). A
   mark holds at most 20. The user's comment stays the user's: no tool changes it.
+- **A case holds at most 200,000 characters of findings.** All marks' finding texts
+  together: `add_finding` and `edit_finding` refuse a change past it ("The case holds
+  too much finding text … Shorten or delete findings of your own first"); a change
+  that shrinks the total passes, so a case from a file over the limit can still be
+  tidied. Why this value: get_case sends a case whole while it takes at most half of the
+  result budget (768 KiB of the relay's 1 MiB message, so 384 KiB); a case of 30 marks
+  with comments of a few lines and 200,000 characters of plain findings is about 250 KB,
+  well under it. Text that is not ASCII is larger in UTF-8; such a case goes compact,
+  where each finding shows its first 200 characters with `cut: true`, so a large case
+  stays readable.
+- **Characters are code points.** Every length limit of the case (findings, comments,
+  notes, the summary) counts characters as JSON Schema's `maxLength` does, an emoji
+  one: the tools' schemas, the case's validation and the cuts agree, and a cut never
+  splits a surrogate pair.
 - **Own is the client id.** An app may edit or delete only its own findings: those whose
   `app.id` is the calling app's client id (its Client ID Metadata Document URL, such as
   `https://claude.ai/oauth`). Not the grant: that changes when the app pairs again or
   the address is renewed, and the app's findings stay its own. Not the name: any app can
   declare any name. get_case says `own` for each finding. Another app's finding is
   refused with a message that says whose it is. The user can delete any finding in the
-  side panel (Delete, then "Really delete?").
+  side panel (Delete, then "Really delete?"); a finding's id is unique on its mark only,
+  so the panel keys this on the mark and the finding, and a mark's open, unsaved
+  comment or resolve form stays open through it.
 - **A finding from a file is no app's own.** An import marks every finding
   `imported: true`, whatever the file says: the app a file names is whoever wrote the
   file's, so no app may change it, and the panel and case.md say "as the file says".

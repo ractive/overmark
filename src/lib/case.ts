@@ -35,6 +35,12 @@ export const MAX_COMMENT = 20_000;
 /** The longest finding an AI app may write on a mark, in characters. */
 export const MAX_FINDING = 5000;
 
+/**
+ * The most finding text a case may hold, all marks' findings together, in
+ * characters: get_case stays readable (DEC-019).
+ */
+export const MAX_FINDINGS_TEXT = 200_000;
+
 /** The most findings a mark may have. */
 export const MAX_FINDINGS = 20;
 
@@ -291,6 +297,29 @@ export function plainUrl(href: string): string {
 	}
 }
 
+/**
+ * The length of `text` in characters as JSON Schema's maxLength counts them:
+ * code points, an emoji one, not two UTF-16 units.
+ */
+export function textLength(text: string): number {
+	let n = 0;
+	for (const _ of text) n++;
+	return n;
+}
+
+/** `text` cut to `max` characters (code points), never inside a pair. */
+export function cutText(text: string, max: number): string {
+	if (text.length <= max) return text;
+	let end = 0;
+	let n = 0;
+	for (const ch of text) {
+		if (n === max) break;
+		end += ch.length;
+		n++;
+	}
+	return text.slice(0, end);
+}
+
 /** The IndexedDB key of a case's image. */
 export const imageKey = (caseId: string, path: string) => `${caseId}/${path}`;
 
@@ -444,7 +473,9 @@ function obj(v: unknown, path: string): Obj {
 
 function str(v: unknown, path: string, max = 100_000): string {
 	if (typeof v !== "string") fail(path, "must be a string");
-	if (v.length > max) fail(path, `longer than ${max} characters`);
+	// Never more characters than UTF-16 units.
+	if (v.length > max && textLength(v) > max)
+		fail(path, `longer than ${max} characters`);
 	return v;
 }
 
@@ -775,7 +806,7 @@ export function withResolution(
 		(a) => {
 			const { resolution: _, ...open } = a;
 			if (resolution === null) return open;
-			const note = resolution.note?.trim().slice(0, MAX_COMMENT) ?? "";
+			const note = cutText(resolution.note?.trim() ?? "", MAX_COMMENT);
 			return {
 				...open,
 				resolution: {
@@ -801,7 +832,7 @@ export function withComment(
 		// The text is the user's now, whoever wrote it first.
 		(a) => ({
 			...a,
-			comment: comment.trim().slice(0, MAX_COMMENT),
+			comment: cutText(comment.trim(), MAX_COMMENT),
 			author: "user",
 		}),
 		now,
@@ -847,6 +878,26 @@ const withFindings = (a: Annotation, findings: Finding[]): Annotation => {
 	return findings.length > 0 ? { ...rest, findings } : rest;
 };
 
+/** The finding text of all the case's marks, in characters. */
+export const findingsTextOf = (c: Case): number =>
+	c.annotations.reduce(
+		(n, a) => (a.findings ?? []).reduce((m, f) => m + textLength(f.text), n),
+		0,
+	);
+
+/**
+ * `next`, unless it holds more finding text than `MAX_FINDINGS_TEXT` and more
+ * than `before` did: a case from a file over the limit may still shrink.
+ */
+function withinFindingsText(before: Case, next: Case): Case {
+	const total = findingsTextOf(next);
+	if (total > MAX_FINDINGS_TEXT && total > findingsTextOf(before))
+		throw new CaseError(
+			`The case holds too much finding text: at most ${MAX_FINDINGS_TEXT} characters on all marks together. Shorten or delete findings of your own first.`,
+		);
+	return next;
+}
+
 function findingOf(a: Annotation, findingId: string): Finding {
 	const f = a.findings?.find((x) => x.id === findingId);
 	if (f === undefined)
@@ -861,7 +912,7 @@ export function withFinding(
 	finding: Finding,
 	now: string,
 ): Case {
-	return changed(
+	const next = changed(
 		c,
 		annotationId,
 		(a) => {
@@ -872,11 +923,12 @@ export function withFinding(
 				);
 			return withFindings(a, [
 				...findings,
-				{ ...finding, text: finding.text.trim().slice(0, MAX_FINDING) },
+				{ ...finding, text: cutText(finding.text.trim(), MAX_FINDING) },
 			]);
 		},
 		now,
 	);
+	return withinFindingsText(c, next);
 }
 
 /** The case with the finding's text replaced; `editedAt` is `now`. */
@@ -887,7 +939,7 @@ export function withFindingText(
 	text: string,
 	now: string,
 ): Case {
-	return changed(
+	const next = changed(
 		c,
 		annotationId,
 		(a) => {
@@ -896,13 +948,14 @@ export function withFindingText(
 				a,
 				(a.findings ?? []).map((f) =>
 					f.id === findingId
-						? { ...f, text: text.trim().slice(0, MAX_FINDING), editedAt: now }
+						? { ...f, text: cutText(text.trim(), MAX_FINDING), editedAt: now }
 						: f,
 				),
 			);
 		},
 		now,
 	);
+	return withinFindingsText(c, next);
 }
 
 /** The case without the finding. */

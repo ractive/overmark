@@ -2,7 +2,8 @@
  * End to end: AI apps' findings on a mark (DEC-019). An AI app adds one once
  * the user allows it; the side panel shows it under the mark with the app's
  * name; another AI app cannot edit or delete it, even when the user allows
- * the call; the user deletes it in the panel with a second click.
+ * the call; the user deletes it in the panel with a second click, and an
+ * unsaved comment form on the mark stays as it is.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -178,5 +179,35 @@ describe.skipIf(browserBinary === undefined)("AI findings on a mark", () => {
 		await panel.eval(`${DELETE}.click()`);
 		await panel.waitFor(`!${FINDING}`, 10_000);
 		expect((await storedMark(h))?.findings).toBeUndefined();
+	});
+
+	test("deleting a finding leaves the mark's unsaved comment form open", async () => {
+		const { result } = await allowed(claude, "add_finding", {
+			caseId: "c_f",
+			mark: 1,
+			text: "Another finding",
+		});
+		expect(result.isError).toBeFalsy();
+		await panel.waitFor(FINDING, 10_000);
+		const form = `document.querySelector('[data-annotation="a1"] [data-form="comment"] textarea')`;
+		await panel.eval(
+			`document.querySelector('[data-annotation="a1"] [data-mark-action="comment"]').click()`,
+		);
+		await panel.waitFor(form);
+		await panel.eval(`(() => {
+			const field = ${form};
+			field.value = "A draft not saved yet";
+			field.dispatchEvent(new Event("input", { bubbles: true }));
+		})()`);
+		await panel.eval(`${DELETE}.click()`);
+		await panel.waitFor(`${DELETE}?.textContent === "Really delete?"`);
+		await Bun.sleep(600);
+		await panel.eval(`${DELETE}.click()`);
+		await panel.waitFor(`!${FINDING}`, 10_000);
+		expect((await storedMark(h))?.findings).toBeUndefined();
+		expect(await panel.eval<string | undefined>(`${form}?.value`)).toBe(
+			"A draft not saved yet",
+		);
+		expect((await storedMark(h))?.comment).toBe("The button is too light");
 	});
 });

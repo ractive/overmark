@@ -835,7 +835,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	const edit = state.markEdit;
 	if (edit === undefined) focusedForm = undefined;
 	const markArmed = state.markDeleteArmed?.annotationId;
-	const findingArmed = state.findingDeleteArmed?.findingId;
+	const findingArmed = state.findingDeleteArmed;
 	const marksKey = JSON.stringify([
 		c.updatedAt,
 		images?.version,
@@ -843,7 +843,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		// What is typed stays out: a key press redraws nothing.
 		edit ? [edit.annotationId, edit.mode] : null,
 		markArmed ?? null,
-		findingArmed ?? null,
+		findingArmed ? [findingArmed.annotationId, findingArmed.findingId] : null,
 	]);
 	if (marksKey !== p.marksKey) {
 		const sorted = [...c.annotations].sort((x, y) => x.number - y.number);
@@ -853,7 +853,10 @@ function renderCase(state: PanelState, actions: Actions): void {
 				match: loaded?.matches.get(a.id),
 				edit: edit?.annotationId === a.id ? edit : undefined,
 				armed: markArmed === a.id,
-				findingArmed,
+				findingArmed:
+					findingArmed?.annotationId === a.id
+						? findingArmed.findingId
+						: undefined,
 				actions,
 				changed: () => syncToggleAll(),
 			}),
@@ -949,7 +952,7 @@ interface MarkContext {
 	match: AnnotationMatch | undefined;
 	edit: PanelState["markEdit"];
 	armed: boolean;
-	/** The finding whose Delete was clicked once. */
+	/** The finding of this mark whose Delete was clicked once. */
 	findingArmed: string | undefined;
 	actions: Actions;
 	/** A mark opened or closed by its own head. */

@@ -15,6 +15,7 @@ import {
 	appLabel,
 	type Case,
 	CaseError,
+	cutText,
 	type Finding,
 	type FindingApp,
 	imageScale,
@@ -22,6 +23,7 @@ import {
 	MAX_COMMENT,
 	MAX_FINDING,
 	MAX_FINDINGS,
+	MAX_FINDINGS_TEXT,
 	MAX_VERDICT,
 	newId,
 	nextNumbers,
@@ -145,8 +147,14 @@ function sizeOf(c: Content): number {
 /** Base64 length of a blob, without encoding it. */
 const base64Length = (blob: Blob) => Math.ceil(blob.size / 3) * 4;
 
-const cut = (value: string, max: number) =>
-	value.length > max ? `${value.slice(0, max)}…` : value;
+/** `value`, or its first `max` characters and "…". */
+const cut = (value: string, max: number) => {
+	const head = cutText(value, max);
+	return head === value ? value : `${head}…`;
+};
+
+/** How much of a finding the compact get_case shows, in characters. */
+export const FINDING_PREVIEW = 200;
 
 const CASE_ID = {
 	type: "string",
@@ -164,23 +172,28 @@ const imported = (c: Case) =>
  */
 export function findingApp(client: ToolCallClient): FindingApp {
 	return {
-		id: client.id.slice(0, 2000),
-		...(client.name ? { name: client.name.slice(0, 200) } : {}),
-		host: client.host.slice(0, 255),
+		id: cutText(client.id, 2000),
+		...(client.name ? { name: cutText(client.name, 200) } : {}),
+		host: cutText(client.host, 255),
 	};
 }
 
 /** A mark's findings for the AI app `clientId`, which may change its own. */
 function findingsView(a: Annotation, clientId: string, compact: boolean) {
-	return (a.findings ?? []).map((f) => ({
-		id: f.id,
-		text: compact ? cut(f.text, 1000) : f.text,
-		app: appLabel(f.app),
-		at: f.at,
-		...(f.editedAt ? { editedAt: f.editedAt } : {}),
-		...(f.imported ? { imported: true } : {}),
-		own: isOwnFinding(f, clientId),
-	}));
+	return (a.findings ?? []).map((f) => {
+		// In a large case, a long finding is a preview only.
+		const shown = compact ? cut(f.text, FINDING_PREVIEW) : f.text;
+		return {
+			id: f.id,
+			text: shown,
+			...(shown === f.text ? {} : { cut: true }),
+			app: appLabel(f.app),
+			at: f.at,
+			...(f.editedAt ? { editedAt: f.editedAt } : {}),
+			...(f.imported ? { imported: true } : {}),
+			own: isOwnFinding(f, clientId),
+		};
+	});
 }
 
 /**
@@ -533,7 +546,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 				content = [
 					text(caseView(c, self, true)),
 					text(
-						"The case is large: element details are summarized and long texts cut. load_case reports the elements on the page in front.",
+						`The case is large: element details are summarized and long texts cut; a finding with cut: true shows its first ${FINDING_PREVIEW} characters only. load_case reports the elements on the page in front.`,
 					),
 				];
 				used = content.reduce((n, b) => n + sizeOf(b), 0);
@@ -949,7 +962,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		},
 		annotations: { consequentialHint: true, idempotentHint: true },
 		execute: async ({ caseId, summary }) => {
-			const value = summary.trim().slice(0, MAX_VERDICT);
+			const value = cutText(summary.trim(), MAX_VERDICT);
 			// In one transaction, so a save running meanwhile keeps the summary.
 			// Stored as verdict, its name before (DEC-019).
 			await store.updateCase(caseId, (current) => {
@@ -1087,7 +1100,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 	const addFinding: Tool<{ caseId: string; mark: number; text: string }> = {
 		name: "add_finding",
 		title: "Add a finding to a mark",
-		description: `Add a finding of yours to a mark: what you found out about it (a cause, where the code is, what to change). It is kept apart from the user's comment and shows with your app's name. A mark holds at most ${MAX_FINDINGS} findings. The user is asked first.`,
+		description: `Add a finding of yours to a mark: what you found out about it (a cause, where the code is, what to change). It is kept apart from the user's comment and shows with your app's name. A mark holds at most ${MAX_FINDINGS} findings, a case at most ${MAX_FINDINGS_TEXT} characters of findings on all marks. The user is asked first.`,
 		inputSchema: {
 			type: "object",
 			properties: { caseId: CASE_ID, mark: MARK, text: FINDING_TEXT },

@@ -267,7 +267,11 @@ describe("a mark's status and actions", () => {
 		});
 		render(
 			caseState(c, (s) => {
-				s.findingDeleteArmed = { findingId: "f_2", at: 1 };
+				s.findingDeleteArmed = {
+					annotationId: "a1",
+					findingId: "f_2",
+					at: 1,
+				};
 			}),
 			actions,
 		);
@@ -294,6 +298,40 @@ describe("a mark's status and actions", () => {
 		expect(button("f_2").textContent).toBe("Really delete?");
 		button("f_1").click();
 		expect(deleted).toEqual(["a1:f_1"]);
+	});
+
+	test("a finding's Delete, clicked once, asks on its own mark only: ids repeat on other marks", () => {
+		const finding = (id: string) => ({
+			id,
+			text: "Same id elsewhere",
+			app: { id: "x", host: "other.example" },
+			at: "2026-11-10T10:00:00Z",
+		});
+		const c: Case = {
+			...twoMarks(),
+			annotations: [
+				{ ...mark(1), findings: [finding("f_1")] },
+				{ ...mark(2), findings: [finding("f_1")] },
+			],
+		};
+		render(
+			caseState(c, (s) => {
+				s.findingDeleteArmed = {
+					annotationId: "a2",
+					findingId: "f_1",
+					at: 1,
+				};
+			}),
+			noActions,
+		);
+		const button = (annotationId: string) =>
+			row(annotationId).querySelector(
+				'[data-finding="f_1"] [data-finding-action="delete"]',
+			) as unknown as HTMLButtonElement;
+		expect(button("a1").textContent).toBe("Delete");
+		expect(button("a1").hasAttribute("data-armed")).toBe(false);
+		expect(button("a2").textContent).toBe("Really delete?");
+		expect(button("a2").hasAttribute("data-armed")).toBe(true);
 	});
 
 	test("Delete asks once more", () => {
