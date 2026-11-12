@@ -164,6 +164,16 @@ describe("build", () => {
 			const content = await Bun.file(join(outdir, "content.js")).text();
 			expect(content).not.toContain("OVERMARK_TEST_BUILD");
 			expect(content).toContain('"closed"');
+			// Nor the side panel's way to take a folder without the picker (DEC-021).
+			const panel = new Bun.Glob("sidepanel/**/*.js");
+			let scripts = 0;
+			for await (const file of panel.scan(outdir)) {
+				scripts++;
+				const text = await Bun.file(join(outdir, file)).text();
+				expect(text).not.toContain("overmarkUseFolder");
+				expect(text).not.toContain("OVERMARK_TEST_BUILD");
+			}
+			expect(scripts).toBeGreaterThan(0);
 		} finally {
 			rmSync(outdir, { recursive: true, force: true });
 		}

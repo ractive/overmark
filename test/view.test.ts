@@ -1372,3 +1372,121 @@ describe("one import at a time", () => {
 		);
 	});
 });
+
+describe("the sync to a folder (DEC-021)", () => {
+	const sync = (
+		change: (s: PanelState["sync"]) => void,
+		actions = noActions,
+	) => {
+		const state = initialState();
+		change(state.sync);
+		render(state, actions);
+		return el<HTMLDivElement>("sync");
+	};
+	const buttons = (box: HTMLElement) =>
+		[...box.querySelectorAll("button")].map((b) => [
+			b.textContent,
+			b.title !== "",
+		]);
+
+	test("not syncing: one button that says what it does", () => {
+		const box = sync(() => {});
+		expect(buttons(box)).toEqual([["Sync to a folder…", true]]);
+		expect(box.querySelector("button")?.title).toContain(
+			"A deleted case keeps its file",
+		);
+	});
+
+	test("syncing: the folder, when it was last synced, Change folder and Stop syncing", () => {
+		const box = sync((s) => {
+			s.folder = "Overmark";
+			s.status = {
+				folderId: "f",
+				state: "synced",
+				lastSyncedAt: "2026-11-12T09:30:00Z",
+			};
+		});
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Syncing to Overmark",
+		);
+		expect(box.querySelector(".sync-line")?.textContent).toStartWith(
+			"Last synced ",
+		);
+		expect(buttons(box)).toEqual([
+			["Change folder…", true],
+			["Stop syncing", true],
+		]);
+	});
+
+	test("writing: how many cases are left", () => {
+		const box = sync((s) => {
+			s.folder = "Overmark";
+			s.status = { folderId: "f", state: "syncing", left: 3 };
+		});
+		expect(box.querySelector(".sync-line")?.textContent).toBe(
+			"Writing 3 cases…",
+		);
+	});
+
+	test("paused: says so, with Allow access first", () => {
+		let allowed = 0;
+		const box = sync(
+			(s) => {
+				s.folder = "Overmark";
+				s.status = {
+					folderId: "f",
+					state: "paused",
+					lastSyncedAt: "2026-11-12T09:30:00Z",
+				};
+			},
+			actionsWith({ syncAllow: () => allowed++ }),
+		);
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Sync paused: allow access again",
+		);
+		expect(buttons(box).map(([label]) => label)).toEqual([
+			"Allow access",
+			"Change folder…",
+			"Stop syncing",
+		]);
+		(
+			box.querySelector('[data-action="sync-allow"]') as HTMLButtonElement
+		).click();
+		expect(allowed).toBe(1);
+	});
+
+	test("failed: what went wrong and Try again", () => {
+		const box = sync((s) => {
+			s.folder = "Overmark";
+			s.status = {
+				folderId: "f",
+				state: "failed",
+				problem: "The folder “Overmark” is no longer there.",
+			};
+		});
+		expect(box.querySelector("[role=alert]")?.textContent).toBe(
+			"The folder “Overmark” is no longer there.",
+		);
+		expect(buttons(box).map(([label]) => label)).toContain("Try again");
+	});
+
+	test("drawn again only when it shows something else", () => {
+		const first = sync((s) => {
+			s.folder = "Overmark";
+			s.status = {
+				folderId: "f",
+				state: "synced",
+				lastSyncedAt: "2026-11-12T09:30:00Z",
+			};
+		}).querySelector("button");
+		const again = sync((s) => {
+			s.folder = "Overmark";
+			s.status = {
+				folderId: "f",
+				state: "synced",
+				lastSyncedAt: "2026-11-12T09:30:00Z",
+			};
+		}).querySelector("button");
+		expect(again).toBe(first);
+	});
+});

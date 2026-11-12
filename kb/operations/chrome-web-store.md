@@ -107,13 +107,14 @@ PRs (`.github/dependabot.yml`).
 > amber when only probable. The screenshots stay the record, so every mark makes sense
 > even when the page has changed.
 >
-> Export a case, or all of them, as a zip with a Markdown summary and the images, or connect an AI app
+> Export a case, or all of them, as a zip with a Markdown summary and the images, keep
+> every case synced to a folder you choose (in iCloud Drive or Dropbox, say), or connect an AI app
 > such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
 > page in front, read a marked element's HTML and CSS there, take screenshots, and
 > record what should change. Changes it wants to
 > make are shown to you first, every time.
 >
-> Your cases stay in your browser unless you export one or connect an AI app. Overmark
+> Your cases stay in your browser unless you export one, sync them to a folder or connect an AI app. Overmark
 > works inside the page, so that page's own scripts can see what it shows there and the
 > keys you press there.
 

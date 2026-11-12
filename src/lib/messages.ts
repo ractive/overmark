@@ -246,7 +246,11 @@ export interface SaveResult {
  */
 export type Broadcast =
 	| { type: "cases:changed"; caseId: string }
-	| { type: "overlay:changed"; state: OverlayState };
+	| { type: "overlay:changed"; state: OverlayState }
+	/** The worker's sync status changed (DEC-021). */
+	| { type: "sync:changed" }
+	/** From the side panel: bring the sync folder up to date now. */
+	| { type: "sync:run" };
 
 /** The content script's file, as the build writes it. */
 export const CONTENT_SCRIPT = "content.js";

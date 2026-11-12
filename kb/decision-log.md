@@ -550,6 +550,108 @@ button exports every case at once; the panel's buttons say in a tooltip what the
   of its own: under CDP's `Browser.setDownloadBehavior` "allow" the `downloads` API's
   `filename` is ignored and files are named by a GUID.
 
+## DEC-021: One-way sync of the cases to a folder the user chose (owner)
+
+The owner, 2026-11-10: Overmark keeps the cases in a folder the user picks once with the
+File System Access API (`showDirectoryPicker({ mode: "readwrite" })` from the side
+panel), one in iCloud Drive or Dropbox for instance; no `downloads` permission and no
+download UI for it. One-way: Overmark writes, the folder is a mirror. Each case is its
+own file in the single-case Export format, overwritten when the case changes; a deleted
+case keeps its file, so a mistaken delete can be undone with Import a case…; nothing is
+read back from the folder. After a browser restart Chrome may want the permission again
+(it can be asked only in a window, with a click): the panel says "Sync paused: allow
+access again" with a button, never failing silently. The rest was worked out here:
+
+- **What Chrome does, tried in Chrome for Testing 151 (headless and headed).** A
+  `FileSystemDirectoryHandle` is structured-cloned through IndexedDB: the side panel
+  stores it, the service worker reads it back and uses it. `FileSystemHandle`,
+  `queryPermission`, `requestPermission` and `createWritable` all exist in the
+  extension's service worker. The permission is the extension origin's, shared by the
+  panel and the worker: a real folder (handed to the panel by a dropped folder, since
+  CDP cannot answer the picker: `Page.setInterceptFileChooserDialog` sees the picker but
+  only aborts it) granted for reading in the panel was listed by the worker, and a folder
+  of the origin's private file system was written by the worker. Write access to a real
+  folder needs Chrome's dialog ("Save changes to …?"), which `requestPermission` from the
+  panel showed and, clicked by hand, answered "granted"; the worker's write after it was
+  not recorded (the Mac's screen locked before the run was repeated), so the worker
+  writing a real folder rests on the shared grant shown for reading. And: **Chrome takes
+  the grant back the moment the extension's last page closes.** One second after the
+  panel closed the worker got `prompt` (and `NotAllowedError` listing the folder), and a
+  panel opened again too. So the worker can write only while the side panel (or another
+  Overmark page) is open, unless Chrome keeps the permission ("Allow on every visit", if
+  its prompt offers it for an extension; not tried).
+- **The worker writes, always.** One writer for every change, wherever it comes from:
+  saves and Undo from a page and the AI tools (`deps.onChange`, through
+  `ConnectionDeps.changed`) are the worker's own; the side panel's changes reach it as
+  the `cases:changed` it announces anyway (accepted only from an extension page, never
+  from a content script), and the panel sends `sync:run` when it opens and after Allow
+  access, Try again and a new folder. Runs never overlap: a change during a run starts
+  one more run after it (`Sync.request`). The zip is built in the worker, so a large
+  case never blocks the panel. Each run compares every case with what was written, so
+  writing from the panel and catching up on open, the fallback the owner named, is what
+  the worker's run does anyway: whatever changed while the grant was gone (an AI app's
+  change with the panel closed, a browser restart) is written on the first run that has
+  it again.
+- **Where it lives.** A database of its own, `overmark-sync` (a `Kv` of `src/lib/kv.ts`, store
+  `settings`), in the extension's origin: the panel writes `folder` (the handle, its
+  name and an id) and `folders` (every folder chosen so far, each with its handle and
+  id); the worker writes `files:<folder id>`, one record for each folder synced, and
+  `status`. The AI settings' database stays the worker's alone (DEC-016); content
+  scripts reach neither. It is opened at its first use, and opened again at the next
+  use after an open that failed; the panel shows "Could not read the sync's state"
+  while it cannot read it.
+- **What was written, per case.** A folder's record holds the folder's id and, by case id, the
+  version written (`updatedAt`, and `importedAt`: an import may keep `updatedAt`) and
+  the file's name, saved after each file so that a worker stopped in the middle goes on
+  from there. A case whose version matches is not written again. Deleted cases stay in
+  it, as their files stay in the folder. Since nothing is read from the folder, a file
+  the user deletes or changes there is not noticed: the case's next change writes it
+  again.
+- **File names.** Export's own: `exportFileName`, `login-button-contrast.overmark.zip`.
+  A name another case has already (a deleted one too) gets `-2`, `-3`; so does a name of
+  a file in the folder that Overmark did not write for that case (only whether the name
+  exists is looked at, `getFileHandle` without `create`): such a file is never
+  overwritten. A case keeps its file while its title gives the same name.
+- **A renamed case**: its file of the new name is written, then its old file is
+  removed. It is the same case, so two files of it would only mislead; deleted cases
+  keep theirs.
+- **Another folder starts afresh** (a new id: nothing written to the old one counts).
+  Choosing a folder synced before, at any time (Change folder… back to it, after Stop
+  syncing, after other folders in between), gives it its id back, compared with
+  `isSameEntry` against every folder in `folders`; its record is still there, so
+  Overmark's files in it are its own and are updated in place, never written again
+  under `-2` names.
+  Stop syncing keeps the files, and a run under way stops before its next file.
+- **Writing.** `getFileHandle(name, { create: true })`, `createWritable()`, one
+  `write` of the zip, `close()`: Chrome writes to a temporary file and moves it into
+  place on `close`, so the folder never holds half a case; on an error the stream is
+  aborted.
+- **Failures, in the panel with what to do.** No permission (`queryPermission` not
+  `granted`, or `NotAllowedError` / `SecurityError` while writing): "Sync paused: allow
+  access again", why Chrome asks again, Last synced, and Allow access (primary), Change
+  folder…, Stop syncing; Allow access calls `requestPermission` in the click and, with a
+  yes, asks the worker to run; a no says so. The folder gone (`NotFoundError`): "The
+  folder “…” is no longer there: it was moved, renamed or deleted. Click Change folder…
+  to choose it again, or another one." No space (`QuotaExceededError`), a locked file
+  (`NoModificationAllowedError`), anything else: what happened, and Try again; Overmark
+  also tries again at the next change. A case that cannot be exported (an image
+  missing) is named, and the other cases are still written.
+- **The panel.** Under the case list, apart from Export and Import by a rule: "Sync to a
+  folder…" (its tooltip says what it does: a file per case as Export writes it, a deleted
+  case keeps its file, nothing is read); then "Syncing to <folder>" with "Last synced
+  <date>" or "Writing 3 cases…", Change folder… and Stop syncing, each with a tooltip;
+  the paused and failed states as above. Colours from the panel's tokens, so light and
+  dark alike; the paused line in the warning colour.
+- **Tests.** Unit tests of `Sync` with a folder in memory (writes, skips unchanged,
+  import, rename, deleted case, same titles, foreign files, another folder, paused and
+  back, permission lost in a run, folder gone, no space, one case failing, no overlap,
+  Stop during a run). End to end, as pickers cannot be automated: the test build gives
+  the panel `overmarkUseFolder(handle)` (left out of the store package, checked by the
+  build test), and the test hands it a folder of the private file system
+  (`navigator.storage.getDirectory()`); a case saved on a page appears there as its
+  export, an AI app's `set_summary` writes it again (the worker), a case deleted in the
+  panel keeps its file, and after Stop syncing nothing more is written.
+
 ## DEC-022: Opening a case shows its marks on the tab in front, and they follow it (owner)
 
 The owner, 2026-11-12: "you never want to load a case without showing the marks … When a
