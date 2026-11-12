@@ -5,6 +5,7 @@ import {
 	cardStatus,
 	cardView,
 	confirms,
+	hasNewGrant,
 	switchShown,
 } from "../src/sidepanel/card.ts";
 import type { AiState } from "../src/worker/protocol.ts";
@@ -143,5 +144,25 @@ describe("the card's clicks", () => {
 			checked: true,
 			intent: undefined,
 		});
+	});
+});
+
+describe("hasNewGrant", () => {
+	const connected: AiState = { ...base, state: "connected", grants: [claude] };
+
+	test("no new app: the pairing box stays for the one being added", () => {
+		expect(hasNewGrant(new Set(["g1"]), connected)).toBe(false);
+	});
+
+	test("the app being added connected: adding ends", () => {
+		const code = { ...claude, grantId: "g2", name: "Claude Code" };
+		const both = { ...connected, grants: [claude, code] };
+		expect(hasNewGrant(new Set(["g1"]), both)).toBe(true);
+		// The view then shows the card without the box.
+		expect(cardView(both, false).pairing).toBe(false);
+	});
+
+	test("an app disconnected meanwhile is no new one", () => {
+		expect(hasNewGrant(new Set(["g1", "g2"]), connected)).toBe(false);
 	});
 });
