@@ -36,10 +36,10 @@ import {
 	type WorkerMessage,
 } from "./protocol.ts";
 import {
+	appName,
 	NOTIFICATION_BUTTONS,
 	Questions,
 	type QuestionsHost,
-	WEBMCP_CALLER,
 } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
@@ -334,13 +334,9 @@ export class Connection {
 					.detail;
 				this.#lastCall = {
 					tool: title ?? tool,
-					// The name is what the app declares; the host is verified.
-					app:
-						client.kind !== "relay"
-							? WEBMCP_CALLER
-							: client.name
-								? `${client.name} (${client.host})`
-								: client.host,
+					// As the questions name it: the declared name escaped, the
+					// verified host after it (or the WebMCP label).
+					app: appName(client),
 					at: Date.now(),
 				};
 				this.#changed();

@@ -437,6 +437,11 @@ describe("questions", () => {
 		expect(host.changes).toBe(0);
 		expect(appName({ kind: "webmcp" })).toBe(WEBMCP_CALLER);
 		expect(appName(claude())).toBe("Claude (claude.ai)");
+		// The declared name escaped, so it cannot hide the verified host;
+		// "Last AI call" uses the same rule.
+		expect(appName(claude("g1", "Cla\u202Eude"))).toBe(
+			"Cla\\u202Eude (claude.ai)",
+		);
 	});
 
 	test("arguments, lines and names show invisible and direction characters as \\u escapes", async () => {
