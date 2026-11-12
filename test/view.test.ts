@@ -702,6 +702,36 @@ describe("a case on a tab Overmark may not run on", () => {
 		).toBe(true);
 	});
 
+	test("with all sites allowed but no file access: it may be a file, the details open the toggle", () => {
+		const opened: string[] = [];
+		const asked: string[] = [];
+		const state = noAccess(sampleCase("c_file"), true);
+		state.fileAccess = false;
+		render(
+			state,
+			actionsWith({
+				openDetails: () => void opened.push("details"),
+				allowAllSites: () => void asked.push("all"),
+			}),
+		);
+		const notice = el("case-access");
+		expect(notice.textContent).toContain("Allow access to file URLs");
+		expect(notice.textContent).toContain("Chrome Web Store");
+		const button = notice.querySelector(
+			"button",
+		) as unknown as HTMLButtonElement;
+		expect(button.hidden).toBe(false);
+		expect(button.textContent).toBe("Open Overmark's details");
+		button.click();
+		expect(opened).toEqual(["details"]);
+		expect(asked).toEqual([]);
+		// With file access, the tab is Chrome's own: no button.
+		state.fileAccess = true;
+		render(state, noActions);
+		expect(notice.textContent).not.toContain("file URLs");
+		expect(button.hidden).toBe(true);
+	});
+
 	test("with access: no notice, the buttons on", () => {
 		render(
 			caseState(withMark(), (s) => {

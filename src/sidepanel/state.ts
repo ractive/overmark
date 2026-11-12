@@ -137,6 +137,8 @@ export interface PanelState {
 	verdictDrafts: Map<string, string>;
 	/** Overmark may run on every site ("Allow on all sites"). */
 	allSites: boolean;
+	/** Overmark may read file:// pages ("Allow access to file URLs"); unknown at first. */
+	fileAccess: boolean | undefined;
 	/** The sync to a folder (DEC-021). */
 	sync: {
 		/** The folder's name; `undefined`: not syncing. */
@@ -182,6 +184,7 @@ export const initialState = (): PanelState => ({
 	verdictStatus: undefined,
 	verdictDrafts: new Map(),
 	allSites: false,
+	fileAccess: undefined,
 	sync: { folder: undefined, status: undefined, problem: undefined },
 	ai: {
 		status: "Not connected",

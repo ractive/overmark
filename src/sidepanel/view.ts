@@ -44,6 +44,8 @@ export interface Actions {
 	openPage(c: Case): void;
 	/** Chrome's prompt for "Allow on all sites"; call it in the click. */
 	allowAllSites(): void;
+	/** Overmark's page in chrome://extensions ("Allow access to file URLs"). */
+	openDetails(): void;
 	matchSize(c: Case): void;
 	addMarks(c: Case): void;
 	exportCase(c: Case): void;
@@ -112,6 +114,10 @@ export const NO_ACCESS =
 /** A tab Overmark is not let onto even with "Allow on all sites". */
 export const CANNOT_RUN =
 	"Overmark cannot run on this tab: Chrome keeps its own pages and the Chrome Web Store off limits to extensions.";
+
+/** The same, where Overmark may not read files either: that is the toggle for them. */
+export const CANNOT_RUN_FILES =
+	"Overmark cannot run on this tab. A page of Chrome's own or the Chrome Web Store is off limits to extensions. A file on your computer needs “Allow access to file URLs” in Overmark's details.";
 
 /** The title of a button that needs the page, while Overmark may not run there. */
 export const NEEDS_ACCESS =
@@ -198,25 +204,40 @@ function notice(id: string, button: HTMLButtonElement): Notice {
 function accessNotice(id: string, actions: () => Actions): Notice {
 	return notice(
 		id,
-		h(
-			"button",
-			{
-				type: "button",
-				"data-action": "allow-all-sites",
-				title:
-					"Let Overmark run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options below.",
-				onclick: () => actions().allowAllSites(),
+		h("button", {
+			type: "button",
+			onclick: (e) => {
+				const button = e.currentTarget as HTMLButtonElement;
+				if (button.dataset["action"] === "file-access") actions().openDetails();
+				else actions().allowAllSites();
 			},
-			"Allow on all sites",
-		),
+		}),
 	);
 }
 
+const ALLOW_ALL_SITES_TITLE =
+	"Let Overmark run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options below.";
+const DETAILS_TITLE =
+	"Open Overmark's page in chrome://extensions, where “Allow access to file URLs” is";
+
+/**
+ * Overmark may not run on the tab: "Allow on all sites" helps, or, where it
+ * may run on all sites already, Chrome keeps the tab off limits; for a file
+ * that is the "Allow access to file URLs" toggle, which the panel cannot
+ * tell apart (Chrome hides the address), so it says both.
+ */
 function renderAccess(n: Notice, state: PanelState): void {
 	const now = access(state);
 	n.el.hidden = now === "yes";
-	n.text.textContent = now === "never" ? CANNOT_RUN : NO_ACCESS;
-	n.button.hidden = now !== "ask";
+	const files = now === "never" && state.fileAccess === false;
+	n.text.textContent =
+		now !== "never" ? NO_ACCESS : files ? CANNOT_RUN_FILES : CANNOT_RUN;
+	n.button.hidden = now === "never" && !files;
+	n.button.dataset["action"] = files ? "file-access" : "allow-all-sites";
+	n.button.textContent = files
+		? "Open Overmark's details"
+		: "Allow on all sites";
+	n.button.title = files ? DETAILS_TITLE : ALLOW_ALL_SITES_TITLE;
 }
 
 /** The actions of the last render, for the home view's notice made once. */

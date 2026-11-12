@@ -219,7 +219,8 @@ async function loadInto(
 			case: c,
 		}).finally(() => loadsUnderWay--);
 		if ("error" in result) {
-			hint(result.error);
+			// A stale load's failure is about a tab no longer in question.
+			if (work.current()) hint(result.error);
 			return undefined;
 		}
 		// Hidden or closed meanwhile: the marks this load drew go too, unless a
@@ -254,7 +255,7 @@ async function loadInto(
 		);
 		return { found, total: result.matches.length };
 	} catch (error) {
-		hint(describeError(error));
+		if (work.current()) hint(describeError(error));
 		return undefined;
 	}
 }
@@ -277,7 +278,7 @@ async function loadOnLoaded(
 		for (const [i, wait] of waits.entries()) {
 			if (wait > 0) {
 				await sleep(wait);
-				if (!work.current() || !showing(c.id)) return;
+				if (!work.current() || !showing(c.id) || hiddenOn.has(tabId)) return;
 				if ((await activeTab())?.id !== tabId) return;
 			}
 			const result = await loadInto(c, tabId, hint, work, i < waits.length - 1);
@@ -288,14 +289,26 @@ async function loadOnLoaded(
 	}
 }
 
+/** The newest `follow`: one that started later knows the tab in front better. */
+const followWork = new Latest();
+
+/** The tab in front of the panel's window, as `follow` needs it. */
+async function frontTab(): Promise<
+	{ id: number; url: string; loading: boolean } | undefined
+> {
+	const tab = await activeTab();
+	return tab?.id === undefined
+		? undefined
+		: { id: tab.id, url: tab.url ?? "", loading: tab.status === "loading" };
+}
+
 /**
  * The open case's marks follow it to the tab in front (DEC-022): drawn there,
- * taken off the tab they were on. `reloaded`: tab `tabId` has just loaded or
- * navigated, so what was drawn on it went with the old page.
+ * taken off the tab they were on. Only the newest call acts: one that waited
+ * for a slow page while another tab came to the front does nothing.
  */
-async function follow(
-	options: { reloaded?: boolean; tabId?: number } = {},
-): Promise<void> {
+async function follow(): Promise<void> {
+	const work = followWork.start();
 	// What the draw found goes under the case's buttons, unless the user did
 	// something there meanwhile (Match size, Export): that one's outcome stays.
 	const hint = followHint();
@@ -305,31 +318,21 @@ async function follow(
 		if (state.view.kind !== "case" && drawn !== undefined) takeOff(drawn);
 		return;
 	}
-	const tab = await activeTab();
-	const front =
-		tab?.id === undefined
-			? undefined
-			: {
-					id: tab.id,
-					url: tab.url ?? "",
-					loading: tab.status === "loading",
-				};
+	const front = await frontTab();
 	const pageCase =
 		front === undefined || front.url === ""
 			? undefined
 			: (await overlayState(front.id))?.loadedCase;
+	// Still the tab in front, and no newer follow: else that one decides.
+	if ((await frontTab())?.id !== front?.id || !work.current()) return;
 	// The panel went on to another case, or back to the list, meanwhile.
 	if (state.current?.id !== c.id || !showing(c.id)) return;
-	const reloaded =
-		options.reloaded === true &&
-		(options.tabId === undefined || options.tabId === front?.id);
 	const step = followStep({
 		caseId: c.id,
 		tab: front,
 		drawn,
 		pageCase,
 		hidden: hiddenOn,
-		reloaded,
 	});
 	if (step.clear !== undefined) takeOff(step.clear);
 	if (front === undefined) return;
@@ -345,8 +348,8 @@ async function follow(
 	}
 	if (step.action !== "draw") return;
 	const target = { tabId: front.id, caseId: c.id };
-	// Under way already; a page that loaded again needs a new one.
-	if (!reloaded && sameDrawn(drawing, target)) return;
+	// Under way already (a page that starts loading again ends that).
+	if (sameDrawn(drawing, target)) return;
 	if (pendingLoad?.tabId === front.id) pendingLoad = undefined;
 	await loadOnLoaded(c, front.id, hint);
 }
@@ -813,6 +816,16 @@ const actions: Actions = {
 					(s) => (s.hint = `Could not change the access: ${message(error)}`),
 				),
 		);
+	},
+
+	openDetails() {
+		void chrome.tabs
+			.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` })
+			.catch((error: unknown) =>
+				update(
+					(s) => (s.hint = `Could not open the details: ${message(error)}`),
+				),
+			);
 	},
 
 	openPage(c) {
@@ -1422,10 +1435,15 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 			from !== undefined &&
 			from === drawn?.tabId &&
 			news.state.loadedCase === undefined &&
-			loadsUnderWay === 0
+			loadsUnderWay === 0 &&
+			// Its results: a page loaded again (no results then) starts empty.
+			state.loaded?.tabId === from &&
+			state.loaded.caseId === drawn.caseId
 		) {
 			hiddenOn.add(from);
 			drawn = undefined;
+			// The searches again must not draw them back.
+			if (loadTarget?.tabId === from) stopLoads();
 		}
 		// The page's own Hide removed the loaded case's marks.
 		if (
@@ -1473,13 +1491,14 @@ window.addEventListener("resize", sizeChanged);
 chrome.tabs.onUpdated.addListener((id, info) => {
 	if (id === state.loaded?.tabId && info.status === "loading")
 		void forgetLoaded();
-	// The marks went with the page.
-	if (id === drawn?.tabId && info.status === "loading") drawn = undefined;
+	// A new page: a draw under way was for the old one.
+	if (id === drawing?.tabId && info.status === "loading") drawing = undefined;
 	if (info.status === "complete" || info.url !== undefined) {
 		void refreshTab();
 		// Loaded, reloaded or navigated: the open case's marks are drawn there
-		// again when it is the tab in front (DEC-022).
-		void follow({ reloaded: true, tabId: id });
+		// again when it is the tab in front and the page no longer shows them;
+		// a new address within the page (a hash, pushState) keeps them (DEC-022).
+		void follow();
 	}
 });
 chrome.tabs.onRemoved.addListener((id) => {
@@ -1492,3 +1511,8 @@ chrome.tabs.onRemoved.addListener((id) => {
 void refreshTab();
 void refreshAllSites();
 void refreshDownloads();
+// Turning "Allow access to file URLs" on or off reloads Overmark: once is enough.
+void chrome.extension.isAllowedFileSchemeAccess().then(
+	(allowed) => update((s) => (s.fileAccess = allowed)),
+	() => undefined,
+);

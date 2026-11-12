@@ -15,7 +15,6 @@ const input = (change: Partial<FollowInput> = {}): FollowInput => ({
 	drawn: undefined,
 	pageCase: undefined,
 	hidden: new Set(),
-	reloaded: false,
 	...change,
 });
 
@@ -40,11 +39,13 @@ describe("the open case's marks follow it to the tab in front", () => {
 		});
 	});
 
-	test("drawn on the tab in front already: left as it is (candidates chosen stay)", () => {
-		expect(followStep(input({ drawn: { tabId: 1, caseId: "c_1" } }))).toEqual({
-			clear: undefined,
-			action: "none",
-		});
+	test("the page shows the case already: left as it is (candidates chosen stay)", () => {
+		// The panel's draw, still on the page.
+		expect(
+			followStep(
+				input({ drawn: { tabId: 1, caseId: "c_1" }, pageCase: "c_1" }),
+			),
+		).toEqual({ clear: undefined, action: "none" });
 		// An AI app's load_case drew it there.
 		expect(followStep(input({ pageCase: "c_1" }))).toEqual({
 			clear: undefined,
@@ -52,22 +53,42 @@ describe("the open case's marks follow it to the tab in front", () => {
 		});
 	});
 
-	test("the tab in front reloaded or navigated: drawn again", () => {
+	test("a new address within the page (a hash, pushState): the page still shows the case, no draw again", () => {
+		// The same step follows any address change: what the page says decides.
 		expect(
 			followStep(
 				input({
+					tab: { ...web, url: "http://localhost:3000/kk#/other" },
 					drawn: { tabId: 1, caseId: "c_1" },
 					pageCase: "c_1",
-					reloaded: true,
 				}),
+			).action,
+		).toBe("none");
+	});
+
+	test("the tab in front loaded again: the page shows nothing, drawn again", () => {
+		expect(
+			followStep(
+				input({ drawn: { tabId: 1, caseId: "c_1" }, pageCase: undefined }),
 			),
 		).toEqual({ clear: undefined, action: "draw" });
 	});
 
+	test("drawn there, then an AI app put another case on the page: left to it", () => {
+		expect(
+			followStep(
+				input({ drawn: { tabId: 1, caseId: "c_1" }, pageCase: "c_ai" }),
+			).action,
+		).toBe("none");
+		// A tab the panel did not draw on gets the open case.
+		expect(followStep(input({ pageCase: "c_ai" })).action).toBe("draw");
+	});
+
 	test("hidden on a tab: not drawn there again by itself", () => {
-		expect(followStep(input({ hidden: new Set([1]), reloaded: true }))).toEqual(
-			{ clear: undefined, action: "none" },
-		);
+		expect(followStep(input({ hidden: new Set([1]) }))).toEqual({
+			clear: undefined,
+			action: "none",
+		});
 		// Elsewhere it is.
 		expect(followStep(input({ hidden: new Set([2]) })).action).toBe("draw");
 		// Leaving for a hidden tab still takes the marks off the tab before.

@@ -670,9 +670,14 @@ there.
   with `complete` or a new address); the marks are taken off the tab they were on
   before, where it is still there (failures do not matter). A tab still loading is
   drawn on once it has loaded; a page no content script runs on (an extension's own
-  page, `chrome://`) is left alone. A tab that shows the case already (the panel drew it,
-  or an AI app's `load_case` did) is not drawn on again, which would drop the candidates
-  chosen, unless the page loaded again. The searches again at 1 s and 2 s (marks a script
+  page, `chrome://`) is left alone. A tab whose page shows the case already (the panel
+  drew it, or an AI app's `load_case` did) is not drawn on again, which would drop the
+  candidates chosen: so a new address within the page (a hash, `pushState`) keeps the
+  marks, and only a page that loaded again (it shows no case) is drawn on. A tab where
+  the panel drew the case and an AI app has put another case since is left to the AI
+  app. Only the newest of these steps acts: one that waited for a slow page while
+  another tab came to the front does nothing, and a draw that fails after that writes
+  no hint. The searches again at 1 s and 2 s (marks a script
   draws late) run for every such draw. What a draw found goes under the case's buttons
   only while the user's own actions there (Match size, Export, Hide) have not written
   since: a draw that happens on its own never wipes their outcome (`Latest.peek`).
@@ -681,7 +686,7 @@ there.
   in the worker) and stay, as before. Closing the side panel leaves the marks where they
   are, as before.
 - **Hide holds on that tab.** "Hide marks on this tab", or the Hide on the page's own
-  bar, keeps the case's marks off that tab while the case stays open: through switching
+  bar (which also stops the searches again), keeps the case's marks off that tab while the case stays open: through switching
   to other tabs and back, and through reloads of that tab. "Show marks on this tab" on
   it, or opening the case again, ends that. Why through a switch back: the user took
   them off that tab on purpose, and a switch is no change of mind.
@@ -702,7 +707,10 @@ there.
   and the open case's marks are drawn (`permissions.onAdded`). The icon's click on that
   tab draws them too, as before. Where Overmark may run on all sites and Chrome still
   hides the address (its own pages, the Web Store), the notice says that Overmark
-  cannot run there, without the button. Only the actions that need the page are
+  cannot run there, without the button; where Overmark may not read files either
+  (`chrome.extension.isAllowedFileSchemeAccess`), it may be a file, so the notice says
+  that too and offers "Open Overmark's details" (chrome://extensions, where "Allow
+  access to file URLs" is). The panel cannot tell which, as Chrome hides the address. Only the actions that need the page are
   disabled, each with a tooltip pointing at the notice: Annotate this page, Show/Hide
   marks on this tab, Add marks, and a mark's Show. The case list, editing a case,
   import, export, the summary and the AI app card work without the tab. A tab still

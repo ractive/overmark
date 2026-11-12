@@ -27,11 +27,6 @@ export interface FollowInput {
 	pageCase: string | undefined;
 	/** Tabs the user took the open case's marks off ("Hide marks on this tab"). */
 	hidden: ReadonlySet<number>;
-	/**
-	 * The page in front has just loaded (or navigated): what was drawn on it
-	 * before went with the old page.
-	 */
-	reloaded: boolean;
 }
 
 export interface FollowStep {
@@ -76,7 +71,6 @@ function nextAction({
 	drawn,
 	pageCase,
 	hidden,
-	reloaded,
 }: FollowInput): FollowStep["action"] {
 	// No case open: the panel draws nothing.
 	if (caseId === undefined || tab === undefined) return "none";
@@ -85,12 +79,18 @@ function nextAction({
 	if (tab.loading) return "none";
 	if (tab.url === "") return "wait";
 	if (!canDrawOn(tab.url)) return "none";
-	if (!reloaded) {
-		// There already: a draw again would drop the candidates chosen.
-		if (drawn?.tabId === tab.id && drawn.caseId === caseId) return "none";
-		// An AI app's load_case drew it there.
-		if (pageCase === caseId) return "none";
-	}
+	// The page shows the case: the panel's draw, or an AI app's load_case. A
+	// draw again would drop the candidates chosen; a change of the address
+	// within the page (a hash, pushState) keeps the marks.
+	if (pageCase === caseId) return "none";
+	// The panel drew it there, and the page shows another case since: an AI
+	// app put it there, leave it. A page with none has loaded again.
+	if (
+		drawn?.tabId === tab.id &&
+		drawn.caseId === caseId &&
+		pageCase !== undefined
+	)
+		return "none";
 	return "draw";
 }
 
