@@ -52,13 +52,27 @@ and text editors are. This covers fields in the page itself and inside its web
 components, not fields inside embedded frames (for example a payment form from another
 site).
 
+If you choose "Sync to a folder…", Overmark also keeps that folder's handle (Chrome's
+reference to the folder you picked, with its name), which file it wrote for each case
+and when, and the sync's last status, in another database of its own in the browser
+(IndexedDB in the extension's origin, `overmark-sync`). The scripts Overmark runs in
+web pages cannot reach it.
+
 ## When data leaves your computer
 
-Only in two cases, both started by you:
+Only in three cases, all started by you:
 
 1. **Export.** "Export" writes a case to a zip file, "Export all cases" every case to
    one. Where it goes from there is up to you.
-2. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
+2. **Sync to a folder.** If you choose a folder with "Sync to a folder…", Overmark
+   writes each case into it as the same zip file Export writes (its marks, comments, AI
+   findings, summary, screenshots and `case.md`), again whenever the case changes, and
+   nowhere else. It writes only into that folder, only files named after its cases, and
+   never reads the files there. A deleted case's file stays in the folder; "Stop
+   syncing" stops the writing and leaves the files. If the folder is synced by a cloud
+   service (iCloud Drive, Dropbox, OneDrive), that service uploads the files under its
+   own privacy policy: that is your choice of folder, not something Overmark sends.
+3. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
    address (cut as above), title, element details and screenshots of the tab in front.
    When the app asks about a mark's element, Overmark also reads that element from the
@@ -149,7 +163,8 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
 ## Deleting
 
 Delete a case in the side panel; its screenshots go with it. Removing the extension
-deletes everything it stored.
+deletes everything it stored in the browser. Files it wrote (an export, the sync
+folder) stay where they are until you delete them.
 
 ## Contact
 

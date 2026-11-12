@@ -77,6 +77,8 @@ interface Panel {
 export interface ConnectionDeps {
 	store: CaseStore;
 	capture: Capture;
+	/** A tool changed or deleted a case (the sync writes it, DEC-021). */
+	changed?: (caseId: string) => void;
 }
 
 /** Clear every notification of the extension: a previous worker's questions died with it. */
@@ -253,7 +255,10 @@ export class Connection {
 			store: this.#deps.store,
 			tab: this.#tab,
 			images: { toWebp, scale: scaleImage, crop: cropImages },
-			onChange: (caseId) => void broadcast({ type: "cases:changed", caseId }),
+			onChange: (caseId) => {
+				this.#deps.changed?.(caseId);
+				void broadcast({ type: "cases:changed", caseId });
+			},
 			// Read at each call: only the worker writes it, and only after the
 			// write to the store succeeded, so this is what the panel shows.
 			blurForms: () => this.#settings.blurForms,
