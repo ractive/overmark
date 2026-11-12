@@ -18,6 +18,8 @@ const globals = globalThis as unknown as Record<string, unknown>;
 const before = { document: globals["document"] };
 let render: (state: PanelState, actions: Actions) => void;
 let ASKING_DOWNLOADS: string;
+let IMPORT_BUSY: string;
+let EXPORT_ALL_BUSY: string;
 
 /** Actions that do nothing, except for `some`. */
 const actionsWith = (some: Partial<Actions>) =>
@@ -36,7 +38,9 @@ beforeAll(async () => {
 		).text(),
 	);
 	globals["document"] = window.document;
-	({ render, ASKING_DOWNLOADS } = await import("../src/sidepanel/view.ts"));
+	({ render, ASKING_DOWNLOADS, IMPORT_BUSY, EXPORT_ALL_BUSY } = await import(
+		"../src/sidepanel/view.ts"
+	));
 });
 
 afterAll(() => {
@@ -681,7 +685,7 @@ describe("what stays between renders", () => {
 		const existing = sampleCase("c_in");
 		const state = initialState();
 		state.importing = {
-			parsed: { case: sampleCase("c_in"), images: new Map() },
+			parsed: { case: sampleCase("c_in"), images: async () => new Map() },
 			existing,
 		};
 		render(state, noActions);
@@ -1074,7 +1078,7 @@ describe("where an export went (DEC-020)", () => {
 	test("a file of several cases says which case it asks about, and offers Skip", () => {
 		const state = initialState();
 		state.importing = {
-			parsed: { case: sampleCase("c_in"), images: new Map() },
+			parsed: { case: sampleCase("c_in"), images: async () => new Map() },
 			existing: sampleCase("c_in"),
 			batch: { name: "all.zip", rest: [], total: 3, stored: 1, skipped: 1 },
 		};
@@ -1088,5 +1092,52 @@ describe("where an export went (DEC-020)", () => {
 		).toBe("Skip");
 		state.importing = undefined;
 		render(state, noActions);
+	});
+});
+
+describe("one import at a time", () => {
+	const button = (id: string) => el<HTMLButtonElement>(id);
+
+	test("Import a case… and Export all cases are off while an import is at work, and say why", () => {
+		const state = initialState();
+		state.cases = [sampleCase("c_y1")];
+		render(state, noActions);
+		const importTitle = button("import").title;
+		const exportTitle = button("export-all").title;
+		expect(button("import").disabled).toBe(false);
+		expect(button("export-all").disabled).toBe(false);
+
+		state.importWork = "all.zip";
+		render(state, noActions);
+		expect(button("import").disabled).toBe(true);
+		expect(button("export-all").disabled).toBe(true);
+		expect(button("import").title).toBe(IMPORT_BUSY);
+		expect(button("export-all").title).toBe(EXPORT_ALL_BUSY);
+		expect(el("import-done").hidden).toBe(false);
+		expect(el("import-done").textContent).toBe("Importing all.zip…");
+
+		// Its question open: the question shows instead.
+		state.importWork = undefined;
+		state.importing = {
+			parsed: { case: sampleCase("c_y1"), images: async () => new Map() },
+			existing: sampleCase("c_y1"),
+			batch: { name: "all.zip", rest: [], total: 2, stored: 0, skipped: 0 },
+		};
+		render(state, noActions);
+		expect(button("import").disabled).toBe(true);
+		expect(button("export-all").disabled).toBe(true);
+		expect(el("import-done").hidden).toBe(true);
+		expect(el("import-prompt").hidden).toBe(false);
+
+		state.importing = undefined;
+		state.importDone = "Imported all 2 cases of all.zip.";
+		render(state, noActions);
+		expect(button("import").disabled).toBe(false);
+		expect(button("export-all").disabled).toBe(false);
+		expect(button("import").title).toBe(importTitle);
+		expect(button("export-all").title).toBe(exportTitle);
+		expect(el("import-done").textContent).toBe(
+			"Imported all 2 cases of all.zip.",
+		);
 	});
 });

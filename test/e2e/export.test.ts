@@ -302,6 +302,28 @@ describe.skipIf(browserBinary === undefined)(
 				await panel.waitFor(
 					`document.getElementById("import-prompt").textContent.includes("Case ${i} of ${before.cases.length}")`,
 				);
+				if (i === 1) {
+					// While it asks, no other import, and no export of all cases.
+					expect(
+						await panel.eval<boolean[]>(
+							`["import", "export-all"].map((id) => document.getElementById(id).disabled)`,
+						),
+					).toEqual([true, true]);
+					// Another file chosen anyway is not read: the batch goes on.
+					await panel.eval(`(() => {
+						const input = document.getElementById("import-file");
+						const files = new DataTransfer();
+						files.items.add(new File(["not a zip"], "other.zip"));
+						input.files = files.files;
+						input.dispatchEvent(new Event("change"));
+					})()`);
+					await Bun.sleep(300);
+					expect(
+						await panel.eval<[boolean, string]>(
+							`[document.getElementById("import-error").hidden, document.getElementById("import-prompt").textContent]`,
+						),
+					).toEqual([true, expect.stringContaining("Case 1 of")]);
+				}
 				await panel.click(
 					`document.querySelector('[data-action="import-cancel"]')`,
 				);
@@ -309,6 +331,11 @@ describe.skipIf(browserBinary === undefined)(
 			await panel.waitFor(
 				`document.getElementById("import-done").textContent.startsWith("Imported 0 of the ${before.cases.length} cases")`,
 			);
+			expect(
+				await panel.eval<boolean[]>(
+					`["import", "export-all"].map((id) => document.getElementById(id).disabled)`,
+				),
+			).toEqual([false, false]);
 			expect(ids(await readDb())).toEqual(ids(before));
 		}, 60_000);
 

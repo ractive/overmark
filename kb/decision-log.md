@@ -501,21 +501,38 @@ button exports every case at once; the panel's buttons say in a tooltip what the
   exactly the single-case layout (`case.json`, `case.md`, `shots/`, `crops/`). Nothing
   else at the top: a single-case export has `case.json` at the top, a file of all cases
   does not, which is how Import tells them apart. Cases in the order of the list (newest
-  change first). The file may be at most 512 MB (the images uncompressed), and Export all
-  refuses a larger one ("Export them one at a time"): a file Import would refuse is no
-  use. The button sits next to "Import a case…" and is disabled with no cases.
+  change first). A file Import would refuse is no use, so Export all checks first, from
+  the sizes of what is stored, what Import checks: a case that unpacks to more than
+  150 MB (or whose `case.json` is over 20 MB) refuses the export, naming each such case
+  by its title ("too large to be imported again … Export the other cases one at a
+  time"); all cases together may unpack to at most 256 MB, and the zip itself, with its
+  headers, may be at most 256 MB too ("Export them one at a time"). 256 MB, not more, as
+  the panel holds the file in memory: the cases' files while the zip is built (let go as
+  soon as it is), then the zip, put into a Blob at once for saving. The button sits next
+  to "Import a case…" and is disabled with no cases.
 - **Import a case… reads both.** A `case.json` at the top: one case, as before (at most
   150 MB). Otherwise each `<folder>/case.json` is a case, read and checked with the same
   rules as a single case; one bad case, or a case id twice, refuses the whole file with
   a message naming the folder (`In login-button-contrast/: The export lacks
-  crops/a1.webp.`), and nothing is stored. Then the cases go in one after the other: one
+  crops/a1.webp.`), and nothing is stored. The file may be at most 256 MB, and what it
+  unpacks to is counted for the whole file, not per case: the sizes its cases' entries
+  declare are added up before anything is unpacked (an entry never unpacks to more than
+  it declares), and what each case did unpack to is added up as it is read; past 256 MB
+  the file is refused (`The cases in the file unpack to more than 256 MB.`), so a small
+  zip of zero-padded images cannot unpack to gigabytes. The check reads every case and
+  its images and lets the images go again; each case's images are unpacked (and
+  checked) once more when that case is stored, one case at a time, so the panel never
+  holds the images of all cases at once. Then the cases go in one after the other: one
   that is not here is stored at once; one whose id is here already asks the same
   question as a single import ("Replace it", "Keep both", and "Skip" instead of
   "Cancel"), saying which case of the file it is. Each case is stored in its own
   transaction, as a single import. At the end the panel says how many were imported
   (`Imported all 3 cases of …`, or `Imported 1 of the 3 cases of …, 2 left as they
   were`); a file of several cases opens none of them. A file with one folder imports
-  as a single file does.
+  as a single file does. One import at a time: while a file is read or its cases stored,
+  or while its question is open, "Import a case…" and "Export all cases" are disabled,
+  their tooltips say why, and the panel shows `Importing <file>…` under them; a file
+  chosen anyway is not read.
 - **Tooltips.** A `title` on the buttons whose label does not say enough: Export and
   Export all cases (what the file holds, that it is one .zip, that Import a case… reads
   it), Import a case…, Show and Hide marks on this tab and the list's Load, Delete (case,

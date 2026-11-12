@@ -75,6 +75,10 @@ const keepOn = byId<HTMLInputElement>("keep-on");
 const importError = byId<HTMLDivElement>("import-error");
 const importDone = byId<HTMLParagraphElement>("import-done");
 const exportAll = byId<HTMLButtonElement>("export-all");
+const importButton = byId<HTMLButtonElement>("import");
+/** Their titles in index.html, for when no import is at work. */
+const importTitle = importButton.title;
+const exportAllTitle = exportAll.title;
 const exportAllSaved = byId<HTMLDivElement>("export-all-saved");
 const importErrorText = byId<HTMLParagraphElement>("import-error-text");
 const importPrompt = h("div", {
@@ -82,7 +86,13 @@ const importPrompt = h("div", {
 	id: "import-prompt",
 	hidden: true,
 });
-byId<HTMLButtonElement>("import").parentElement?.after(importPrompt);
+importButton.parentElement?.after(importPrompt);
+
+/** The titles of Import a case… and Export all cases while an import is at work. */
+export const IMPORT_BUSY =
+	"An import is at work: wait for it, or answer its question below, before choosing another file.";
+export const EXPORT_ALL_BUSY =
+	"An import is at work: wait for it, or answer its question below, before exporting all cases.";
 
 /** Why Overmark does not work on a tab yet, and what to do about it. */
 export const NO_ACCESS =
@@ -347,8 +357,18 @@ function renderHome(state: PanelState, actions: Actions): void {
 	allSites.checked = state.allSites;
 	importError.hidden = state.importError === undefined;
 	importErrorText.textContent = state.importError ?? "";
-	setHint(importDone, state.importDone);
-	exportAll.disabled = state.exportingAll || state.cases.length === 0;
+	// One import at a time, and no export of all cases while it stores them.
+	const busy = state.importWork !== undefined || state.importing !== undefined;
+	setHint(
+		importDone,
+		state.importWork !== undefined && state.importing === undefined
+			? `Importing ${state.importWork}…`
+			: state.importDone,
+	);
+	importButton.disabled = busy;
+	importButton.title = busy ? IMPORT_BUSY : importTitle;
+	exportAll.disabled = busy || state.exportingAll || state.cases.length === 0;
+	exportAll.title = busy ? EXPORT_ALL_BUSY : exportAllTitle;
 	renderSaved(
 		exportAllSaved,
 		state.exported?.of === "all" ? state.exported : undefined,

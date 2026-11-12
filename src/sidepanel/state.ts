@@ -6,7 +6,7 @@
  */
 
 import type { Case, ResolutionKind } from "../lib/case.ts";
-import type { ParsedExport } from "../lib/export.ts";
+import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
 import type { Size } from "./size.ts";
 
@@ -55,7 +55,7 @@ export interface ImportBatch {
 	/** The file's name. */
 	name: string;
 	/** The cases still to import, after the one asked about. */
-	rest: ParsedExport[];
+	rest: CheckedExport[];
 	total: number;
 	stored: number;
 	skipped: number;
@@ -88,13 +88,18 @@ export interface PanelState {
 	 * several cases, with the rest of them.
 	 */
 	importing:
-		| { parsed: ParsedExport; existing: Case; batch?: ImportBatch }
+		| { parsed: CheckedExport; existing: Case; batch?: ImportBatch }
 		| undefined;
 	/**
 	 * Why the last import or "Export all cases" failed, until the next one or a
 	 * dismiss.
 	 */
 	importError: string | undefined;
+	/**
+	 * What an import is at work on (a file's name, or the case asked about),
+	 * while it reads or stores; no other import starts meanwhile.
+	 */
+	importWork: string | undefined;
 	/** What importing a file of several cases came to, until the next import. */
 	importDone: string | undefined;
 	/** "Export all cases" is at work. */
@@ -150,6 +155,7 @@ export const initialState = (): PanelState => ({
 	loaded: undefined,
 	importing: undefined,
 	importError: undefined,
+	importWork: undefined,
 	importDone: undefined,
 	exportingAll: false,
 	exported: undefined,

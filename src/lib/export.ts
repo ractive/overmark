@@ -42,29 +42,64 @@ export function exportAllFileName(now = new Date()): string {
 	return `overmark-cases-${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}${EXPORT_SUFFIX}`;
 }
 
-/** A case's files, each name after `folder` (`""`: at the top). */
-async function caseEntries(
+/** The largest export of one case the side panel reads. */
+export const MAX_IMPORT_BYTES = 150 * 1024 * 1024;
+/**
+ * The largest file of all cases the side panel reads (and writes), and the
+ * most all its cases may unpack to together.
+ */
+export const MAX_IMPORT_ALL_BYTES = 256 * 1024 * 1024;
+
+/** The limits of a file of all cases (smaller in tests). */
+export interface FileLimits {
+	/** The most one case in it may unpack to. */
+	maxCaseBytes: number;
+	/** The largest file, and the most all its cases may unpack to together. */
+	maxAllBytes: number;
+}
+
+const LIMITS: FileLimits = {
+	maxCaseBytes: MAX_IMPORT_BYTES,
+	maxAllBytes: MAX_IMPORT_ALL_BYTES,
+};
+
+const mb = (bytes: number) => `${bytes / 1024 / 1024} MB`;
+
+/** A file of a case, its data as a Blob: an image as stored, not read yet. */
+interface CaseFile {
+	name: string;
+	data: Blob;
+}
+
+/** A case's files, each name after `folder` (`""`: at the top), case.json first. */
+async function caseFiles(
 	store: CaseStore,
 	c: Case,
 	folder: string,
-): Promise<ZipEntry[]> {
-	const encoder = new TextEncoder();
-	const entries: ZipEntry[] = [
+): Promise<CaseFile[]> {
+	const files: CaseFile[] = [
 		{
 			name: `${folder}case.json`,
-			data: encoder.encode(`${JSON.stringify(c, null, "\t")}\n`),
+			data: new Blob([`${JSON.stringify(c, null, "\t")}\n`]),
 		},
-		{ name: `${folder}case.md`, data: encoder.encode(caseMarkdown(c)) },
+		{ name: `${folder}case.md`, data: new Blob([caseMarkdown(c)]) },
 	];
 	for (const path of caseImages(c)) {
 		const image = await store.getImage(c.id, path);
 		if (image === undefined)
 			throw new CaseError(`the image ${path} of “${c.title}” is missing`);
-		entries.push({
-			name: `${folder}${path}`,
-			data: new Uint8Array(await image.blob.arrayBuffer()),
-		});
+		files.push({ name: `${folder}${path}`, data: image.blob });
 	}
+	return files;
+}
+
+async function entriesOf(files: readonly CaseFile[]): Promise<ZipEntry[]> {
+	const entries: ZipEntry[] = [];
+	for (const f of files)
+		entries.push({
+			name: f.name,
+			data: new Uint8Array(await f.data.arrayBuffer()),
+		});
 	return entries;
 }
 
@@ -72,7 +107,7 @@ export async function exportCase(
 	store: CaseStore,
 	c: Case,
 ): Promise<Uint8Array> {
-	return writeZip(await caseEntries(store, c, ""));
+	return writeZip(await entriesOf(await caseFiles(store, c, "")));
 }
 
 /**
@@ -90,34 +125,56 @@ export function caseFolders(cases: readonly Case[]): string[] {
 	});
 }
 
-/** The largest file of all cases the side panel reads (and writes). */
-export const MAX_IMPORT_ALL_BYTES = 512 * 1024 * 1024;
+/** “A”, “A” and “B”, “A”, “B” and “C” */
+function titles(cases: readonly Case[]): string {
+	const quoted = cases.map((c) => `“${c.title}”`);
+	const last = quoted.pop();
+	return quoted.length === 0 ? `${last}` : `${quoted.join(", ")} and ${last}`;
+}
 
-/** Every case in one zip: a folder per case, each as `exportCase` lays it out. */
+/**
+ * Every case in one zip: a folder per case, each as `exportCase` lays it out.
+ * A file the panel would refuse to import again is no use, so the sizes are
+ * checked first, from what is stored, against what `readExports` reads: each
+ * case, all of them, and the file itself with its headers.
+ */
 export async function exportAllCases(
 	store: CaseStore,
 	cases: readonly Case[],
+	limits: FileLimits = LIMITS,
 ): Promise<Uint8Array> {
 	if (cases.length === 0) throw new CaseError("There are no cases to export.");
 	const folders = caseFolders(cases);
-	const entries: ZipEntry[] = [];
+	const files: CaseFile[] = [];
+	const tooLarge: Case[] = [];
 	let bytes = 0;
 	for (const [i, c] of cases.entries()) {
-		for (const entry of await caseEntries(store, c, `${folders[i]}/`)) {
-			bytes += entry.data.length;
-			entries.push(entry);
-		}
-		// A file the panel would refuse to import again is no use.
-		if (bytes > MAX_IMPORT_ALL_BYTES)
-			throw new CaseError(
-				`All cases together are larger than ${MAX_IMPORT_ALL_BYTES / 1024 / 1024} MB. Export them one at a time.`,
-			);
+		const own = await caseFiles(store, c, `${folders[i]}/`);
+		const size = own.reduce((n, f) => n + f.data.size, 0);
+		if (
+			size > limits.maxCaseBytes ||
+			(own[0]?.data.size ?? 0) > MAX_CASE_JSON_BYTES
+		)
+			tooLarge.push(c);
+		bytes += size;
+		files.push(...own);
 	}
-	return writeZip(entries);
+	if (tooLarge.length > 0)
+		throw new CaseError(
+			`${titles(tooLarge)} ${tooLarge.length === 1 ? "is" : "are"} too large to be imported again (more than ${mb(limits.maxCaseBytes)}${tooLarge.length === 1 ? "" : " each"}). Export the other cases one at a time.`,
+		);
+	const tooMuch = new CaseError(
+		`All cases together are larger than ${mb(limits.maxAllBytes)}. Export them one at a time.`,
+	);
+	if (bytes > limits.maxAllBytes) throw tooMuch;
+	let entries: ZipEntry[] | undefined = await entriesOf(files);
+	const zip = await writeZip(entries);
+	// Not kept beside the file while it is checked and saved.
+	entries = undefined;
+	// With the zip's headers: the panel checks the file's own size.
+	if (zip.length > limits.maxAllBytes) throw tooMuch;
+	return zip;
 }
-
-/** The largest export the side panel reads. */
-export const MAX_IMPORT_BYTES = 150 * 1024 * 1024;
 
 /** case.json is text about marks; a real one is far smaller than this. */
 export const MAX_CASE_JSON_BYTES = 20 * 1024 * 1024;
@@ -169,22 +226,27 @@ export interface ParsedExport {
 	images: Map<string, StoredImage>;
 }
 
+/**
+ * A case of a file of all cases, read and checked; its images stay packed in
+ * the file until it is stored, and are unpacked and checked again then.
+ */
+export interface CheckedExport {
+	case: Case;
+	images(): Promise<Map<string, StoredImage>>;
+}
+
 /** Entries in any one file of all cases: the zip format's own limit. */
 const MAX_ALL_ENTRIES = 0xffff;
 
-/**
- * Read and check the case in `folder` (`""`: at the top) of a zip already
- * checked for its size.
- */
-async function readCaseIn(
+/** The case in `folder` (`""`: at the top), and how many bytes its case.json unpacked to. */
+async function readCaseJson(
 	zip: Uint8Array,
 	folder: string,
 	maxEntries: number,
-): Promise<ParsedExport> {
-	const limits = { maxEntries, maxTotalBytes: MAX_IMPORT_BYTES };
+): Promise<{ c: Case; bytes: number }> {
 	const json = (
 		await readZip(zip, {
-			...limits,
+			maxEntries,
 			maxTotalBytes: MAX_CASE_JSON_BYTES,
 			include: (n) => n === `${folder}case.json`,
 		})
@@ -199,16 +261,32 @@ async function readCaseIn(
 	} catch {
 		throw new CaseError("case.json is not valid JSON.");
 	}
-	const c = validateCase(parsed);
+	return { c: validateCase(parsed), bytes: json.length };
+}
+
+/**
+ * Unpack and check the images of `c` in `folder`, at most `maxBytes` of them;
+ * as Blobs only when `keep` (else they are checked and let go), and how many
+ * bytes they unpacked to.
+ */
+async function readImages(
+	zip: Uint8Array,
+	folder: string,
+	c: Case,
+	limits: { maxEntries: number; maxBytes: number; keep: boolean },
+): Promise<{ images: Map<string, StoredImage>; bytes: number }> {
 	const wanted = caseImages(c);
 	const files = await readZip(zip, {
-		...limits,
+		maxEntries: limits.maxEntries,
+		maxTotalBytes: limits.maxBytes,
 		include: (n) => n.startsWith(folder) && wanted.has(n.slice(folder.length)),
 	});
 	const images = new Map<string, StoredImage>();
+	let bytes = 0;
 	for (const path of wanted) {
 		const data = files.get(`${folder}${path}`);
 		if (data === undefined) throw new CaseError(`The export lacks ${path}.`);
+		bytes += data.length;
 		const size = webpSize(data);
 		if (size === undefined) throw new CaseError(`${path} is not a WebP image.`);
 		if (
@@ -220,66 +298,117 @@ async function readCaseIn(
 			size.width * size.height > MAX_IMAGE_PIXELS
 		)
 			throw new CaseError(`${path} is too large for a screenshot.`);
-		const blob = new Blob([data as Uint8Array<ArrayBuffer>], {
-			type: "image/webp",
-		});
-		images.set(path, { blob, ...size });
+		if (limits.keep)
+			images.set(path, {
+				blob: new Blob([data as Uint8Array<ArrayBuffer>], {
+					type: "image/webp",
+				}),
+				...size,
+			});
 	}
-	return { case: c, images };
+	return { images, bytes };
 }
 
 /** Read and check an exported case without touching the store. */
-export async function readExport(zip: Uint8Array): Promise<ParsedExport> {
-	if (zip.length > MAX_IMPORT_BYTES)
-		throw new CaseError(
-			`The file is larger than ${MAX_IMPORT_BYTES / 1024 / 1024} MB.`,
-		);
-	return readCaseIn(zip, "", 2500);
+export async function readExport(
+	zip: Uint8Array,
+	maxBytes = MAX_IMPORT_BYTES,
+): Promise<ParsedExport> {
+	if (zip.length > maxBytes)
+		throw new CaseError(`The file is larger than ${mb(maxBytes)}.`);
+	const { c } = await readCaseJson(zip, "", 2500);
+	const { images } = await readImages(zip, "", c, {
+		maxEntries: 2500,
+		maxBytes,
+		keep: true,
+	});
+	return { case: c, images };
 }
+
+/** `login/case.json` → `login/`; `undefined` for a name at the top. */
+const folderOf = (name: string) => /^[^/]+\//.exec(name)?.[0];
 
 /**
  * Read and check a file with one case (`exportCase`) or all of them
  * (`exportAllCases`): one case for a `case.json` at the top, else one for
- * each `<folder>/case.json`. One bad case refuses the whole file.
+ * each `<folder>/case.json`. One bad case refuses the whole file, so every
+ * case is checked first, and the images are let go again: each case's are
+ * unpacked once more when it is stored, one case at a time. What the file
+ * unpacks to is counted for the whole file, never more than the limit for all
+ * cases: by the sizes its entries declare before anything is unpacked, and by
+ * what each case did unpack to.
  */
-export async function readExports(zip: Uint8Array): Promise<ParsedExport[]> {
-	if (zip.length > MAX_IMPORT_ALL_BYTES)
-		throw new CaseError(
-			`The file is larger than ${MAX_IMPORT_ALL_BYTES / 1024 / 1024} MB.`,
-		);
-	// Only the names: nothing is unpacked.
-	const names: string[] = [];
+export async function readExports(
+	zip: Uint8Array,
+	limits: FileLimits = LIMITS,
+): Promise<CheckedExport[]> {
+	if (zip.length > limits.maxAllBytes)
+		throw new CaseError(`The file is larger than ${mb(limits.maxAllBytes)}.`);
+	// Only the names and the sizes they declare: nothing is unpacked.
+	const listed: { name: string; size: number }[] = [];
 	await readZip(zip, {
 		maxEntries: MAX_ALL_ENTRIES,
-		include: (n) => {
-			names.push(n);
+		include: (name, size) => {
+			listed.push({ name, size });
 			return false;
 		},
 	});
-	if (names.includes("case.json")) return [await readExport(zip)];
-	const folders = names.flatMap(
-		(n) => /^([^/]+\/)case\.json$/.exec(n)?.[1] ?? [],
+	if (listed.some((e) => e.name === "case.json")) {
+		const one = await readExport(zip, limits.maxCaseBytes);
+		return [{ case: one.case, images: async () => one.images }];
+	}
+	const folders = listed.flatMap(
+		(e) => /^([^/]+\/)case\.json$/.exec(e.name)?.[1] ?? [],
 	);
 	if (folders.length === 0)
 		throw new CaseError(
 			"This is not an Overmark export: case.json is missing.",
 		);
-	const cases: ParsedExport[] = [];
+	const tooMuch = new CaseError(
+		`The cases in the file unpack to more than ${mb(limits.maxAllBytes)}.`,
+	);
+	// An entry never unpacks to more than it declares (readZip stops it there).
+	const inCases = new Set(folders);
+	let declared = 0;
+	for (const e of listed) {
+		const folder = folderOf(e.name);
+		if (folder !== undefined && inCases.has(folder)) declared += e.size;
+	}
+	if (declared > limits.maxAllBytes) throw tooMuch;
+	const cases: CheckedExport[] = [];
 	const ids = new Set<string>();
-	for (const folder of folders) {
-		let parsed: ParsedExport;
+	let unpacked = 0;
+	const inFolder = async <T>(folder: string, read: () => Promise<T>) => {
 		try {
-			parsed = await readCaseIn(zip, folder, MAX_ALL_ENTRIES);
+			return await read();
 		} catch (error) {
 			const why = error instanceof Error ? error.message : String(error);
 			throw new CaseError(`In ${folder}: ${why}`);
 		}
-		if (ids.has(parsed.case.id))
+	};
+	for (const folder of folders) {
+		const imagesOf = (c: Case, keep: boolean) =>
+			readImages(zip, folder, c, {
+				maxEntries: MAX_ALL_ENTRIES,
+				maxBytes: limits.maxCaseBytes,
+				keep,
+			});
+		const c = await inFolder(folder, async () => {
+			const json = await readCaseJson(zip, folder, MAX_ALL_ENTRIES);
+			unpacked += json.bytes + (await imagesOf(json.c, false)).bytes;
+			return json.c;
+		});
+		if (unpacked > limits.maxAllBytes) throw tooMuch;
+		if (ids.has(c.id))
 			throw new CaseError(
-				`The file holds the case ${parsed.case.id} twice (in ${folder}).`,
+				`The file holds the case ${c.id} twice (in ${folder}).`,
 			);
-		ids.add(parsed.case.id);
-		cases.push(parsed);
+		ids.add(c.id);
+		cases.push({
+			case: c,
+			images: () =>
+				inFolder(folder, async () => (await imagesOf(c, true)).images),
+		});
 	}
 	return cases;
 }
@@ -293,9 +422,11 @@ export async function readExports(zip: Uint8Array): Promise<ParsedExport[]> {
  */
 export async function storeImport(
 	store: CaseStore,
-	parsed: ParsedExport,
+	parsed: ParsedExport | CheckedExport,
 	options: { copy?: boolean; now?: Date } = {},
 ): Promise<Case> {
+	const images =
+		parsed.images instanceof Map ? parsed.images : await parsed.images();
 	const c: Case = {
 		...parsed.case,
 		...(options.copy
@@ -315,7 +446,7 @@ export async function storeImport(
 		),
 		importedAt: (options.now ?? new Date()).toISOString(),
 	};
-	await store.replaceCase(c, parsed.images);
+	await store.replaceCase(c, images);
 	return c;
 }
 

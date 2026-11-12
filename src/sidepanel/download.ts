@@ -85,17 +85,21 @@ function saveByLink(url: string, name: string): void {
 }
 
 /**
- * Save `bytes` as `name`. Where it went, when `allowed` (askForDownloads,
+ * Save `bytes` (or a Blob of them) as `name`. Where it went, when `allowed` (askForDownloads,
  * asked in the click) says yes; otherwise, or when the user cancelled Chrome's
  * Save as, `undefined`.
  */
 export async function saveFile(
-	bytes: Uint8Array,
+	bytes: Uint8Array | Blob,
 	name: string,
 	allowed: Promise<boolean>,
 ): Promise<SavedFile | undefined> {
 	const url = URL.createObjectURL(
-		new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "application/zip" }),
+		bytes instanceof Blob
+			? bytes
+			: new Blob([bytes as Uint8Array<ArrayBuffer>], {
+					type: "application/zip",
+				}),
 	);
 	let id: number | undefined;
 	if ((await allowed) && typeof chrome.downloads?.download === "function") {

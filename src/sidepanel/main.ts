@@ -16,12 +16,12 @@ import {
 	withResolution,
 } from "../lib/case.ts";
 import {
+	type CheckedExport,
 	exportAllCases,
 	exportAllFileName,
 	exportCase,
 	exportFileName,
 	MAX_IMPORT_ALL_BYTES,
-	type ParsedExport,
 	readExports,
 	storeImport,
 } from "../lib/export.ts";
@@ -486,8 +486,29 @@ async function startAnnotating(target?: Case): Promise<void> {
 	}
 }
 
+/** An import is at work, or its question is open: no other import starts. */
+const importBusy = () =>
+	state.importWork !== undefined || state.importing !== undefined;
+
+/**
+ * Do an import's work (on `what`, a file's name), one at a time: the import
+ * buttons are off meanwhile, and a second import does not start.
+ */
+async function importWork(
+	what: string,
+	work: () => Promise<void>,
+): Promise<void> {
+	if (state.importWork !== undefined) return;
+	update((s) => (s.importWork = what));
+	try {
+		await work();
+	} finally {
+		update((s) => (s.importWork = undefined));
+	}
+}
+
 /** Store one case of a file; the drawn marks of the version it replaced go. */
-async function storeOne(parsed: ParsedExport, copy: boolean): Promise<Case> {
+async function storeOne(parsed: CheckedExport, copy: boolean): Promise<Case> {
 	const c = await storeImport(store, parsed, { copy });
 	// Results (and drawn marks) of the version it replaced describe other marks.
 	if (state.loaded?.caseId === c.id) await forgetLoaded({ clearTab: true });
@@ -500,7 +521,7 @@ async function storeOne(parsed: ParsedExport, copy: boolean): Promise<Case> {
  * tab when it is that case's page); in a file of several the next one follows.
  */
 async function finishImport(
-	parsed: ParsedExport,
+	parsed: CheckedExport,
 	copy: boolean,
 	batch?: ImportBatch,
 ): Promise<void> {
@@ -575,7 +596,7 @@ function asking(of: Exported["of"], allowed: Promise<boolean>): void {
 /** Save an export, and show where it went when Chrome tells. */
 async function saveExport(
 	of: Exported["of"],
-	bytes: Uint8Array,
+	bytes: Uint8Array | Blob,
 	name: string,
 	allowed: Promise<boolean>,
 ): Promise<void> {
@@ -1047,29 +1068,43 @@ const actions: Actions = {
 
 	importReplace() {
 		const importing = state.importing;
-		if (importing === undefined) return;
-		void (async () => {
-			const now = await store.getCase(importing.parsed.case.id);
-			if (state.importing !== importing) return;
-			// It changed under the prompt: ask again, with the new date.
-			if (now !== undefined && now.updatedAt !== importing.existing.updatedAt)
-				update((s) => (s.importing = { ...importing, existing: now }));
-			else await finishImport(importing.parsed, false, importing.batch);
-		})().catch((error: unknown) =>
-			update((s) => (s.importError = `Could not import: ${message(error)}`)),
+		if (importing === undefined || state.importWork !== undefined) return;
+		void importWork(
+			importing.batch?.name ?? importing.parsed.case.title,
+			async () => {
+				try {
+					const now = await store.getCase(importing.parsed.case.id);
+					if (state.importing !== importing) return;
+					// It changed under the prompt: ask again, with the new date.
+					if (
+						now !== undefined &&
+						now.updatedAt !== importing.existing.updatedAt
+					)
+						update((s) => (s.importing = { ...importing, existing: now }));
+					else await finishImport(importing.parsed, false, importing.batch);
+				} catch (error) {
+					update(
+						(s) => (s.importError = `Could not import: ${message(error)}`),
+					);
+				}
+			},
 		);
 	},
 	importCopy() {
 		const importing = state.importing;
-		if (importing) void finishImport(importing.parsed, true, importing.batch);
+		if (importing === undefined || state.importWork !== undefined) return;
+		void importWork(importing.batch?.name ?? importing.parsed.case.title, () =>
+			finishImport(importing.parsed, true, importing.batch),
+		);
 	},
 	importCancel() {
+		if (state.importWork !== undefined) return;
 		const batch = state.importing?.batch;
 		update((s) => (s.importing = undefined));
 		// In a file of several: this one stays as it is, the next one follows.
 		if (batch !== undefined) {
 			batch.skipped++;
-			void importRest(batch);
+			void importWork(batch.name, () => importRest(batch));
 		}
 	},
 };
@@ -1114,6 +1149,8 @@ byId<HTMLButtonElement>("annotate").addEventListener("click", () =>
 );
 
 exportAllButton.addEventListener("click", () => {
+	// Off while an import is at work (view.ts); it reads the cases it stores.
+	if (importBusy()) return;
 	// Chrome asks only during a click: nothing may be awaited before this.
 	const allowed = askForDownloads();
 	asking("all", allowed);
@@ -1125,8 +1162,17 @@ exportAllButton.addEventListener("click", () => {
 	});
 	void (async () => {
 		try {
-			const zip = await exportAllCases(store, await store.listCases());
-			await saveExport("all", zip, exportAllFileName(), allowed);
+			// The bytes go into a Blob at once, and are not kept beside it.
+			const file = new Blob(
+				[
+					(await exportAllCases(
+						store,
+						await store.listCases(),
+					)) as Uint8Array<ArrayBuffer>,
+				],
+				{ type: "application/zip" },
+			);
+			await saveExport("all", file, exportAllFileName(), allowed);
 		} catch (error) {
 			update(
 				(s) =>
@@ -1138,16 +1184,24 @@ exportAllButton.addEventListener("click", () => {
 	})();
 });
 
-importButton.addEventListener("click", () => importFile.click());
-importFile.addEventListener("change", async () => {
+importButton.addEventListener("click", () => {
+	if (!importBusy()) importFile.click();
+});
+importFile.addEventListener("change", () => {
 	const file = importFile.files?.[0];
 	importFile.value = "";
 	if (file === undefined) return;
+	// One import at a time: its question is answered before another file is read.
+	if (importBusy()) return;
 	update((s) => {
 		s.importError = undefined;
 		s.importDone = undefined;
-		s.importing = undefined;
 	});
+	void importWork(file.name, () => importOne(file));
+});
+
+/** Read a chosen file, and store its cases (or ask about the first one here already). */
+async function importOne(file: File): Promise<void> {
 	try {
 		if (file.size > MAX_IMPORT_ALL_BYTES)
 			throw new Error(
@@ -1173,7 +1227,7 @@ importFile.addEventListener("change", async () => {
 				(s.importError = `Could not import ${file.name}: ${message(error)}`),
 		);
 	}
-});
+}
 byId<HTMLButtonElement>("import-dismiss").addEventListener("click", () =>
 	update((s) => (s.importError = undefined)),
 );

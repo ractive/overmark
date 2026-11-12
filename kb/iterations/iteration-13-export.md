@@ -37,6 +37,13 @@ The decision is DEC-020.
       Export with Chrome's prompt answered no saves the old way and shows no path; all
       cases imported into an empty store and again with Skip for each
 - [x] Docs
+- [x] Review of PR 35: the unpacked size of a file of all cases counted for the whole
+      file (declared sizes before unpacking, then what was unpacked), at most 256 MB
+      (was 512 MB); Export all refuses naming the cases too large to import again, and
+      counts the zip's headers; the import checks every case first without keeping its
+      images, then unpacks and stores one case at a time; one import at a time, with
+      Import a case… and Export all cases disabled meanwhile. Unit tests for each, and
+      the end-to-end test chooses a second file while the first one's question is open
 
 ## Left open
 
@@ -46,6 +53,8 @@ The decision is DEC-020.
   behaviour; it was not tried by hand in branded Chrome.
 - Importing a file of all cases into a browser that has them all asks once per case;
   there is no "the same for all".
+- Export of a single case does not check its size: a case over 150 MB still gets a file
+  that Import a case… refuses (Export all cases checks each case, see DEC-020).
 
 # Citations
 

@@ -6,6 +6,8 @@ import {
 	exportAllFileName,
 	exportCase,
 	exportFileName,
+	type FileLimits,
+	MAX_IMPORT_ALL_BYTES,
 	readExport,
 	readExports,
 	storeImport,
@@ -511,7 +513,7 @@ describe("all cases in one file", () => {
 		const parsed = await readExports(await exportCase(store, c));
 		expect(parsed).toHaveLength(1);
 		expect(parsed[0]?.case).toEqual(c);
-		expect(parsed[0]?.images.size).toBe(3);
+		expect((await parsed[0]?.images())?.size).toBe(3);
 	});
 
 	test("refuses a file that is no export, naming what is wrong", async () => {
@@ -557,5 +559,158 @@ describe("all cases in one file", () => {
 		await expect(exportAllCases(new MemoryStore(), [])).rejects.toThrow(
 			"There are no cases to export.",
 		);
+	});
+});
+
+describe("third review: sizes of a file of all cases", () => {
+	const MB = 1024 * 1024;
+	const limits = (maxCaseBytes: number, maxAllBytes: number): FileLimits => ({
+		maxCaseBytes,
+		maxAllBytes,
+	});
+
+	/** Cases with one screenshot each of `sizes[i]` bytes, zeros after the header. */
+	async function sized(
+		sizes: readonly number[],
+	): Promise<{ store: MemoryStore; cases: Case[] }> {
+		const store = new MemoryStore();
+		const cases: Case[] = [];
+		for (const [i, size] of sizes.entries()) {
+			const c: Case = {
+				...sampleCase(`c_size${i}`),
+				title: `Case ${i}`,
+				shots: [
+					{
+						id: "s1",
+						image: "shots/s1.webp",
+						scrollX: 0,
+						scrollY: 0,
+						viewport: { width: 1280, height: 800, dpr: 2 },
+						capturedAt: "2026-11-04T10:00:00Z",
+					},
+				],
+			};
+			await putCase(store, c);
+			await store.putImage(c.id, "shots/s1.webp", {
+				blob: new Blob(
+					[
+						webpBytes(
+							10,
+							10,
+							"\0".repeat(size - 30),
+						) as Uint8Array<ArrayBuffer>,
+					],
+					{ type: "image/webp" },
+				),
+				width: 10,
+				height: 10,
+			});
+			cases.push(c);
+		}
+		return { store, cases };
+	}
+
+	test("the cases of a file count together: a small file that unpacks to more is refused", async () => {
+		const { store, cases } = await sized([1.2 * MB, 1.2 * MB, 1.2 * MB]);
+		const files = await readZip(
+			await exportAllCases(store, cases, limits(2 * MB, 8 * MB)),
+		);
+		// The zero-padded "WebP"s deflate to almost nothing.
+		const bomb = await writeZip(
+			[...files].map(([name, data]) => ({ name, data })),
+			{ compress: () => true },
+		);
+		expect(bomb.length).toBeLessThan(100 * 1024);
+		// Each case is within its limit; all of them are not.
+		await expect(readExports(bomb, limits(2 * MB, 3 * MB))).rejects.toThrow(
+			"The cases in the file unpack to more than 3 MB.",
+		);
+		expect(await readExports(bomb, limits(2 * MB, 4 * MB))).toHaveLength(3);
+	});
+
+	test("Export all cases names the cases too large to be imported again", async () => {
+		const { store, cases } = await sized([1.2 * MB, 1000, 1.5 * MB]);
+		await expect(
+			exportAllCases(store, cases, limits(1 * MB, 8 * MB)),
+		).rejects.toThrow(
+			"“Case 0” and “Case 2” are too large to be imported again (more than 1 MB each). Export the other cases one at a time.",
+		);
+		await expect(
+			exportAllCases(store, cases.slice(0, 2), limits(1 * MB, 8 * MB)),
+		).rejects.toThrow(
+			"“Case 0” is too large to be imported again (more than 1 MB).",
+		);
+		// Each within the limit for one case, together over the one for all.
+		await expect(
+			exportAllCases(store, cases, limits(2 * MB, 2 * MB)),
+		).rejects.toThrow("All cases together are larger than 2 MB.");
+	});
+
+	test("Export all cases counts the zip's headers too, as the import does", async () => {
+		const store = new MemoryStore();
+		const cases: Case[] = [];
+		for (let i = 0; i < 20; i++) {
+			const c = {
+				...sampleCase(`c_head${i}`),
+				title: "A title long enough to make a long folder name, near sixty",
+			};
+			await putCase(store, c);
+			cases.push(c);
+		}
+		const zip = await exportAllCases(store, cases);
+		let data = 0;
+		for (const d of (await readZip(zip)).values()) data += d.length;
+		// Headers outweigh what deflating case.json and case.md saves here.
+		expect(zip.length).toBeGreaterThan(data);
+		const max = zip.length - 1;
+		await expect(exportAllCases(store, cases, limits(MB, max))).rejects.toThrow(
+			"All cases together are larger than",
+		);
+		await expect(readExports(zip, limits(MB, max))).rejects.toThrow(
+			"The file is larger than",
+		);
+	});
+
+	test("the cap for all cases is 256 MB", () => {
+		expect(MAX_IMPORT_ALL_BYTES).toBe(256 * MB);
+	});
+
+	test("reading a file keeps no images: each case's come when it is stored", async () => {
+		const { store, cases } = await sized([1000, 2000, 3000]);
+		const zip = await exportAllCases(store, cases);
+		const RealBlob = globalThis.Blob;
+		let made = 0;
+		globalThis.Blob = class extends RealBlob {
+			constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+				super(parts, options);
+				if (options?.type === "image/webp") made++;
+			}
+		};
+		try {
+			const read = await readExports(zip);
+			expect(read).toHaveLength(3);
+			expect(made).toBe(0);
+			const target = new MemoryStore();
+			await storeImport(target, read[1] as (typeof read)[number]);
+			expect(made).toBe(1);
+			expect(
+				(await target.getImage("c_size1", "shots/s1.webp"))?.blob.size,
+			).toBe(2000);
+			expect(await target.listCases()).toHaveLength(1);
+		} finally {
+			globalThis.Blob = RealBlob;
+		}
+	});
+
+	test("a case's images are checked again when it is stored", async () => {
+		const { store, cases } = await sized([1000, 2000]);
+		const zip = await exportAllCases(store, cases);
+		const read = await readExports(zip);
+		// The bytes of the second case's screenshot, changed after the check.
+		const at = new TextDecoder("latin1").decode(zip).lastIndexOf("RIFF");
+		zip[at] = 0;
+		await expect(
+			storeImport(new MemoryStore(), read[1] as (typeof read)[number]),
+		).rejects.toThrow("In case-1/:");
 	});
 });
