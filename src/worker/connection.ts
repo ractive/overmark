@@ -14,6 +14,7 @@
  */
 
 import {
+	type ConfirmAnswer,
 	type ConfirmRequest,
 	type DisconnectDetail,
 	type ReplacedDetail,
@@ -280,15 +281,15 @@ export class Connection {
 		);
 	}
 
-	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<boolean> {
+	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<ConfirmAnswer> {
 		return decide(
 			{
 				always: this.#always,
 				ask: async (r) => {
 					const lines = await confirmLines(this.#deps.store, this.#tab, r);
 					const front = await tabInFront().catch(() => undefined);
-					// No answer in time is Don't allow; the library tells the AI
-					// app "The user declined" for that as for any no.
+					// No answer in time is "timeout": `decide` tells the library
+					// "unanswered", which the AI app hears as such, not as a no.
 					return this.#questions.ask(r, lines, front?.id);
 				},
 				connected: (grantId) => mcp.grants.some((g) => g.grantId === grantId),

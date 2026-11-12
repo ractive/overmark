@@ -173,7 +173,7 @@ describe("a call of a tool that changes something", () => {
 		for (const [answer, allowed] of [
 			["allow", true],
 			["deny", false],
-			["timeout", false],
+			["timeout", "unanswered"],
 		] as const) {
 			const d = await decider(answer);
 			expect(await decide(d, request())).toBe(allowed);
