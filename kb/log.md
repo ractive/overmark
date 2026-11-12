@@ -28,3 +28,4 @@
 ## 2026-11-12
 
 - tab-mcp client 0.13.0. Its `client` (tool calls, questions, the `toolcall` event) is now a relay AI app or an agent in the browser through WebMCP (`kind`); Overmark leaves the new `webmcp` option off (its TabMcp runs in the service worker, which has no document), and should a WebMCP call come all the same it is refused: a tool that changes something gets no question and no Always allow, findings cannot be added, edited or deleted, and none are its own. Relay AI apps work as before
+- The pairing box opened with "+ Add another AI app" closes by itself once that app has connected (the owner: it stayed open next to the connected apps until Done)
