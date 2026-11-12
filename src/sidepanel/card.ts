@@ -64,6 +64,14 @@ export function cardView(a: AiState, adding: boolean): CardView {
 	};
 }
 
+/**
+ * Whether `a` has a grant that is not in `known`: the AI app being added has
+ * connected, which ends adding it (the pairing box closes).
+ */
+export function hasNewGrant(known: ReadonlySet<string>, a: AiState): boolean {
+	return a.grants.some((g) => !known.has(g.grantId));
+}
+
 /** A confirming click this soon after the first one (a double click) counts as nothing. */
 export const CONFIRM_DELAY_MS = 750;
 

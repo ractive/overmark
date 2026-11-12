@@ -28,6 +28,7 @@ import {
 import {
 	cardView,
 	confirms,
+	hasNewGrant,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
 	switchShown,
@@ -197,6 +198,8 @@ export async function startAi(
 	let pairing = false;
 	/** The user asked to add another AI app (with apps paired already). */
 	let addingApp = false;
+	/** The apps paired when "+ Add another AI app" was clicked. */
+	let knownGrants: ReadonlySet<string> = new Set();
 	/** Disconnect asks first: the apps whose button was clicked once. */
 	const disconnectArmed = new Map<
 		string,
@@ -337,6 +340,8 @@ export async function startAi(
 
 	function addApp(on: boolean): void {
 		addingApp = on;
+		// The apps already paired: one more connecting ends adding it.
+		knownGrants = new Set(current?.grants.map((g) => g.grantId));
 		if (current) showCard(current);
 	}
 
@@ -537,6 +542,8 @@ export async function startAi(
 	function showCard(a: AiState): void {
 		// Adding another app ends with the connection.
 		if (a.state !== "connected") addingApp = false;
+		// And with the app being added connecting: the box has done its job.
+		if (addingApp && hasNewGrant(knownGrants, a)) addingApp = false;
 		const view = cardView(a, addingApp);
 		byId("ai-state").dataset["state"] = view.status;
 		byId("ai-state-text").textContent = view.stateText;
