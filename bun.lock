@@ -5,7 +5,7 @@
     "": {
       "name": "overmark",
       "dependencies": {
-        "@ractive-ch/tab-mcp-client": "0.13.0",
+        "@ractive-ch/tab-mcp-client": "0.14.0",
       },
       "devDependencies": {
         "@biomejs/biome": "2.6.5",
@@ -49,7 +49,7 @@
 
     "@ractive-ch/tab-mcp": ["@ractive-ch/tab-mcp@0.9.0", "", { "bin": { "tab-mcp": "main.js" } }, "sha512-Egz3q5NxQvCoIqjaUvFFToGy6u46FSIOBZtyoJT7lBR/Kxi2+Rbcldn7u5yWOJY+uvLT7+ZgoXowqHtq/hfVzA=="],
 
-    "@ractive-ch/tab-mcp-client": ["@ractive-ch/tab-mcp-client@0.13.0", "", { "dependencies": { "@cfworker/json-schema": "4.1.6" }, "peerDependencies": { "react": ">=18.3.0 <20" }, "optionalPeers": ["react"] }, "sha512-4vDsqaYZIeF8xvSdu0InjRN7rwbnQqJKIOk/4zsicmabGfvQXBs4REBUnF/RwFpe5/OvPSeXfN+Rm7pzmoIgfw=="],
+    "@ractive-ch/tab-mcp-client": ["@ractive-ch/tab-mcp-client@0.14.0", "", { "dependencies": { "@cfworker/json-schema": "4.1.6" }, "peerDependencies": { "react": ">=18.3.0 <20" }, "optionalPeers": ["react"] }, "sha512-PPMG/3E3MtZVXeF+0hdihPRSVcbreG0YpPH9kqn0HGayuWRbRCWhR+/MeQZwq17Ks0eLCmWcZuSe73mlAN9ukA=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
