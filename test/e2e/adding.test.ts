@@ -143,6 +143,19 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		const panel = await panelHome(h);
 		await openCase(panel, title);
 		await page.activate();
+		// The case's marks follow it to the page (DEC-022): drawn before the
+		// toolbar comes, as a person's click on Add marks would find them.
+		const { c } = await caseTitled(title);
+		const tabId = await h.control.eval<number>(
+			`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.id)`,
+		);
+		await until(
+			() =>
+				h.control.eval<string | null>(
+					`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.loadedCase ?? null, () => null)`,
+				),
+			(loaded) => loaded === c.id,
+		);
 		await panel.eval(`document.getElementById("add-marks").click()`);
 		await page.waitFor(`${status} === ${JSON.stringify(says)}`);
 		return panel;

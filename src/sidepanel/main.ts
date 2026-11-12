@@ -296,6 +296,9 @@ async function loadOnLoaded(
 async function follow(
 	options: { reloaded?: boolean; tabId?: number } = {},
 ): Promise<void> {
+	// What the draw found goes under the case's buttons, unless the user did
+	// something there meanwhile (Match size, Export): that one's outcome stays.
+	const hint = followHint();
 	const c = state.view.kind === "case" ? state.current : undefined;
 	if (c === undefined || !showing(c.id)) {
 		// Not read yet: opening it follows once it is.
@@ -331,10 +334,10 @@ async function follow(
 	if (step.clear !== undefined) takeOff(step.clear);
 	if (front === undefined) return;
 	if (front.id !== followed) {
+		// What the hints said was about the tab before (opening the case
+		// cleared them already).
+		if (followed !== undefined) hint(undefined);
 		followed = front.id;
-		// What the hints said was about the tab before.
-		hintWork.cancel();
-		update((s) => (s.caseHint = undefined));
 	}
 	if (step.action === "wait") {
 		pendingLoad = { tabId: front.id, caseId: c.id };
@@ -345,7 +348,7 @@ async function follow(
 	// Under way already; a page that loaded again needs a new one.
 	if (!reloaded && sameDrawn(drawing, target)) return;
 	if (pendingLoad?.tabId === front.id) pendingLoad = undefined;
-	await loadOnLoaded(c, front.id, caseHintWriter());
+	await loadOnLoaded(c, front.id, hint);
 }
 
 /** Waits until the window has left full screen or maximised, three seconds at most. */
@@ -523,6 +526,17 @@ function closeCase(): void {
  */
 function caseHintWriter(): (text: string | undefined) => void {
 	const work = hintWork.start();
+	return (text) => {
+		if (work.current()) update((s) => (s.caseHint = text));
+	};
+}
+
+/**
+ * For the panel's own draws: writes under the case's buttons while no action
+ * of the user's has written there since, and stops no action's hint itself.
+ */
+function followHint(): (text: string | undefined) => void {
+	const work = hintWork.peek();
 	return (text) => {
 		if (work.current()) update((s) => (s.caseHint = text));
 	};

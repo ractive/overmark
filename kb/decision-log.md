@@ -673,7 +673,9 @@ there.
   page, `chrome://`) is left alone. A tab that shows the case already (the panel drew it,
   or an AI app's `load_case` did) is not drawn on again, which would drop the candidates
   chosen, unless the page loaded again. The searches again at 1 s and 2 s (marks a script
-  draws late) run for every such draw.
+  draws late) run for every such draw. What a draw found goes under the case's buttons
+  only while the user's own actions there (Match size, Export, Hide) have not written
+  since: a draw that happens on its own never wipes their outcome (`Latest.peek`).
 - **"← All cases" takes the panel's marks off the page.** The panel remembers where it
   drew them; marks an AI app loaded through the tools are the page's (`state.loadedCase`
   in the worker) and stay, as before. Closing the side panel leaves the marks where they
