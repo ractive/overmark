@@ -67,18 +67,23 @@
 				<p><button id="add-app" type="button" class="link add-app" hidden title="Show the address and a code to pair one more AI app; the apps paired already stay">+ Add another AI app</button></p>
 				<div id="pairing" class="pairing" hidden>
 					<h3 class="group-title">Pair an AI app</h3>
-					<p>
-						Add this address to your AI app as a connector (a remote MCP server).
-						<a href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">How, in Claude, ChatGPT, Claude Code and Codex</a>
-					</p>
+					<p>Add this address to your AI app as a connector (a remote MCP server).</p>
 					<div class="row">
 						<code id="pair-address" class="address"></code>
-						<button id="pair-copy" type="button" title="Copy the address, to add it to your AI app">Copy</button>
+						<button id="pair-copy" type="button" class="copy" aria-label="Copy address" title="Copy the address, to add it to your AI app">Copy</button>
 					</div>
+					<!-- The steps per AI app, from the client library (setup.ts). -->
+					<details id="setup" class="setup" hidden>
+						<summary>How do I add it?</summary>
+						<ul id="setup-steps" class="setup-steps" aria-label="Steps per AI app"></ul>
+						<p><a id="setup-guide" href="https://ractive.ch/tab-mcp/connect/" target="_blank" rel="noopener">Step by step, and what to do when it fails</a></p>
+					</details>
+					<!-- What a Copy did; outside the details, so it also speaks with them closed. -->
+					<p id="copy-status" class="meta copy-status" role="status"></p>
 					<p>When the AI app opens the sign-in page, type this code there:</p>
 					<div class="row">
 						<code id="pair-code" class="code">––– –––</code>
-						<button id="pair-copy-code" type="button" disabled title="Copy the code, to type it on the AI app's sign-in page">Copy</button>
+						<button id="pair-copy-code" type="button" class="copy" aria-label="Copy code" disabled title="Copy the code, to type it on the AI app's sign-in page">Copy</button>
 					</div>
 					<p class="meta">The code changes every 2 minutes and after each use.</p>
 					<div class="row">

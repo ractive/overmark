@@ -132,14 +132,16 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_STORE=memory \
   -e TAB_MCP_SITES='[{"origin":"chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg","name":"Overmark"}]' \
-  ractive/tab-mcp:0.8.0
+  ractive/tab-mcp:0.9.0
 ```
 
 Then, in the side panel's "AI app" card, set the relay to `http://localhost:8080`
 and click "Turn on AI access" (or flip the AI access switch). With no AI app paired yet,
 the card shows the address and a code at once; with apps paired, "+ Add another AI app"
-shows them. Add the address to Claude Code, then run `/mcp` there and choose
-Authenticate:
+shows them. Under the address, "How do I add it?" opens the steps for Claude, ChatGPT,
+Claude Code and Codex (the tab-mcp client library's, with the address in them), each
+command with its own Copy, and a link to the step-by-step guide. Add the address to
+Claude Code, then run `/mcp` there and choose Authenticate:
 
 ```sh
 claude mcp add --transport http overmark <address>

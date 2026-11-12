@@ -1328,6 +1328,85 @@ button.link.add-app:hover:not(:disabled) {
 	letter-spacing: 0.08em;
 }
 
+/* "Copy" and "Copied" take the same width: nothing beside them moves. */
+button.copy {
+	min-width: 5em;
+	flex: none;
+}
+
+/* "How do I add it?": per AI app its steps, each command with its own Copy. */
+.setup {
+	margin: 0 0 4px;
+	padding: 0 10px;
+	border: 1px solid var(--rule);
+	border-radius: 8px;
+	background: var(--sheet);
+}
+
+.setup summary {
+	padding: 6px 0;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.setup[open] {
+	padding-bottom: 10px;
+}
+
+.setup-steps {
+	list-style: none;
+	margin: 4px 0 10px;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.setup-steps li {
+	overflow-wrap: anywhere;
+}
+
+.setup-steps strong {
+	display: block;
+	font-weight: 600;
+}
+
+.setup .command {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	margin-top: 4px;
+}
+
+.setup pre {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+	padding: 6px 8px;
+	border-radius: 8px;
+	background: var(--wash);
+	font-size: 12px;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+.pairing .setup p {
+	margin: 4px 0 0;
+}
+
+.setup code {
+	padding: 0 4px;
+	border-radius: 4px;
+	background: var(--wash);
+	font-size: 12px;
+}
+
+/* What a Copy did: one line kept for it, so the box does not move when it speaks. */
+.pairing .copy-status {
+	min-height: 1.45em;
+	margin: 0 0 4px;
+}
+
 /* "Disconnect? Click again": filled, so the second click is meant. */
 ul.grants button[data-armed],
 ul.grants button[data-armed]:hover:not(:disabled) {

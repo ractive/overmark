@@ -13,6 +13,7 @@
  */
 
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
+import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import type { Answer, QuestionView } from "./protocol.ts";
 
 /** A question nobody answers in this time is Don't allow. */
@@ -51,25 +52,17 @@ export interface NotificationText {
 	contextMessage: string;
 }
 
-const INVISIBLE = /(?![\t\n ])[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}⠀ㅤᅟᅠﾠ]/gu;
-
 const cut = (text: string, max: number) =>
 	text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
 /**
  * Characters that are invisible, blank or turn the text's direction (U+202E,
  * say) written as `\uXXXX`, so the AI app cannot make the arguments look like
- * something else. The tool gets them unchanged.
+ * something else; line breaks and tabs stay (in JSON only the layout). The
+ * library's escaping, the same as its confirmation dialog's and the tab-mcp
+ * extension's. The tool gets the text unchanged.
  */
-export function visible(text: string): string {
-	// Line breaks and tabs stay: in JSON they are only the layout.
-	return text.replace(INVISIBLE, (c) => {
-		const code = c.codePointAt(0) ?? 0;
-		return code > 0xffff
-			? `\\u{${code.toString(16)}}`
-			: `\\u${code.toString(16).padStart(4, "0")}`;
-	});
-}
+export const visible: (text: string) => string = escapeInvisible;
 
 /** The AI app as a question names it: its declared name beside its verified host. */
 export function appName(client: ConfirmRequest["client"]): string {

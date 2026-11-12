@@ -1,12 +1,12 @@
 ---
 type: iteration
-title: "Iteration 13: Export says where the file went, Export all cases, tooltips"
+title: "Iteration 14: Export says where the file went, Export all cases, tooltips"
 status: completed
 description: "Export shows the saved file's path with Copy and Show in folder, through the optional downloads permission asked at the first Export (a no saves as before); Export all cases writes one zip with a folder per case, which Import a case… reads case by case; the side panel's buttons get tooltips (DEC-020)."
 timestamp: 2026-11-12T12:00:00+01:00
 tags: [iteration, export, ui]
 ---
-# Iteration 13: Export says where the file went, Export all cases, tooltips
+# Iteration 14: Export says where the file went, Export all cases, tooltips
 
 The owner decided on 2026-11-10 that Export should say where the file went, that all
 cases should go out in one file, and that the panel's buttons should say what they do.

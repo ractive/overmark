@@ -33,6 +33,7 @@ import {
 	switchShown,
 } from "./card.ts";
 import { byId, h } from "./dom.ts";
+import { copyText, startSetup } from "./setup.ts";
 import type { PanelState } from "./state.ts";
 
 /** How long the panel must be visible and focused before Allow and Always allow count. */
@@ -188,6 +189,7 @@ export async function startAi(
 		return;
 	}
 
+	const setup = startSetup();
 	const windowId = (await chrome.windows.getCurrent()).id;
 	let port: chrome.runtime.Port | undefined;
 	let current: AiState | undefined;
@@ -367,25 +369,24 @@ export async function startAi(
 		send({ type: "set-relay", relay: value });
 	});
 
-	function copy(button: HTMLButtonElement, text: string | undefined): void {
-		if (text === undefined) return;
-		navigator.clipboard.writeText(text).then(
-			() => {
-				button.textContent = "Copied";
-				setTimeout(() => {
-					button.textContent = "Copy";
-				}, 1500);
-			},
-			() => undefined,
-		);
+	/** A Copy in the pairing box; a refused clipboard selects what it shows. */
+	function copy(
+		button: HTMLButtonElement,
+		text: string | undefined,
+		noun: string,
+		shown: HTMLElement,
+	): void {
+		if (text !== undefined) copyText(button, text, noun, shown, setup.announce);
 	}
 
 	const copyAddress = byId<HTMLButtonElement>("pair-copy");
 	copyAddress.addEventListener("click", () =>
-		copy(copyAddress, current?.address),
+		copy(copyAddress, current?.address, "address", byId("pair-address")),
 	);
 	const copyCode = byId<HTMLButtonElement>("pair-copy-code");
-	copyCode.addEventListener("click", () => copy(copyCode, current?.code));
+	copyCode.addEventListener("click", () =>
+		copy(copyCode, current?.code, "code", byId("pair-code")),
+	);
 
 	byId<HTMLButtonElement>("pair-take-back").addEventListener("click", () =>
 		send({ type: "connect" }),
@@ -612,6 +613,7 @@ export async function startAi(
 		byId("pair-done").hidden = !view.done;
 		// The address only while pairing: it is what an AI app is added with.
 		byId("pair-address").textContent = view.address;
+		setup.show(view.address);
 		const code = a.code;
 		byId("pair-code").textContent =
 			code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
