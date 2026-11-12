@@ -6,8 +6,10 @@
  * question shows in every open side panel; unless a side panel is open, on
  * screen, in the focused window of the tab in front, it also goes out as a Chrome
  * notification, with Allow and Always allow. The first answer counts;
- * closing the notification or a click on its body, nobody answering within
- * the time limit, or the AI app cancelling, is Don't allow. Each notification carries
+ * closing the notification or a click on its body, or the AI app cancelling,
+ * is Don't allow; nobody answering within the time limit is `"timeout"`,
+ * which `decide` reports to the AI app as unanswered (the call does not run).
+ * Each notification carries
  * its call: a click answers only that call, and a click on a call that is
  * already settled is dropped.
  */
@@ -16,7 +18,7 @@ import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import type { Answer, QuestionView } from "./protocol.ts";
 
-/** A question nobody answers in this time is Don't allow. */
+/** A question nobody answers in this time ends as `"timeout"`: unanswered, the call does not run. */
 export const QUESTION_TIMEOUT_MS = 60_000;
 /** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
@@ -222,7 +224,7 @@ export class Questions {
 	/**
 	 * Allow every waiting question that `covered` now lets through (an
 	 * Always allow or Allow all changes given meanwhile for its AI app and
-	 * tool): it would otherwise still wait, and time out as a no.
+	 * tool): it would otherwise still wait, and time out unanswered.
 	 */
 	allowCovered(covered: (grantId: string, tool: string) => boolean): void {
 		for (const pending of [...this.#pending.values()])

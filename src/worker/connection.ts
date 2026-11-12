@@ -14,6 +14,7 @@
  */
 
 import {
+	type ConfirmAnswer,
 	type ConfirmRequest,
 	type DisconnectDetail,
 	type ReplacedDetail,
@@ -25,6 +26,7 @@ import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
 import { AlwaysAllowed } from "./always.ts";
 import { decide } from "./decide.ts";
+import { showSpark } from "./icon.ts";
 import { KeepOn } from "./keep-on.ts";
 import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
@@ -280,15 +282,15 @@ export class Connection {
 		);
 	}
 
-	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<boolean> {
+	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<ConfirmAnswer> {
 		return decide(
 			{
 				always: this.#always,
 				ask: async (r) => {
 					const lines = await confirmLines(this.#deps.store, this.#tab, r);
 					const front = await tabInFront().catch(() => undefined);
-					// No answer in time is Don't allow; the library tells the AI
-					// app "The user declined" for that as for any no.
+					// No answer in time is "timeout": `decide` tells the library
+					// "unanswered", which the AI app hears as such, not as a no.
 					return this.#questions.ask(r, lines, front?.id);
 				},
 				connected: (grantId) => mcp.grants.some((g) => g.grantId === grantId),
@@ -791,23 +793,27 @@ export class Connection {
 
 	/**
 	 * The icon says what is going on with no panel open: a question waits
-	 * ("?"), AI access is on ("on"), or it is connecting or retrying ("…").
+	 * ("?"), it is connecting or retrying ("…"), or AI access is on (a green
+	 * spark in the icon, no badge).
 	 */
 	#showBadge(): void {
 		const questions = this.#questions.list.length;
 		const mcp = this.#mcp;
-		const [text, color, title] =
+		// One decision for the badge, the title and the spark.
+		const [text, color, title, spark] =
 			questions > 0
 				? [
 						"?",
 						"#b45309",
 						`Overmark: ${questions === 1 ? "an AI app asks" : `${questions} questions wait`} for your answer. Open the side panel to answer.`,
+						false,
 					]
 				: mcp.state === "connected"
-					? ["on", "#15803d", "Overmark: AI access is on"]
+					? ["", "#15803d", "Overmark: AI access is on", true]
 					: mcp.state === "connecting" || mcp.reconnecting
-						? ["…", "#6b7280", "Overmark: connecting to the AI app"]
-						: ["", "#6b7280", "Overmark"];
+						? ["…", "#6b7280", "Overmark: connecting to the AI app", false]
+						: ["", "#6b7280", "Overmark", false];
+		void showSpark(spark);
 		void chrome.action.setBadgeText({ text }).catch(() => {});
 		void chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
 		void chrome.action.setTitle({ title }).catch(() => {});

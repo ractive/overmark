@@ -3,10 +3,11 @@
  * allow for that tool, or Allow all changes, for the AI app it came from;
  * otherwise the user's answer to a question. Only for an AI app connected
  * through the relay: a call through the browser's WebMCP (which Overmark
- * leaves off) is refused without a question.
+ * leaves off) is refused without a question. A question nobody answered in
+ * time is `"unanswered"`: the AI app hears that, not that the user declined.
  */
 
-import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
+import type { ConfirmAnswer, ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import type { AlwaysAllowed } from "./always.ts";
 import type { Answer } from "./protocol.ts";
 
@@ -28,7 +29,7 @@ export interface Decider {
 export async function decide(
 	d: Decider,
 	request: ConfirmRequest,
-): Promise<boolean> {
+): Promise<ConfirmAnswer> {
 	// Overmark turns WebMCP off; should a call come through it all the same,
 	// it is refused: no question, no Always allow (they are per AI app).
 	if (request.client.kind !== "relay") {
@@ -43,5 +44,6 @@ export async function decide(
 	// question was open gets nothing from it.
 	if (answer === "always" && d.connected(grantId))
 		await d.always.addTool(grantId, tool).then(d.kept, d.notKept);
+	if (answer === "timeout") return "unanswered";
 	return answer === "allow" || answer === "always";
 }
