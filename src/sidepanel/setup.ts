@@ -26,6 +26,9 @@ export const SELECTED = "Selected: copy it with Ctrl+C or ⌘C";
  * the focus stays on the button. A refused clipboard (the panel not focused,
  * say) selects `shown`, the element that shows the text, to copy by hand.
  */
+/** Each Copy button's pending switch back to "Copy": a new Copy restarts it. */
+const reverts = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
 export function copyText(
 	button: HTMLElement,
 	text: string,
@@ -49,7 +52,14 @@ export function copyText(
 	clipboard.writeText(text).then(() => {
 		say("Copied");
 		announce(`Copied ${noun}`);
-		setTimeout(() => say("Copy"), COPIED_MS);
+		clearTimeout(reverts.get(button));
+		reverts.set(
+			button,
+			setTimeout(() => {
+				reverts.delete(button);
+				say("Copy");
+			}, COPIED_MS),
+		);
 	}, refused);
 }
 

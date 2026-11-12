@@ -139,6 +139,29 @@ describe("How do I add it?", () => {
 		}
 	});
 
+	test("a second Copy keeps saying Copied for its own full time", async () => {
+		setup.show(ADDRESS);
+		const spy = spyOn(clipboard, "writeText").mockImplementation(
+			async () => {},
+		);
+		try {
+			const copy = step("codex")?.querySelector("button") as HTMLButtonElement;
+			copy.click();
+			await settle();
+			await new Promise((resolve) => setTimeout(resolve, COPIED_MS / 2));
+			copy.click();
+			await settle();
+			// Past the first Copy's time, within the second's.
+			await new Promise((resolve) => setTimeout(resolve, COPIED_MS / 2 + 100));
+			expect(copy.textContent).toBe("Copied");
+			expect(copy.getAttribute("aria-label")).toBe("Copied Codex command");
+			await new Promise((resolve) => setTimeout(resolve, COPIED_MS / 2 + 50));
+			expect(copy.textContent).toBe("Copy");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
 	test("a refused clipboard selects the command and says how to copy it", async () => {
 		setup.show(ADDRESS);
 		const spy = spyOn(clipboard, "writeText").mockImplementation(async () => {
