@@ -398,6 +398,26 @@ ul.cases .load {
 	margin: 0 0 6px;
 }
 
+/* The sync to a folder (DEC-021). */
+.sync {
+	margin-top: 12px;
+	padding-top: 10px;
+	border-top: 1px solid var(--rule);
+}
+
+#sync p {
+	margin: 0 0 6px;
+}
+
+.sync .sync-state {
+	overflow-wrap: anywhere;
+}
+
+.sync[data-sync="paused"] .sync-state {
+	color: var(--warn);
+	font-weight: 600;
+}
+
 /* --- the start: this tab, the cases, the AI app, options ------------------ */
 
 #home {

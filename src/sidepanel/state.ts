@@ -8,6 +8,7 @@
 import type { Case, ResolutionKind } from "../lib/case.ts";
 import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
+import type { SyncStatus } from "../lib/sync.ts";
 import type { Size } from "./size.ts";
 
 export interface MarkEdit {
@@ -132,6 +133,15 @@ export interface PanelState {
 	verdictDrafts: Map<string, string>;
 	/** Overmark may run on every site ("Allow on all sites"). */
 	allSites: boolean;
+	/** The sync to a folder (DEC-021). */
+	sync: {
+		/** The folder's name; `undefined`: not syncing. */
+		folder: string | undefined;
+		/** The worker's status for this folder, once it has one. */
+		status: SyncStatus | undefined;
+		/** What the panel itself could not do (the picker, Allow access). */
+		problem: string | undefined;
+	};
 	ai: {
 		status: string;
 		connected: boolean;
@@ -168,6 +178,7 @@ export const initialState = (): PanelState => ({
 	verdictStatus: undefined,
 	verdictDrafts: new Map(),
 	allSites: false,
+	sync: { folder: undefined, status: undefined, problem: undefined },
 	ai: {
 		status: "Not connected",
 		connected: false,

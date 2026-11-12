@@ -86,6 +86,18 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    Overmark may manage your downloads (an optional permission): with a yes the side
    panel shows where the file went, with Copy (its full path) and Show in folder; with
    a no the file is saved as before and Chrome asks again only at the next Export.
+8. "Sync to a folder…", under the case list, writes every case to a folder you choose
+   once (one in iCloud Drive or Dropbox, say): each case as its own file, the same
+   `<title>.overmark.zip` as Export writes, and again whenever the case changes, also
+   when an AI app changed it. The folder is a mirror: Overmark never reads from it, and
+   a deleted case keeps its file there, so "Import a case…" can bring it back. A case
+   whose title changed gets a file of the new name and its old file goes; two cases of
+   the same title get `-2`, `-3`, and a file Overmark did not write is never
+   overwritten. The side panel shows "Syncing to <folder>" with when it last synced,
+   "Change folder…" and "Stop syncing" (the files stay). Chrome lets Overmark write to
+   the folder only while its side panel is open, and asks for the folder again after
+   the side panel was closed or the browser restarted: the panel then says "Sync paused:
+   allow access again", and "Allow access" writes what changed meanwhile.
 
 ## With an AI app
 

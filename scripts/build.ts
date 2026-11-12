@@ -205,6 +205,8 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 			join(outdir, "sidepanel"),
 			"esm",
 			minify,
+			undefined,
+			options.test,
 		)),
 	]);
 	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));
