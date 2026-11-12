@@ -12,6 +12,9 @@
  * reload; without it AI access is on only until the browser closes or the
  * extension is updated, reloaded or disabled, which clear
  * `chrome.storage.session`.
+ *
+ * It also writes the cases to the folder the user chose for the sync
+ * (DEC-021), after every change and at each start, whoever made the change.
  */
 
 import { isSafeId, pendingImage } from "./lib/case.ts";
@@ -21,6 +24,7 @@ import {
 	PENDING_QUALITY,
 	screenshotToWebp,
 } from "./lib/images.ts";
+import { kvWhenOpen, openKv } from "./lib/kv.ts";
 import {
 	type Broadcast,
 	type CaptureResult,
@@ -34,6 +38,7 @@ import {
 } from "./lib/messages.ts";
 import { numberFree, saveCase, undoAdd } from "./lib/save.ts";
 import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
+import { kvSyncStore, SYNC_DATABASE, Sync } from "./lib/sync.ts";
 import { inject } from "./lib/tabs.ts";
 import { AddLedger } from "./lib/undo.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
@@ -45,6 +50,19 @@ import {
 
 const store = new IdbStore();
 const added = new AddLedger(chrome.storage.session);
+
+/**
+ * The one writer of the sync folder (DEC-021). Chrome lets it write only
+ * while an extension page (the side panel) is open and the user allowed the
+ * folder; otherwise it says "paused" and writes what changed meanwhile once
+ * the panel asks again.
+ */
+const sync = new Sync({
+	cases: store,
+	store: kvSyncStore(kvWhenOpen(openKv(SYNC_DATABASE))),
+	notify: () => void broadcast({ type: "sync:changed" }),
+});
+void sync.request();
 
 // Screenshots of saves that never finished (the tab was closed or navigated
 // while saving) would otherwise stay in storage unseen.
@@ -113,6 +131,7 @@ function capture(tabId: number, windowId: number): Promise<string> {
 }
 
 async function broadcast(message: Broadcast): Promise<void> {
+	if (message.type === "cases:changed") void sync.request();
 	try {
 		await chrome.runtime.sendMessage(message);
 	} catch {
@@ -221,9 +240,21 @@ async function handle(
 	}
 }
 
+/** A page of the extension itself (the side panel), not a content script. */
+const fromExtensionPage = (sender: chrome.runtime.MessageSender) =>
+	sender.url?.startsWith(chrome.runtime.getURL("")) === true;
+
 chrome.runtime.onMessage.addListener(
-	(request: WorkerRequest, sender, sendResponse) => {
+	(request: WorkerRequest | Broadcast, sender, sendResponse) => {
 		if (sender.id !== chrome.runtime.id) return false;
+		// The side panel changed a case, or opened: the sync folder follows.
+		if (
+			(request?.type === "cases:changed" || request?.type === "sync:run") &&
+			fromExtensionPage(sender)
+		) {
+			void sync.request();
+			return false;
+		}
 		if (!isWorkerRequest(request)) return false;
 		handle(request, sender).then(
 			(result) =>
@@ -240,7 +271,11 @@ chrome.runtime.onMessage.addListener(
 
 // --- The AI app (DEC-015) ---------------------------------------------------
 
-const ready = Connection.start({ store, capture });
+const ready = Connection.start({
+	store,
+	capture,
+	changed: () => void sync.request(),
+});
 ready.catch((error: unknown) =>
 	console.error("Overmark: AI connection", error),
 );

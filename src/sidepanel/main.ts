@@ -49,6 +49,7 @@ import {
 	Panel,
 	type PanelState,
 } from "./state.ts";
+import { startSync } from "./sync.ts";
 import { type Actions, NO_ACCESS, render } from "./view.ts";
 
 const store = new IdbStore();
@@ -1107,7 +1108,15 @@ const actions: Actions = {
 			void importWork(batch.name, () => importRest(batch));
 		}
 	},
+
+	syncChoose: () => panelSync.choose(),
+	syncStop: () => panelSync.stop(),
+	syncAllow: () => panelSync.allow(),
+	syncRetry: () => panelSync.retry(),
 };
+
+/** The sync to a folder (DEC-021): the worker writes, the panel chooses. */
+const panelSync = startSync(update);
 
 // --- settings and import -------------------------------------------------------------
 
@@ -1347,7 +1356,7 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 	} else if (news?.type === "cases:changed") {
 		caseChanged(news.caseId);
 		void refreshTab();
-	}
+	} else if (news?.type === "sync:changed") void panelSync.refresh();
 	return false;
 });
 
