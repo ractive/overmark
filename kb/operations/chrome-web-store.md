@@ -107,7 +107,7 @@ PRs (`.github/dependabot.yml`).
 > amber when only probable. The screenshots stay the record, so every mark makes sense
 > even when the page has changed.
 >
-> Export a case as a zip with a Markdown summary and the images, or connect an AI app
+> Export a case, or all of them, as a zip with a Markdown summary and the images, or connect an AI app
 > such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
 > page in front, read a marked element's HTML and CSS there, take screenshots, and
 > record what should change. Changes it wants to
@@ -131,6 +131,7 @@ of the same pages, alone or with an AI app the user connects.
 | `sidePanel` | The side panel lists cases, loads them onto the tab, and shows the AI app's connection and its questions. |
 | `storage` | Session storage, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others, and whether AI access is on. (The AI connection's settings and the secret from which its address is derived are in the extension's own IndexedDB, used by its service worker only; local storage only to delete what an unreleased build kept there.) |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
+| `downloads` (optional) | Asked for when the user clicks Export (or Export all cases) in the side panel. Overmark saves its own export file through `chrome.downloads.download` and reads that one download's path (`downloads.search` by its id), to show the user where the file went with Copy and "Show in folder" (`downloads.show`). It reads no other download. Without it the export is saved as a plain download, without the path. |
 | `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page from its address or shows a case's marks on a tab Overmark may not run on yet ("Show marks on this tab" or the case's Load button), so the marks load without clicking the icon. All sites only when the user turns on "allow on all sites". |
 
 **Remote code:** No. All code is in the package; the connection to the relay carries

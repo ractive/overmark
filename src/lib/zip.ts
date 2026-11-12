@@ -22,8 +22,11 @@ export interface ReadZipOptions {
 	maxEntries?: number;
 	/** The most bytes all included entries may unpack to together. */
 	maxTotalBytes?: number;
-	/** Unpack only the entries this accepts (default: all). */
-	include?: (name: string) => boolean;
+	/**
+	 * Unpack only the entries this accepts (default: all); `size` is what the
+	 * entry declares it unpacks to.
+	 */
+	include?: (name: string, size: number) => boolean;
 }
 
 export class ZipError extends Error {
@@ -233,7 +236,7 @@ export async function readZip(
 		const name = decoder.decode(bytes.subarray(at + 46, at + 46 + nameLength));
 		at += 46 + nameLength + extraLength + commentLength;
 		if (name.endsWith("/")) continue;
-		if (options.include !== undefined && !options.include(name)) continue;
+		if (options.include !== undefined && !options.include(name, size)) continue;
 		if (flags & 1) throw new ZipError(`encrypted entry: ${name}`);
 		if (compressedSize === 0xffffffff || size === 0xffffffff)
 			throw new ZipError(`zip64 entry: ${name}`);

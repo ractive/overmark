@@ -60,6 +60,8 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 	test("has no host access, in the manifest or in Chrome", async () => {
 		expect(h.manifest["host_permissions"]).toBeUndefined();
 		expect(h.manifest["key"]).toBeUndefined();
+		// Asked for at the first Export (DEC-020), not granted at install.
+		expect(h.manifest["optional_permissions"]).toEqual(["downloads"]);
 		const granted = await h.control.eval<{
 			origins: string[];
 			permissions: string[];

@@ -50,7 +50,7 @@ describe("extension ID", () => {
 });
 
 describe("manifest", () => {
-	test("development: key, activeTab, alarms and notifications, optional <all_urls> only", () => {
+	test("development: key, activeTab, alarms and notifications, optional downloads and <all_urls> only", () => {
 		const m = createManifest("1.2.3", { key: "abc" });
 		expect(m["manifest_version"]).toBe(3);
 		expect(m["version"]).toBe("1.2.3");
@@ -64,6 +64,7 @@ describe("manifest", () => {
 			"storage",
 			"unlimitedStorage",
 		]);
+		expect(m["optional_permissions"]).toEqual(["downloads"]);
 		expect(m["optional_host_permissions"]).toEqual(["<all_urls>"]);
 		expect(m["host_permissions"]).toBeUndefined();
 		// A WebSocket that carries messages keeps the service worker alive from
@@ -72,10 +73,11 @@ describe("manifest", () => {
 		expect(m["minimum_chrome_version"]).toBe("116");
 	});
 
-	test("test builds get host access", () => {
-		expect(createManifest("1.0.0", { test: true })["host_permissions"]).toEqual(
-			["<all_urls>"],
-		);
+	test("test builds get host access, and downloads without asking", () => {
+		const m = createManifest("1.0.0", { test: true });
+		expect(m["host_permissions"]).toEqual(["<all_urls>"]);
+		expect(m["permissions"]).toContain("downloads");
+		expect(m["optional_permissions"]).toBeUndefined();
 	});
 });
 

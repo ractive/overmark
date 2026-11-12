@@ -439,6 +439,9 @@ export async function startAi(
 				type: "button",
 				"data-focus": "disconnect",
 				"data-armed": armed ? "" : false,
+				title: armed
+					? "Click again to disconnect this app"
+					: "Remove this app (click twice): it can no longer reach Overmark, and must be added and paired again to come back",
 				onclick: () => {
 					const first = disconnectArmed.get(grant.grantId);
 					if (first === undefined) {
@@ -473,7 +476,10 @@ export async function startAi(
 		const parts: HTMLElement[] = [
 			h(
 				"label",
-				{ class: "switch small" },
+				{
+					class: "switch small",
+					title: `On: every change ${app} asks for runs without asking you, until you disconnect it`,
+				},
 				h("input", {
 					type: "checkbox",
 					role: "switch",
@@ -515,6 +521,7 @@ export async function startAi(
 									class: "link",
 									"data-focus": `ask-again:${tool}`,
 									"aria-label": `Ask again before ${title}`,
+									title: `Ask you again each time ${app} wants to run ${title}`,
 									onclick: () =>
 										send({ type: "ask-again", grantId: grant.grantId, tool }),
 								},
@@ -621,12 +628,18 @@ export async function startAi(
 	const list = byId("questions");
 
 	function question(q: QuestionView): HTMLElement {
+		const titles: Record<Answer, string> = {
+			deny: "Refuse this call; nothing changes",
+			allow: "Run this call once; the app asks again next time",
+			always: `Run this call, and from now on ${q.title ?? q.tool} for ${q.app} without asking, until you disconnect it`,
+		};
 		const answer = (text: string, value: Answer, primary = false) =>
 			h(
 				"button",
 				{
 					type: "button",
 					"data-answer": value,
+					title: titles[value],
 					class: primary ? "primary" : false,
 					// Allow and Always allow only once the panel has been in front a
 					// while: the click that brings it forward cannot approve.

@@ -17,6 +17,9 @@ const window = new Window({ url: "chrome-extension://x/sidepanel/index.html" });
 const globals = globalThis as unknown as Record<string, unknown>;
 const before = { document: globals["document"] };
 let render: (state: PanelState, actions: Actions) => void;
+let ASKING_DOWNLOADS: string;
+let IMPORT_BUSY: string;
+let EXPORT_ALL_BUSY: string;
 
 /** Actions that do nothing, except for `some`. */
 const actionsWith = (some: Partial<Actions>) =>
@@ -35,7 +38,9 @@ beforeAll(async () => {
 		).text(),
 	);
 	globals["document"] = window.document;
-	({ render } = await import("../src/sidepanel/view.ts"));
+	({ render, ASKING_DOWNLOADS, IMPORT_BUSY, EXPORT_ALL_BUSY } = await import(
+		"../src/sidepanel/view.ts"
+	));
 });
 
 afterAll(() => {
@@ -680,7 +685,7 @@ describe("what stays between renders", () => {
 		const existing = sampleCase("c_in");
 		const state = initialState();
 		state.importing = {
-			parsed: { case: sampleCase("c_in"), images: new Map() },
+			parsed: { case: sampleCase("c_in"), images: async () => new Map() },
 			existing,
 		};
 		render(state, noActions);
@@ -983,5 +988,156 @@ describe("a loaded mark", () => {
 		expect(said()).toBe("a span, hidden at this width");
 		render(shownAs(summarize(element), false), noActions);
 		expect(said()).toBe("Hidden at this width");
+	});
+});
+
+describe("where an export went (DEC-020)", () => {
+	const saved = (where: string) =>
+		window.document.querySelector(`#${where}`) as unknown as HTMLElement;
+
+	test("Export all cases waits for a case, and is off while at work", () => {
+		const state = initialState();
+		render(state, noActions);
+		expect(el<HTMLButtonElement>("export-all").disabled).toBe(true);
+		state.cases = [sampleCase("c_x1")];
+		render(state, noActions);
+		expect(el<HTMLButtonElement>("export-all").disabled).toBe(false);
+		state.exportingAll = true;
+		render(state, noActions);
+		expect(el<HTMLButtonElement>("export-all").disabled).toBe(true);
+	});
+
+	test("the path of all cases' file at home, with Copy and Show in folder", async () => {
+		const state = initialState();
+		state.cases = [sampleCase("c_x1")];
+		state.exported = { of: "all", downloadId: 7, path: "/Users/a/x.zip" };
+		const copied: string[] = [];
+		const shown: number[] = [];
+		render(
+			state,
+			actionsWith({
+				copyPath: async (path) => {
+					copied.push(path);
+					return true;
+				},
+				showFile: (e) => shown.push(e.downloadId),
+			}),
+		);
+		const box = saved("export-all-saved");
+		expect(box.hidden).toBe(false);
+		expect(box.querySelector("code")?.textContent).toBe("/Users/a/x.zip");
+		const copy = box.querySelector(
+			'[data-action="copy-path"]',
+		) as unknown as HTMLButtonElement;
+		copy.click();
+		await Bun.sleep(0);
+		expect(copied).toEqual(["/Users/a/x.zip"]);
+		expect(copy.textContent).toBe("Copied");
+		render(state, noActions);
+		// Drawn again only when it shows another file: "Copied" stays.
+		expect(copy.isConnected).toBe(true);
+		(
+			box.querySelector('[data-action="show-file"]') as unknown as HTMLElement
+		).click();
+		expect(shown).toEqual([7]);
+		state.exported = undefined;
+		render(state, noActions);
+		expect(box.hidden).toBe(true);
+	});
+
+	test("a case's file shows in that case only", () => {
+		const c = sampleCase("c_x2");
+		render(
+			caseState(c, (s) => {
+				s.exported = { of: { caseId: c.id }, downloadId: 1, path: "/p.zip" };
+			}),
+			noActions,
+		);
+		expect(saved("export-saved").hidden).toBe(false);
+		expect(saved("export-saved").textContent).toContain("/p.zip");
+		render(
+			caseState(sampleCase("c_x3"), (s) => {
+				s.exported = { of: { caseId: c.id }, downloadId: 1, path: "/p.zip" };
+			}),
+			noActions,
+		);
+		expect(saved("export-saved").hidden).toBe(true);
+	});
+
+	test("while Chrome asks, it says what the answer does", () => {
+		const c = sampleCase("c_x4");
+		render(
+			caseState(c, (s) => {
+				s.askingDownloads = { caseId: c.id };
+			}),
+			noActions,
+		);
+		expect(saved("export-saved").textContent).toBe(ASKING_DOWNLOADS);
+	});
+
+	test("a file of several cases says which case it asks about, and offers Skip", () => {
+		const state = initialState();
+		state.importing = {
+			parsed: { case: sampleCase("c_in"), images: async () => new Map() },
+			existing: sampleCase("c_in"),
+			batch: { name: "all.zip", rest: [], total: 3, stored: 1, skipped: 1 },
+		};
+		render(state, noActions);
+		expect(el("import-prompt").textContent).toContain(
+			"Case 3 of 3 in all.zip.",
+		);
+		expect(
+			window.document.querySelector('[data-action="import-cancel"]')
+				?.textContent,
+		).toBe("Skip");
+		state.importing = undefined;
+		render(state, noActions);
+	});
+});
+
+describe("one import at a time", () => {
+	const button = (id: string) => el<HTMLButtonElement>(id);
+
+	test("Import a case… and Export all cases are off while an import is at work, and say why", () => {
+		const state = initialState();
+		state.cases = [sampleCase("c_y1")];
+		render(state, noActions);
+		const importTitle = button("import").title;
+		const exportTitle = button("export-all").title;
+		expect(button("import").disabled).toBe(false);
+		expect(button("export-all").disabled).toBe(false);
+
+		state.importWork = "all.zip";
+		render(state, noActions);
+		expect(button("import").disabled).toBe(true);
+		expect(button("export-all").disabled).toBe(true);
+		expect(button("import").title).toBe(IMPORT_BUSY);
+		expect(button("export-all").title).toBe(EXPORT_ALL_BUSY);
+		expect(el("import-done").hidden).toBe(false);
+		expect(el("import-done").textContent).toBe("Importing all.zip…");
+
+		// Its question open: the question shows instead.
+		state.importWork = undefined;
+		state.importing = {
+			parsed: { case: sampleCase("c_y1"), images: async () => new Map() },
+			existing: sampleCase("c_y1"),
+			batch: { name: "all.zip", rest: [], total: 2, stored: 0, skipped: 0 },
+		};
+		render(state, noActions);
+		expect(button("import").disabled).toBe(true);
+		expect(button("export-all").disabled).toBe(true);
+		expect(el("import-done").hidden).toBe(true);
+		expect(el("import-prompt").hidden).toBe(false);
+
+		state.importing = undefined;
+		state.importDone = "Imported all 2 cases of all.zip.";
+		render(state, noActions);
+		expect(button("import").disabled).toBe(false);
+		expect(button("export-all").disabled).toBe(false);
+		expect(button("import").title).toBe(importTitle);
+		expect(button("export-all").title).toBe(exportTitle);
+		expect(el("import-done").textContent).toBe(
+			"Imported all 2 cases of all.zip.",
+		);
 	});
 });

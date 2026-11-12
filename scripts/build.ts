@@ -3,7 +3,7 @@
  *
  *   bun scripts/build.ts            development build with the fixed key (DEC-006)
  *   bun scripts/build.ts --store    no `key`, for the Chrome Web Store
- *   bun scripts/build.ts --test     adds `<all_urls>` host access for the end-to-end tests
+ *   bun scripts/build.ts --test     grants `<all_urls>` and `downloads` at install, for the end-to-end tests
  *   bun scripts/build.ts --zip      also packs overmark-<version>.zip
  */
 
@@ -19,7 +19,10 @@ export interface BuildOptions {
 	outdir?: string;
 	/** Leave out `key` (Chrome Web Store upload). */
 	store?: boolean;
-	/** Grant `<all_urls>` at install, so tests need no click on the icon. */
+	/**
+	 * Grant `<all_urls>` and `downloads` at install, so tests need no click on
+	 * the icon and no answer to Chrome's prompt (DEC-020).
+	 */
 	test?: boolean;
 	minify?: boolean;
 }
@@ -108,7 +111,10 @@ export function createManifest(
 			"sidePanel",
 			"storage",
 			"unlimitedStorage",
+			...(options.test ? ["downloads"] : []),
 		],
+		// Export asks for it, to say where the file went (DEC-020).
+		...(options.test ? {} : { optional_permissions: ["downloads"] }),
 		optional_host_permissions: ["<all_urls>"],
 		...(options.test ? { host_permissions: ["<all_urls>"] } : {}),
 		commands: {

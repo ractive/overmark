@@ -6,7 +6,7 @@
  */
 
 import type { Case, ResolutionKind } from "../lib/case.ts";
-import type { ParsedExport } from "../lib/export.ts";
+import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
 import type { Size } from "./size.ts";
 
@@ -41,6 +41,26 @@ export interface CaseImages {
 	urls: Map<string, string>;
 }
 
+/** Where the last export went, as Chrome told (DEC-020). */
+export interface Exported {
+	/** The case exported, or every case. */
+	of: { caseId: string } | "all";
+	downloadId: number;
+	/** The file's absolute path. */
+	path: string;
+}
+
+/** A file of several cases being imported, one after the other. */
+export interface ImportBatch {
+	/** The file's name. */
+	name: string;
+	/** The cases still to import, after the one asked about. */
+	rest: CheckedExport[];
+	total: number;
+	stored: number;
+	skipped: number;
+}
+
 /** An AI app's last tool call. */
 export interface AiCall {
 	/** The tool's title. */
@@ -63,10 +83,33 @@ export interface PanelState {
 	/** Under the open case's buttons. */
 	caseHint: string | undefined;
 	loaded: Loaded | undefined;
-	/** An import that would replace a case that is here already. */
-	importing: { parsed: ParsedExport; existing: Case } | undefined;
-	/** Why the last import failed, until the next import or a dismiss. */
+	/**
+	 * An import that would replace a case that is here already; in a file of
+	 * several cases, with the rest of them.
+	 */
+	importing:
+		| { parsed: CheckedExport; existing: Case; batch?: ImportBatch }
+		| undefined;
+	/**
+	 * Why the last import or "Export all cases" failed, until the next one or a
+	 * dismiss.
+	 */
 	importError: string | undefined;
+	/**
+	 * What an import is at work on (a file's name, or the case asked about),
+	 * while it reads or stores; no other import starts meanwhile.
+	 */
+	importWork: string | undefined;
+	/** What importing a file of several cases came to, until the next import. */
+	importDone: string | undefined;
+	/** "Export all cases" is at work. */
+	exportingAll: boolean;
+	/** Where the last export went, when Chrome told; until the next one. */
+	exported: Exported | undefined;
+	/** Chrome's prompt for "downloads" is open for this export. */
+	askingDownloads: Exported["of"] | undefined;
+	/** Overmark may use chrome.downloads (DEC-020). */
+	downloads: boolean;
 	/** When "Delete" was clicked once. */
 	deleteArmedAt: number | undefined;
 	/** A mark of the open case being resolved or its comment edited. */
@@ -112,6 +155,12 @@ export const initialState = (): PanelState => ({
 	loaded: undefined,
 	importing: undefined,
 	importError: undefined,
+	importWork: undefined,
+	importDone: undefined,
+	exportingAll: false,
+	exported: undefined,
+	askingDownloads: undefined,
+	downloads: false,
 	deleteArmedAt: undefined,
 	markEdit: undefined,
 	markDeleteArmed: undefined,

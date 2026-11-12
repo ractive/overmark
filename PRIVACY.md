@@ -56,8 +56,8 @@ site).
 
 Only in two cases, both started by you:
 
-1. **Export.** "Export" writes a case to a zip file. Where it goes from there is up to
-   you.
+1. **Export.** "Export" writes a case to a zip file, "Export all cases" every case to
+   one. Where it goes from there is up to you.
 2. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
    address (cut as above), title, element details and screenshots of the tab in front.
@@ -131,6 +131,13 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   ("Display notifications").
 - **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
   free disk space, and they may grow beyond its usual limit. They stay in your browser.
+- **Downloads (optional):** asked for at the first Export (or Export all cases);
+  Chrome calls it "Manage your downloads". Overmark uses it only to save its own
+  export through Chrome's downloads and then read that one download's path, to show
+  you where the file went (with Copy and Show in folder). It does not read, change or
+  open your other downloads. With a no, the export is saved as before, without the
+  path, and Chrome asks again only when you click Export again. You can take it back
+  in Chrome's extension settings.
 - **Single sites (optional):** when you open a case's page from its address, or show a
   case's marks on a tab where Overmark may not run yet ("Show marks on this tab" or the
   case's Load button), Chrome asks whether Overmark may run on that case's site from

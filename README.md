@@ -77,8 +77,15 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 6. The case's "Summary for the developer" says what should change overall, as agreed;
    whoever loads the case sees it first. You or the AI app write it.
 7. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
-   on; Import reads one back and, when it is for the page in front, loads it right
-   away. An AI app can read `case.md` and the images without the extension.
+   on; "Import a case…" reads one back and, when it is for the page in front, loads it
+   right away. An AI app can read `case.md` and the images without the extension.
+   "Export all cases", next to "Import a case…", writes every case into one
+   `overmark-cases-<date>.overmark.zip`, a folder per case laid out as a single export;
+   "Import a case…" reads that too, case by case, asking about each case that is here
+   already (Replace it, Keep both or Skip). At the first Export, Chrome asks whether
+   Overmark may manage your downloads (an optional permission): with a yes the side
+   panel shows where the file went, with Copy (its full path) and Show in folder; with
+   a no the file is saved as before and Chrome asks again only at the next Export.
 
 ## With an AI app
 
