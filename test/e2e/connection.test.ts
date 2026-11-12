@@ -222,6 +222,17 @@ describe.skipIf(browserBinary === undefined)(
 			await panel.waitFor(
 				`${byId("pair-address")}.textContent === ${JSON.stringify(address)}`,
 			);
+			// "How do I add it?" under it, collapsed, with the steps for this address.
+			expect(
+				await panel.eval(
+					`[${byId("setup")}.hidden, ${byId("setup")}.open, ${byId("setup-steps")}.children.length]`,
+				),
+			).toEqual([false, false, 4]);
+			expect(
+				await panel.eval<string>(
+					`${byId("setup-steps")}.querySelector('li[data-app="claude-code"] pre').textContent`,
+				),
+			).toBe(`claude mcp add --transport http overmark ${address}`);
 			if (paired) {
 				await panel.eval(`${byId("pair-done")}.click()`);
 				expect(await panel.eval(`${byId("pairing")}.hidden`)).toBe(true);
