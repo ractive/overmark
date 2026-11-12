@@ -105,15 +105,29 @@ export async function openKv(name: string): Promise<Kv> {
 	};
 }
 
-/** A `Kv` usable at once: each call waits for the database to open. */
-export function kvWhenOpen(opening: Promise<Kv>): Kv {
-	// Not left unhandled: each call that uses it rejects with the error.
-	opening.catch(() => undefined);
+/**
+ * A `Kv` usable at once: each call waits for the database to open. `open`
+ * runs at the first call; when it fails, that call (and those waiting with
+ * it) reject with its error, and the next call opens again, so one failed
+ * open does not fail every later call until the worker or panel restarts.
+ */
+export function kvWhenOpen(open: () => Promise<Kv>): Kv {
+	let opening: Promise<Kv> | undefined;
+	const kv = (): Promise<Kv> => {
+		if (opening !== undefined) return opening;
+		// A throw in `open` itself rejects too.
+		const attempt = (async () => open())();
+		opening = attempt;
+		attempt.catch(() => {
+			if (opening === attempt) opening = undefined;
+		});
+		return attempt;
+	};
 	return {
-		get: async (key) => (await opening).get(key),
-		all: async () => (await opening).all(),
-		set: async (entries) => (await opening).set(entries),
-		remove: async (key) => (await opening).remove(key),
+		get: async (key) => (await kv()).get(key),
+		all: async () => (await kv()).all(),
+		set: async (entries) => (await kv()).set(entries),
+		remove: async (key) => (await kv()).remove(key),
 	};
 }
 

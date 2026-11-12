@@ -15,11 +15,13 @@ decision, with what was found out about Chrome on the way, is DEC-021.
 ## Scope
 
 - `src/lib/sync.ts`: `Sync`, the one writer (a run compares each case's version with what
-  was written; file names, rename, failures, paused), and its store in the database
-  `overmark-sync`.
+  was written; file names, rename, failures, paused), its store in the database
+  `overmark-sync` (a record of what was written for each folder), and `chooseFolder`,
+  which gives a folder synced before its id back.
 - `src/lib/kv.ts`: the small key-value database, out of the worker's settings module,
   so that the side panel's bundle, which opens the sync's database, still never names
-  the settings' database (the bundle test checks it).
+  the settings' database (the bundle test checks it). `kvWhenOpen` opens it at the
+  first use and again after a failed open.
 - The service worker runs it at each start, after its own changes (saves, Undo, the AI
   tools through `ConnectionDeps.changed`), on the side panel's `cases:changed` and on
   `sync:run`.
@@ -33,7 +35,9 @@ decision, with what was found out about Chrome on the way, is DEC-021.
 - [x] Find out whether the worker can write with the folder's handle (IndexedDB, the
       grant shared with the panel, the grant gone once the last extension page closes)
 - [x] `Sync` with unit tests on a folder in memory: writes, skips unchanged, rename,
-      deleted case keeps its file, same titles, foreign files, failures, paused
+      deleted case keeps its file, same titles, foreign files, failures, paused;
+      A → B → A and A, Stop, B, A update A's files in place (no `-2` copies); a failed
+      open of the database is tried again; the panel shows that it cannot read it
 - [x] The worker writes after every change; runs never overlap
 - [x] The panel: Sync to a folder…, Syncing to, Last synced, Change folder…, Stop
       syncing, Sync paused with Allow access, failures with Try again; tooltips
@@ -57,6 +61,8 @@ decision, with what was found out about Chrome on the way, is DEC-021.
   temporary `.crswap` file in the folder; the case is written again at the next run.
 - Changes made while the side panel was closed are written only at its next opening
   (with Allow access), not by themselves.
+- `folders` and the records keep every folder ever chosen; nothing removes one that
+  the user will not choose again. A handful of folders is what is expected.
 
 # Citations
 

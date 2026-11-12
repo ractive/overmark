@@ -59,7 +59,7 @@ const added = new AddLedger(chrome.storage.session);
  */
 const sync = new Sync({
 	cases: store,
-	store: kvSyncStore(kvWhenOpen(openKv(SYNC_DATABASE))),
+	store: kvSyncStore(kvWhenOpen(() => openKv(SYNC_DATABASE))),
 	notify: () => void broadcast({ type: "sync:changed" }),
 });
 void sync.request();

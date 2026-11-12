@@ -11,23 +11,23 @@ import { type Kv, kvWhenOpen, openKv } from "../lib/kv.ts";
 import type { Broadcast } from "../lib/messages.ts";
 import {
 	type ChosenFolder,
+	chooseFolder,
 	FOLDER_KEY,
-	PREVIOUS_KEY,
+	type PickedFolder,
 	STATUS_KEY,
 	SYNC_DATABASE,
-	type SyncFolder,
 	type SyncStatus,
+	stopSyncing,
 } from "../lib/sync.ts";
 import type { PanelState } from "./state.ts";
 
 declare const OVERMARK_TEST_BUILD: boolean | undefined;
 
 /** A folder handle as a window has it: it may ask for permission. */
-interface WindowFolder extends SyncFolder {
+interface WindowFolder extends PickedFolder {
 	requestPermission(descriptor: {
 		mode: "readwrite";
 	}): Promise<"granted" | "denied" | "prompt">;
-	isSameEntry(other: unknown): Promise<boolean>;
 }
 
 type Picker = (options: {
@@ -60,10 +60,15 @@ function run(): void {
 	chrome.runtime.sendMessage(news).catch(() => undefined);
 }
 
-export function startSync(update: Update): PanelSync {
-	const kv: Kv = kvWhenOpen(openKv(SYNC_DATABASE));
+/** The panel's sync; `kv` is the sync's database (tests pass their own). */
+export function startSync(
+	update: Update,
+	kv: Kv = kvWhenOpen(() => openKv(SYNC_DATABASE)),
+): PanelSync {
 	/** The folder as last read, for a click that must not wait for the database. */
 	let current: (ChosenFolder & { handle: WindowFolder }) | undefined;
+	/** The problem `refresh` shows while the database cannot be read. */
+	let unreadable: string | undefined;
 
 	const problem = (text: string | undefined) =>
 		update((s) => {
@@ -71,33 +76,31 @@ export function startSync(update: Update): PanelSync {
 		});
 
 	async function refresh(): Promise<void> {
-		const all = await kv.all().catch(() => undefined);
-		if (all === undefined) return;
+		let all: Record<string, unknown>;
+		try {
+			all = await kv.all();
+		} catch (error) {
+			unreadable = `Could not read the sync's state: ${message(error)} Close and open the side panel to try again.`;
+			problem(unreadable);
+			return;
+		}
 		const folder = all[FOLDER_KEY] as typeof current;
 		const status = all[STATUS_KEY] as SyncStatus | undefined;
 		current = folder;
+		const was = unreadable;
+		unreadable = undefined;
 		update((s) => {
 			s.sync.folder = folder?.name;
 			s.sync.status = status?.folderId === folder?.id ? status : undefined;
+			// Readable again: that problem is over.
+			if (was !== undefined && s.sync.problem === was)
+				s.sync.problem = undefined;
 		});
 	}
 
-	/** Use `handle` from now on: the same folder as before keeps what was written there. */
+	/** Use `handle` from now on: a folder synced before keeps what was written there. */
 	async function use(handle: WindowFolder): Promise<void> {
-		const all = await kv.all();
-		let id: string | undefined;
-		for (const key of [FOLDER_KEY, PREVIOUS_KEY]) {
-			const before = all[key] as ChosenFolder | undefined;
-			if (before === undefined || id !== undefined) continue;
-			if (await handle.isSameEntry(before.handle).catch(() => false))
-				id = before.id;
-		}
-		const chosen: ChosenFolder = {
-			handle,
-			name: handle.name,
-			id: id ?? newId("f"),
-		};
-		await kv.set({ [FOLDER_KEY]: chosen });
+		await chooseFolder(kv, handle, () => newId("f"));
 		problem(undefined);
 		await refresh();
 		run();
@@ -132,18 +135,14 @@ export function startSync(update: Update): PanelSync {
 	}
 
 	function stop(): void {
-		const was = current;
-		// Kept as the folder before: choosing it again keeps what was written there.
-		void kv
-			.set({ [FOLDER_KEY]: undefined, ...(was ? { [PREVIOUS_KEY]: was } : {}) })
-			.then(
-				() => {
-					problem(undefined);
-					return refresh();
-				},
-				(error: unknown) =>
-					problem(`Could not stop syncing: ${message(error)}`),
-			);
+		// The folder stays known: choosing it again keeps what was written there.
+		void stopSyncing(kv).then(
+			() => {
+				problem(undefined);
+				return refresh();
+			},
+			(error: unknown) => problem(`Could not stop syncing: ${message(error)}`),
+		);
 	}
 
 	function allow(): void {

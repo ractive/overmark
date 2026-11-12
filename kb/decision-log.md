@@ -594,10 +594,13 @@ access again" with a button, never failing silently. The rest was worked out her
   it again.
 - **Where it lives.** A database of its own, `overmark-sync` (a `Kv` of `src/lib/kv.ts`, store
   `settings`), in the extension's origin: the panel writes `folder` (the handle, its
-  name and an id) and `previous` (the folder before Stop syncing); the worker writes
-  `files` and `status`. The AI settings' database stays the worker's alone (DEC-016);
-  content scripts reach neither.
-- **What was written, per case.** `files` holds the folder's id and, by case id, the
+  name and an id) and `folders` (every folder chosen so far, each with its handle and
+  id); the worker writes `files:<folder id>`, one record for each folder synced, and
+  `status`. The AI settings' database stays the worker's alone (DEC-016); content
+  scripts reach neither. It is opened at its first use, and opened again at the next
+  use after an open that failed; the panel shows "Could not read the sync's state"
+  while it cannot read it.
+- **What was written, per case.** A folder's record holds the folder's id and, by case id, the
   version written (`updatedAt`, and `importedAt`: an import may keep `updatedAt`) and
   the file's name, saved after each file so that a worker stopped in the middle goes on
   from there. A case whose version matches is not written again. Deleted cases stay in
@@ -613,8 +616,11 @@ access again" with a button, never failing silently. The rest was worked out her
   removed. It is the same case, so two files of it would only mislead; deleted cases
   keep theirs.
 - **Another folder starts afresh** (a new id: nothing written to the old one counts).
-  Choosing the same folder again (Change folder… to it, or after Stop syncing) keeps the
-  id, compared with `isSameEntry`, so nothing is written twice under `-2` names.
+  Choosing a folder synced before, at any time (Change folder… back to it, after Stop
+  syncing, after other folders in between), gives it its id back, compared with
+  `isSameEntry` against every folder in `folders`; its record is still there, so
+  Overmark's files in it are its own and are updated in place, never written again
+  under `-2` names.
   Stop syncing keeps the files, and a run under way stops before its next file.
 - **Writing.** `getFileHandle(name, { create: true })`, `createWritable()`, one
   `write` of the zip, `close()`: Chrome writes to a temporary file and moves it into

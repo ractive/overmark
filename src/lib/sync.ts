@@ -46,14 +46,23 @@ export interface SyncFolder {
 	}): Promise<"granted" | "denied" | "prompt">;
 }
 
+/**
+ * A folder as the side panel's picker hands it over: it can tell whether it
+ * is a folder chosen before.
+ */
+export interface PickedFolder extends SyncFolder {
+	isSameEntry(other: unknown): Promise<boolean>;
+}
+
 /** The folder chosen, as the side panel keeps it. */
 export interface ChosenFolder {
 	handle: SyncFolder;
 	/** Its name, for the panel. */
 	name: string;
 	/**
-	 * Which folder this is: a new one gets a new id, so nothing written to the
-	 * one before counts for it. Choosing the same folder again keeps the id.
+	 * Which folder this is: a new one gets a new id, so nothing written to
+	 * another folder counts for it. Choosing a folder synced before, at any
+	 * time, gives it its id back, and with it what was written there.
 	 */
 	id: string;
 }
@@ -88,7 +97,8 @@ export interface SyncStatus {
 /** Where the sync keeps its folder, what it wrote and its status. */
 export interface SyncStore {
 	folder(): Promise<ChosenFolder | undefined>;
-	files(): Promise<SyncedFiles | undefined>;
+	/** What was written to that folder, kept for each folder ever synced. */
+	files(folderId: string): Promise<SyncedFiles | undefined>;
 	status(): Promise<SyncStatus | undefined>;
 	/** Both at once. */
 	save(files: SyncedFiles, status: SyncStatus): Promise<void>;
@@ -97,27 +107,67 @@ export interface SyncStore {
 
 /**
  * The database of the sync, in the extension's origin: the side panel writes
- * `folder` (and `previous`, the folder before Stop syncing), the worker
- * `files` and `status`. Apart from the settings' database, which only the
- * worker uses (DEC-016).
+ * `folder` and `folders` (every folder chosen so far), the worker
+ * `files:<folder id>` (one record for each folder) and `status`. Apart from
+ * the settings' database, which only the worker uses (DEC-016).
  */
 export const SYNC_DATABASE = "overmark-sync";
 export const FOLDER_KEY = "folder";
-export const PREVIOUS_KEY = "previous";
-const FILES_KEY = "files";
+export const FOLDERS_KEY = "folders";
 export const STATUS_KEY = "status";
+export const filesKey = (folderId: string) => `files:${folderId}`;
 
 /** The sync's store in its database. */
 export function kvSyncStore(kv: Kv): SyncStore {
 	return {
 		folder: async () => (await kv.get(FOLDER_KEY)) as ChosenFolder | undefined,
-		files: async () => (await kv.get(FILES_KEY)) as SyncedFiles | undefined,
+		files: async (folderId) =>
+			(await kv.get(filesKey(folderId))) as SyncedFiles | undefined,
 		status: async () => (await kv.get(STATUS_KEY)) as SyncStatus | undefined,
 		save: (files, status) =>
-			kv.set({ [FILES_KEY]: files, [STATUS_KEY]: status }),
+			kv.set({ [filesKey(files.folderId)]: files, [STATUS_KEY]: status }),
 		saveStatus: (status) => kv.set({ [STATUS_KEY]: status }),
 	};
 }
+
+/**
+ * Sync to `handle` from now on (the side panel, after the picker). A folder
+ * synced before, the current one or any earlier one, gets its id back, so
+ * the files Overmark wrote there are its own again and are updated in place.
+ * Every folder chosen stays in `folders` for that.
+ */
+export async function chooseFolder(
+	kv: Kv,
+	handle: PickedFolder,
+	newId: () => string,
+): Promise<ChosenFolder> {
+	const all = await kv.all();
+	const current = all[FOLDER_KEY] as ChosenFolder | undefined;
+	const known = (all[FOLDERS_KEY] as ChosenFolder[] | undefined) ?? [];
+	// The current one too, should it be missing from the list.
+	const before = current === undefined ? known : [current, ...known];
+	let id: string | undefined;
+	for (const f of before)
+		if (await handle.isSameEntry(f.handle).catch(() => false)) {
+			id = f.id;
+			break;
+		}
+	const chosen: ChosenFolder = { handle, name: handle.name, id: id ?? newId() };
+	// Each folder once, under its latest handle and name.
+	const seen = new Set([chosen.id]);
+	const folders = [chosen];
+	for (const f of before)
+		if (!seen.has(f.id)) {
+			seen.add(f.id);
+			folders.push(f);
+		}
+	await kv.set({ [FOLDER_KEY]: chosen, [FOLDERS_KEY]: folders });
+	return chosen;
+}
+
+/** Stop syncing: the folder stays in `folders`, to be recognised again. */
+export const stopSyncing = (kv: Kv): Promise<void> =>
+	kv.set({ [FOLDER_KEY]: undefined });
 
 /** A case's version: an import may keep `updatedAt` and still change it. */
 export const versionOf = (c: Case) => `${c.updatedAt}|${c.importedAt ?? ""}`;
@@ -241,7 +291,7 @@ export class Sync {
 		if (permission !== "granted")
 			return this.#report({ ...base, state: "paused" });
 
-		const record = await store.files();
+		const record = await store.files(folder.id);
 		const byCase: Record<string, SyncedFile> =
 			record?.folderId === folder.id ? { ...record.byCase } : {};
 		const files = (): SyncedFiles => ({ folderId: folder.id, byCase });
