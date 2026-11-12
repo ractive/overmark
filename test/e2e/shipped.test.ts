@@ -143,17 +143,41 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		expect(imagesOf(db, saved?.id ?? "")).toContain("crops/a1.webp");
 		await panel.waitFor(`document.querySelector("[data-case]")`);
 
-		// The click was for that tab: the panel, still open, may not touch the other.
+		// The click was for that tab: the panel, still open, may not touch the
+		// other, and says so with a notice above the button it turns off.
 		await other.page.activate();
 		await panel.waitFor(
-			`document.getElementById("annotate").textContent === "Annotate this page"`,
+			`!document.getElementById("access-notice").hidden && document.getElementById("annotate").disabled`,
 		);
+		expect(
+			await panel.eval<string>(
+				`document.getElementById("access-notice").textContent`,
+			),
+		).toContain("may not run on this tab");
 		await panel.click(`document.getElementById("annotate")`);
-		await panel.waitFor(
-			`document.getElementById("hint")?.textContent.includes("may not run on this tab")`,
-		);
 		expect(await inject(other.tabId)).toContain("Cannot access");
 		expect(await other.page.eval<boolean>(`${HOST} === null`)).toBe(true);
+		// Its Allow on all sites asks Chrome for every site, in the click.
+		await panel.eval(`(() => {
+			globalThis.asked = [];
+			chrome.permissions.request = (p) => (globalThis.asked.push(p), Promise.resolve(false));
+		})()`);
+		await panel.click(
+			`document.querySelector('#access-notice [data-action="allow-all-sites"]')`,
+		);
+		expect(await panel.eval(`globalThis.asked`)).toEqual([
+			{ origins: ["<all_urls>"] },
+		]);
+		// A no changes nothing.
+		await Bun.sleep(200);
+		expect(
+			await panel.eval<boolean>(
+				`document.getElementById("access-notice").hidden`,
+			),
+		).toBe(false);
+		await panel.goto(
+			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		);
 	}, 60_000);
 
 	test("a case's address opens a tab, and the icon's click there loads the case", async () => {
@@ -186,7 +210,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await panel.click(`document.getElementById("open-page")`);
 		// No host access: Chrome hides the new tab from Overmark until the click.
 		await panel.waitFor(
-			`document.getElementById("case-hint").textContent.includes("Click the Overmark icon")`,
+			`!document.getElementById("case-access").hidden && document.getElementById("case-access").textContent.includes("Click the Overmark icon")`,
 			15_000,
 		);
 		// The case's address has no query: the new tab is the one not there before.
@@ -224,7 +248,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await panel.waitFor(row);
 		await panel.eval(`${row}.click()`);
 		await panel.waitFor(
-			`document.getElementById("case-hint").textContent.includes("click the Overmark icon")`,
+			`!document.getElementById("case-access").hidden && document.getElementById("load-case").disabled`,
 		);
 		await h.browser.send("Extensions.triggerAction", {
 			id: h.extensionId,
@@ -234,6 +258,11 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 			`document.querySelector(".match")?.dataset.status === "found"`,
 			15_000,
 		);
+		expect(
+			await panel.eval<boolean>(
+				`document.getElementById("case-access").hidden`,
+			),
+		).toBe(true);
 		expect(await page.eval<number>(`${HOST} === null ? 0 : 1`)).toBe(1);
 	}, 60_000);
 
@@ -281,9 +310,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		const row = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes("As the owner uses it"))`;
 		await panel.waitFor(row);
 		await panel.eval(`${row}.click()`);
-		await panel.waitFor(
-			`document.getElementById("case-hint").textContent.includes("click the Overmark icon")`,
-		);
+		await panel.waitFor(`!document.getElementById("case-access").hidden`);
 		await h.browser.send("Extensions.triggerAction", {
 			id: h.extensionId,
 			targetId: fresh?.targetId,

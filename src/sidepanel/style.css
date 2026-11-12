@@ -578,6 +578,53 @@ ul.cases .load {
 	color: var(--ink);
 }
 
+/*
+ * Overmark may not run on the tab in front, or found none of the case's
+ * marks there (DEC-022): amber with a warning sign, and the way out. On the
+ * band, which is dark in the light style too.
+ */
+.notice {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 8px 10px;
+	border-left: 3px solid var(--amber);
+	border-radius: 4px 8px 8px 4px;
+	background: rgba(255, 176, 0, 0.1);
+	color: var(--on-ink);
+}
+
+.notice-icon {
+	flex: none;
+	margin-top: 1px;
+	color: var(--amber);
+}
+
+.notice-body {
+	display: grid;
+	justify-items: start;
+	gap: 6px;
+	min-width: 0;
+}
+
+.notice-body p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.notice button {
+	padding: 3px 10px;
+	font-size: 12px;
+	border-color: rgba(255, 176, 0, 0.5);
+	background: none;
+	color: var(--on-ink);
+}
+
+.notice button:hover:not(:disabled) {
+	border-color: var(--amber);
+	background: rgba(255, 176, 0, 0.16);
+}
+
 /* What the last action came to: a note, not a box. */
 .case-header .hint {
 	margin: 0;

@@ -549,3 +549,61 @@ button exports every case at once; the panel's buttons say in a tooltip what the
   to answer no for the old way. The test browser's profile sends downloads to a folder
   of its own: under CDP's `Browser.setDownloadBehavior` "allow" the `downloads` API's
   `filename` is ignored and files are named by a GUID.
+
+## DEC-022: Opening a case shows its marks on the tab in front, and they follow it (owner)
+
+The owner, 2026-11-12: "you never want to load a case without showing the marks … When a
+tab becomes active and the case is loaded, just try to show the marks. If none of them
+are found, show a warning." And, about the side panel without access to the tab: a
+warning icon beside "Overmark may not run on this tab yet …", with "Allow on all sites"
+there.
+
+- **Opening a case draws its marks on the tab in front, whatever page that is.** Not only
+  on the case's own path (`isPageOf`) as before: the main use is another origin, such as
+  `localhost`. The same for a case that an import opens. The case list's Load button goes:
+  a click on the case does what it did.
+- **The marks follow the open case to the tab in front.** While a case is open, a tab
+  that comes to the front of the panel's window (`tabs.onActivated`) gets its marks, and
+  so does the tab in front once it has loaded, reloaded or navigated (`tabs.onUpdated`
+  with `complete` or a new address); the marks are taken off the tab they were on
+  before, where it is still there (failures do not matter). A tab still loading is
+  drawn on once it has loaded; a page no content script runs on (an extension's own
+  page, `chrome://`) is left alone. A tab that shows the case already (the panel drew it,
+  or an AI app's `load_case` did) is not drawn on again, which would drop the candidates
+  chosen, unless the page loaded again. The searches again at 1 s and 2 s (marks a script
+  draws late) run for every such draw.
+- **"← All cases" takes the panel's marks off the page.** The panel remembers where it
+  drew them; marks an AI app loaded through the tools are the page's (`state.loadedCase`
+  in the worker) and stay, as before. Closing the side panel leaves the marks where they
+  are, as before.
+- **Hide holds on that tab.** "Hide marks on this tab", or the Hide on the page's own
+  bar, keeps the case's marks off that tab while the case stays open: through switching
+  to other tabs and back, and through reloads of that tab. "Show marks on this tab" on
+  it, or opening the case again, ends that. Why through a switch back: the user took
+  them off that tab on purpose, and a switch is no change of mind.
+- **None found: the case says so.** When the draw is over (after the searches again)
+  and none of the marks that recorded an element is there (every one `lost`; resolved
+  marks count as any other, a mark without an element says nothing about the page),
+  the case shows a warning with a warning sign: "None of this case's marks were found
+  on this page. It is probably for another page: <the case's short address>." with
+  "Open the case's page" (`openPage`). On a page with the case's own path (another
+  build) only the first sentence shows, without the button. Some found: the marks'
+  states as before.
+- **Without access to the tab, a notice, and only what needs the page is off.** Chrome
+  hides a tab's address until Overmark may run there (`activeTab` from the icon or
+  Alt+Shift+O; a click in the side panel grants nothing). The home view (above "Annotate
+  this page") and the open case (above "Show marks on this tab") then show the notice
+  with a warning sign and "Allow on all sites", which asks for `<all_urls>` in the click
+  (`chrome.permissions.request`, nothing awaited before it); with a yes the notice goes
+  and the open case's marks are drawn (`permissions.onAdded`). The icon's click on that
+  tab draws them too, as before. Where Overmark may run on all sites and Chrome still
+  hides the address (its own pages, the Web Store), the notice says that Overmark
+  cannot run there, without the button. Only the actions that need the page are
+  disabled, each with a tooltip pointing at the notice: Annotate this page, Show/Hide
+  marks on this tab, Add marks, and a mark's Show. The case list, editing a case,
+  import, export, the summary and the AI app card work without the tab. A tab still
+  loading has no address yet and shows no notice. The "Allow on all sites" checkbox in
+  the options stays. "Show marks on this tab" no longer asks for the case's site on such
+  a tab (it is off there); the case's address still does as it opens the page.
+- **One heading.** The home view's "This tab" heading becomes "This page"; under it the
+  tab's address, else its title, else nothing (it said "This page" a second time).

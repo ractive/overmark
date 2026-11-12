@@ -25,6 +25,8 @@ export interface TabInfo {
 	title: string;
 	/** In CSS pixels, as a case's viewport; unknown where Chrome does not say. */
 	size: Size | undefined;
+	/** Still loading: an address not known yet says nothing about access. */
+	loading?: boolean;
 }
 
 /** The case loaded onto a tab, and where its marks were found there. */
@@ -32,6 +34,8 @@ export interface Loaded {
 	caseId: string;
 	tabId: number;
 	matches: Map<string, AnnotationMatch>;
+	/** The marks not found are looked for again in a moment. */
+	settling?: boolean;
 }
 
 /** Object URLs of one version of a case's images, by path. */
@@ -73,7 +77,7 @@ export interface AiCall {
 export interface PanelState {
 	tab: TabInfo | undefined;
 	overlay: OverlayState | undefined;
-	/** Under "This tab". */
+	/** Under "This page". */
 	hint: string | undefined;
 	cases: Case[];
 	view: { kind: "home" } | { kind: "case"; id: string };

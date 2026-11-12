@@ -25,13 +25,32 @@ const status = `${shadow('[data-role="status"]')}?.textContent`;
 const alert = `${shadow('[data-role="alert"]')}?.textContent`;
 
 /** The mark numbers drawn on the page: drafts, and those in the case (fainter). */
+/**
+ * The marks on the page: drafts, and the case's own (fainter while adding to
+ * it, or drawn by the loaded case: opening a case draws it, DEC-022).
+ */
 const drawn = (page: Page) =>
 	page.eval<{ drafts: string[]; saved: string[] }>(`(() => {
 		const svg = ${shadow("svg.marks")};
-		const all = [...svg.querySelectorAll("g[data-number]")];
+		const all = [...svg.querySelectorAll("g[data-number]")].filter((g) => g.closest("[data-review]") === null);
 		const numbers = (saved) => all.filter((g) => (g.closest(".saved") !== null) === saved).map((g) => g.dataset.number);
-		return { drafts: numbers(false), saved: numbers(true) };
+		const review = [...svg.querySelectorAll("[data-review]")].map((g) => g.dataset.review);
+		const saved = [...new Set([...numbers(true), ...review])].sort((a, b) => a - b);
+		return { drafts: numbers(false), saved };
 	})()`);
+
+/** Until the page draws these marks (the loaded case follows a change a moment later). */
+const drawnAre = async (
+	page: Page,
+	want: { drafts: string[]; saved: string[] },
+) => {
+	const json = JSON.stringify(want);
+	const got = await until(
+		() => drawn(page),
+		(now) => JSON.stringify(now) === json,
+	).catch(() => drawn(page));
+	expect(got).toEqual(want);
+};
 
 const pressEscape = async (page: Page) => {
 	for (const type of ["keyDown", "keyUp"])
@@ -140,7 +159,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 
 		await markElement(page, "[data-truth=submit]", "Too pale");
 		await page.waitFor(`${status} === "Mark 2 added to “Straight in”"`, 20_000);
-		expect(await drawn(page)).toEqual({ drafts: [], saved: ["1", "2"] });
+		await drawnAre(page, { drafts: [], saved: ["1", "2"] });
 		// The case view follows.
 		await panel.waitFor(
 			`document.querySelectorAll(".annotation").length === 2`,
@@ -208,7 +227,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			`${status} === "Mark 2 taken out of “Taken back”"`,
 			20_000,
 		);
-		expect(await drawn(page)).toEqual({ drafts: [], saved: ["1"] });
+		await drawnAre(page, { drafts: [], saved: ["1"] });
 		await panel.waitFor(
 			`document.querySelectorAll(".annotation").length === 1`,
 		);
@@ -258,7 +277,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		expect(await page.eval<string>(status)).toBe(
 			"Mark 2 is not in “Gone for a moment” yet",
 		);
-		expect(await drawn(page)).toEqual({ drafts: ["2"], saved: ["1"] });
+		await drawnAre(page, { drafts: ["2"], saved: ["1"] });
 		expect(await buttons(page)).toContain("Add mark 2");
 
 		// Done tries once more, and stays while the mark is not in the case.
@@ -276,7 +295,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			20_000,
 		);
 		expect(await page.eval<string>(alert)).toBe("");
-		expect(await drawn(page)).toEqual({ drafts: [], saved: ["1", "2"] });
+		await drawnAre(page, { drafts: [], saved: ["1", "2"] });
 		expect(await buttons(page)).not.toContain("Add mark 2");
 		const after = await caseTitled("Gone for a moment");
 		expect(after.c.annotations.map((a) => a.comment)).toEqual([
@@ -311,7 +330,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await putBack(stored);
 		// Shown again, the mark is gone, and nothing was added meanwhile.
 		await addMarks(page, "Discarded");
-		expect(await drawn(page)).toEqual({ drafts: [], saved: ["1"] });
+		await drawnAre(page, { drafts: [], saved: ["1"] });
 		expect((await caseTitled("Discarded")).c.annotations).toHaveLength(1);
 		await page.click(shadow('[data-action="close"]'));
 		await page.send("Page.close");
@@ -335,7 +354,8 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		const b = (await caseTitled("Case B")).c;
 		expect(b.annotations.map((x) => x.comment)).toEqual(["First"]);
 		expect((await caseTitled("Case A")).c.annotations).toHaveLength(1);
-		expect(await drawn(page)).toEqual({ drafts: ["2"], saved: [] });
+		// B's own mark is on the page: opening B drew it (DEC-022).
+		await drawnAre(page, { drafts: ["2"], saved: ["1"] });
 
 		// "Add mark 2" is the user's choice: then it goes into B.
 		await page.click(shadow('[data-action="retry"]'));
@@ -348,6 +368,8 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	}, 90_000);
 
 	test("New case: the marks wait for Save case and a title, as before", async () => {
+		// No case open in the panel: its marks would follow to the new tab.
+		await panelHome(h);
 		const { page, tabId } = await h.open("v1");
 		await showToolbar(h, page, tabId);
 		expect(await buttons(page)).toContain("Close");
@@ -365,9 +387,9 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.waitFor(shadow('input[aria-label="Case title"]'));
 		expect(await buttons(page)).toEqual(["Save case", "Keep drawing"]);
 		await page.click(shadow('[data-action="save-cancel"]'));
-		expect(await drawn(page)).toEqual({ drafts: ["1"], saved: [] });
+		await drawnAre(page, { drafts: ["1"], saved: [] });
 		await page.click(shadow('[data-action="undo"]'));
-		expect(await drawn(page)).toEqual({ drafts: [], saved: [] });
+		await drawnAre(page, { drafts: [], saved: [] });
 		await markElement(page, "[data-truth=tip]", "Saved with a title");
 
 		await saveAs(page, "Saved the old way");
