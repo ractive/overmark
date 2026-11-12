@@ -131,7 +131,12 @@ function request(tool = "delete_case", grantId = "g1"): ConfirmRequest {
 	return {
 		tool: { name: tool, title: tool, description: "" },
 		arguments: {},
-		client: { grantId, id: "https://claude.ai/oauth", host: "claude.ai" },
+		client: {
+			kind: "relay",
+			grantId,
+			id: "https://claude.ai/oauth",
+			host: "claude.ai",
+		},
 		signal: new AbortController().signal,
 	};
 }
@@ -198,6 +203,19 @@ describe("a call of a tool that changes something", () => {
 		expect(d.asked).toBe(0);
 		expect(await decide(d, request("delete_case", "g2"))).toBe(false);
 		expect(d.asked).toBe(1);
+	});
+
+	test("a call through WebMCP is refused: no question, Allow all changes does not cover it", async () => {
+		const d = await decider("allow");
+		await d.always.setAll("g1", true);
+		const refused: string[] = [];
+		d.refused = (r) => refused.push(r.tool.name);
+		const r: ConfirmRequest = { ...request(), client: { kind: "webmcp" } };
+		expect(await decide(d, r)).toBe(false);
+		expect(d.asked).toBe(0);
+		expect(refused).toEqual(["delete_case"]);
+		// An AI app through the relay is as before.
+		expect(await decide(d, request())).toBe(true);
 	});
 
 	test("Always allow from an app disconnected meanwhile allows this call, keeps nothing", async () => {

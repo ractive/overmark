@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
+import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
 import { oldSettings, statusText } from "../src/sidepanel/ai.ts";
@@ -27,12 +27,14 @@ import {
 	parseCommand,
 } from "../src/worker/protocol.ts";
 import {
+	appName,
 	NOTIFICATION_BUTTONS,
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
 	Questions,
 	type QuestionsHost,
 	visible,
+	WEBMCP_CALLER,
 } from "../src/worker/questions.ts";
 import { CachedSecretStorage } from "../src/worker/secret.ts";
 import { kvContract } from "./kv-contract.ts";
@@ -184,13 +186,18 @@ function request(
 	return {
 		tool: { name: tool, title: "Delete case", description: "" },
 		arguments: args,
-		client: {
-			grantId,
-			id: "https://claude.ai/oauth",
-			name: "Claude",
-			host: "claude.ai",
-		},
+		client: claude(grantId),
 		signal,
+	};
+}
+
+function claude(grantId = "g1", name = "Claude"): RelayClient {
+	return {
+		kind: "relay",
+		grantId,
+		id: "https://claude.ai/oauth",
+		name,
+		host: "claude.ai",
 	};
 }
 
@@ -419,6 +426,24 @@ describe("questions", () => {
 		expect(await questions.ask(request({}, gone.signal), [], 7)).toBe("deny");
 	});
 
+	test("a call through WebMCP is not asked about: Don't allow at once, nothing shows", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		const r: ConfirmRequest = { ...request(), client: { kind: "webmcp" } };
+		expect(await questions.ask(r, CASE, 7)).toBe("deny");
+		await settle();
+		expect(questions.list).toEqual([]);
+		expect(host.shown.size).toBe(0);
+		expect(host.changes).toBe(0);
+		expect(appName({ kind: "webmcp" })).toBe(WEBMCP_CALLER);
+		expect(appName(claude())).toBe("Claude (claude.ai)");
+		// The declared name escaped, so it cannot hide the verified host;
+		// "Last AI call" uses the same rule.
+		expect(appName(claude("g1", "Cla\u202Eude"))).toBe(
+			"Cla\\u202Eude (claude.ai)",
+		);
+	});
+
 	test("arguments, lines and names show invisible and direction characters as \\u escapes", async () => {
 		expect(visible("pay‮evil​")).toBe("pay\\u202Eevil\\u200B");
 		expect(visible("a b")).toBe("a\\u00A0b");
@@ -431,7 +456,7 @@ describe("questions", () => {
 		expect(visible("a\u2800b\u3000c")).toBe("a\\u2800b\\u3000c");
 		const questions = new Questions(fakeHost());
 		const r = request({ caseId: "c‮1" });
-		r.client = { ...r.client, name: "Cl​aude" };
+		r.client = claude("g1", "Cl​aude");
 		void questions.ask(r, ["Case: “x‮”"], 7);
 		await settle();
 		const [view] = questions.list;
