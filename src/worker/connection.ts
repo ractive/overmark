@@ -798,19 +798,21 @@ export class Connection {
 	#showBadge(): void {
 		const questions = this.#questions.list.length;
 		const mcp = this.#mcp;
-		const [text, color, title] =
+		// One decision for the badge, the title and the spark.
+		const [text, color, title, spark] =
 			questions > 0
 				? [
 						"?",
 						"#b45309",
 						`Overmark: ${questions === 1 ? "an AI app asks" : `${questions} questions wait`} for your answer. Open the side panel to answer.`,
+						false,
 					]
 				: mcp.state === "connected"
-					? ["", "#15803d", "Overmark: AI access is on"]
+					? ["", "#15803d", "Overmark: AI access is on", true]
 					: mcp.state === "connecting" || mcp.reconnecting
-						? ["…", "#6b7280", "Overmark: connecting to the AI app"]
-						: ["", "#6b7280", "Overmark"];
-		void showSpark(questions === 0 && mcp.state === "connected");
+						? ["…", "#6b7280", "Overmark: connecting to the AI app", false]
+						: ["", "#6b7280", "Overmark", false];
+		void showSpark(spark);
 		void chrome.action.setBadgeText({ text }).catch(() => {});
 		void chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
 		void chrome.action.setTitle({ title }).catch(() => {});

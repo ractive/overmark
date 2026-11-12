@@ -76,6 +76,18 @@ describe.skipIf(browserBinary === undefined)(
 			(await worker(h)).eval<string>("chrome.action.getBadgeText({})");
 		const title = async () =>
 			(await worker(h)).eval<string>("chrome.action.getTitle({})");
+		/** The icon the worker last set: drawn and set without an error. */
+		const icon = async () => {
+			const w = await worker(h);
+			for (let i = 0; i < 50; i++) {
+				const shown = await w.eval<string | null>(
+					"globalThis.overmarkIcon ?? null",
+				);
+				if (shown === "spark") return shown;
+				await Bun.sleep(100);
+			}
+			return w.eval<string | null>("globalThis.overmarkIcon ?? null");
+		};
 
 		beforeAll(async () => {
 			h = await startHarness(browserBinary as string);
@@ -122,6 +134,7 @@ describe.skipIf(browserBinary === undefined)(
 			expect(await verdictOf(h, "c_1")).toBe("Panel");
 			expect(await badge()).toBe("");
 			expect(await title()).toBe("Overmark: AI access is on");
+			expect(await icon()).toBe("spark");
 			expect(await w.eval("globalThis.e2eCreated")).toEqual([]);
 			await panel.waitFor(`!document.querySelector("[data-question]")`);
 		});
@@ -146,6 +159,7 @@ describe.skipIf(browserBinary === undefined)(
 			expect(result.content[0]?.text).toContain("c_1");
 			expect(await badge()).toBe("");
 			expect(await title()).toBe("Overmark: AI access is on");
+			expect(await icon()).toBe("spark");
 		});
 
 		test("Blur form fields, changed while connected, holds for the next screenshot", async () => {

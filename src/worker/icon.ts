@@ -98,28 +98,56 @@ function sparkedIcon(): Promise<Record<number, ImageData>> {
 	return sparked;
 }
 
-/** The plain icon, as in the manifest. */
-const PLAIN = Object.fromEntries(
-	SIZES.map((size) => [size, `icons/icon-${size}.png`]),
-);
-
-/** What was asked last: a repeat changes nothing. */
-let wanted: boolean | undefined;
-/** The latest call wins over an earlier one still drawing. */
-let latest = 0;
-
-/** The toolbar icon with the spark (`on`) or without. */
-export async function showSpark(on: boolean): Promise<void> {
-	if (wanted === on) return;
-	wanted = on;
-	const call = ++latest;
-	try {
-		const imageData = on ? await sparkedIcon() : undefined;
-		if (call !== latest) return;
-		await chrome.action.setIcon(imageData ? { imageData } : { path: PLAIN });
-	} catch (error) {
-		// Asked again, it is tried again.
-		if (call === latest) wanted = undefined;
-		console.warn("Overmark: the toolbar icon", error);
-	}
+/** The plain icon: the manifest's, every size of it. */
+function plainIcon(): Record<string, string> {
+	const icon = chrome.runtime.getManifest().action?.default_icon;
+	return typeof icon === "object"
+		? icon
+		: Object.fromEntries(SIZES.map((s) => [s, `icons/icon-${s}.png`]));
 }
+
+/** What the switch needs (fakes in the tests). */
+export interface IconDeps {
+	setIcon(details: chrome.action.TabIconDetails): Promise<void>;
+	sparked(): Promise<Record<number, ImageData>>;
+	plain(): Record<string, string>;
+	/** The icon now shown, after each change that went through. */
+	shown?(on: boolean): void;
+}
+
+/**
+ * The toolbar icon with the spark (`on`) or without: a repeat does nothing,
+ * the latest call wins over one still drawing, and a failed one is tried
+ * again at the next call.
+ */
+export function iconSwitch(deps: IconDeps): (on: boolean) => Promise<void> {
+	let wanted: boolean | undefined;
+	let latest = 0;
+	return async (on) => {
+		if (wanted === on) return;
+		wanted = on;
+		const call = ++latest;
+		try {
+			const imageData = on ? await deps.sparked() : undefined;
+			if (call !== latest) return;
+			await deps.setIcon(imageData ? { imageData } : { path: deps.plain() });
+			deps.shown?.(on);
+		} catch (error) {
+			if (call === latest) wanted = undefined;
+			console.warn("Overmark: the toolbar icon", error);
+		}
+	};
+}
+
+/** Overmark's toolbar icon. */
+export const showSpark = iconSwitch({
+	setIcon: (details) => chrome.action.setIcon(details),
+	sparked: sparkedIcon,
+	plain: plainIcon,
+	// For a look in the worker's console, and the end-to-end tests.
+	shown: (on) => {
+		(globalThis as { overmarkIcon?: string }).overmarkIcon = on
+			? "spark"
+			: "plain";
+	},
+});
