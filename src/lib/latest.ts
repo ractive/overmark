@@ -14,6 +14,15 @@ export class Latest {
 		return { current: () => mine === this.#n };
 	}
 
+	/**
+	 * Join the newest piece of work without starting one: stale as soon as
+	 * another starts, and it makes none stale itself.
+	 */
+	peek(): { current: () => boolean } {
+		const mine = this.#n;
+		return { current: () => mine === this.#n };
+	}
+
 	/** Make every running piece of work stale. */
 	cancel(): void {
 		this.#n++;

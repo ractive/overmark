@@ -26,6 +26,8 @@ export interface TabInfo {
 	title: string;
 	/** In CSS pixels, as a case's viewport; unknown where Chrome does not say. */
 	size: Size | undefined;
+	/** Still loading: an address not known yet says nothing about access. */
+	loading?: boolean;
 }
 
 /** The case loaded onto a tab, and where its marks were found there. */
@@ -33,6 +35,8 @@ export interface Loaded {
 	caseId: string;
 	tabId: number;
 	matches: Map<string, AnnotationMatch>;
+	/** The marks not found are looked for again in a moment. */
+	settling?: boolean;
 }
 
 /** Object URLs of one version of a case's images, by path. */
@@ -74,7 +78,7 @@ export interface AiCall {
 export interface PanelState {
 	tab: TabInfo | undefined;
 	overlay: OverlayState | undefined;
-	/** Under "This tab". */
+	/** Under "This page". */
 	hint: string | undefined;
 	cases: Case[];
 	view: { kind: "home" } | { kind: "case"; id: string };
@@ -133,6 +137,8 @@ export interface PanelState {
 	verdictDrafts: Map<string, string>;
 	/** Overmark may run on every site ("Allow on all sites"). */
 	allSites: boolean;
+	/** Overmark may read file:// pages ("Allow access to file URLs"); unknown at first. */
+	fileAccess: boolean | undefined;
 	/** The sync to a folder (DEC-021). */
 	sync: {
 		/** The folder's name; `undefined`: not syncing. */
@@ -178,6 +184,7 @@ export const initialState = (): PanelState => ({
 	verdictStatus: undefined,
 	verdictDrafts: new Map(),
 	allSites: false,
+	fileAccess: undefined,
 	sync: { folder: undefined, status: undefined, problem: undefined },
 	ai: {
 		status: "Not connected",

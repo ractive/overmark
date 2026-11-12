@@ -32,8 +32,8 @@ a [tab-mcp](https://github.com/ractive/tab-mcp) relay.
 3. After the rollout the PO loads the case onto
    `https://dev.example.com/…`, later prod, and checks the fix.
 
-Overmark never opens or switches environments itself: a case is loaded onto whatever
-tab is in front. Forwarding cases to a team (tickets, links) is out of scope for now.
+Overmark never opens or switches environments itself: a case's marks are drawn on
+whatever tab is in front (DEC-022). Forwarding cases to a team (tickets, links) is out of scope for now.
 
 ## The screenshot is the record
 
@@ -53,10 +53,13 @@ is what a case is about, and finding the element again is a best-effort extra:
   text, test id, the readable part of its classes, the heading above it, its landmark,
   its ancestors, its position). They are hints for the AI app and the dev to find the
   code, and the input of the matching below.
-- Loading a case onto a tab highlights each annotation's element where it can be found
-  ("found", "probable", "ambiguous" with candidates, or "not found"). The side panel
-  always shows the annotated screenshots, so a case makes sense even when nothing is
-  found.
+- Opening a case in the side panel draws its marks on the tab in front, whatever page
+  that is, and highlights each annotation's element where it can be found ("found",
+  "probable", "ambiguous" with candidates, or "not found"). While the case is open the
+  marks follow the tab in front (another tab, a reload, a navigation); "← All cases"
+  takes them off, and a Hide holds on its tab (DEC-022). When none is found the case
+  says it is probably for another page. The side panel always shows the annotated
+  screenshots, so a case makes sense even when nothing is found.
 
 ## Parts
 
@@ -64,7 +67,7 @@ is what a case is about, and finding the element again is a best-effort extra:
 |---|---|
 | Content script (`src/content/`) | Toolbar and drawing overlay in a shadow DOM, element picker, element details, a screenshot per mark as it is drawn, highlighting a loaded case |
 | Service worker (`src/background.ts`, `src/worker/`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases; `TabMcp` with the tools and their questions (DEC-015) |
-| Side panel (`src/sidepanel/`) | Case list, case viewer, summary for the developer, AI findings, export and import; a view of the AI connection (status, pairing, questions) |
+| Side panel (`src/sidepanel/`) | Case list, case viewer (its marks follow the tab in front, `follow.ts`), summary for the developer, AI findings, export and import; a view of the AI connection (status, pairing, questions) |
 | Library (`src/lib/`) | Case format, element details, matching, zip, export, IndexedDB store, images |
 
 Storage is IndexedDB in the extension's origin (database `overmark`, stores `cases` and
@@ -88,8 +91,9 @@ the page's origin and never touches it directly.
 - `unlimitedStorage`: IndexedDB holds the only copy of the cases, so the browser must not
   evict it when disk space runs low. Chrome documents the permission as exempt from quota
   and eviction, and it adds no install warning, which keeps DEC-003's small warning.
-- Optional `<all_urls>`, asked for in the side panel ("Allow on all sites") only when the
-  user wants Overmark without clicking the icon on each tab. `captureVisibleTab` accepts
+- Optional `<all_urls>`, asked for in the side panel ("Allow on all sites", in the options
+  and in the notice the panel shows on a tab Overmark may not run on yet, DEC-022) only
+  when the user wants Overmark without clicking the icon on each tab. `captureVisibleTab` accepts
   `activeTab` or `<all_urls>`, not a single site's permission.
 
 No JavaScript from an AI app or a server ever runs: the tools are fixed (Chrome Web Store

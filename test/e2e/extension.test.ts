@@ -284,7 +284,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.send("Page.close");
 	});
 
-	test("the list's Load puts drawn marks back on their elements", async () => {
+	test("opening a case from the list puts drawn marks back on their elements", async () => {
 		const box = (page: Page, truth: string) =>
 			page.eval<{ x: number; y: number; width: number; height: number }>(
 				`(() => { const { x, y, width, height } = document.querySelector("[data-truth=${truth}]").getBoundingClientRect(); return { x, y, width, height }; })()`,
@@ -321,9 +321,10 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await h.control.goto(
 			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
 		);
-		const load = `document.querySelector('[data-load][title*="Drawn marks"]')`;
-		await h.control.waitFor(load);
-		await h.control.eval(`${load}.click()`);
+		// Another page than the case's: opening the case draws its marks all the same.
+		const row = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes("Drawn marks"))`;
+		await h.control.waitFor(row);
+		await h.control.eval(`${row}.click()`);
 		await h.control.waitFor(
 			`document.querySelectorAll(".match").length === 3`,
 			10_000,

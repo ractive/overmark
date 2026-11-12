@@ -7,7 +7,6 @@
 import {
 	type Annotation,
 	type Case,
-	isPageOf,
 	nextNumbers,
 	validateCase,
 	withComment,
@@ -41,6 +40,7 @@ import {
 	type SavedFile,
 	saveFile,
 } from "./download.ts";
+import { type Drawn, followStep, isFound, noneFound } from "./follow.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
 	type Exported,
@@ -141,53 +141,121 @@ const showing = (caseId: string) =>
 /** The newest load: Hide, or another load, makes the older ones stale. */
 const loadWork = new Latest();
 
-/** A case to load onto a tab once the icon's click there lets Overmark in. */
+/** What the newest load draws where, until Hide or the case closes. */
+let loadTarget: Drawn | undefined;
+
+/** A load of the case onto the tab: it makes the older ones stale. */
+function startLoad(target: Drawn): ReturnType<Latest["start"]> {
+	loadTarget = target;
+	return loadWork.start();
+}
+
+/** No load goes on, and none that is under way draws its marks. */
+function stopLoads(): void {
+	loadTarget = undefined;
+	loadWork.cancel();
+}
+
+/**
+ * Where the panel drew a case's marks last (DEC-022): they follow the open
+ * case to the tab in front, and leave the tab they were on. Marks an AI app
+ * loaded are the page's, not these.
+ */
+let drawn: Drawn | undefined;
+
+/** A draw by `follow` under way. */
+let drawing: Drawn | undefined;
+
+/** Loads waiting for the page's answer: its news meanwhile may predate them. */
+let loadsUnderWay = 0;
+
+/**
+ * Tabs the user took the open case's marks off ("Hide marks on this tab"):
+ * they are not drawn there again by themselves until "Show marks on this
+ * tab", or the case is opened again.
+ */
+const hiddenOn = new Set<number>();
+
+/** The tab `follow` last saw in front: hints about another tab go. */
+let followed: number | undefined;
+
+const sameDrawn = (a: Drawn | undefined, b: Drawn | undefined) =>
+	a !== undefined &&
+	b !== undefined &&
+	a.tabId === b.tabId &&
+	a.caseId === b.caseId;
+
+/** Take the panel's marks of that case off that tab; a closed or reloaded tab has none. */
+function takeOff(d: Drawn): void {
+	if (sameDrawn(drawn, d)) drawn = undefined;
+	void chrome.tabs
+		.sendMessage(d.tabId, { type: "case:clear", caseId: d.caseId })
+		.catch(() => undefined);
+}
+
+/**
+ * A tab Overmark may not run on yet, with the open case to draw there once
+ * the icon's click (or "Allow on all sites") lets it in.
+ */
 let pendingLoad: { tabId: number; caseId: string } | undefined;
 
 /**
  * Loads the case onto the tab and says how it went; `undefined` when it could
- * not, the hint says why.
+ * not, the hint says why. `again`: the marks not found are looked for once
+ * more in a moment.
  */
 async function loadInto(
 	c: Case,
 	tabId: number,
-	hint: (text: string) => void,
+	hint: (text: string | undefined) => void,
 	work: { current: () => boolean },
+	again = false,
 ): Promise<{ found: number; total: number } | undefined> {
+	const here = { tabId, caseId: c.id };
 	try {
+		loadsUnderWay++;
 		const result = await sendToTab<LoadResult | { error: string }>(tabId, {
 			type: "case:load",
 			case: c,
-		});
+		}).finally(() => loadsUnderWay--);
 		if ("error" in result) {
-			hint(result.error);
+			// A stale load's failure is about a tab no longer in question.
+			if (work.current()) hint(result.error);
 			return undefined;
 		}
-		// Hidden meanwhile: the marks this load drew go too.
+		// Hidden or closed meanwhile: the marks this load drew go too, unless a
+		// newer load draws them there again.
 		if (!work.current()) {
-			void chrome.tabs
-				.sendMessage(tabId, { type: "case:clear", caseId: c.id })
-				.catch(() => undefined);
+			if (sameDrawn(loadTarget, here)) drawn = here;
+			else takeOff(here);
 			return undefined;
 		}
-		// Results describe the tab in front (see refreshTab).
-		if ((await activeTab())?.id !== tabId) return undefined;
-		const found = result.matches.filter(
-			(m) => m.status !== "lost" && m.status !== "no-element",
-		).length;
+		drawn = here;
+		// The marks follow the case to the tab in front (DEC-022), and the
+		// results describe that tab (see refreshTab).
+		if ((await activeTab())?.id !== tabId) {
+			takeOff(here);
+			return undefined;
+		}
+		const found = result.matches.filter(isFound).length;
+		const settling = again && found < result.matches.length;
 		update((s) => {
 			s.loaded = {
 				caseId: c.id,
 				tabId,
 				matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+				settling,
 			};
 		});
+		// None found: the case view says so, and where the case is from.
 		hint(
-			`${found} of ${result.matches.length} marks found on ${shortUrl(result.url)}. Green: found. Amber, dashed: probable or unsure.`,
+			noneFound(result.matches) && !settling
+				? undefined
+				: `${found} of ${result.matches.length} marks found on ${shortUrl(result.url)}. Green: found. Amber, dashed: probable or unsure.`,
 		);
 		return { found, total: result.matches.length };
 	} catch (error) {
-		hint(describeError(error));
+		if (work.current()) hint(describeError(error));
 		return undefined;
 	}
 }
@@ -200,18 +268,90 @@ async function loadInto(
 async function loadOnLoaded(
 	c: Case,
 	tabId: number,
-	hint: (text: string) => void,
+	hint: (text: string | undefined) => void,
 ): Promise<void> {
-	const work = loadWork.start();
-	for (const wait of [0, 1000, 2000]) {
-		if (wait > 0) {
-			await sleep(wait);
-			if (!work.current() || !showing(c.id)) return;
-			if ((await activeTab())?.id !== tabId) return;
+	const target = { tabId, caseId: c.id };
+	const work = startLoad(target);
+	drawing = target;
+	try {
+		const waits = [0, 1000, 2000];
+		for (const [i, wait] of waits.entries()) {
+			if (wait > 0) {
+				await sleep(wait);
+				if (!work.current() || !showing(c.id) || hiddenOn.has(tabId)) return;
+				if ((await activeTab())?.id !== tabId) return;
+			}
+			const result = await loadInto(c, tabId, hint, work, i < waits.length - 1);
+			if (result === undefined || result.found === result.total) return;
 		}
-		const result = await loadInto(c, tabId, hint, work);
-		if (result === undefined || result.found === result.total) return;
+	} finally {
+		if (drawing === target) drawing = undefined;
 	}
+}
+
+/** The newest `follow`: one that started later knows the tab in front better. */
+const followWork = new Latest();
+
+/** The tab in front of the panel's window, as `follow` needs it. */
+async function frontTab(): Promise<
+	{ id: number; url: string; loading: boolean } | undefined
+> {
+	const tab = await activeTab();
+	return tab?.id === undefined
+		? undefined
+		: { id: tab.id, url: tab.url ?? "", loading: tab.status === "loading" };
+}
+
+/**
+ * The open case's marks follow it to the tab in front (DEC-022): drawn there,
+ * taken off the tab they were on. Only the newest call acts: one that waited
+ * for a slow page while another tab came to the front does nothing.
+ */
+async function follow(): Promise<void> {
+	const work = followWork.start();
+	// What the draw found goes under the case's buttons, unless the user did
+	// something there meanwhile (Match size, Export): that one's outcome stays.
+	const hint = followHint();
+	const c = state.view.kind === "case" ? state.current : undefined;
+	if (c === undefined || !showing(c.id)) {
+		// Not read yet: opening it follows once it is.
+		if (state.view.kind !== "case" && drawn !== undefined) takeOff(drawn);
+		return;
+	}
+	const front = await frontTab();
+	const pageCase =
+		front === undefined || front.url === ""
+			? undefined
+			: (await overlayState(front.id))?.loadedCase;
+	// Still the tab in front, and no newer follow: else that one decides.
+	if ((await frontTab())?.id !== front?.id || !work.current()) return;
+	// The panel went on to another case, or back to the list, meanwhile.
+	if (state.current?.id !== c.id || !showing(c.id)) return;
+	const step = followStep({
+		caseId: c.id,
+		tab: front,
+		drawn,
+		pageCase,
+		hidden: hiddenOn,
+	});
+	if (step.clear !== undefined) takeOff(step.clear);
+	if (front === undefined) return;
+	if (front.id !== followed) {
+		// What the hints said was about the tab before (opening the case
+		// cleared them already).
+		if (followed !== undefined) hint(undefined);
+		followed = front.id;
+	}
+	if (step.action === "wait") {
+		pendingLoad = { tabId: front.id, caseId: c.id };
+		return;
+	}
+	if (step.action !== "draw") return;
+	const target = { tabId: front.id, caseId: c.id };
+	// Under way already (a page that starts loading again ends that).
+	if (sameDrawn(drawing, target)) return;
+	if (pendingLoad?.tabId === front.id) pendingLoad = undefined;
+	await loadOnLoaded(c, front.id, hint);
 }
 
 /** Waits until the window has left full screen or maximised, three seconds at most. */
@@ -232,41 +372,6 @@ async function settledSize(tabId: number): Promise<void> {
 		if (now === last) return;
 		last = now;
 	}
-}
-
-/** The tab once it has loaded; `undefined` if it closed or took too long. */
-function loadedTab(
-	tabId: number,
-	timeout = 30_000,
-): Promise<chrome.tabs.Tab | undefined> {
-	return new Promise((resolve) => {
-		const done = (tab?: chrome.tabs.Tab) => {
-			clearTimeout(timer);
-			chrome.tabs.onUpdated.removeListener(updated);
-			chrome.tabs.onRemoved.removeListener(removed);
-			resolve(tab);
-		};
-		const updated = (
-			id: number,
-			info: { status?: string },
-			tab: chrome.tabs.Tab,
-		) => {
-			if (id === tabId && info.status === "complete") done(tab);
-		};
-		const removed = (id: number) => {
-			if (id === tabId) done();
-		};
-		const timer = setTimeout(() => done(), timeout);
-		chrome.tabs.onUpdated.addListener(updated);
-		chrome.tabs.onRemoved.addListener(removed);
-		// It may have loaded before anyone listened.
-		chrome.tabs.get(tabId).then(
-			(tab) => {
-				if (tab.status === "complete") done(tab);
-			},
-			() => done(),
-		);
-	});
 }
 
 /** The overlay's state on the tab, or `undefined` where it is not injected. */
@@ -293,7 +398,13 @@ async function refreshTab(): Promise<void> {
 			const next =
 				tab?.id === undefined
 					? undefined
-					: { id: tab.id, url: tab.url ?? "", title: tab.title ?? "", size };
+					: {
+							id: tab.id,
+							url: tab.url ?? "",
+							title: tab.title ?? "",
+							size,
+							loading: tab.status === "loading",
+						};
 			// A hint is about the tab in front when it was given; the first read
 			// of that tab is no change of it.
 			if (
@@ -344,7 +455,10 @@ async function refreshCase(): Promise<void> {
 	const c = await store.getCase(id);
 	if (!work.current()) return;
 	if (c === undefined) return closeCase();
+	const opened = state.current?.id !== c.id;
 	update((s) => (s.current = c));
+	// Just opened: its marks go to the tab in front (DEC-022).
+	if (opened) void follow();
 	if (state.images?.caseId === c.id && state.images.version === c.updatedAt)
 		return;
 	const images = imagesWork.start();
@@ -366,33 +480,44 @@ async function refreshCase(): Promise<void> {
 	});
 }
 
-function openCase(id: string, caseHint?: string): void {
+/** Open a case, and draw its marks on the tab in front (DEC-022). */
+function openCase(id: string): void {
 	hintWork.cancel();
+	const other = state.view.kind !== "case" || state.view.id !== id;
+	// Opened again: a Hide on a tab holds no longer.
+	if (other) hiddenOn.clear();
 	update((s) => {
-		if (s.view.kind !== "case" || s.view.id !== id) {
+		if (other) {
 			s.current = undefined;
 			s.verdictStatus = undefined;
 			releaseImages(s);
 		}
 		s.view = { kind: "case", id };
-		s.caseHint = caseHint;
+		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
 	});
+	followed = undefined;
 	void refreshCase();
 }
 
+/** Back to the list: the marks the panel drew leave the page. */
 function closeCase(): void {
 	caseWork.cancel();
 	imagesWork.cancel();
 	hintWork.cancel();
+	stopLoads();
+	hiddenOn.clear();
+	pendingLoad = undefined;
+	if (drawn !== undefined) takeOff(drawn);
 	update((s) => {
 		s.view = { kind: "home" };
 		s.current = undefined;
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
+		s.loaded = undefined;
 		releaseImages(s);
 	});
 	void refreshCases();
@@ -402,8 +527,19 @@ function closeCase(): void {
  * For an action on the open case: writes its outcome under that case's
  * buttons, unless the panel left the case, or a newer action took over.
  */
-function caseHintWriter(): (text: string) => void {
+function caseHintWriter(): (text: string | undefined) => void {
 	const work = hintWork.start();
+	return (text) => {
+		if (work.current()) update((s) => (s.caseHint = text));
+	};
+}
+
+/**
+ * For the panel's own draws: writes under the case's buttons while no action
+ * of the user's has written there since, and stops no action's hint itself.
+ */
+function followHint(): (text: string | undefined) => void {
+	const work = hintWork.peek();
 	return (text) => {
 		if (work.current()) update((s) => (s.caseHint = text));
 	};
@@ -418,10 +554,7 @@ async function forgetLoaded(
 		s.loaded = undefined;
 		if (options.hint !== undefined) s.caseHint = options.hint;
 	});
-	if (was !== undefined && options.clearTab)
-		await chrome.tabs
-			.sendMessage(was.tabId, { type: "case:clear", caseId: was.caseId })
-			.catch(() => undefined);
+	if (was !== undefined && options.clearTab) takeOff(was);
 }
 
 /**
@@ -518,8 +651,8 @@ async function storeOne(parsed: CheckedExport, copy: boolean): Promise<Case> {
 }
 
 /**
- * Store the case asked about. A file's only case opens (and loads onto the
- * tab when it is that case's page); in a file of several the next one follows.
+ * Store the case asked about. A file's only case opens; in a file of several
+ * the next one follows.
  */
 async function finishImport(
 	parsed: CheckedExport,
@@ -533,9 +666,8 @@ async function finishImport(
 			batch.stored++;
 			return await importRest(batch);
 		}
+		// Its marks are drawn on the tab in front, as for any case opened.
 		openCase(c.id);
-		const url = state.tab?.url;
-		if (url && isPageOf(c, url)) actions.loadOntoTab(c);
 	} catch (error) {
 		update(
 			(s) =>
@@ -631,63 +763,37 @@ const actions: Actions = {
 		})();
 	},
 
-	openCase(id) {
-		// The page in front is the case's: show its marks there too, unless
-		// they are already (a load again would drop the candidates chosen).
-		const c = state.cases.find((it) => it.id === id);
-		const url = state.tab?.url;
-		const loaded =
-			state.loaded?.caseId === id || state.overlay?.loadedCase === id;
-		if (c && url && isPageOf(c, url) && !loaded) return actions.openAndLoad(c);
-		// Chrome hides the address of a tab Overmark may not run on yet: the
-		// icon's click there tells it, and the case loads if it is that page's.
-		const tab = state.tab;
-		if (c && tab !== undefined && !tab.url && !loaded) {
-			pendingLoad = { tabId: tab.id, caseId: id };
-			return openCase(
-				id,
-				"If this tab shows the case's page, click the Overmark icon in the toolbar (or press Alt+Shift+O) and the case loads here.",
-			);
-		}
-		openCase(id);
-	},
+	openCase,
 	closeCase,
 
 	loadOntoTab(c) {
+		// Off while Overmark may not run on the tab (view.ts): the notice
+		// above it says what lets it.
 		const hint = caseHintWriter();
-		// Chrome hides the address of a tab Overmark may not run on: ask for
-		// the case's site, the likeliest one. Another site needs the icon.
-		const asked =
-			state.tab !== undefined && !state.tab.url
-				? askForSite(c.page.url)
-				: undefined;
 		void (async () => {
-			const work = loadWork.start();
 			const tab = await activeTab();
 			if (tab?.id === undefined) return;
+			const work = startLoad({ tabId: tab.id, caseId: c.id });
+			// Shown again by hand: a Hide on this tab holds no longer.
+			hiddenOn.delete(tab.id);
 			// This load replaces one the icon's click would start.
 			if (pendingLoad?.tabId === tab.id) pendingLoad = undefined;
-			const loaded = await loadInto(c, tab.id, hint, work);
-			// Allowed by Chrome's prompt only now: once more.
-			if (loaded !== undefined || asked === undefined || !(await asked)) return;
-			if (!work.current()) return;
-			await refreshTab();
-			if (state.tab?.id === tab.id && !state.tab.url)
-				return hint(
-					`This tab is not on ${shortUrl(c.page.url)}, so the access to that site does not reach it. Click the Overmark icon in the toolbar (or press Alt+Shift+O) while this tab is in front.`,
-				);
 			await loadInto(c, tab.id, hint, work);
 		})();
 	},
 
 	hideFromTab(c) {
-		loadWork.cancel();
+		stopLoads();
 		hintWork.cancel();
 		// Where the panel loaded the case, and the tab in front where an AI app did.
 		const tabs = new Set<number>();
 		if (state.loaded?.caseId === c.id) tabs.add(state.loaded.tabId);
+		if (drawn?.caseId === c.id) tabs.add(drawn.tabId);
 		if (state.overlay?.loadedCase === c.id && state.tab !== undefined)
 			tabs.add(state.tab.id);
+		// Not drawn there again by itself (DEC-022).
+		if (state.tab !== undefined) hiddenOn.add(state.tab.id);
+		for (const tabId of tabs) hiddenOn.add(tabId);
 		update((s) => {
 			s.loaded = undefined;
 			s.caseHint = undefined;
@@ -697,60 +803,43 @@ const actions: Actions = {
 				s.overlay = rest;
 			}
 		});
-		for (const tabId of tabs)
-			void chrome.tabs
-				.sendMessage(tabId, { type: "case:clear", caseId: c.id })
-				.catch(() => undefined);
+		for (const tabId of tabs) takeOff({ tabId, caseId: c.id });
 	},
 
-	openAndLoad(c) {
-		openCase(c.id);
-		actions.loadOntoTab(c);
+	allowAllSites() {
+		// Chrome asks only during a click: nothing may be awaited before this.
+		void chrome.permissions.request(ALL_SITES).then(
+			// A yes: permissions.onAdded draws the open case's marks.
+			() => refreshAllSites(),
+			(error: unknown) =>
+				update(
+					(s) => (s.hint = `Could not change the access: ${message(error)}`),
+				),
+		);
+	},
+
+	openDetails() {
+		void chrome.tabs
+			.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` })
+			.catch((error: unknown) =>
+				update(
+					(s) => (s.hint = `Could not open the details: ${message(error)}`),
+				),
+			);
 	},
 
 	openPage(c) {
 		if (!isWebPage(c.page.url)) return;
 		const hint = caseHintWriter();
-		// Now, while the click allows Chrome's prompt. The tab opens meanwhile,
-		// and without a yes the icon's click lets Overmark run there (below).
-		const asked = askForSite(c.page.url);
-		void (async () => {
-			try {
-				const opened = await chrome.tabs.create({ url: c.page.url });
-				if (opened.id === undefined) return;
-				hint(`Opening ${shortUrl(c.page.url)}…`);
-				const tab = await loadedTab(opened.id);
-				if (tab === undefined)
-					return hint(
-						`${shortUrl(c.page.url)} did not finish loading. Press "Show marks on this tab" once it has.`,
-					);
-				// The user went on to another case or tab meanwhile: leave it be.
-				if (!showing(c.id) || (await activeTab())?.id !== tab.id)
-					return hint("");
-				// Chrome tells the address only where Overmark may run. Elsewhere
-				// the icon's click lets it: the case loads then (see onMessage).
-				const url = tab.url;
-				if (url === undefined) {
-					pendingLoad = { tabId: opened.id, caseId: c.id };
-					hint(
-						"Click the Overmark icon in the toolbar (or press Alt+Shift+O) to load the case onto this tab.",
-					);
-					// A yes to Chrome's prompt after the page loaded: load it now,
-					// unless the icon's click did already, as the click would.
-					if (!(await asked) || pendingLoad?.tabId !== opened.id) return;
-					pendingLoad = undefined;
-					return await loadPending(c.id, opened.id);
-				}
-				// The page may have sent the tab elsewhere, to a sign-in say.
-				if (!isPageOf(c, url))
-					return hint(
-						`The page went on to ${shortUrl(url)}, so the case was not loaded there.`,
-					);
-				await loadOnLoaded(c, opened.id, hint);
-			} catch (error) {
-				hint(`Could not open the page: ${message(error)}`);
-			}
-		})();
+		// Now, while the click allows Chrome's prompt. The tab opens meanwhile;
+		// once it has loaded, the case's marks follow it there (DEC-022), and
+		// without a yes the icon's click lets Overmark run there.
+		void askForSite(c.page.url);
+		void chrome.tabs
+			.create({ url: c.page.url })
+			.catch((error: unknown) =>
+				hint(`Could not open the page: ${message(error)}`),
+			);
 	},
 
 	matchSize(c) {
@@ -1146,6 +1235,8 @@ chrome.permissions.onAdded.addListener(() => {
 	void refreshAllSites();
 	void refreshDownloads();
 	void refreshTab();
+	// Overmark may run on the tab in front now: the open case's marks go there.
+	void follow();
 });
 chrome.permissions.onRemoved.addListener(() => {
 	void refreshAllSites();
@@ -1333,11 +1424,26 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 	if (sender.id !== chrome.runtime.id) return false;
 	if (news?.type === "overlay:changed") {
 		const from = sender.tab?.id;
-		// Overmark runs on the tab a case's address opened: the icon was clicked.
+		// Overmark runs on the tab the open case waits for: the icon was clicked.
 		if (from !== undefined && from === pendingLoad?.tabId) {
-			const caseId = pendingLoad.caseId;
 			pendingLoad = undefined;
-			void loadPending(caseId, from);
+			void follow();
+		}
+		// The page's own Hide (on its bar) took the panel's marks off: it
+		// holds as the panel's Hide does.
+		if (
+			from !== undefined &&
+			from === drawn?.tabId &&
+			news.state.loadedCase === undefined &&
+			loadsUnderWay === 0 &&
+			// Its results: a page loaded again (no results then) starts empty.
+			state.loaded?.tabId === from &&
+			state.loaded.caseId === drawn.caseId
+		) {
+			hiddenOn.add(from);
+			drawn = undefined;
+			// The searches again must not draw them back.
+			if (loadTarget?.tabId === from) stopLoads();
 		}
 		// The page's own Hide removed the loaded case's marks.
 		if (
@@ -1350,8 +1456,9 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 		if (from !== undefined && from === state.tab?.id) {
 			update((s) => (s.overlay = news.state));
 			// A refresh may have read the page before this news, or be finding
-			// out that another tab is in front now: it starts over.
-			if (refreshing > 0) void refreshTab();
+			// out that another tab is in front now: it starts over. A tab whose
+			// address Chrome hid lets Overmark in now: the icon was clicked.
+			if (refreshing > 0 || state.tab.url === "") void refreshTab();
 		}
 	} else if (news?.type === "cases:changed") {
 		caseChanged(news.caseId);
@@ -1360,25 +1467,20 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 	return false;
 });
 
-/** The case its address opened a tab for, now that Overmark may run there. */
-async function loadPending(caseId: string, tabId: number): Promise<void> {
-	const c = state.current;
-	if (c?.id !== caseId || !showing(caseId)) return;
-	const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-	if (tab?.url === undefined || !isPageOf(c, tab.url)) return;
-	if ((await activeTab())?.id !== tabId) return;
-	await loadOnLoaded(c, tabId, caseHintWriter());
-}
-
-chrome.tabs.onActivated.addListener(() => void refreshTab());
+/** The window this panel is in. */
+let panelWindow: number | undefined;
+void chrome.windows.getCurrent().then((w) => (panelWindow = w.id));
+chrome.tabs.onActivated.addListener(({ windowId }) => {
+	void refreshTab();
+	// The open case's marks follow it to the tab in front of this window.
+	if (panelWindow === undefined || windowId === panelWindow) void follow();
+});
 // The tab's size: the window's, the panel's own width, or the zoom changed.
 let resized: ReturnType<typeof setTimeout> | undefined;
 const sizeChanged = () => {
 	clearTimeout(resized);
 	resized = setTimeout(() => void refreshSize(), 150);
 };
-let panelWindow: number | undefined;
-void chrome.windows.getCurrent().then((w) => (panelWindow = w.id));
 chrome.windows.onBoundsChanged.addListener((w) => {
 	if (w.id === panelWindow) sizeChanged();
 });
@@ -1389,13 +1491,28 @@ window.addEventListener("resize", sizeChanged);
 chrome.tabs.onUpdated.addListener((id, info) => {
 	if (id === state.loaded?.tabId && info.status === "loading")
 		void forgetLoaded();
-	if (info.status === "complete" || info.url !== undefined) void refreshTab();
+	// A new page: a draw under way was for the old one.
+	if (id === drawing?.tabId && info.status === "loading") drawing = undefined;
+	if (info.status === "complete" || info.url !== undefined) {
+		void refreshTab();
+		// Loaded, reloaded or navigated: the open case's marks are drawn there
+		// again when it is the tab in front and the page no longer shows them;
+		// a new address within the page (a hash, pushState) keeps them (DEC-022).
+		void follow();
+	}
 });
 chrome.tabs.onRemoved.addListener((id) => {
 	if (id === state.loaded?.tabId) void forgetLoaded();
 	if (id === pendingLoad?.tabId) pendingLoad = undefined;
+	if (id === drawn?.tabId) drawn = undefined;
+	hiddenOn.delete(id);
 });
 
 void refreshTab();
 void refreshAllSites();
 void refreshDownloads();
+// Turning "Allow access to file URLs" on or off reloads Overmark: once is enough.
+void chrome.extension.isAllowedFileSchemeAccess().then(
+	(allowed) => update((s) => (s.fileAccess = allowed)),
+	() => undefined,
+);

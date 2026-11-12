@@ -56,27 +56,69 @@ function caseState(c: Case, change?: (s: PanelState) => void): PanelState {
 }
 
 describe("the tab", () => {
-	const home = (tab: PanelState["tab"]) => {
+	const home = (
+		tab: PanelState["tab"],
+		change?: (s: PanelState) => void,
+		actions: Actions = noActions,
+	) => {
 		const state = initialState();
 		state.tab = tab;
-		render(state, noActions);
+		change?.(state);
+		render(state, actions);
 	};
 	const text = (id: string) => el(id).textContent;
+	const allow = () =>
+		el("access-notice").querySelector(
+			'[data-action="allow-all-sites"]',
+		) as unknown as HTMLButtonElement;
 
-	test("without an address: its title, or at least some words", () => {
+	test("one heading, This page: its address, else its title, else nothing more", () => {
+		expect(text("page-heading")).toBe("This page");
 		home({ id: 1, url: "", title: "", size: undefined });
-		expect(text("page")).toBe("This page");
+		expect(el("page").hidden).toBe(true);
 		home({ id: 1, url: "", title: "Kasse", size: undefined });
+		expect(el("page").hidden).toBe(false);
 		expect(text("page")).toBe("Kasse");
 	});
 
-	test("without an address: says that a click on the icon is needed", () => {
-		home({ id: 1, url: "", title: "", size: undefined });
-		expect(el("hint").hidden).toBe(false);
-		expect(text("hint")).toContain("Click the Overmark icon");
+	test("without an address: a notice with a warning sign, the icon's click and Allow on all sites", () => {
+		const asked: string[] = [];
+		home({ id: 1, url: "", title: "", size: undefined }, undefined, {
+			...noActions,
+			allowAllSites: () => asked.push("all"),
+		} as Actions);
+		const notice = el("access-notice");
+		expect(notice.hidden).toBe(false);
+		expect(notice.querySelector("svg.notice-icon")).not.toBeNull();
+		expect(notice.textContent).toContain("Click the Overmark icon");
+		// It stands above Annotate this page, and the hint below says nothing.
+		expect(notice.nextElementSibling).toBe(el("annotate"));
+		expect(el("hint").hidden).toBe(true);
+		expect(allow().hidden).toBe(false);
+		allow().click();
+		expect(asked).toEqual(["all"]);
+		// Annotating needs the page: off, and its title points at the notice.
+		expect(el<HTMLButtonElement>("annotate").disabled).toBe(true);
+		expect(el("annotate").title).toContain("see the notice");
 	});
 
-	test("with an address: no such hint", () => {
+	test("without an address although Overmark may run on all sites: Chrome's own pages, no button", () => {
+		home({ id: 1, url: "", title: "", size: undefined }, (s) => {
+			s.allSites = true;
+		});
+		expect(el("access-notice").hidden).toBe(false);
+		expect(text("access-notice")).toContain("cannot run on this tab");
+		expect(allow().hidden).toBe(true);
+		expect(el<HTMLButtonElement>("annotate").disabled).toBe(true);
+	});
+
+	test("a tab still loading has no address yet: no notice", () => {
+		home({ id: 1, url: "", title: "", size: undefined, loading: true });
+		expect(el("access-notice").hidden).toBe(true);
+		expect(el<HTMLButtonElement>("annotate").disabled).toBe(false);
+	});
+
+	test("with an address: no notice, Annotate this page on", () => {
 		home({
 			id: 1,
 			url: "https://www.example.com/kk",
@@ -85,6 +127,8 @@ describe("the tab", () => {
 		});
 		expect(text("page")).toBe("www.example.com/kk");
 		expect(el("hint").hidden).toBe(true);
+		expect(el("access-notice").hidden).toBe(true);
+		expect(el<HTMLButtonElement>("annotate").disabled).toBe(false);
 	});
 
 	test("a hint of its own goes first", () => {
@@ -97,7 +141,7 @@ describe("the tab", () => {
 });
 
 describe("the case list", () => {
-	test("a case of the page in front has no Load: opening it loads it", () => {
+	test("no Load of its own: opening any case draws its marks (DEC-022)", () => {
 		const mine = sampleCase("c_here");
 		const theirs = {
 			...sampleCase("c_there"),
@@ -108,16 +152,14 @@ describe("the case list", () => {
 		state.cases = [mine, theirs];
 		const opened: string[] = [];
 		render(state, actionsWith({ openCase: (id) => opened.push(id) }));
-		const load = (id: string) =>
-			window.document.querySelector(`[data-load="${id}"]`);
-		expect(load("c_here")).toBeNull();
-		expect(load("c_there")).not.toBeNull();
-		(
-			window.document.querySelector(
-				'[data-case="c_here"]',
-			) as unknown as HTMLElement
-		).click();
-		expect(opened).toEqual(["c_here"]);
+		expect(window.document.querySelector("[data-load]")).toBeNull();
+		for (const id of ["c_here", "c_there"])
+			(
+				window.document.querySelector(
+					`[data-case="${id}"]`,
+				) as unknown as HTMLElement
+			).click();
+		expect(opened).toEqual(["c_here", "c_there"]);
 	});
 });
 
@@ -544,7 +586,12 @@ describe("Load and Hide", () => {
 		el("load-case").click();
 		const loadedOn = (front: number) =>
 			caseState(c, (s) => {
-				s.tab = { id: front, url: "", title: "", size: undefined };
+				s.tab = {
+					id: front,
+					url: "http://localhost:3000/kk",
+					title: "",
+					size: undefined,
+				};
 				s.loaded = { caseId: c.id, tabId: 1, matches: new Map() };
 			});
 		render(loadedOn(1), actions);
@@ -570,6 +617,220 @@ describe("Load and Hide", () => {
 		);
 		expect(el("load-case").textContent).toBe("Hide marks on this tab");
 		expect(called).toEqual(["load", "hide"]);
+	});
+});
+
+describe("a case on a tab Overmark may not run on", () => {
+	const noAccess = (c: Case, allSites = false) =>
+		caseState(c, (s) => {
+			s.tab = { id: 1, url: "", title: "", size: undefined };
+			s.allSites = allSites;
+		});
+	const withMark = (): Case => ({
+		...sampleCase("c_reach"),
+		annotations: [
+			{
+				id: "a1",
+				number: 1,
+				shot: "s1",
+				comment: "Here",
+				author: "user",
+				shape: { kind: "note", at: { x: 1, y: 1 } },
+				crop: "crops/a1.webp",
+				element: null,
+			},
+		],
+	});
+
+	test("the notice with Allow on all sites; only what needs the page is off", () => {
+		const c = withMark();
+		const asked: string[] = [];
+		const state = noAccess(c);
+		state.loaded = {
+			caseId: c.id,
+			tabId: 1,
+			matches: new Map([
+				[
+					"a1",
+					{
+						annotationId: "a1",
+						number: 1,
+						status: "no-element",
+						score: 0,
+						current: 0,
+						candidates: [],
+					},
+				],
+			]),
+		};
+		render(state, actionsWith({ allowAllSites: () => void asked.push("all") }));
+		const notice = el("case-access");
+		expect(notice.hidden).toBe(false);
+		expect(notice.textContent).toContain("Click the Overmark icon");
+		expect(notice.querySelector("svg.notice-icon")).not.toBeNull();
+		// Above Show marks on this tab.
+		expect(notice.nextElementSibling).toBe(el("load-case"));
+		(
+			notice.querySelector(
+				'[data-action="allow-all-sites"]',
+			) as unknown as HTMLButtonElement
+		).click();
+		expect(asked).toEqual(["all"]);
+		for (const id of ["load-case", "add-marks"]) {
+			expect(el<HTMLButtonElement>(id).disabled).toBe(true);
+			expect(el(id).title).toContain("see the notice");
+		}
+		const show = window.document.querySelector(
+			'[data-action="show"]',
+		) as unknown as HTMLButtonElement;
+		expect(show.disabled).toBe(true);
+		expect(show.title).toContain("see the notice");
+		// The rest works without the tab.
+		for (const id of ["export-case", "delete-case", "save-verdict"])
+			expect(el<HTMLButtonElement>(id).disabled).toBe(false);
+	});
+
+	test("with all sites allowed: the tab is Chrome's own, no button", () => {
+		render(noAccess(sampleCase("c_never"), true), noActions);
+		expect(el("case-access").textContent).toContain("cannot run on this tab");
+		expect(
+			(
+				el("case-access").querySelector(
+					'[data-action="allow-all-sites"]',
+				) as unknown as HTMLElement
+			).hidden,
+		).toBe(true);
+	});
+
+	test("with all sites allowed but no file access: it may be a file, the details open the toggle", () => {
+		const opened: string[] = [];
+		const asked: string[] = [];
+		const state = noAccess(sampleCase("c_file"), true);
+		state.fileAccess = false;
+		render(
+			state,
+			actionsWith({
+				openDetails: () => void opened.push("details"),
+				allowAllSites: () => void asked.push("all"),
+			}),
+		);
+		const notice = el("case-access");
+		expect(notice.textContent).toContain("Allow access to file URLs");
+		expect(notice.textContent).toContain("Chrome Web Store");
+		const button = notice.querySelector(
+			"button",
+		) as unknown as HTMLButtonElement;
+		expect(button.hidden).toBe(false);
+		expect(button.textContent).toBe("Open Overmark's details");
+		button.click();
+		expect(opened).toEqual(["details"]);
+		expect(asked).toEqual([]);
+		// With file access, the tab is Chrome's own: no button.
+		state.fileAccess = true;
+		render(state, noActions);
+		expect(notice.textContent).not.toContain("file URLs");
+		expect(button.hidden).toBe(true);
+	});
+
+	test("with access: no notice, the buttons on", () => {
+		render(
+			caseState(withMark(), (s) => {
+				s.tab = {
+					id: 1,
+					url: "http://localhost:3000/kk",
+					title: "",
+					size: undefined,
+				};
+			}),
+			noActions,
+		);
+		expect(el("case-access").hidden).toBe(true);
+		expect(el<HTMLButtonElement>("load-case").disabled).toBe(false);
+		expect(el<HTMLButtonElement>("add-marks").disabled).toBe(false);
+	});
+});
+
+describe("none of the case's marks found (DEC-022)", () => {
+	const match = (
+		n: number,
+		status: AnnotationMatch["status"],
+	): AnnotationMatch => ({
+		annotationId: `a${n}`,
+		number: n,
+		status,
+		score: status === "lost" ? 0 : 0.9,
+		current: 0,
+		candidates:
+			status === "lost"
+				? []
+				: [
+						{
+							score: 0.9,
+							summary: "button",
+							selector: "button",
+							visible: true,
+							found: status === "found",
+						},
+					],
+	});
+	const on = (
+		url: string,
+		matches: AnnotationMatch[],
+		settling = false,
+	): PanelState => {
+		const c = sampleCase("c_none");
+		return caseState(c, (s) => {
+			s.tab = { id: 1, url, title: "", size: undefined };
+			s.loaded = {
+				caseId: c.id,
+				tabId: 1,
+				matches: new Map(matches.map((m) => [m.annotationId, m])),
+				settling,
+			};
+		});
+	};
+
+	test("on another page: says so, with the case's page and a way there", () => {
+		const opened: string[] = [];
+		render(
+			on("http://localhost:3000/other", [match(1, "lost"), match(2, "lost")]),
+			actionsWith({ openPage: (c) => void opened.push(c.id) }),
+		);
+		const warning = el("none-found");
+		expect(warning.hidden).toBe(false);
+		expect(warning.querySelector("svg.notice-icon")).not.toBeNull();
+		expect(warning.textContent).toContain(
+			"None of this case's marks were found on this page. It is probably for another page: www.example.com/kk.",
+		);
+		const open = warning.querySelector(
+			'[data-action="open-case-page"]',
+		) as unknown as HTMLButtonElement;
+		expect(open.hidden).toBe(false);
+		open.click();
+		expect(opened).toEqual(["c_none"]);
+	});
+
+	test("on the case's own path (another build): says so, no claim of another page", () => {
+		render(on("http://localhost:3000/kk", [match(1, "lost")]), noActions);
+		expect(el("none-found").hidden).toBe(false);
+		expect(el("none-found").textContent).not.toContain("another page");
+		expect(
+			(
+				el("none-found").querySelector(
+					'[data-action="open-case-page"]',
+				) as unknown as HTMLElement
+			).hidden,
+		).toBe(true);
+	});
+
+	test("some found, still being looked for, or nothing to tell by: no warning", () => {
+		const url = "http://localhost:3000/other";
+		render(on(url, [match(1, "lost"), match(2, "probable")]), noActions);
+		expect(el("none-found").hidden).toBe(true);
+		render(on(url, [match(1, "lost")], true), noActions);
+		expect(el("none-found").hidden).toBe(true);
+		render(on(url, [match(1, "no-element")]), noActions);
+		expect(el("none-found").hidden).toBe(true);
 	});
 });
 

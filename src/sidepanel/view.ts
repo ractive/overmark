@@ -20,6 +20,7 @@ import {
 import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
+import { noneFound } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
 import type { AiCall, Exported, PanelState } from "./state.ts";
 
@@ -40,8 +41,11 @@ export interface Actions {
 	deleteMark(c: Case, a: Annotation): void;
 	/** An AI app's finding on a mark: the first click asks, the second deletes. */
 	deleteFinding(c: Case, a: Annotation, findingId: string): void;
-	openAndLoad(c: Case): void;
 	openPage(c: Case): void;
+	/** Chrome's prompt for "Allow on all sites"; call it in the click. */
+	allowAllSites(): void;
+	/** Overmark's page in chrome://extensions ("Allow access to file URLs"). */
+	openDetails(): void;
 	matchSize(c: Case): void;
 	addMarks(c: Case): void;
 	exportCase(c: Case): void;
@@ -70,6 +74,8 @@ const caseView = byId<HTMLElement>("case-view");
 const pageText = byId<HTMLParagraphElement>("page");
 const hint = byId<HTMLParagraphElement>("hint");
 const annotate = byId<HTMLButtonElement>("annotate");
+/** Its title in index.html, for when Overmark may run on the tab. */
+const annotateTitle = annotate.title;
 const casesList = byId<HTMLDivElement>("cases");
 const allSites = byId<HTMLInputElement>("all-sites");
 const aiStatus = byId<HTMLSpanElement>("ai-status");
@@ -104,6 +110,140 @@ export const EXPORT_ALL_BUSY =
 /** Why Overmark does not work on a tab yet, and what to do about it. */
 export const NO_ACCESS =
 	"Overmark may not run on this tab yet. Click the Overmark icon in the toolbar (or press Alt+Shift+O) while this tab is in front.";
+
+/** A tab Overmark is not let onto even with "Allow on all sites". */
+export const CANNOT_RUN =
+	"Overmark cannot run on this tab: Chrome keeps its own pages and the Chrome Web Store off limits to extensions.";
+
+/** The same, where Overmark may not read files either: that is the toggle for them. */
+export const CANNOT_RUN_FILES =
+	"Overmark cannot run on this tab. A page of Chrome's own or the Chrome Web Store is off limits to extensions. A file on your computer needs “Allow access to file URLs” in Overmark's details.";
+
+/** The title of a button that needs the page, while Overmark may not run there. */
+export const NEEDS_ACCESS =
+	"Overmark may not run on this tab yet: see the notice above.";
+
+/**
+ * Whether Overmark may run on the tab in front, as far as the panel knows:
+ * Chrome tells the address only of a tab it may run on (a tab still loading
+ * has none yet). `never`: not even with "Allow on all sites".
+ */
+export function access(state: PanelState): "yes" | "ask" | "never" {
+	const tab = state.tab;
+	if (tab === undefined || tab.url !== "" || tab.loading) return "yes";
+	return state.allSites ? "never" : "ask";
+}
+
+/** "None of this case's marks were found on this page…" (DEC-022). */
+export function noneFoundText(c: Case, url: string | undefined): string {
+	const here = "None of this case's marks were found on this page.";
+	return url !== undefined && url !== "" && isPageOf(c, url)
+		? here
+		: `${here} It is probably for another page: ${shortUrl(c.page.url)}.`;
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+
+/** A warning sign in the text's colour, for the panel's light and dark styles alike. */
+function warningIcon(): SVGSVGElement {
+	const svg = document.createElementNS(SVG, "svg");
+	svg.setAttribute("viewBox", "0 0 16 16");
+	svg.setAttribute("width", "16");
+	svg.setAttribute("height", "16");
+	svg.setAttribute("aria-hidden", "true");
+	svg.setAttribute("class", "notice-icon");
+	for (const [tag, attrs] of [
+		[
+			"path",
+			{
+				d: "M8 1.5 15 14H1z",
+				fill: "none",
+				stroke: "currentColor",
+				"stroke-width": "1.5",
+				"stroke-linejoin": "round",
+			},
+		],
+		[
+			"path",
+			{
+				d: "M8 6v3.5",
+				stroke: "currentColor",
+				"stroke-width": "1.6",
+				"stroke-linecap": "round",
+			},
+		],
+		["circle", { cx: "8", cy: "11.75", r: "0.95", fill: "currentColor" }],
+	] as const) {
+		const part = document.createElementNS(SVG, tag);
+		for (const [key, value] of Object.entries(attrs))
+			part.setAttribute(key, value);
+		svg.append(part);
+	}
+	return svg;
+}
+
+/** A notice with the warning sign: its text, and a button where there is one. */
+interface Notice {
+	el: HTMLElement;
+	text: HTMLParagraphElement;
+	button: HTMLButtonElement;
+}
+
+function notice(id: string, button: HTMLButtonElement): Notice {
+	const text = h("p", {});
+	const el = h(
+		"div",
+		{ class: "notice", id, role: "status", hidden: true },
+		warningIcon(),
+		h("div", { class: "notice-body" }, text, button),
+	);
+	return { el, text, button };
+}
+
+/** The notice when Overmark may not run on the tab in front, with "Allow on all sites". */
+function accessNotice(id: string, actions: () => Actions): Notice {
+	return notice(
+		id,
+		h("button", {
+			type: "button",
+			onclick: (e) => {
+				const button = e.currentTarget as HTMLButtonElement;
+				if (button.dataset["action"] === "file-access") actions().openDetails();
+				else actions().allowAllSites();
+			},
+		}),
+	);
+}
+
+const ALLOW_ALL_SITES_TITLE =
+	"Let Overmark run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options below.";
+const DETAILS_TITLE =
+	"Open Overmark's page in chrome://extensions, where “Allow access to file URLs” is";
+
+/**
+ * Overmark may not run on the tab: "Allow on all sites" helps, or, where it
+ * may run on all sites already, Chrome keeps the tab off limits; for a file
+ * that is the "Allow access to file URLs" toggle, which the panel cannot
+ * tell apart (Chrome hides the address), so it says both.
+ */
+function renderAccess(n: Notice, state: PanelState): void {
+	const now = access(state);
+	n.el.hidden = now === "yes";
+	const files = now === "never" && state.fileAccess === false;
+	n.text.textContent =
+		now !== "never" ? NO_ACCESS : files ? CANNOT_RUN_FILES : CANNOT_RUN;
+	n.button.hidden = now === "never" && !files;
+	n.button.dataset["action"] = files ? "file-access" : "allow-all-sites";
+	n.button.textContent = files
+		? "Open Overmark's details"
+		: "Allow on all sites";
+	n.button.title = files ? DETAILS_TITLE : ALLOW_ALL_SITES_TITLE;
+}
+
+/** The actions of the last render, for the home view's notice made once. */
+let lastActions: Actions | undefined;
+const homeAccess = accessNotice("access-notice", () => lastActions as Actions);
+annotate.before(homeAccess.el);
 
 const sizeOf = (s: Size) => `${s.width}×${s.height}`;
 
@@ -319,8 +459,8 @@ function renderSync({ sync }: PanelState, actions: Actions): void {
 
 // --- home ----------------------------------------------------------------------
 
-/** A case of the page in front loads when it is opened: no Load of its own. */
-function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
+/** A case: opening it draws its marks on the tab in front (DEC-022). */
+function caseItem(c: Case, actions: Actions): HTMLLIElement {
 	const count = c.annotations.length;
 	// The bar beside it is a picture; the words say the same.
 	const counts = countsText(c);
@@ -332,6 +472,7 @@ function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 			{
 				type: "button",
 				"data-case": c.id,
+				title: `Open “${c.title}” and show its marks on the page in this tab`,
 				onclick: () => actions.openCase(c.id),
 			},
 			h("span", { class: "title" }, c.title),
@@ -350,19 +491,6 @@ function caseItem(c: Case, actions: Actions, here: boolean): HTMLLIElement {
 					)
 				: null,
 		),
-		here
-			? null
-			: h(
-					"button",
-					{
-						type: "button",
-						class: "load",
-						"data-load": c.id,
-						title: `Open “${c.title}” and show its marks on the page in this tab`,
-						onclick: () => actions.openAndLoad(c),
-					},
-					"Load",
-				),
 	);
 }
 
@@ -393,7 +521,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 					h(
 						"ul",
 						{ class: "cases", "data-group": "here" },
-						...here.map((c) => caseItem(c, actions, isPageOf(c, url))),
+						...here.map((c) => caseItem(c, actions)),
 					),
 				]
 			: []),
@@ -405,7 +533,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 					h(
 						"ul",
 						{ class: "cases", "data-group": "other" },
-						...other.map((c) => caseItem(c, actions, false)),
+						...other.map((c) => caseItem(c, actions)),
 					),
 				]
 			: []),
@@ -487,11 +615,15 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 
 function renderHome(state: PanelState, actions: Actions): void {
 	const tab = state.tab;
-	pageText.textContent = tab?.url
-		? shortUrl(tab.url)
-		: tab?.title || "This page";
-	// Chrome tells the address only of a tab Overmark may run on.
-	setHint(hint, state.hint ?? (tab && !tab.url ? NO_ACCESS : undefined));
+	// Under "This page": its address, else its title (Chrome tells the
+	// address only of a tab Overmark may run on).
+	pageText.textContent = tab?.url ? shortUrl(tab.url) : (tab?.title ?? "");
+	pageText.hidden = pageText.textContent === "";
+	renderAccess(homeAccess, state);
+	setHint(hint, state.hint);
+	const ok = access(state) === "yes";
+	annotate.disabled = !ok;
+	annotate.title = ok ? annotateTitle : NEEDS_ACCESS;
 	const target = state.overlay?.target;
 	annotate.textContent = state.overlay?.visible
 		? "Stop annotating"
@@ -661,9 +793,14 @@ interface CaseParts {
 	size: HTMLElement;
 	sizeText: HTMLSpanElement;
 	origin: HTMLElement;
+	/** Overmark may not run on the tab in front. */
+	access: Notice;
+	/** None of the case's marks were found on the tab in front (DEC-022). */
+	noneFound: Notice;
 	/** Load, or Hide where the case is loaded on the tab in front. */
 	loadButton: HTMLButtonElement;
 	loadedHere: boolean;
+	addMarks: HTMLButtonElement;
 	deleteButton: HTMLButtonElement;
 	/** Where Export saved the file. */
 	saved: HTMLElement;
@@ -725,6 +862,21 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		),
 		sizeText,
 		origin: h("p", { class: "hint", id: "case-origin", hidden: true }),
+		access: accessNotice("case-access", () => actions),
+		noneFound: notice(
+			"none-found",
+			h(
+				"button",
+				{
+					type: "button",
+					"data-action": "open-case-page",
+					title:
+						"Open the page the marks were made on in a new tab; the case's marks are drawn there",
+					onclick: () => actions.openPage(created.current),
+				},
+				"Open the case's page",
+			),
+		),
 		loadButton: h("button", {
 			type: "button",
 			class: "primary wide",
@@ -735,6 +887,15 @@ function createParts(c: Case, actions: Actions): CaseParts {
 					: actions.loadOntoTab(created.current),
 		}),
 		loadedHere: false,
+		addMarks: h(
+			"button",
+			{
+				type: "button",
+				id: "add-marks",
+				onclick: () => actions.addMarks(created.current),
+			},
+			"Add marks",
+		),
 		deleteButton: h("button", {
 			type: "button",
 			class: "danger",
@@ -762,21 +923,13 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		created.meta,
 		created.size,
 		created.origin,
+		created.access.el,
 		created.loadButton,
+		created.noneFound.el,
 		h(
 			"div",
 			{ class: "row" },
-			h(
-				"button",
-				{
-					type: "button",
-					id: "add-marks",
-					title:
-						"Each mark you draw on the page goes into this case when its comment is done",
-					onclick: () => actions.addMarks(created.current),
-				},
-				"Add marks",
-			),
+			created.addMarks,
 			h(
 				"button",
 				{
@@ -1127,16 +1280,36 @@ function renderCase(state: PanelState, actions: Actions): void {
 			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, summary and findings are whoever wrote the file's, whatever author or AI app they name.`,
 	);
 	// Marks the panel loaded, or an AI app (the page says so).
-	p.loadedHere =
-		(state.loaded?.caseId === c.id && state.loaded.tabId === state.tab?.id) ||
-		state.overlay?.loadedCase === c.id;
+	const here =
+		state.loaded?.caseId === c.id && state.loaded.tabId === state.tab?.id
+			? state.loaded
+			: undefined;
+	p.loadedHere = here !== undefined || state.overlay?.loadedCase === c.id;
+	renderAccess(p.access, state);
+	const ok = access(state) === "yes";
+	p.loadButton.disabled = !ok;
 	p.loadButton.textContent = p.loadedHere
 		? "Hide marks on this tab"
 		: "Show marks on this tab";
-	p.loadButton.title = p.loadedHere
-		? "Take this case's marks off the page in this tab; the case stays as it is"
-		: "Look for each mark's element on the page in this tab and draw the marks there";
+	p.loadButton.title = !ok
+		? NEEDS_ACCESS
+		: p.loadedHere
+			? "Take this case's marks off the page in this tab; they stay off on this tab until you show them again"
+			: "Look for each mark's element on the page in this tab and draw the marks there";
 	p.loadButton.classList.toggle("primary", !p.loadedHere);
+	p.addMarks.disabled = !ok;
+	p.addMarks.title = ok
+		? "Each mark you draw on the page goes into this case when its comment is done"
+		: NEEDS_ACCESS;
+	// The search is over and found none: the case is probably for another page.
+	const none =
+		here !== undefined &&
+		!here.settling &&
+		noneFound([...here.matches.values()]);
+	p.noneFound.el.hidden = !none;
+	p.noneFound.text.textContent = none ? noneFoundText(c, state.tab?.url) : "";
+	p.noneFound.button.hidden =
+		!none || !isWebPage(c.page.url) || isPageOf(c, state.tab?.url ?? "");
 	const armed = state.deleteArmedAt !== undefined;
 	p.deleteButton.toggleAttribute("data-armed", armed);
 	p.deleteButton.textContent = armed ? "Really delete?" : "Delete";
@@ -1167,6 +1340,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		edit ? [edit.annotationId, edit.mode] : null,
 		markArmed ?? null,
 		findingArmed ? [findingArmed.annotationId, findingArmed.findingId] : null,
+		ok,
 	]);
 	if (marksKey !== p.marksKey) {
 		const sorted = [...c.annotations].sort((x, y) => x.number - y.number);
@@ -1181,6 +1355,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 						? findingArmed.findingId
 						: undefined,
 				actions,
+				canReach: ok,
 				changed: () => syncToggleAll(),
 			}),
 		);
@@ -1278,6 +1453,8 @@ interface MarkContext {
 	/** The finding of this mark whose Delete was clicked once. */
 	findingArmed: string | undefined;
 	actions: Actions;
+	/** Overmark may run on the tab in front: Show can scroll it. */
+	canReach: boolean;
 	/** A mark opened or closed by its own head. */
 	changed: () => void;
 }
@@ -1334,7 +1511,10 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 					class: "small show",
 					"data-action": "show",
 					"aria-label": `Show mark ${a.number} on the page`,
-					title: "Scroll the page to this mark and outline it",
+					title: x.canReach
+						? "Scroll the page to this mark and outline it"
+						: NEEDS_ACCESS,
+					disabled: !x.canReach,
 					onclick: () => actions.showMatch(c.id, a, m.current),
 				},
 				"Show",
@@ -1455,6 +1635,7 @@ function renderAi({ ai }: PanelState): void {
 
 /** Draw the panel from `state`. */
 export function render(state: PanelState, actions: Actions): void {
+	lastActions = actions;
 	renderAi(state);
 	const onCase = state.view.kind === "case";
 	home.hidden = onCase;

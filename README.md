@@ -51,14 +51,19 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    are in; while one is not, the toolbar stays up and says so, and Done again discards
    it. New case stops adding to the case, and the next marks wait for "Save case…".
 4. On another build of the page (say `localhost:3000`), click the case in the side panel:
-   on the same path it loads at once; a case of another page has a Load button for this
-   tab. In the case, "Show marks on this tab" and "Hide marks on this tab" put its marks
-   on the page and take them off. On a tab Overmark may not run on yet (after reloading the extension, say), Chrome
-   hides the address: click the Overmark icon there and the case loads, or press "Show
-   marks on this tab" (or the case's Load button), and Chrome asks whether Overmark may
-   run on the case's site from then on; that helps only when the tab is on that site. The case's address asks the same, then opens its page in a new tab and loads
-   it there (marks a script draws late are looked for
-   again for a few seconds), and when the
+   its marks are drawn on the tab in front, whatever page that is. While the case is open
+   they follow the tab in front: another tab, a reload or a navigation draws them there
+   and takes them off the tab before; "← All cases" takes them off the page.
+   "Hide marks on this tab" takes them off, and they stay off on that tab until "Show
+   marks on this tab" or the case is opened again. When none of the case's marks is
+   found, the case says it is probably for another page and offers to open the case's
+   page. On a tab Overmark may not run on yet (after reloading the extension, say),
+   Chrome hides the address, and the side panel says so with a warning: click the
+   Overmark icon there (or press Alt+Shift+O) and the marks are drawn, or press "Allow
+   on all sites" in that notice; until then what needs the page is off. The case's
+   address opens its page in a new tab (Chrome asks whether Overmark may run on that
+   site from then on) and draws the marks there (marks a script draws late are looked
+   for again for a few seconds), and when the
    tab's size is not the one the marks were made at, Match size resizes the window to it
    (as far as the screen allows; page zoom is counted). Overmark looks for each mark's element and draws the mark on it again,
    moved and scaled with the element: green when found, amber and dashed when probable
@@ -77,8 +82,8 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 6. The case's "Summary for the developer" says what should change overall, as agreed;
    whoever loads the case sees it first. You or the AI app write it.
 7. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
-   on; "Import a case…" reads one back and, when it is for the page in front, loads it
-   right away. An AI app can read `case.md` and the images without the extension.
+   on; "Import a case…" reads one back, opens it and draws its marks on the tab in
+   front. An AI app can read `case.md` and the images without the extension.
    "Export all cases", next to "Import a case…", writes every case into one
    `overmark-cases-<date>.overmark.zip`, a folder per case laid out as a single export;
    "Import a case…" reads that too, case by case, asking about each case that is here
