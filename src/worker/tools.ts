@@ -6,6 +6,7 @@
 
 import type {
 	ConfirmRequest,
+	RelayClient,
 	Tool,
 	ToolCallClient,
 } from "@ractive-ch/tab-mcp-client";
@@ -170,7 +171,7 @@ const imported = (c: Case) =>
  * The AI app that calls, as a finding records it: within the case's limits,
  * so that the same app comes out the same each time.
  */
-export function findingApp(client: ToolCallClient): FindingApp {
+export function findingApp(client: RelayClient): FindingApp {
 	return {
 		id: cutText(client.id, 2000),
 		...(client.name ? { name: cutText(client.name, 200) } : {}),
@@ -178,8 +179,33 @@ export function findingApp(client: ToolCallClient): FindingApp {
 	};
 }
 
-/** A mark's findings for the AI app `clientId`, which may change its own. */
-function findingsView(a: Annotation, clientId: string, compact: boolean) {
+/**
+ * The id a caller's own findings carry: an AI app's through the relay. An
+ * agent in the browser (WebMCP, which Overmark leaves off) is not paired and
+ * has no id, so it owns none.
+ */
+export function ownerId(client: ToolCallClient): string | undefined {
+	return client.kind === "relay" ? findingApp(client).id : undefined;
+}
+
+/** The caller, if it may write findings: only an AI app through the relay. */
+export function findingWriter(client: ToolCallClient): RelayClient {
+	if (client.kind !== "relay")
+		throw new CaseError(
+			"Only an AI app connected through Overmark's relay may add, edit or delete findings: a finding records the app that wrote it, and a call through the browser's WebMCP comes from no known app.",
+		);
+	return client;
+}
+
+/**
+ * A mark's findings for the AI app `clientId`, which may change its own;
+ * `undefined` (a call through WebMCP) owns none.
+ */
+function findingsView(
+	a: Annotation,
+	clientId: string | undefined,
+	compact: boolean,
+) {
 	return (a.findings ?? []).map((f) => {
 		// In a large case, a long finding is a preview only.
 		const shown = compact ? cut(f.text, FINDING_PREVIEW) : f.text;
@@ -191,7 +217,7 @@ function findingsView(a: Annotation, clientId: string, compact: boolean) {
 			at: f.at,
 			...(f.editedAt ? { editedAt: f.editedAt } : {}),
 			...(f.imported ? { imported: true } : {}),
-			own: isOwnFinding(f, clientId),
+			own: clientId !== undefined && isOwnFinding(f, clientId),
 		};
 	});
 }
@@ -200,7 +226,7 @@ function findingsView(a: Annotation, clientId: string, compact: boolean) {
  * A case for the AI app `clientId`; `compact` summarizes elements and cuts
  * long texts.
  */
-function caseView(c: Case, clientId: string, compact = false) {
+function caseView(c: Case, clientId: string | undefined, compact = false) {
 	return {
 		caseId: c.id,
 		title: c.title,
@@ -539,7 +565,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		execute: async ({ caseId, images: withImages }, { client }) => {
 			const c = await mustGet(caseId);
 			const limit = budget();
-			const self = findingApp(client).id;
+			const self = ownerId(client);
 			let content: Content[] = [text(caseView(c, self))];
 			let used = content.reduce((n, b) => n + sizeOf(b), 0);
 			if (used > limit / 2) {
@@ -1062,7 +1088,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 	function ownFinding(
 		a: Annotation,
 		findingId: string,
-		client: ToolCallClient,
+		client: RelayClient,
 	): Finding {
 		const f = a.findings?.find((x) => x.id === findingId);
 		if (f === undefined)
@@ -1109,6 +1135,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		},
 		annotations: { consequentialHint: true },
 		execute: async ({ caseId, mark, text: body }, { client }) => {
+			const app = findingApp(findingWriter(client));
 			const findingId = newId("f");
 			const now = new Date().toISOString();
 			await store.updateCase(caseId, (current) => {
@@ -1117,7 +1144,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 					value: withFinding(
 						c,
 						a.id,
-						{ id: findingId, text: body, app: findingApp(client), at: now },
+						{ id: findingId, text: body, app, at: now },
 						now,
 					),
 				};
@@ -1152,10 +1179,11 @@ export function createTools(deps: ToolDeps): Tool[] {
 		},
 		annotations: { consequentialHint: true, idempotentHint: true },
 		execute: async ({ caseId, mark, finding, text: body }, { client }) => {
+			const writer = findingWriter(client);
 			const now = new Date().toISOString();
 			await store.updateCase(caseId, (current) => {
 				const { c, a } = caseAndMark(current, caseId, mark);
-				ownFinding(a, finding, client);
+				ownFinding(a, finding, writer);
 				return { value: withFindingText(c, a.id, finding, body, now) };
 			});
 			deps.onChange?.(caseId);
@@ -1179,10 +1207,11 @@ export function createTools(deps: ToolDeps): Tool[] {
 			},
 			annotations: { consequentialHint: true, destructiveHint: true },
 			execute: async ({ caseId, mark, finding }, { client }) => {
+				const writer = findingWriter(client);
 				const now = new Date().toISOString();
 				await store.updateCase(caseId, (current) => {
 					const { c, a } = caseAndMark(current, caseId, mark);
-					ownFinding(a, finding, client);
+					ownFinding(a, finding, writer);
 					return { value: withoutFinding(c, a.id, finding, now) };
 				});
 				deps.onChange?.(caseId);
@@ -1279,9 +1308,10 @@ export async function confirmLines(
 			typeof findingId === "string"
 				? a?.findings?.find((x) => x.id === findingId)
 				: undefined;
+		const self = ownerId(request.client);
 		if (f !== undefined)
 			lines.push(
-				`Finding by ${appLabel(f.app)}: “${cut(f.text, 200)}”.${isOwnFinding(f, findingApp(request.client).id) ? "" : " It is not this AI app's own, so Overmark will refuse the change whatever you answer."}`,
+				`Finding by ${appLabel(f.app)}: “${cut(f.text, 200)}”.${self !== undefined && isOwnFinding(f, self) ? "" : " It is not this AI app's own, so Overmark will refuse the change whatever you answer."}`,
 			);
 	}
 	if (request.tool.name === "add_annotation") {

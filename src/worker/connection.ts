@@ -36,6 +36,7 @@ import {
 	type WorkerMessage,
 } from "./protocol.ts";
 import {
+	appName,
 	NOTIFICATION_BUTTONS,
 	Questions,
 	type QuestionsHost,
@@ -287,6 +288,10 @@ export class Connection {
 				},
 				connected: (grantId) => mcp.grants.some((g) => g.grantId === grantId),
 				kept: () => this.#allowCovered(),
+				refused: (r) =>
+					console.warn(
+						`Overmark: refused ${r.tool.name} through WebMCP: only an AI app connected through the relay may change something`,
+					),
 				notKept: (error) => {
 					console.warn("Overmark: keeping Always allow", error);
 					this.#problem = `Always allow could not be saved: ${message(error)}`;
@@ -329,8 +334,9 @@ export class Connection {
 					.detail;
 				this.#lastCall = {
 					tool: title ?? tool,
-					// The name is what the app declares; the host is verified.
-					app: client.name ? `${client.name} (${client.host})` : client.host,
+					// As the questions name it: the declared name escaped, the
+					// verified host after it (or the WebMCP label).
+					app: appName(client),
 					at: Date.now(),
 				};
 				this.#changed();
