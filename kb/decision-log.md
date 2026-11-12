@@ -719,3 +719,107 @@ there.
   a tab (it is off there); the case's address still does as it opens the page.
 - **One heading.** The home view's "This tab" heading becomes "This page"; under it the
   tab's address, else its title, else nothing (it said "This page" a second time).
+
+## DEC-023: A toolbar belongs to the open case or to a new one; All cases closes the case; Verify (owner)
+
+The owner, 2026-11-12: "The goal is to have a tested, user friendly experience to
+annotate a page and then fixing it", checked from three roles: the tester who annotates
+and hands the case over, the developer who fixes on their build, and the tester again
+who verifies each fix. On the flow: "I'd expect that you open a case, you can annotate
+and add marks, stop annotating etc. When you go back to '← All cases', the current case
+should be 'closed' and the annotations be removed and you shouldn't be able to 'Continue
+annotating'." On "← All cases": "I missed it at first glance." On Verify: build it, the
+tester gets Verified or Reopen (with a comment) per mark, and the case shows open /
+fixed, to verify / verified. The details are the
+[UX review](design/ux-review-2026-11.md)'s, which the owner asked for.
+
+- **One rule for the toolbar.** On the tab in front, the page's toolbar belongs to a new
+  case being drawn (the panel is on Home) or to the open case (the panel shows it):
+  *toolbar adding to case X ⇔ case X is open in the panel*. "Annotate this page" always
+  starts a new case; "Continue annotating" no longer exists. The toolbar's "New case"
+  button goes (it made a toolbar with no case open).
+- **"← All cases" closes the case.** The toolbar adding to it is ended (as its Done,
+  then its target cleared: the page message `overlay:end`), and the case's marks are
+  taken off the tab in front whoever drew them. This changes DEC-022, which left the
+  marks an AI app's `load_case` drew. A mark that could not be added keeps the toolbar
+  up and the panel in the case, which says so; a second click leaves without it. The
+  back button is a real button in a top bar (32 px high), not a 12 px link.
+- **The panel adopts what the page shows.** On Home, a toolbar on the tab in front that
+  adds to a stored case opens that case (so "Save case…" opens the new case). When the
+  panel starts, the case whose marks the tab in front shows is opened too: closing the
+  side panel leaves marks and toolbar on the page as before (PR 42's open question),
+  and opening it again is in that case again, not on Home with orphaned marks.
+- **Hide holds through a reload of that tab** (PR 42's other open question): it ends
+  with Show marks, with closing the case, or with closing the panel.
+- **A Settings view** holds the AI app card and the options. The AI pill opens it and
+  keeps the case open: it closed the case before, which would now also end annotating
+  and clear the page.
+- **Verify is stored as additions, never as a new `resolution.kind`.** An older build
+  refuses a file with a kind it does not know, and drops fields it does not know. A
+  mark's status is derived: open (no `resolution`), fixed and to verify (`kind: fixed`),
+  verified (`kind: fixed` with `resolution.verified { at, app? }`), won't fix, can't
+  reproduce. A reopen moves the whole resolution it ends into `annotation.reopens[]`
+  (`note?`, `at`, `app?`, `was`; at most 20, a note at most 2,000 characters), so the
+  claimed fix and its note survive. Older cases need no migration: their fixed marks
+  are to verify, which is true. A file of this build read by an older one loses
+  `verified` and the reopen notes; `case.md` in the same zip keeps them.
+- **Who may do what.** In the panel: Resolve… (fixed and to verify, fixed and verified,
+  won't fix, can't reproduce), Verified on a fixed mark, Reopen… with a comment that is
+  required. An AI app's `set_mark_status` gains `verified`, only for a mark that is
+  fixed and, as its description says, only when the user says so, never for its own
+  fix; `open` on a resolved mark records a reopen, its note optional so that existing
+  calls keep working. An Always allow for `set_mark_status` covers `verified` too.
+- **No role switch.** One panel for tester and developer: each mark offers the action
+  its status calls for, and the case's status chips (Open, To verify, Verified, Closed)
+  are legend and filter in one. The case list, `get_case`, `list_cases` and `case.md`
+  carry the same counts.
+
+## DEC-024: The look: paper and ink, colour is the status, amber once (owner)
+
+The owner, 2026-11-12: "Redesign: free hand", and about the case header: dark on dark
+without much contrast. The [UX review](design/ux-review-2026-11.md) measured it: the
+text was fine (7.8:1); the surfaces and boundaries were not (the band against the sheet
+1.22:1, button borders 1.67:1, in light 1.29:1), so buttons, chips and fields had no
+shape.
+
+- **No ink band.** The panel is paper (`--paper`) with sheets on it; structure comes
+  from spacing, rules and boundaries that reach 3:1 (`--edge`). Every text pair reaches
+  4.5:1 in light and dark; a unit test reads the tokens from `style.css` and the page's
+  constants and asserts each pair of the review's tables.
+- **Amber once per view**, for the action that starts drawing (Annotate this page, Add
+  marks). Other main actions are the ink "strong" button; three ambers on one screen
+  made none primary.
+- **Colour is a mark's status, the dash its match.** Open stays `#e5195f` on the page
+  (as on its screenshot), to verify is indigo, verified green, closed grey; found is
+  solid, unsure dashed. Green meant "found" before, where a reader expects "fine".
+  Every stroke on the page has a white casing and the bars a white ring, so they show
+  on any page; the page's overlay keeps one fixed look in both schemes.
+- **The margin rail.** The marks list has a margin column with each mark's pin on a
+  rail: its colour the status, its fill the match.
+- System fonts only; the extension loads nothing.
+
+## DEC-025: Sync to Downloads by default, to any folder as an option, and an Allow that cannot be missed (owner)
+
+The owner, 2026-11-12, on the sync's "Allow access" (DEC-021): "It was not obvious",
+it was missed. The decision: offer both. Default: a subfolder of Downloads written
+through `chrome.downloads` (`conflictAction: "overwrite"`), which never asks again and
+works with the side panel closed; its limits: only inside Downloads, each write shows
+in Chrome's download list, the optional `downloads` permission is asked once. Option:
+any folder through the File System Access API as in DEC-021, with an Allow access that
+cannot be missed.
+
+- **Two targets, one engine.** `Sync` (one writer, a record per target of what was
+  written, names with `-2`) writes to a target: Downloads (`Overmark/` in Chrome's
+  downloads folder; a renamed case leaves its old file, as nothing can be removed
+  there) or the folder. Someone syncing to a folder keeps doing so; nothing switches by
+  itself. "Use Downloads instead" is offered where the folder needs access.
+- **What needs the user is above every view and on the icon.** While the sync is paused
+  (the folder needs access again, or the downloads permission is gone) or has failed, a
+  banner sits above Home, the case and Settings with the one button that helps (Allow
+  access, Allow downloads, Try again), and the toolbar icon shows "!" (amber paused,
+  red failed) with a title that says why. The worker runs the sync when it starts, so
+  the "!" is there after a browser restart before the panel is opened.
+- **How the worker downloads** is settled in the sync's PR by a spike first, as DEC-021
+  was: a service worker has no `URL.createObjectURL`, so the plan is an offscreen
+  document (the `offscreen` permission) that makes the blob URL; the fallback is in the
+  review.
