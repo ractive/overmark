@@ -64,8 +64,15 @@ const cut = (text: string, max: number) =>
  */
 export const visible: (text: string) => string = escapeInvisible;
 
+/**
+ * Who calls through the browser's WebMCP: not paired, nothing known of it.
+ * Overmark leaves WebMCP off and refuses such calls (`decide.ts`).
+ */
+export const WEBMCP_CALLER = "An agent in the browser (WebMCP)";
+
 /** The AI app as a question names it: its declared name beside its verified host. */
 export function appName(client: ConfirmRequest["client"]): string {
+	if (client.kind !== "relay") return WEBMCP_CALLER;
 	return client.name ? `${visible(client.name)} (${client.host})` : client.host;
 }
 
@@ -116,13 +123,18 @@ export class Questions {
 	 * Ask whether `request` may run; `lines` say what it is about, `tabId` is
 	 * the tab in front (where the user looks). Resolves with the first
 	 * answer, `"timeout"` when nobody answered in time, `"deny"` when the AI
-	 * app cancelled.
+	 * app cancelled, and at once, without a question, for a caller that is
+	 * not an AI app through the relay.
 	 */
 	ask(
 		request: ConfirmRequest,
 		lines: string[],
 		tabId: number | undefined,
 	): Promise<Answer | "timeout"> {
+		// Only an AI app through the relay is asked (`decide` refuses the
+		// rest before): any other caller gets a no, and no question shows.
+		const { client } = request;
+		if (client.kind !== "relay") return Promise.resolve("deny");
 		const id = crypto.randomUUID();
 		const json = visible(JSON.stringify(request.arguments, null, 2) ?? "{}");
 		const view: QuestionView = {
@@ -146,7 +158,7 @@ export class Questions {
 			const cancelled = () => pending.settle("deny");
 			const pending: Pending = {
 				view,
-				grantId: request.client.grantId,
+				grantId: client.grantId,
 				summary,
 				windowId: undefined,
 				shownAt: 0,

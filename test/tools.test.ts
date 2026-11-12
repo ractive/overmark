@@ -5,6 +5,8 @@ import {
 } from "@modelcontextprotocol/client";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
 import {
+	type ConfirmRequest,
+	type RelayClient,
 	TabMcp,
 	type Tool,
 	type ToolCallClient,
@@ -284,7 +286,8 @@ function build(options: Partial<ToolDeps> = {}): void {
 	);
 }
 
-const CLAUDE = {
+const CLAUDE: RelayClient = {
+	kind: "relay",
 	grantId: "g",
 	id: "https://claude.ai/oauth",
 	name: "Claude",
@@ -558,6 +561,7 @@ describe("tools", () => {
 			tool: { name: "add_annotation", description: "Add a mark." },
 			arguments: { caseId: "c_1", selector: "button", comment: "x" },
 			client: {
+				kind: "relay",
 				grantId: "g",
 				id: "https://claude.ai/oauth",
 				host: "claude.ai",
@@ -978,7 +982,7 @@ describe("tools", () => {
 		const asked = await confirmLines(store, tab, {
 			tool: { name: "add_annotation", description: "Does it." },
 			arguments: { caseId: "c_1" },
-			client: { grantId: "g", id: "i", host: "claude.ai" },
+			client: { kind: "relay", grantId: "g", id: "i", host: "claude.ai" },
 			signal,
 		});
 		expect(asked.join("\n")).toContain(`Page: ${secret}`);
@@ -997,6 +1001,7 @@ describe("tools", () => {
 
 describe("findings", () => {
 	const OTHER: ToolCallClient = {
+		kind: "relay",
 		grantId: "g2",
 		id: "https://chatgpt.com/cimd.json",
 		name: "ChatGPT",
@@ -1073,6 +1078,46 @@ describe("findings", () => {
 		// The same app paired again (a new grant) still owns it.
 		await call("delete_finding", input, signal, { ...CLAUDE, grantId: "g9" });
 		expect(await stored(1)).toBeUndefined();
+	});
+
+	test("a call through WebMCP writes no finding and owns none", async () => {
+		await seed();
+		const id = added(
+			await call("add_finding", { caseId: "c_1", mark: 1, text: "Mine" }),
+		);
+		const signal = new AbortController().signal;
+		const webmcp: ToolCallClient = { kind: "webmcp" };
+		const refusal = "Only an AI app connected through Overmark's relay";
+		await expect(
+			call(
+				"add_finding",
+				{ caseId: "c_1", mark: 1, text: "x" },
+				signal,
+				webmcp,
+			),
+		).rejects.toThrow(refusal);
+		const input = { caseId: "c_1", mark: 1, finding: id };
+		await expect(
+			call("edit_finding", { ...input, text: "Theirs" }, signal, webmcp),
+		).rejects.toThrow(refusal);
+		await expect(call("delete_finding", input, signal, webmcp)).rejects.toThrow(
+			refusal,
+		);
+		expect(await stored(1)).toEqual([
+			expect.objectContaining({ id, text: "Mine" }),
+		]);
+		expect(changed).toEqual(["c_1"]);
+		const view = json(
+			await call("get_case", { caseId: "c_1", images: false }, signal, webmcp),
+		);
+		expect(view.marks[0].findings[0].own).toBe(false);
+		const lines = await confirmLines(store, tab, {
+			tool: { name: "delete_finding", description: "Does it." },
+			arguments: input,
+			client: webmcp,
+			signal,
+		});
+		expect(lines.join("\n")).toContain("It is not this AI app's own");
 	});
 
 	test("a finding from a file is no app's own", async () => {
@@ -1242,10 +1287,18 @@ describe("findings", () => {
 });
 
 describe("confirmations", () => {
-	const request = (name: string, args: Record<string, unknown>) => ({
+	const request = (
+		name: string,
+		args: Record<string, unknown>,
+	): ConfirmRequest => ({
 		tool: { name, description: "Does it." },
 		arguments: args,
-		client: { grantId: "g", id: "https://claude.ai/oauth", host: "claude.ai" },
+		client: {
+			kind: "relay",
+			grantId: "g",
+			id: "https://claude.ai/oauth",
+			host: "claude.ai",
+		},
 		signal: new AbortController().signal,
 	});
 

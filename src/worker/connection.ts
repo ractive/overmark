@@ -39,6 +39,7 @@ import {
 	NOTIFICATION_BUTTONS,
 	Questions,
 	type QuestionsHost,
+	WEBMCP_CALLER,
 } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
@@ -287,6 +288,10 @@ export class Connection {
 				},
 				connected: (grantId) => mcp.grants.some((g) => g.grantId === grantId),
 				kept: () => this.#allowCovered(),
+				refused: (r) =>
+					console.warn(
+						`Overmark: refused ${r.tool.name} through WebMCP: only an AI app connected through the relay may change something`,
+					),
 				notKept: (error) => {
 					console.warn("Overmark: keeping Always allow", error);
 					this.#problem = `Always allow could not be saved: ${message(error)}`;
@@ -330,7 +335,12 @@ export class Connection {
 				this.#lastCall = {
 					tool: title ?? tool,
 					// The name is what the app declares; the host is verified.
-					app: client.name ? `${client.name} (${client.host})` : client.host,
+					app:
+						client.kind !== "relay"
+							? WEBMCP_CALLER
+							: client.name
+								? `${client.name} (${client.host})`
+								: client.host,
 					at: Date.now(),
 				};
 				this.#changed();
