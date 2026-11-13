@@ -388,6 +388,15 @@ describe("the sync to a folder (DEC-021)", () => {
 		expect(store.current?.problem).toContain("“Broken” could not be written");
 	});
 
+	test("a folder is written at once: the quiet wait is for Downloads only", async () => {
+		sync = new Sync({ cases, store, quietMs: 200 });
+		await add("c_1", "Login");
+		const start = Date.now();
+		await sync.request();
+		expect(Date.now() - start).toBeLessThan(150);
+		expect(folder.writes).toEqual(["login.overmark.zip"]);
+	});
+
 	test("no folder chosen: nothing happens", async () => {
 		store.chosen = undefined;
 		await add("c_1", "Login");

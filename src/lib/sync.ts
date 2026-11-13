@@ -514,8 +514,8 @@ export interface SyncDeps {
 	/** A case's file for a folder (Export's own); tests may fail it. */
 	exportCase?: ExportCase;
 	/**
-	 * Wait this long after the last request before a run (not for Try
-	 * again): a burst of changes is one write per case, one download each.
+	 * Wait this long after the last request before a run to Downloads (not
+	 * for Try again): a burst of changes is one download per case.
 	 */
 	quietMs?: number;
 }
@@ -556,7 +556,13 @@ export class Sync {
 	async #loop(): Promise<void> {
 		try {
 			while (this.#dirty) {
-				const quiet = this.#deps.quietMs ?? 0;
+				// Downloads only: each write there is a download Chrome shows; a
+				// folder is written at once.
+				const quiet =
+					(await this.#deps.store.choice().catch(() => undefined))?.target ===
+					"downloads"
+						? (this.#deps.quietMs ?? 0)
+						: 0;
 				for (;;) {
 					const wait = this.#last + quiet - Date.now();
 					if (this.#force || wait <= 0) break;
