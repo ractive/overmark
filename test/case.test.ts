@@ -828,10 +828,25 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 		expect(
 			withChoice(fixed, "a1", "fixed", "Other", T3).annotations[0]?.resolution,
 		).toEqual({ kind: "fixed", note: "Other", at: T1, app: CLAUDE });
-		// Another status: the resolution is the user's, now.
+		// The same kind: when and who stay, only the verification changes.
 		expect(
-			withChoice(verified, "a1", "fixed", "", T3).annotations[0]?.resolution,
-		).toEqual({ kind: "fixed", at: T3 });
+			withChoice(verified, "a1", "fixed", "Hover state too", T3).annotations[0]
+				?.resolution,
+		).toEqual({ kind: "fixed", note: "Hover state too", at: T1, app: CLAUDE });
+		expect(
+			withChoice(fixed, "a1", "verified", "Hover state too", T3).annotations[0]
+				?.resolution,
+		).toEqual({
+			kind: "fixed",
+			note: "Hover state too",
+			at: T1,
+			app: CLAUDE,
+			verified: { at: T3 },
+		});
+		// Another kind: the resolution is the user's, now.
+		expect(
+			withChoice(verified, "a1", "wontfix", "", T3).annotations[0]?.resolution,
+		).toEqual({ kind: "wontfix", at: T3 });
 		expect(statusOf(withChoice(one(), "a1", "verified", "", T3))).toBe(
 			"verified",
 		);

@@ -1019,9 +1019,9 @@ export function withResolution(
 }
 
 /**
- * The panel's Resolve… and Change…: another status replaces the resolution;
- * the same status again keeps when and by whom it was set, and changes only
- * the note, if that differs.
+ * The panel's Resolve… and Change…: another kind replaces the resolution;
+ * the same kind keeps when and by whom it was set, and changes only the note
+ * and whether the fix is verified. Nothing changed writes nothing.
  */
 export function withChoice(
 	c: Case,
@@ -1030,11 +1030,33 @@ export function withChoice(
 	note: string,
 	now: string,
 ): Case {
-	const a = c.annotations.find((x) => x.id === annotationId);
-	if (a?.resolution && markStatus(a) === choice)
-		return (a.resolution.note ?? "") === cutText(note.trim(), MAX_COMMENT)
-			? c
-			: withResolutionNote(c, annotationId, note, now);
+	const r = c.annotations.find((x) => x.id === annotationId)?.resolution;
+	const target = resolutionFor(choice);
+	if (r?.kind === target.kind) {
+		const text = cutText(note.trim(), MAX_COMMENT);
+		if (
+			(r.note ?? "") === text &&
+			(r.verified !== undefined) === target.verified
+		)
+			return c;
+		const verified = target.verified ? (r.verified ?? { at: now }) : undefined;
+		return changed(
+			c,
+			annotationId,
+			(a) => {
+				const { note: _n, verified: _v, ...kept } = r;
+				return {
+					...a,
+					resolution: {
+						...kept,
+						...(text ? { note: text } : {}),
+						...(verified ? { verified } : {}),
+					},
+				};
+			},
+			now,
+		);
+	}
 	return withResolution(
 		c,
 		annotationId,
