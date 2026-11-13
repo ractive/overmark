@@ -498,8 +498,9 @@ let adopting: string | undefined;
 /**
  * On Home, a toolbar on the tab in front that adds to a stored case opens
  * that case (DEC-023): so "Save case…" opens the new case, and a panel
- * opened again is in the case the toolbar adds to. The page is asked once
- * more, so news older than "← All cases" opens nothing.
+ * opened again is in the case the toolbar adds to; one whose case is gone
+ * draws a new case. The page is asked once more, so news older than "← All
+ * cases" opens nothing.
  */
 async function adopt(): Promise<void> {
 	const tabId = state.tab?.id;
@@ -520,9 +521,11 @@ async function adopt(): Promise<void> {
 			store.getCase(caseId),
 			overlayState(tabId),
 		]);
-		if (c === undefined || !now?.visible || now.target?.caseId !== caseId)
-			return;
+		if (!now?.visible || now.target?.caseId !== caseId) return;
 		if (state.view.kind !== "home" || (await activeTab())?.id !== tabId) return;
+		// Its case was deleted meanwhile (elsewhere, the tab not in front): it
+		// draws a new case, its drafts kept, as clearDeleted does.
+		if (c === undefined) return await startAnnotating();
 		toolbarOn.add(tabId);
 		update((s) => {
 			if (s.tab?.id === tabId) s.overlay = now;

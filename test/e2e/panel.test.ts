@@ -1098,10 +1098,10 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`!${id("case-view")}.hidden && ${id("verdict")}?.dataset.case === "${caseId}"`,
 					10_000,
 				);
-				// The case's marks are the panel's again: "← All cases" takes them off.
 				await h.control.waitFor(
 					`${id("load-case")}.textContent === "Hide marks"`,
 				);
+				// The case's marks are the panel's again: "← All cases" takes them off.
 				await h.control.eval(`${back}.click()`);
 				await h.control.waitFor(`!${id("home")}.hidden`);
 				await until(
@@ -1209,6 +1209,56 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`${id("case-hint")}.textContent.startsWith("Could not reach the page")`,
 				);
 				await openPanel();
+				await page.send("Page.close");
+			},
+		);
+
+		/** Delete the case as another window's panel (or an AI app) does. */
+		async function deleteElsewhere(caseId: string, back: Page): Promise<void> {
+			const elsewhere = await h.browser.newPage(panelUrl());
+			await back.activate();
+			await elsewhere.eval(`new Promise((resolve) => {
+				const open = indexedDB.open("overmark");
+				open.onsuccess = () => {
+					const tx = open.result.transaction("cases", "readwrite");
+					tx.objectStore("cases").delete(${JSON.stringify(caseId)});
+					tx.oncomplete = () => { open.result.close(); resolve(); };
+				};
+			})`);
+			await elsewhere.eval(
+				`chrome.runtime.sendMessage({ type: "cases:changed", caseId: ${JSON.stringify(caseId)} })`,
+			);
+			await elsewhere.send("Page.close");
+		}
+		const toolbarSays = (page: Page) =>
+			page.eval<string | undefined>(
+				`${shadow('[data-role="status"]')}?.textContent`,
+			);
+
+		slowTest(
+			"a toolbar on another tab whose case was deleted meanwhile draws a new case when it comes to the front",
+			async () => {
+				const { page, tabId, caseId } = await inCaseWithMarks("Deleted behind");
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(() => toolbarUp(tabId), "the toolbar");
+				const other = await h.open("v2");
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === caseId,
+					"the marks on the next tab",
+				);
+				await deleteElsewhere(caseId, other.page);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				expect(await toolbarSays(page)).toBe("Adding to “Deleted behind”");
+				await page.activate();
+				await page.waitFor(
+					`${shadow('[data-role="status"]')}?.textContent === "New case: choose a tool"`,
+				);
+				await h.control.waitFor(
+					`${id("annotate")}.textContent === "Stop annotating" && ${id("annotate-hint")}.textContent === "Draw on the page with the toolbar at its bottom."`,
+				);
+				await page.click(shadow('[data-action="close"]'));
+				await other.page.send("Page.close");
 				await page.send("Page.close");
 			},
 		);
