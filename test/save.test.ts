@@ -379,6 +379,27 @@ describe("saveCase", () => {
 		]);
 	});
 
+	test("a later mark leaves the case's page as its first mark had it", async () => {
+		const store = new MemoryStore();
+		await putCase(store, sampleCase("c_1"));
+		await captured(store, "c_1", "p_a");
+		const first = await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_a")], [draft(1, "p_a")])),
+			crop,
+		);
+		await captured(store, "c_1", "p_b");
+		const second = await saveCase(
+			store,
+			fromPage({
+				...request("c_1", false, [shot("p_b")], [draft(2, "p_b")]),
+				page: { ...page, url: "https://elsewhere.example/" },
+			}),
+			crop,
+		);
+		expect(second.page).toEqual(first.page);
+	});
+
 	test("marks are kept in the order of their numbers, whatever order they went in", async () => {
 		const store = new MemoryStore();
 		await putCase(store, sampleCase("c_1"));
@@ -410,7 +431,7 @@ describe("saveCase", () => {
 		expect(await store.getCase("c_1")).toBeUndefined();
 	});
 
-	test("the first mark of a case Annotate this page made: s1 and a1, the case's page and title kept (DEC-026)", async () => {
+	test("the first mark of a case Annotate this page made: s1 and a1, the page its mark's, the title kept (DEC-026)", async () => {
 		const store = new MemoryStore();
 		const empty = await putCase(store, {
 			...sampleCase("c_1"),
@@ -422,14 +443,23 @@ describe("saveCase", () => {
 			store,
 			fromPage({
 				...request("c_1", false, [shot("p_a")], [draft(1, "p_a")]),
-				// The toolbar sends the page as it is now: the case keeps its own.
-				page: { ...page, url: "https://elsewhere.example/" },
+				// The window grew, and the route changed, between the click and
+				// the mark: the case's page is the mark's (review of PR 57).
+				page: {
+					...page,
+					url: "https://elsewhere.example/checkout?step=2#top",
+					viewport: { width: 1600, height: 900, dpr: 2 },
+				},
 				keepPending: true,
 			}),
 			crop,
 		);
 		expect(saved.title).toBe("Your cart");
-		expect(saved.page).toEqual(empty.page);
+		expect(saved.page).toEqual({
+			...page,
+			url: "https://elsewhere.example/checkout",
+			viewport: { width: 1600, height: 900, dpr: 2 },
+		});
 		expect(saved.createdAt).toBe(empty.createdAt);
 		expect(saved.shots.map((s) => s.id)).toEqual(["s1"]);
 		expect(saved.annotations.map((a) => [a.id, a.shot])).toEqual([
@@ -444,6 +474,7 @@ describe("saveCase", () => {
 			new Date("2026-11-04T10:05:00Z"),
 		);
 		expect(undone).toEqual({ removed: true, next: 1 });
+
 		const after = (await store.getCase("c_1")) as Case;
 		expect(after.annotations).toEqual([]);
 		expect(after.shots).toEqual([]);

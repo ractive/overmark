@@ -230,10 +230,13 @@ export async function saveCase(
 			title: current?.title ?? (request.title.trim() || "Untitled case"),
 			createdAt: current?.createdAt ?? stamp,
 			updatedAt: stamp,
-			page: current?.page ?? {
-				...request.page,
-				url: plainUrl(request.page.url),
-			},
+			// The first mark's page is the case's (review of PR 57): a case
+			// "Annotate this page" made has the page as it was at that click,
+			// and the window or the route may have changed before the mark.
+			page:
+				current !== undefined && current.shots.length > 0
+					? current.page
+					: { ...request.page, url: plainUrl(request.page.url) },
 			shots,
 			annotations,
 			verdict: current?.verdict ?? null,
