@@ -1040,7 +1040,7 @@ ul.cases .title {
 	gap: var(--s2);
 }
 
-.rename > input {
+#rename-field {
 	font-size: 16px;
 	font-weight: 700;
 }
