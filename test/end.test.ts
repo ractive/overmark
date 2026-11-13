@@ -436,3 +436,45 @@ test("a failed mark takes the next number of the case the toolbar is shown for (
 		save?.type === "case:save" && save.request.annotations[0]?.number,
 	).toBe(7);
 });
+
+test("a re-render keeps the toolbar's buttons: a click pressed before it still lands", () => {
+	const { a, overlay } = annotator();
+	a.show({ target });
+	const button = (action: string) =>
+		overlay.toolbar.querySelector<HTMLButtonElement>(
+			`[data-action="${action}"]`,
+		);
+	const pen = button("tool-pen");
+	const undo = button("undo");
+	// Pressed: then the toolbar draws itself again (a rename, a draw of the
+	// case, a mark's screenshot), then released on the same element.
+	pen?.dispatchEvent(new window.MouseEvent("mousedown") as unknown as Event);
+	a.setTitle("c_open", "Renamed");
+	expect(button("tool-pen")).toBe(pen);
+	expect(pen?.isConnected).toBe(true);
+	pen?.dispatchEvent(new window.MouseEvent("mouseup") as unknown as Event);
+	pen?.click();
+	expect(button("tool-pen")?.getAttribute("aria-pressed")).toBe("true");
+	expect(button("tool-pen")).toBe(pen);
+	// What changed is taken over by the element that stays.
+	expect(button("undo")).toBe(undo);
+	note(overlay, a);
+	expect(button("undo")).toBe(undo);
+	expect(undo?.disabled).toBe(false);
+	expect(undo?.title).toBe("Remove mark 3");
+	// The order holds, the status and the alert where they were.
+	expect(
+		[...overlay.toolbar.querySelectorAll("button")].map(
+			(b) => b.dataset["action"],
+		),
+	).toEqual([
+		"tool-element",
+		"tool-box",
+		"tool-arrow",
+		"tool-pen",
+		"tool-note",
+		"undo",
+		"close",
+		"move-toolbar",
+	]);
+});

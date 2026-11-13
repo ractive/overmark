@@ -104,6 +104,23 @@ describe("elements replaced after loading", () => {
 		expect(bar()).toContain("1 of 1 found");
 	});
 
+	test("the bar's Hide stays the same element when the case is drawn again", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		await reviewer.load(c);
+		const hide = overlay.reviewBar.querySelector('[data-action="review-hide"]');
+		expect(hide).not.toBeNull();
+		await reviewer.update({ ...c, title: "Renamed" });
+		await reviewer.load(c);
+		expect(overlay.reviewBar.querySelector('[data-action="review-hide"]')).toBe(
+			hide,
+		);
+		expect(bar()).toContain("1 of 1 found");
+		expect(
+			overlay.reviewBar.querySelectorAll('[data-role="review-status"]'),
+		).toHaveLength(1);
+	});
+
 	test("gone for good: showing says so", async () => {
 		doc.body.innerHTML = PAGE;
 		await reviewer.load(caseOf($("button")));

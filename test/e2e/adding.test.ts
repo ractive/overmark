@@ -663,6 +663,29 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.send("Page.close");
 	}, 60_000);
 
+	test("a toolbar button pressed while the toolbar draws itself again still takes the click", async () => {
+		const { page, tabId } = await h.open("v1");
+		const panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const pen = shadow('[data-action="tool-pen"]');
+		const at = await page.centreOf(pen);
+		await page.mouse("mouseMoved", at.x, at.y);
+		await page.mouse("mousePressed", at.x, at.y);
+		// Between press and release the toolbar draws itself again: a rename.
+		const before = await page.eval<string>(
+			`${shadow('[data-role="status"]')}.textContent`,
+		);
+		await h.control.eval(
+			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:title", caseId: document.getElementById("verdict").dataset.case, title: "Renamed under the press" })`,
+		);
+		await page.waitFor(
+			`${shadow('[data-role="status"]')}.textContent !== ${JSON.stringify(before)}`,
+		);
+		await page.mouse("mouseReleased", at.x, at.y);
+		await page.waitFor(`${pen}.getAttribute("aria-pressed") === "true"`, 5000);
+		await page.send("Page.close");
+	}, 60_000);
+
 	test("an empty case whose toolbar holds a comment on another tab stays when left (review of PR 57)", async () => {
 		const a = await h.open("v1");
 		let panel = await annotate(a.page);

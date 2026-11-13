@@ -223,6 +223,8 @@ export class Annotator {
 	/** The toolbar's status and alert: kept, and changed in place. */
 	readonly #statusEl: HTMLElement;
 	readonly #alertEl: HTMLElement;
+	/** What each toolbar button does now (#button, #mount). */
+	readonly #onClick = new WeakMap<HTMLButtonElement, () => void>();
 
 	readonly #pageBlur: PageBlur;
 	readonly #activity: PageActivity;
@@ -740,7 +742,10 @@ export class Annotator {
 			b.append(word);
 		}
 		b.dataset["action"] = action;
-		b.addEventListener("click", onClick);
+		this.#onClick.set(b, onClick);
+		// What a click does is looked up then: a button kept through a
+		// re-render (#mount) does what the newest render says.
+		b.addEventListener("click", () => this.#onClick.get(b)?.());
 		return b;
 	}
 
@@ -976,23 +981,64 @@ export class Annotator {
 				: undefined;
 		const statusEl = this.#statusEl;
 		const alertEl = this.#alertEl;
-		for (const child of [...bar.children])
-			if (child !== statusEl && child !== alertEl) child.remove();
-		if (statusEl.parentNode !== bar) bar.append(statusEl);
-		if (statusEl.nextSibling !== alertEl) statusEl.after(alertEl);
 		if (statusEl.textContent !== status) statusEl.textContent = status;
 		statusEl.hidden = status === "";
 		const alert = this.#alert || this.#failureText();
 		if (alertEl.textContent !== alert) alertEl.textContent = alert;
 		alertEl.hidden = alert === "";
-		statusEl.before(...before);
-		alertEl.after(...after);
+		// A button already there stays the same element (a click pressed on it
+		// before this render still lands: Chrome sends it to the element both
+		// mousedown and mouseup were on) and takes the new one's state.
+		const kept = new Map<string, HTMLButtonElement>();
+		// By tag name, not instanceof: the page's realm is not the script's.
+		const isButton = (el: Element): el is HTMLButtonElement =>
+			el.tagName === "BUTTON";
+		for (const child of bar.children) {
+			const action = isButton(child) ? child.dataset["action"] : undefined;
+			if (action !== undefined && isButton(child)) kept.set(action, child);
+		}
+		const reuse = (el: Element): Element => {
+			if (!isButton(el)) return el;
+			const action = el.dataset["action"];
+			const old = action === undefined ? undefined : kept.get(action);
+			if (old === undefined || action === undefined) return el;
+			kept.delete(action);
+			this.#takeOver(old, el);
+			return old;
+		};
+		const wanted = [
+			...before.map(reuse),
+			statusEl,
+			alertEl,
+			...after.map(reuse),
+		];
+		for (const child of [...bar.children])
+			if (!wanted.includes(child)) child.remove();
+		// In order, moving only what is out of place.
+		let at: ChildNode | null = bar.firstChild;
+		for (const node of wanted) {
+			if (node === at) at = at.nextSibling;
+			else bar.insertBefore(node, at);
+		}
 		// Other parts, other widths: laid out for the room there is.
 		this.overlay.fitToolbar();
 		if (action !== undefined)
 			bar
 				.querySelector<HTMLElement>(`[data-action="${CSS.escape(action)}"]`)
 				?.focus();
+	}
+
+	/** `old`, kept in the toolbar, takes `fresh`'s attributes, content and action. */
+	#takeOver(old: HTMLButtonElement, fresh: HTMLButtonElement): void {
+		for (const { name } of [...old.attributes])
+			if (!fresh.hasAttribute(name)) old.removeAttribute(name);
+		for (const { name, value } of [...fresh.attributes])
+			if (old.getAttribute(name) !== value) old.setAttribute(name, value);
+		old.disabled = fresh.disabled;
+		if (old.innerHTML !== fresh.innerHTML)
+			old.replaceChildren(...fresh.childNodes);
+		const run = this.#onClick.get(fresh);
+		if (run !== undefined) this.#onClick.set(old, run);
 	}
 
 	/** Why the last mark that could not be added is not in the case. */

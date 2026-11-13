@@ -466,11 +466,21 @@ export class Reviewer {
 		text.className = "text";
 		text.dataset["role"] = "review-status";
 		text.append(title, sep, count);
-		const hide = doc.createElement("button");
-		hide.type = "button";
-		hide.dataset["action"] = "review-hide";
-		hide.textContent = "Hide";
-		hide.addEventListener("click", () => this.clear());
-		this.overlay.reviewBar.replaceChildren(ring(doc), text, hide);
+		const bar = this.overlay.reviewBar;
+		// Hide stays the same element: a click pressed on it while the case
+		// is drawn again (a mark added, a search again) still lands.
+		let hide = bar.querySelector<HTMLButtonElement>(
+			'[data-action="review-hide"]',
+		);
+		if (hide === null) {
+			hide = doc.createElement("button");
+			hide.type = "button";
+			hide.dataset["action"] = "review-hide";
+			hide.textContent = "Hide";
+			hide.addEventListener("click", () => this.clear());
+			bar.replaceChildren(ring(doc), text, hide);
+			return;
+		}
+		bar.querySelector('[data-role="review-status"]')?.replaceWith(text);
 	}
 }
