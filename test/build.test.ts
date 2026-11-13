@@ -105,6 +105,28 @@ describe("build", () => {
 		expect(isWrappedScript(content)).toBe(true);
 	});
 
+	test("no bundle loads code later: no dynamic import(), no WebMCP chunk", async () => {
+		const outdir = tempDir();
+		await build({ outdir });
+		// A service worker refuses import(); the content script is a plain
+		// script. Both are bundled whole, the client's lazy chunks included.
+		for (const file of ["background.js", "content.js"])
+			expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
+				/\bimport\s*\(/,
+			);
+		// The pages are split into chunks, but none is loaded later, and the
+		// client's WebMCP mirror (a chunk of its own since 0.16.1, for
+		// `webmcp: true`, which Overmark leaves off) is in none of them.
+		const files = [...new Bun.Glob("**/*").scanSync({ cwd: outdir })];
+		expect(files.filter((f) => /webmcp/i.test(f))).toEqual([]);
+		for (const file of files.filter(
+			(f) => /^(sidepanel|offscreen)\//.test(f) && f.endsWith(".js"),
+		))
+			expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
+				/\bimport\s*\(/,
+			);
+	});
+
 	test("the content script's check tells a module from a wrapped script", async () => {
 		for (const code of [
 			"export{a as b};",
