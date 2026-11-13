@@ -4,7 +4,14 @@
  * after each step. And what a worker that starts again cleans up.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +30,7 @@ import {
 	openCase,
 	panelHome,
 	READ_DB,
+	resetPanel,
 	restartWorker,
 	saveAs,
 	showToolbar,
@@ -61,6 +69,9 @@ describe.skipIf(browserBinary === undefined)(
 			await h?.stop();
 			rmSync(folder, { recursive: true, force: true });
 		});
+
+		// No page of a test before, the control page (a panel too) on Home.
+		beforeEach(() => resetPanel(h));
 
 		test("exported, imported with Keep both and with Replace, then deleted", async () => {
 			const { page, tabId } = await h.open("v1");

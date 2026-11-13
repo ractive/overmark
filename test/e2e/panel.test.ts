@@ -24,6 +24,7 @@ import {
 	type Db,
 	markElement,
 	READ_DB,
+	resetPanel,
 	saveAs,
 	settingsOf,
 	shadow,
@@ -99,7 +100,9 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		await putCases(cases);
 		// Blur form fields is the worker's; the blur test turns it off again.
 		await h.control.eval(`localStorage.clear()`);
-		await openPanel();
+		// No page of a test before, the panel on Home: one failing test does
+		// not take the next ones along.
+		await resetPanel(h);
 	}
 
 	/** Open the case with this id in `page`. */
