@@ -399,7 +399,8 @@ export function markupOf(
 		if (EMPTIED.has(name) || name === "iframe") {
 			// Nothing inside: code, styles, another document.
 		} else if (holdsInput(e) || (e === el && typedRoot)) {
-			if (e.firstChild !== null) out += LEFT_OUT_INPUT;
+			// Also when empty: an editor's emptiness is what was typed.
+			out += LEFT_OUT_INPUT;
 		} else if (e === el && isHidden(e)) {
 			if (e.firstChild !== null) out += HIDDEN_NOTE("element's content");
 			hidden += countElements(e.childNodes);
@@ -1021,12 +1022,17 @@ export function inspectElement(el: Element, skip?: Element): Inspection {
 		at !== null && ancestors.length < LIMITS.ancestors;
 		at = parentOf(at)
 	) {
+		// Inside an editor, the elements around are what was typed.
+		if (insideInput(at)) continue;
 		ancestors.push(neighbour(at, "layout", false));
 		if (at.localName === "html") break;
 	}
-	const all = [...el.children].filter(
-		(c) => c !== skip && !EMPTIED.has(c.localName),
-	);
+	// What an editor, a select or a text area holds is typed or chosen: not
+	// its children, their number or their boxes either.
+	const typed = holdsInput(el) || inInput(el);
+	const all = typed
+		? []
+		: [...el.children].filter((c) => c !== skip && !EMPTIED.has(c.localName));
 	const kids = all.filter((c) => !isHidden(c));
 	const root = doc.documentElement;
 	const out: Inspection = {

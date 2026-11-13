@@ -4,6 +4,7 @@ import {
 	attributeValue,
 	cleanCssUrls,
 	cleanUrl,
+	type Inspection,
 	inspectElement,
 	LEFT_OUT_INPUT,
 	markupOf,
@@ -658,31 +659,50 @@ describe("a selector cannot ask about form state (CR-01)", () => {
 	});
 
 	test("two pages that differ only in what was typed or chosen give the same answers", () => {
+		const SELECTORS = [
+			"input",
+			"[name=iban]",
+			"option",
+			"p",
+			".line",
+			"div > *",
+			"input:nth-child(1)",
+			"form > *:last-child",
+			".Editor",
+			"[contenteditable]",
+			"select",
+			"label",
+		];
 		const answers = (html: string) => {
 			page(html);
 			const form = $("form");
-			return [
-				"input",
-				"[name=iban]",
-				"option",
-				"p",
-				".line",
-				"div > *",
-				"input:nth-child(1)",
-				"form > *:last-child",
-			].map((s) => {
+			const read = SELECTORS.map((s) => {
 				const r = resolveSelector(doc, form, s);
-				return "error" in r ? r.error : `${r.relation} ${r.element.localName}`;
+				return "error" in r
+					? r.error
+					: { relation: r.relation, inspection: inspectElement(r.element) };
 			});
+			// A mark drawn inside the editor, read without a selector.
+			const inside = doc.querySelector(".Editor > .line");
+			return { read, inside: inside && inspectElement(inside) };
 		};
 		const typed = answers(
-			`<form><input name="iban" value="CH93"><select><option>a</option><option selected>b</option></select><div contenteditable><p class="line">x</p><p>y</p></div></form>`,
+			`<form><input name="iban" value="CH93"><input type="checkbox" name="news" checked><label>News</label><select><option>a</option><option selected>b</option></select><div class="Editor" contenteditable><h2>Diagnosis</h2><p class="line">x</p><p>y <span class="mention" id="user-jane-doe">@jane</span></p><ul><li>a</li></ul></div></form>`,
 		);
 		const empty = answers(
-			`<form><input name="iban" value=""><select><option>a</option><option>b</option></select><div contenteditable></div></form>`,
+			`<form><input name="iban" value=""><input type="checkbox" name="news"><label>News</label><select><option>a</option><option>b</option></select><div class="Editor" contenteditable></div></form>`,
 		);
-		expect(typed).toEqual(empty);
-		expect(typed.filter((a) => a.startsWith("descendant"))).toHaveLength(4);
+		expect(typed.read).toEqual(empty.read);
+		expect(typed.read.filter((a) => typeof a !== "string")).toHaveLength(8);
+		// The editor's content stays out, children included, typed or not.
+		const editor = typed.read[8] as { inspection: Inspection };
+		expect(editor.inspection.html).toBe(
+			`<div class="Editor" contenteditable>${LEFT_OUT_INPUT}</div>`,
+		);
+		expect(editor.inspection.children).toEqual([]);
+		expect(editor.inspection.childrenLeftOut).toBeUndefined();
+		expect(typed.inside?.children).toEqual([]);
+		expect(typed.inside?.html).toBe(`<p class="line">${LEFT_OUT_INPUT}</p>`);
 	});
 
 	test("the page's own rules that depend on a state are never listed, nor counted", () => {
