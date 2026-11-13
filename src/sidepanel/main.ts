@@ -45,6 +45,7 @@ import {
 	saveFile,
 } from "./download.ts";
 import { type Drawn, followStep, isFound, noneFound } from "./follow.ts";
+import { CaseHints } from "./hints.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
 	type Exported,
@@ -115,7 +116,8 @@ const tabWork = new Latest();
 const casesWork = new Latest();
 const caseWork = new Latest();
 const imagesWork = new Latest();
-const hintWork = new Latest();
+/** Who may write under the open case's buttons (hints.ts). */
+const caseHints = new CaseHints();
 const sitesWork = new Latest();
 const downloadsWork = new Latest();
 
@@ -639,7 +641,7 @@ async function refreshCase(): Promise<void> {
 
 /** Open a case, and draw its marks on the tab in front (DEC-022). */
 function openCase(id: string): void {
-	hintWork.cancel();
+	caseHints.cancel();
 	const other = state.view.kind !== "case" || state.view.id !== id;
 	// Opened again: a Hide on a tab holds no longer.
 	if (other) hiddenOn.clear();
@@ -792,7 +794,7 @@ function closeCase(): void {
 	const caseId = state.view.kind === "case" ? state.view.id : undefined;
 	caseWork.cancel();
 	imagesWork.cancel();
-	hintWork.cancel();
+	caseHints.cancel();
 	stopLoads();
 	hiddenOn.clear();
 	pendingLoad = undefined;
@@ -823,19 +825,13 @@ function closeCase(): void {
 
 /**
  * For an action on the open case: writes its outcome under that case's
- * buttons, unless the panel left the case, or a newer action wrote there.
- * Only a write takes the place over: an action that says nothing (Done
- * adding, an Export that went well) leaves what a draw finds to say it.
+ * buttons, unless the panel left the case, or an action clicked after it
+ * wrote there already (hints.ts).
  */
 function caseHintWriter(): (text: string | undefined) => void {
-	const since = hintWork.peek();
-	let mine: { current: () => boolean } | undefined;
+	const may = caseHints.action();
 	return (text) => {
-		if (mine === undefined) {
-			if (!since.current()) return;
-			mine = hintWork.start();
-		}
-		if (mine.current()) update((s) => (s.caseHint = text));
+		if (may()) update((s) => (s.caseHint = text));
 	};
 }
 
@@ -844,9 +840,9 @@ function caseHintWriter(): (text: string | undefined) => void {
  * of the user's has written there since, and stops no action's hint itself.
  */
 function followHint(): (text: string | undefined) => void {
-	const work = hintWork.peek();
+	const may = caseHints.draw();
 	return (text) => {
-		if (work.current()) update((s) => (s.caseHint = text));
+		if (may()) update((s) => (s.caseHint = text));
 	};
 }
 
@@ -1099,7 +1095,7 @@ const actions: Actions = {
 
 	hideFromTab(c) {
 		stopLoads();
-		hintWork.cancel();
+		caseHints.cancel();
 		// Where the panel loaded the case, and the tab in front where an AI app did.
 		const tabs = new Set<number>();
 		if (state.loaded?.caseId === c.id) tabs.add(state.loaded.tabId);
