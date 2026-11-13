@@ -569,13 +569,9 @@ ul.cases .load {
 	font-size: 12px;
 }
 
-/* The case's counts and bar, where its status block goes. */
+/* Holds the status block; nothing while the case has no marks. */
 .case-status:empty {
 	display: none;
-}
-
-.case-status .progress {
-	margin-top: 4px;
 }
 
 /* Add marks (or Done adding) and Export. */
@@ -930,6 +926,18 @@ button.chip[aria-pressed="true"] .sign {
 
 .status-block .all-done {
 	margin: 0;
+}
+
+/* In the case's header, on its band (DEC-023): the header's padding, ink-band chips. */
+.case-header .status-block {
+	padding: 0;
+}
+
+.case-header button.chip[aria-pressed="true"],
+.case-header button.chip[aria-pressed="true"]:hover:not(:disabled) {
+	border-color: var(--on-ink);
+	background: var(--on-ink);
+	color: var(--ink);
 }
 
 .marks > .filtered {

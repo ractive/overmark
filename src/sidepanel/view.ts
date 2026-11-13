@@ -1621,7 +1621,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		p.origin,
 		c.importedAt === undefined
 			? undefined
-			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, summary and findings are whoever wrote the file's, whatever author or AI app they name.`,
+			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, statuses and reopen notes, summary and findings are as the file says: whoever wrote it, whatever author or AI app it names.`,
 	);
 	// Marks the panel loaded, or an AI app (the page says so).
 	const here =

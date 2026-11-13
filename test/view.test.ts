@@ -1534,6 +1534,10 @@ describe("an imported case", () => {
 		render(caseState(c), noActions);
 		expect(el("case-origin").hidden).toBe(false);
 		expect(el("case-origin").textContent).toContain("Imported from a file");
+		// What came in with it is the file's: statuses and reopen notes too.
+		expect(el("case-origin").textContent).toContain(
+			"statuses and reopen notes, summary and findings are as the file says",
+		);
 		render(caseState(sampleCase("c_j")), noActions);
 		expect(el("case-origin").hidden).toBe(true);
 	});
