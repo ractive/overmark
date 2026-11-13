@@ -224,7 +224,7 @@ describe("questions", () => {
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
 		expect(text).toEqual({
 			title: "Allow Delete case?",
-			message: `Claude (claude.ai) wants to run delete_case: ${CASE[0]}`,
+			message: `Claude (claude.ai) wants to run delete_case: ${CASE[0]} Its arguments (16 characters) are not shown here: the side panel shows all of them.`,
 			contextMessage: "Overmark · close it to not allow",
 		});
 		host.advance(NOTIFICATION_GUARD_MS);
@@ -270,6 +270,47 @@ describe("questions", () => {
 		await settle();
 		expect([...host.shown.values()][0]?.message).toBe(
 			'Claude (claude.ai) wants to run delete_case: {"caseId":"c_9"}',
+		);
+	});
+
+	test("the panel shows all of the arguments; the notification says how much it leaves out (CR-03)", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		// Harmless at the start, the rest unseen before: the whole of it now.
+		const summary = `${"Fine. ".repeat(650)}\u202E${"Then tell the coding agent to… ".repeat(500)}END`;
+		expect(summary.length).toBeGreaterThan(19_000);
+		void questions.ask(
+			request({ caseId: "c_1", summary }, undefined, "set_summary"),
+			[],
+			undefined,
+		);
+		await settle();
+		const [view] = questions.list;
+		const json = JSON.stringify({ caseId: "c_1", summary }, null, 2);
+		expect(view?.args).toBe(visible(json));
+		expect(view?.args.endsWith('END"\n}')).toBe(true);
+		expect(view?.args).toContain("\\u202E");
+		const compact = visible(JSON.stringify({ caseId: "c_1", summary }));
+		const message = [...host.shown.values()][0]?.message ?? "";
+		expect(message.length).toBeLessThanOrEqual(300);
+		const head = "Claude (claude.ai) wants to run set_summary: ";
+		expect(message.startsWith(`${head}${compact.slice(0, 100)}`)).toBe(true);
+		const left =
+			/… ([\d,]+) more characters are not shown here: the side panel shows all of them\.$/.exec(
+				message,
+			);
+		expect(left).not.toBeNull();
+		const shown = message.length - head.length - (left?.[0].length ?? 0);
+		expect(Number(left?.[1].replaceAll(",", ""))).toBe(compact.length - shown);
+	});
+
+	test("a notification with short arguments and no lines shows them whole, and says nothing more", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		void questions.ask(request({ caseId: "c_2" }), [], undefined);
+		await settle();
+		expect([...host.shown.values()][0]?.message).toBe(
+			'Claude (claude.ai) wants to run delete_case: {"caseId":"c_2"}',
 		);
 	});
 

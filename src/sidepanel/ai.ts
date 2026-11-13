@@ -39,6 +39,8 @@ import type { PanelState } from "./state.ts";
 
 /** How long the panel must be visible and focused before Allow and Always allow count. */
 const ALLOW_DELAY_MS = 750;
+/** Arguments longer than this (characters) say their length above them. */
+const LONG_ARGS = 600;
 /** After a first click on New address with apps connected: the second makes it. */
 const NEW_ADDRESS_ARMED_MS = 4000;
 
@@ -629,6 +631,12 @@ export async function startAi(
 
 	// --- Questions ---
 
+	/** Long arguments say how long they are, so that nobody takes the start for all. */
+	const argsLength = (args: string) =>
+		args.length > LONG_ARGS
+			? ` (${args.length.toLocaleString("en-US")} characters: scroll to read all of them)`
+			: "";
+
 	/** Since when the panel has been visible and focused, if it is. */
 	let focusedSince: number | undefined;
 	const cards = new Map<string, { card: HTMLElement; shownAt: number }>();
@@ -667,7 +675,12 @@ export async function startAi(
 				h("strong", {}, `${q.app} wants to run ${q.title ?? q.tool}.`),
 			),
 			...q.lines.map((line) => h("p", {}, line)),
-			h("p", { class: "meta" }, `Tool ${q.tool}, with these arguments:`),
+			h(
+				"p",
+				{ class: "meta" },
+				`Tool ${q.tool}, with these arguments${argsLength(q.args)}:`,
+			),
+			// All of them, scrolling: what is allowed is what was shown (CR-03).
 			h("pre", {}, q.args),
 			h(
 				"div",

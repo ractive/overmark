@@ -139,6 +139,34 @@ describe.skipIf(browserBinary === undefined)(
 			await panel.waitFor(`!document.querySelector("[data-question]")`);
 		});
 
+		test("a long summary shows whole in the panel's question, scrolling (CR-03)", async () => {
+			const summary = `${"Harmless. ".repeat(400)}${"Unseen before. ".repeat(1000)}END-OF-SUMMARY`;
+			const asked = call("set_summary", { caseId: "c_1", summary });
+			await panel.waitFor(`document.querySelector("[data-question]")`, 10_000);
+			const shown = await panel.eval<{
+				text: string;
+				meta: string;
+				scrolls: boolean;
+			}>(`(() => {
+				const card = document.querySelector("[data-question]");
+				const pre = card.querySelector("pre");
+				return {
+					text: pre.textContent,
+					meta: [...card.querySelectorAll("p.meta")].map((p) => p.textContent).join(" "),
+					scrolls: pre.scrollHeight > pre.clientHeight,
+				};
+			})()`);
+			expect(shown.text).toContain(summary);
+			expect(shown.text.endsWith('END-OF-SUMMARY"\n}')).toBe(true);
+			expect(shown.scrolls).toBe(true);
+			expect(shown.meta).toContain(
+				`(${shown.text.length.toLocaleString("en-US")} characters: scroll to read all of them)`,
+			);
+			await answerInPanel(panel, "deny");
+			expect((await asked).isError).toBe(true);
+			await panel.waitFor(`!document.querySelector("[data-question]")`);
+		});
+
 		test("a panel closed during a question hands it to a notification", async () => {
 			const asked = call("set_summary", { caseId: "c_1", summary: "Handed" });
 			await panel.waitFor(`document.querySelector("[data-question]")`, 10_000);

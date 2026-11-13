@@ -22,9 +22,14 @@ import type { Answer, QuestionView } from "./protocol.ts";
 export const QUESTION_TIMEOUT_MS = 60_000;
 /** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
-/** The arguments shown in the panel, and in a notification, are cut to this. */
-export const MAX_ARGS = 4000;
+/**
+ * The arguments in a notification are cut to this; the panel shows all of
+ * them (CR-03), which the tools' schemas bound (the library checks them
+ * before it asks): `set_summary` takes 20,000 characters.
+ */
 export const MAX_ARGS_NOTIFICATION = 150;
+/** A notification's message is cut to this. */
+export const MAX_NOTIFICATION_MESSAGE = 300;
 /** A tool's title in a notification's title is cut to this. */
 export const MAX_NOTIFICATION_TITLE = 60;
 
@@ -78,16 +83,46 @@ export function appName(client: ConfirmRequest["client"]): string {
 	return client.name ? `${visible(client.name)} (${client.host})` : client.host;
 }
 
-/** A notification's text for a question: the case it is about, else the arguments. */
+const characters = (n: number, more = "") =>
+	`${n.toLocaleString("en-US")} ${more}character${n === 1 ? "" : "s"}`;
+
+/**
+ * A notification's text for a question: the case it is about, else the
+ * arguments (`args`, in one line). Whatever of the arguments it leaves out,
+ * it says how much, and that the side panel shows all of them (CR-03).
+ */
 export function notificationText(
 	view: QuestionView,
-	summary: string,
+	args: string,
 ): NotificationText {
 	const what = cut(view.title ?? view.tool, MAX_NOTIFICATION_TITLE);
-	const about = view.lines.length > 0 ? view.lines.join(" ") : summary;
+	const head = `${view.app} wants to run ${view.tool}: `;
+	const inPanel = "the side panel shows all of them.";
+	let message: string;
+	if (view.lines.length > 0) {
+		const note = `Its arguments (${characters(args.length)}) are not shown here: ${inPanel}`;
+		message = `${cut(`${head}${view.lines.join(" ")}`, MAX_NOTIFICATION_MESSAGE - note.length - 1)} ${note}`;
+	} else if (
+		args.length <= MAX_ARGS_NOTIFICATION &&
+		head.length + args.length <= MAX_NOTIFICATION_MESSAGE
+	)
+		message = `${head}${args}`;
+	else {
+		const note = (n: number) =>
+			`… ${characters(n, "more ")} ${n === 1 ? "is" : "are"} not shown here: ${inPanel}`;
+		// Room for the note naming the most characters it could.
+		const room = Math.max(
+			0,
+			Math.min(
+				MAX_ARGS_NOTIFICATION,
+				MAX_NOTIFICATION_MESSAGE - head.length - note(args.length).length,
+			),
+		);
+		message = `${head}${args.slice(0, room)}${note(args.length - room)}`;
+	}
 	return {
 		title: `Allow ${what}?`,
-		message: cut(`${view.app} wants to run ${view.tool}: ${about}`, 300),
+		message,
 		contextMessage: "Overmark · close it to not allow",
 	};
 }
@@ -96,7 +131,8 @@ interface Pending {
 	view: QuestionView;
 	/** The AI app that asked. */
 	grantId: string;
-	summary: string;
+	/** The arguments in one line, for a notification. */
+	args: string;
 	windowId: number | undefined;
 	/** The notification showing it, if one does, and its creation. */
 	notification?: string;
@@ -145,12 +181,10 @@ export class Questions {
 			tool: request.tool.name,
 			...(request.tool.title ? { title: visible(request.tool.title) } : {}),
 			lines: lines.map(visible),
-			args: cut(json, MAX_ARGS),
+			// All of it: the user allows what they were shown (CR-03).
+			args: json,
 		};
-		const summary = cut(
-			visible(JSON.stringify(request.arguments) ?? "{}"),
-			MAX_ARGS_NOTIFICATION,
-		);
+		const args = visible(JSON.stringify(request.arguments) ?? "{}");
 		return new Promise((resolve) => {
 			if (request.signal.aborted) {
 				resolve("deny");
@@ -161,7 +195,7 @@ export class Questions {
 			const pending: Pending = {
 				view,
 				grantId: client.grantId,
-				summary,
+				args,
 				windowId: undefined,
 				shownAt: 0,
 				settle: (answer) => {
@@ -205,7 +239,7 @@ export class Questions {
 		pending.notification = id;
 		pending.shownAt = this.#host.now();
 		pending.created = this.#host
-			.notify(id, notificationText(pending.view, pending.summary))
+			.notify(id, notificationText(pending.view, pending.args))
 			.catch((error: unknown) =>
 				// Notifications off for Chrome: the badge and the panel remain.
 				console.warn("Overmark: notification", error),
