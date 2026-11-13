@@ -142,7 +142,11 @@ describe.skipIf(browserBinary === undefined)(
 		test("a long summary shows whole in the panel's question, scrolling (CR-03)", async () => {
 			const summary = `${"Harmless. ".repeat(400)}${"Unseen before. ".repeat(1000)}END-OF-SUMMARY`;
 			const asked = call("set_summary", { caseId: "c_1", summary });
-			await panel.waitFor(`document.querySelector("[data-question]")`, 10_000);
+			// The note follows the box's layout.
+			await panel.waitFor(
+				`document.querySelector("[data-question] [data-scroll-note]")?.textContent`,
+				10_000,
+			);
 			const shown = await panel.eval<{
 				text: string;
 				meta: string;
@@ -165,6 +169,68 @@ describe.skipIf(browserBinary === undefined)(
 			await answerInPanel(panel, "deny");
 			expect((await asked).isError).toBe(true);
 			await panel.waitFor(`!document.querySelector("[data-question]")`);
+		});
+
+		test("the scroll note goes by whether the box overflows, not by a length", async () => {
+			const width = (w: number) =>
+				panel.send("Emulation.setDeviceMetricsOverride", {
+					width: w,
+					height: 800,
+					deviceScaleFactor: 1,
+					mobile: false,
+				});
+			/** The note and the box once the layout has settled. */
+			const box = async () => {
+				await panel.eval(
+					"new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))",
+				);
+				return panel.eval<{ note: string; scrolls: boolean }>(`(() => {
+					const card = document.querySelector("[data-question]");
+					const pre = card.querySelector("pre");
+					return {
+						note: card.querySelector("[data-scroll-note]")?.textContent ?? "",
+						scrolls: pre.scrollHeight > pre.clientHeight,
+					};
+				})()`);
+			};
+			/** Ask, and wait for the question in the panel. */
+			const ask = async (summary: string) => {
+				const asked = call("set_summary", { caseId: "c_1", summary });
+				await panel.waitFor(
+					`document.querySelector("[data-question] pre")`,
+					10_000,
+				);
+				return { asked };
+			};
+			const deny = async ({ asked }: { asked: Promise<unknown> }) => {
+				await answerInPanel(panel, "deny");
+				await asked;
+				await panel.waitFor(`!document.querySelector("[data-question]")`);
+			};
+			try {
+				// The side panel's width: about 500 characters do not fit the box.
+				await width(380);
+				const middle = await ask(
+					"Lower the contrast of the button. ".repeat(15),
+				);
+				const narrow = await box();
+				expect(narrow.scrolls).toBe(true);
+				expect(narrow.note).toContain(
+					"characters: scroll to read all of them)",
+				);
+				// Wider, the same text fits: the note goes.
+				await width(2400);
+				const wide = await box();
+				expect(wide.scrolls).toBe(false);
+				expect(wide.note).toBe("");
+				await deny(middle);
+				await width(380);
+				const short = await ask("Fine.");
+				expect(await box()).toEqual({ note: "", scrolls: false });
+				await deny(short);
+			} finally {
+				await panel.send("Emulation.clearDeviceMetricsOverride");
+			}
 		});
 
 		test("a panel closed during a question hands it to a notification", async () => {

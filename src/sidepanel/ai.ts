@@ -39,8 +39,6 @@ import type { PanelState } from "./state.ts";
 
 /** How long the panel must be visible and focused before Allow and Always allow count. */
 const ALLOW_DELAY_MS = 750;
-/** Arguments longer than this (characters) say their length above them. */
-const LONG_ARGS = 600;
 /** After a first click on New address with apps connected: the second makes it. */
 const NEW_ADDRESS_ARMED_MS = 4000;
 
@@ -631,11 +629,22 @@ export async function startAi(
 
 	// --- Questions ---
 
-	/** Long arguments say how long they are, so that nobody takes the start for all. */
-	const argsLength = (args: string) =>
-		args.length > LONG_ARGS
-			? ` (${args.length.toLocaleString("en-US")} characters: scroll to read all of them)`
-			: "";
+	/**
+	 * Arguments the box cannot show at once say how long they are, so that
+	 * nobody takes the start for all: decided by the box's overflow once it
+	 * is laid out, and again whenever its size changes.
+	 */
+	function scrollNote(pre: Element): void {
+		const note = pre.parentElement?.querySelector("[data-scroll-note]");
+		if (note === null || note === undefined) return;
+		note.textContent =
+			pre.scrollHeight > pre.clientHeight
+				? ` (${(pre.textContent ?? "").length.toLocaleString("en-US")} characters: scroll to read all of them)`
+				: "";
+	}
+	const overflow = new ResizeObserver((entries) => {
+		for (const { target } of entries) scrollNote(target);
+	});
 
 	/** Since when the panel has been visible and focused, if it is. */
 	let focusedSince: number | undefined;
@@ -678,7 +687,9 @@ export async function startAi(
 			h(
 				"p",
 				{ class: "meta" },
-				`Tool ${q.tool}, with these arguments${argsLength(q.args)}:`,
+				`Tool ${q.tool}, with these arguments`,
+				h("span", { "data-scroll-note": "" }),
+				":",
 			),
 			// All of them, scrolling: what is allowed is what was shown (CR-03).
 			h("pre", {}, q.args),
@@ -702,6 +713,8 @@ export async function startAi(
 		let removed = false;
 		for (const [id, { card }] of cards)
 			if (!ids.has(id)) {
+				const pre = card.querySelector("pre");
+				if (pre !== null) overflow.unobserve(pre);
 				card.remove();
 				cards.delete(id);
 				removed = true;
@@ -712,6 +725,11 @@ export async function startAi(
 			if (!cards.has(q.id)) {
 				const card = question(q);
 				list.append(card);
+				const pre = card.querySelector("pre");
+				if (pre !== null) {
+					scrollNote(pre);
+					overflow.observe(pre);
+				}
 				cards.set(q.id, { card, shownAt: Date.now() });
 			}
 		arm();
