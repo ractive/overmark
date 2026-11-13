@@ -810,8 +810,11 @@ export class Connection {
 
 	/**
 	 * Disconnect one AI app (DEC-017). Its Always allow goes with the grant,
-	 * once the relay's list no longer has it (`#keepGrants`, DEC-018), or
-	 * when the relay says it does not know the grant at all.
+	 * once the library's list no longer has it (`#keepGrants`, DEC-018): also
+	 * for a grant the relay does not know (expired), which client 0.16.1
+	 * drops from the list when relay 0.10.2 says so. A relay before 0.10.2
+	 * names no grant in its `unknown_id`: the library rejects, the app stays
+	 * listed, and only then does the worker forget it and say why.
 	 */
 	#revoke(grantId: string): void {
 		const mcp = this.#mcp;
@@ -822,6 +825,7 @@ export class Connection {
 			return mcp.revoke(grantId).catch((error: unknown) => {
 				if (mcp !== this.#mcp) return;
 				this.#revokeProblems.set(grantId, { error });
+				// A relay before 0.10.2: the queue makes it this grant's answer.
 				if ((error as { code?: unknown }).code === "unknown_id")
 					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
 				this.#changed();
