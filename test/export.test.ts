@@ -269,7 +269,14 @@ describe("statuses in case.md (DEC-023)", () => {
 				},
 			],
 		});
-		expect(md).not.toMatch(/^## Marks$/m);
+		// The headings are the file's own, none of the note's.
+		expect(md.split("\n").filter((l) => l.startsWith("#"))).toEqual([
+			"# Prämien-Button: Kontrast!",
+			"## Summary for the developer",
+			"## Marks (1)",
+			"### 1. box",
+			"## Screenshots",
+		]);
 		expect(md).toContain("- Note: x \\#\\# Marks \\<b\\>");
 		expect(md).toContain("  > \\<!-- hidden");
 	});
