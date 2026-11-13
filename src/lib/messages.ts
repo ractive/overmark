@@ -184,6 +184,11 @@ export interface LoadResult {
 	caseId: string;
 	url: string;
 	matches: AnnotationMatch[];
+	/**
+	 * A newer load of the case overtook this one (an AI app's load_case, the
+	 * panel's own draw) and this is its result: the marks are that load's.
+	 */
+	adopted?: true;
 }
 
 /** The content script's answer to the `overlay:*` and `case:clear` requests. */

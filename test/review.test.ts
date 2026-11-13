@@ -376,8 +376,11 @@ describe("loads close together", () => {
 		const first = reviewer.load(c);
 		const second = reviewer.load(c);
 		const [a, b] = await Promise.all([first, second]);
-		expect(a.matches.map((m) => m.status)).toEqual(["found"]);
-		expect(b).toEqual(a);
+		expect(b.matches.map((m) => m.status)).toEqual(["found"]);
+		// The older one's is the newer's, and says so: its marks are that
+		// load's, not this caller's to take off.
+		expect(a).toEqual({ ...b, adopted: true });
+		expect(b.adopted).toBeUndefined();
 		expect(reviewer.caseId).toBe(c.id);
 	});
 

@@ -251,7 +251,8 @@ async function loadInto(
 		// newer load draws them there again.
 		if (!work.current()) {
 			if (sameDrawn(loadTarget, here)) drawn = here;
-			else takeOff(here);
+			// A newer load of the case drew them (an AI app's load_case): its.
+			else if (!result.adopted) takeOff(here);
 			return undefined;
 		}
 		drawn = here;

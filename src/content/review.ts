@@ -113,7 +113,9 @@ export class Reviewer {
 					newest.run !== run &&
 					newest.caseId === c.id
 				)
-					return newest.run;
+					// Its marks are that load's: the caller of this one may be done
+					// with the case and must not take them off.
+					return newest.run.then((r) => ({ ...r, adopted: true as const }));
 				throw error;
 			},
 		);
