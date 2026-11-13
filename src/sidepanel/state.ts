@@ -8,7 +8,7 @@
 import type { Case, ResolveChoice, StatusGroup } from "../lib/case.ts";
 import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
-import type { SyncStatus } from "../lib/sync.ts";
+import type { SyncStatus, SyncTargetKind } from "../lib/sync.ts";
 import type { Size } from "./size.ts";
 
 export interface MarkEdit {
@@ -168,14 +168,24 @@ export interface PanelState {
 	allSites: boolean;
 	/** Overmark may read file:// pages ("Allow access to file URLs"); unknown at first. */
 	fileAccess: boolean | undefined;
-	/** The sync to a folder (DEC-021). */
+	/** The sync to Downloads or a folder (DEC-021, DEC-025). */
 	sync: {
-		/** The folder's name; `undefined`: not syncing. */
+		/** Where it writes; `undefined`: not syncing. */
+		target: SyncTargetKind | undefined;
+		/** `downloads`, or the folder's id. */
+		targetId: string | undefined;
+		/** The folder's name, when syncing to a folder. */
 		folder: string | undefined;
-		/** The worker's status for this folder, once it has one. */
+		/** The worker's status for this target, once it has one. */
 		status: SyncStatus | undefined;
-		/** What the panel itself could not do (the picker, Allow access). */
+		/** What the panel itself could not do (the picker, the database). */
 		problem: string | undefined;
+		/** Chrome's prompt for downloads is open. */
+		asking: boolean;
+		/** "Change…": the Off state's buttons, while the target keeps running. */
+		changing: boolean;
+		/** The user said no to Allow access or Allow downloads. */
+		refused: boolean;
 	};
 	ai: {
 		status: string;
@@ -219,7 +229,16 @@ export const initialState = (): PanelState => ({
 	verdictDrafts: new Map(),
 	allSites: false,
 	fileAccess: undefined,
-	sync: { folder: undefined, status: undefined, problem: undefined },
+	sync: {
+		target: undefined,
+		targetId: undefined,
+		folder: undefined,
+		status: undefined,
+		problem: undefined,
+		asking: false,
+		changing: false,
+		refused: false,
+	},
 	ai: {
 		status: "Not connected",
 		connected: false,

@@ -107,13 +107,16 @@ export function createManifest(
 			"activeTab",
 			"alarms",
 			"notifications",
+			// The sync to Downloads makes its blob URLs there (DEC-025).
+			"offscreen",
 			"scripting",
 			"sidePanel",
 			"storage",
 			"unlimitedStorage",
 			...(options.test ? ["downloads"] : []),
 		],
-		// Export asks for it, to say where the file went (DEC-020).
+		// Export asks for it, to say where the file went (DEC-020), and the
+		// sync to Downloads writes through it (DEC-025).
 		...(options.test ? {} : { optional_permissions: ["downloads"] }),
 		optional_host_permissions: ["<all_urls>"],
 		...(options.test ? { host_permissions: ["<all_urls>"] } : {}),
@@ -191,7 +194,14 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 	};
 	await rm(outdir, { recursive: true, force: true });
 	const packages = new Set([
-		...(await bundle("src/background.ts", outdir, "esm", minify)),
+		...(await bundle(
+			"src/background.ts",
+			outdir,
+			"esm",
+			minify,
+			undefined,
+			options.test,
+		)),
 		...(await bundle(
 			"src/content/index.ts",
 			outdir,
@@ -207,6 +217,13 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 			minify,
 			undefined,
 			options.test,
+		)),
+		// The sync to Downloads' blob URLs (DEC-025).
+		...(await bundle(
+			"src/offscreen/index.html",
+			join(outdir, "offscreen"),
+			"esm",
+			minify,
 		)),
 	]);
 	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));

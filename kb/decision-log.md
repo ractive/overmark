@@ -859,7 +859,66 @@ cannot be missed.
   access, Allow downloads, Try again), and the toolbar icon shows "!" (amber paused,
   red failed) with a title that says why. The worker runs the sync when it starts, so
   the "!" is there after a browser restart before the panel is opened.
-- **How the worker downloads** is settled in the sync's PR by a spike first, as DEC-021
-  was: a service worker has no `URL.createObjectURL`, so the plan is an offscreen
-  document (the `offscreen` permission) that makes the blob URL; the fallback is in the
-  review.
+- **How the worker downloads, tried in Chrome for Testing 151 (headless) before it was
+  built on.** The worker has no `URL.createObjectURL` (`undefined` there). An offscreen
+  document (`chrome.offscreen.createDocument`, reason `BLOBS`, the `offscreen`
+  permission, which adds no install warning) made a blob URL and answered with it over
+  `runtime.sendMessage`; the worker downloaded it with
+  `chrome.downloads.download({ url, filename: "Overmark/<name>", conflictAction:
+  "overwrite", saveAs: false })` into `Overmark/` under the profile's downloads folder.
+  A second write of the same name replaced the file: no `(1)` copy, no dialog. It worked
+  with no extension page open but the offscreen document (the only other page was the
+  browser's `about:blank` tab), also for a 5 MB file, and again after the document was
+  closed and opened anew. Erasing the earlier entry (`downloads.erase`) left the file and
+  the newer entry. So the fallback (the panel making the URL, data URLs for small cases)
+  is not built. The offscreen document builds the case's export itself from the
+  extension's database, as a message carries JSON only; it answers only the worker's
+  messages. One run opens it at its first file and closes it at its end; each download
+  is waited for (`downloads.onChanged`, 60 s, then cancelled), its URL revoked, and the
+  entry written before it erased. **With Chrome's "Ask where to save each file before
+  downloading" on, `saveAs: false` does not stop the dialog**: headless, the download
+  ended `interrupted` with `USER_CANCELED`. The sync then fails with what to do (turn
+  the setting off, or choose a folder), and also when Chrome saved the file somewhere
+  other than `Overmark/<name>` (the user answered that dialog, or another extension
+  moved it). Such a failure only the user can end is kept until Try again or a new
+  choice, so no run downloads (and asks) again by itself. **Not shown: the store
+  build's way to the permission**, where the worker starts without `downloads` and the
+  user's yes in the panel must make `chrome.downloads` appear in that running worker.
+  Tried headless with an optional `downloads`: `permissions.request` from a click in
+  an extension page neither resolved nor rejected within 10 s (Chrome's prompt cannot
+  be answered there), so whether the API appears without a worker restart is not
+  known, and is on the owner's list to try by hand. If it does not, the worker sees the
+  permission (`permissions.contains`) without the API: the sync fails saying so, that
+  it starts once Chrome restarts Overmark's background part (by itself after a while
+  without use), and how to do it now (Overmark off and on in chrome://extensions); every
+  change and start tries again. The e2e tests run with `downloads` at install. Not tried either: a headed
+  Chrome's download bubble on each write (changes in a row now wait 2 s of quiet, so a
+  burst is one download per case), and Edge.
+- **After the review of PR 48.** A title Windows reserves (`con`, `nul`, `com1`…) is
+  written as `_con.overmark.zip`, and a name Chrome refuses is that case's problem, not
+  the run's. Choosing Downloads writes every case again into its own file (nothing is
+  read back, so this brings deleted files back). The offscreen document failing stops
+  the run; a run names at most three failing cases. The worker calls an extension API
+  every 20 s while it waits for a download, so Chrome does not stop it; should it stop
+  all the same, the download under way is in `downloads:pending` (its id, case,
+  version and name), a top-level `downloads.onChanged` wakes a new worker at its end,
+  and the next run settles it from Chrome's list (complete in `Overmark/`: written;
+  otherwise its entry goes and the case is written again; still under way: waited for)
+  before it closes a document left open. A failure only the user can end (a Save
+  dialog cancelled, the file saved elsewhere) is not tried again until Try again or a
+  new choice. Changes in a row wait 2 s of quiet before a run to Downloads; a folder is
+  written at once. Only an entry this extension wrote into `Overmark/` is erased or
+  shown; Stop syncing forgets its id, and gives the permission back when "Sync to
+  Downloads" asked for it (not when Export had it). Choosing Downloads (again) writes
+  every case into its file, which is the way to bring back files deleted there.
+  **Limit:** `Overmark/` is shared by every profile and browser syncing to Downloads,
+  and nothing there can be looked at, so one install overwrites another's file of the
+  same name: one profile per downloads folder, or choose a folder (the README says so).
+- **The badge, built.** One decision for the icon (`src/worker/badge.ts`): an AI app's
+  question "?" first (it waits for an answer now), then the sync's "!" (amber `#ffb000`
+  with `#1b2130` paused, red `#b3261e` with white failed, its title saying why and, with
+  AI access on, that too), then "…" while connecting. The spark stays in the icon beside
+  the "!" while AI access is on. The worker reruns the sync when the `downloads`
+  permission is taken back or given (`permissions.onRemoved` / `onAdded`), so a
+  permission taken back in Chrome's settings shows as "paused" at once. Stop syncing
+  clears the status and the "!".

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import type { SyncStatus } from "../src/lib/sync.ts";
+import { badgeOf, decideBadge } from "../src/worker/badge.ts";
 import {
 	drawSpark,
 	iconSwitch,
@@ -132,5 +134,75 @@ describe("iconSwitch", () => {
 		} finally {
 			console.warn = warn;
 		}
+	});
+});
+
+describe("the badge (DEC-025)", () => {
+	const off = { questions: 0, ai: "off" } as const;
+	const paused = (reason: "access" | "downloads"): SyncStatus => ({
+		folderId: "f",
+		state: "paused",
+		reason,
+	});
+	const failed: SyncStatus = { folderId: "f", state: "failed", problem: "x" };
+
+	test("paused, the folder: amber “!” with dark text, and why", () => {
+		expect(decideBadge(off, paused("access"))).toEqual({
+			text: "!",
+			color: "#ffb000",
+			textColor: "#1b2130",
+			title: "Overmark: sync is paused. Click to allow access.",
+			spark: false,
+		});
+	});
+
+	test("paused, the downloads: the same “!”, another title", () => {
+		const b = decideBadge(off, paused("downloads"));
+		expect([b.text, b.color]).toEqual(["!", "#ffb000"]);
+		expect(b.title).toBe("Overmark: sync is paused. Click to allow downloads.");
+	});
+
+	test("failed: red “!” with white text", () => {
+		const b = decideBadge(off, failed);
+		expect([b.text, b.color, b.textColor]).toEqual(["!", "#b3261e", "#ffffff"]);
+		expect(b.title).toContain("sync failed");
+	});
+
+	test("syncing, synced or off: no badge", () => {
+		for (const s of [
+			undefined,
+			{ folderId: "f", state: "syncing", left: 2 },
+			{ folderId: "f", state: "synced" },
+		] as const) {
+			const b = decideBadge(off, s);
+			expect([b.text, b.title]).toEqual(["", "Overmark"]);
+		}
+	});
+
+	test("a question waiting wins over the sync: it needs an answer now", () => {
+		const b = decideBadge({ questions: 1, ai: "connected" }, failed);
+		expect(b.text).toBe("?");
+		expect(b.title).toContain("an AI app asks");
+	});
+
+	test("the sync's “!” wins over connecting; the spark stays beside it", () => {
+		expect(decideBadge({ questions: 0, ai: "connecting" }, failed).text).toBe(
+			"!",
+		);
+		const b = decideBadge({ questions: 0, ai: "connected" }, paused("access"));
+		expect([b.text, b.spark]).toEqual(["!", true]);
+		expect(b.title).toBe(
+			"Overmark: sync is paused. Click to allow access. AI access is on.",
+		);
+	});
+
+	test("set again when either part changes, and cleared with the state", () => {
+		const shown: string[] = [];
+		const badge = badgeOf({ apply: (b) => shown.push(b.text) });
+		badge.sync(paused("access"));
+		badge.ai({ questions: 1, ai: "connected" });
+		badge.ai({ questions: 0, ai: "connected" });
+		badge.sync(undefined);
+		expect(shown).toEqual(["!", "?", "!", ""]);
 	});
 });

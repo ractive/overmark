@@ -52,11 +52,12 @@ and text editors are. This covers fields in the page itself and inside its web
 components, not fields inside embedded frames (for example a payment form from another
 site).
 
-If you choose "Sync to a folder…", Overmark also keeps that folder's handle (Chrome's
-reference to the folder you picked, with its name), which file it wrote for each case
-and when, and the sync's last status, in another database of its own in the browser
-(IndexedDB in the extension's origin, `overmark-sync`). The scripts Overmark runs in
-web pages cannot reach it.
+If you turn on the sync ("Sync to Downloads" or "Choose a folder…"), Overmark also keeps
+where it syncs to (Downloads, or that folder's handle: Chrome's reference to the folder
+you picked, with its name), which file it wrote for each case and when, the sync's last
+status and, for Downloads, the id of the newest entry it left in Chrome's download list,
+in another database of its own in the browser (IndexedDB in the extension's origin,
+`overmark-sync`). The scripts Overmark runs in web pages cannot reach it.
 
 ## When data leaves your computer
 
@@ -64,14 +65,19 @@ Only in three cases, all started by you:
 
 1. **Export.** "Export" writes a case to a zip file, "Export all cases" every case to
    one. Where it goes from there is up to you.
-2. **Sync to a folder.** If you choose a folder with "Sync to a folder…", Overmark
-   writes each case into it as the same zip file Export writes (its marks, comments, AI
-   findings, summary, screenshots and `case.md`), again whenever the case changes, and
-   nowhere else. It writes only into that folder, only files named after its cases, and
-   never reads the files there. A deleted case's file stays in the folder; "Stop
-   syncing" stops the writing and leaves the files. If the folder is synced by a cloud
-   service (iCloud Drive, Dropbox, OneDrive), that service uploads the files under its
-   own privacy policy: that is your choice of folder, not something Overmark sends.
+2. **Sync.** If you choose "Sync to Downloads", Overmark writes each case into a folder
+   `Overmark` in Chrome's downloads folder; if you choose a folder with "Choose a
+   folder…", into that folder. Each case is the same zip file Export writes (its marks,
+   comments, AI findings, summary, screenshots and `case.md`), written again whenever
+   the case changes, and nowhere else. It writes only there, only files named after its
+   cases, and never reads the files there. A deleted case's file stays; "Stop syncing"
+   stops the writing and leaves the files. To Downloads it writes through Chrome's
+   downloads (the optional `downloads` permission, asked when you click "Sync to
+   Downloads"), with the side panel closed too; each file is built in an offscreen
+   document of the extension (the `offscreen` permission), which only makes the file's
+   address for the download and sends nothing anywhere. If the folder is synced by a
+   cloud service (iCloud Drive, Dropbox, OneDrive), that service uploads the files under
+   its own privacy policy: that is your choice of folder, not something Overmark sends.
 3. **An AI app.** If you connect an AI app (for example Claude) in the side panel,
    Overmark answers that app's tool calls: the cases' contents and screenshots, and the
    address (cut as above), title, element details and screenshots of the tab in front.
@@ -148,13 +154,21 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   ("Display notifications").
 - **unlimitedStorage:** so that the browser does not delete your cases and screenshots to
   free disk space, and they may grow beyond its usual limit. They stay in your browser.
-- **Downloads (optional):** asked for at the first Export (or Export all cases);
-  Chrome calls it "Manage your downloads". Overmark uses it only to save its own
-  export through Chrome's downloads and then read that one download's path, to show
-  you where the file went (with Copy and Show in folder). It does not read, change or
-  open your other downloads. With a no, the export is saved as before, without the
-  path, and Chrome asks again only when you click Export again. You can take it back
-  in Chrome's extension settings.
+- **offscreen:** while the sync writes your cases to Downloads, Overmark's background
+  service worker opens a hidden page of the extension that builds one case's file and
+  gives it an address for the download (a service worker cannot); it closes once the
+  cases are written. No install warning.
+- **Downloads (optional):** asked for at the first Export (or Export all cases), or when
+  you click "Sync to Downloads"; Chrome calls it "Manage your downloads". Overmark uses
+  it only to save its own export through Chrome's downloads and then read that one
+  download's path, to show you where the file went (with Copy and Show in folder), and
+  for the sync to write each case to `Overmark` in your downloads folder, overwriting
+  that case's earlier file, and to take its own previous entry out of Chrome's download
+  list (the file stays). It does not read, change or open your other downloads. With a
+  no, the export is saved as before, without the path, the sync to Downloads does not
+  start, and Chrome asks again only when you click again. "Stop syncing" gives it back
+  when it was asked for by "Sync to Downloads" (not when Export had it already); Export
+  or "Sync to Downloads" asks for it again. Otherwise it stays until Overmark is removed.
 - **Single sites (optional):** when you open a case's page from its address, or show a
   case's marks on a tab where Overmark may not run yet ("Show marks on this tab" or the
   case's Load button), Chrome asks whether Overmark may run on that case's site from
@@ -166,8 +180,8 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
 ## Deleting
 
 Delete a case in the side panel; its screenshots go with it. Removing the extension
-deletes everything it stored in the browser. Files it wrote (an export, the sync
-folder) stay where they are until you delete them.
+deletes everything it stored in the browser. Files it wrote (an export, the synced
+files in Downloads or your folder) stay where they are until you delete them.
 
 ## Contact
 
