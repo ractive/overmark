@@ -1112,6 +1112,44 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			},
 		);
 
+		slowTest(
+			"a panel opened again while the toolbar adds to the case: its marks are the panel's",
+			async () => {
+				const { page, tabId, caseId } = await inCaseWithMarks(
+					"Reopened while adding",
+				);
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(() => toolbarUp(tabId), "the toolbar");
+				// As closing and opening the side panel.
+				await openPanel();
+				await h.control.waitFor(
+					`!${id("case-view")}.hidden && ${id("verdict")}?.dataset.case === "${caseId}" && ${id("add-marks")}.textContent === "Done adding"`,
+					10_000,
+				);
+				// What the page found shows, without a draw again.
+				await h.control.waitFor(
+					`document.querySelectorAll(".match").length === 1 && ${id("case-hint")}.textContent.includes("1 of 1 marks found")`,
+				);
+				// They follow the case to the next tab, and leave this one.
+				const other = await h.open("v2");
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === caseId,
+					"the marks on the next tab",
+				);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to leave the first tab",
+				);
+				await page.activate();
+				await h.control.eval(`${back}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await until(async () => !(await toolbarUp(tabId)), "the toolbar to go");
+				await other.page.send("Page.close");
+				await page.send("Page.close");
+			},
+		);
+
 		slowTest("Hide holds through a reload of that tab", async () => {
 			const { page, tabId } = await inCaseWithMarks("Hidden through a reload");
 			await h.control.waitFor(

@@ -516,7 +516,11 @@ async function adopt(): Promise<void> {
 		update((s) => {
 			if (s.tab?.id === tabId) s.overlay = now;
 		});
+		// Marks the page shows of the case are the panel's from now on, as
+		// in adoptLoaded: they follow the case (DEC-022).
+		if (now.loadedCase === caseId) drawn = { tabId, caseId };
 		openCase(caseId);
+		if (now.loadedCase === caseId) void readLoaded(c, tabId);
 	} finally {
 		adopting = undefined;
 	}
