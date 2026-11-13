@@ -93,14 +93,47 @@ describe("KeepOn", () => {
 		expect(connection.calls).toEqual([]);
 	});
 
-	test.each(["user", "replaced", "new_address", "network", "policy"] as const)(
+	test.each(["user", "replaced", "new_address", "network"] as const)(
 		"leaves a session that ended as %s alone",
 		(reason) => {
 			connection.state = "connected";
 			connection.end(reason);
 			expect(connection.calls).toEqual([]);
+			expect(keep.problem).toBeUndefined();
+			expect(keep.retrying).toBe(false);
 		},
 	);
+
+	test.each([
+		["rate_limited", "The relay ended the connection: too many messages."],
+		["too_large", "The relay ended the connection: a message was too large."],
+		["policy", "The relay ended the connection: it refused a message."],
+		["closed", "The relay closed the connection."],
+	] as const)(
+		"a session the relay ended as %s: says why and tries again later",
+		async (reason, why) => {
+			connection.state = "connected";
+			connection.end(reason);
+			// Not at once: a relay that ends every session gets no tight loop.
+			expect(connection.calls).toEqual([]);
+			expect(keep.problem).toBe(why);
+			expect(keep.retrying).toBe(true);
+			while (connection.state !== "connected") await Bun.sleep(1);
+			expect(keep.problem).toBeUndefined();
+		},
+	);
+
+	test("not wanted, a session the relay ended still says why, and stays off", async () => {
+		wanted = false;
+		connection.state = "connected";
+		connection.end("rate_limited");
+		expect(keep.problem).toBe(
+			"The relay ended the connection: too many messages.",
+		);
+		expect(keep.retrying).toBe(false);
+		await Bun.sleep(10);
+		expect(connection.calls).toEqual([]);
+	});
 
 	test("says why a connect failed and tries again until it works", async () => {
 		connection.errors = [new Error("relay down"), new Error("still down")];

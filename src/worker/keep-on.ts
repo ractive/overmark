@@ -2,14 +2,27 @@
  * "Keep AI access on", in the service worker (DEC-015): the library
  * reconnects by itself only after a broken connection; this also connects
  * after an idle or expired session, and goes on trying after a connect that
- * failed, while the user wants it.
+ * failed or a session the relay ended (too many messages, say), while the
+ * user wants it.
  */
 
-import type { TabMcp } from "@ractive-ch/tab-mcp-client";
+import type { DisconnectReason, TabMcp } from "@ractive-ch/tab-mcp-client";
 import { Latest } from "../lib/latest.ts";
 
 /** The waits between tries to connect, in ms; the last one repeats. */
 const KEEP_ON_DELAYS_MS = [5000, 10_000, 20_000, 40_000, 60_000];
+
+/**
+ * Why the relay ended a session for good, for the reasons the library does
+ * not reconnect after and nobody chose (the user, a new address, a takeover)
+ * and that are not the end of an idle or old session.
+ */
+const ENDED: Partial<Record<DisconnectReason, string>> = {
+	rate_limited: "The relay ended the connection: too many messages.",
+	too_large: "The relay ended the connection: a message was too large.",
+	policy: "The relay ended the connection: it refused a message.",
+	closed: "The relay closed the connection.",
+};
 
 /** The part of `TabMcp` that `KeepOn` uses. */
 export type KeptConnection = Pick<
@@ -20,8 +33,10 @@ export type KeptConnection = Pick<
 /**
  * "Keep AI access on": the library reconnects by itself only after a broken
  * connection. While `wanted` says so, this also connects after an idle or
- * expired session, and goes on trying after a connect that failed. It leaves
- * alone what the user or another tab ended (`disconnect()`, `replaced`).
+ * expired session, and goes on trying after a connect that failed or a
+ * session the relay ended for another reason, saying why (`problem`) also
+ * when not wanted. It leaves alone what the user or another tab ended
+ * (`disconnect()`, `replaced`, `new_address`).
  */
 export class KeepOn {
 	/** Why the last try failed; `undefined` once connected or stopped. */
@@ -69,6 +84,12 @@ export class KeepOn {
 					(reason === "idle" || reason === "expired")
 				)
 					this.connect();
+				// Ended by the relay for another reason: say why, and try again
+				// later, as after a failed connect.
+				else if (state === "disconnected" && reason !== undefined) {
+					const ended = ENDED[reason];
+					if (ended !== undefined) this.failed(new Error(ended));
+				}
 			},
 			{ signal },
 		);
