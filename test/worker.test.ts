@@ -14,7 +14,7 @@ import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
 import { oldSettings, statusText } from "../src/sidepanel/ai.ts";
-import { stopFirst } from "../src/worker/connection.ts";
+import { stopFirst, stopProblem } from "../src/worker/connection.ts";
 import {
 	DATABASE,
 	memoryKv,
@@ -569,7 +569,7 @@ describe("questions", () => {
 });
 
 describe("Stop AI access (CR-08)", () => {
-	test("disconnects first; a write that fails still lets the others run, and is reported after", async () => {
+	test("disconnects first; a write that fails still lets the others run, and comes back", async () => {
 		const done: string[] = [];
 		const write =
 			(name: string, fails = false) =>
@@ -578,22 +578,43 @@ describe("Stop AI access (CR-08)", () => {
 				done.push(name);
 				if (fails) throw new Error(`${name} failed`);
 			};
-		const stopped = stopFirst(
-			() => done.push("disconnect"),
-			[write("keep-on", true), write("session", true)],
-		);
+		const stopped = stopFirst(() => done.push("disconnect"), {
+			stopped: write("stopped"),
+			keepOn: write("keep-on", true),
+			session: write("session", true),
+		});
 		// Before any write has even started to finish.
 		expect(done).toEqual(["disconnect"]);
-		await expect(stopped).rejects.toThrow(
-			"AI access is off now, but the setting could not be saved (keep-on failed)",
+		const failed = await stopped;
+		expect(done).toEqual(["disconnect", "stopped", "keep-on", "session"]);
+		expect(Object.keys(failed)).toEqual(["keepOn", "session"]);
+		expect(
+			await stopFirst(() => undefined, { stopped: async () => undefined }),
+		).toEqual({});
+	});
+
+	test("says what holds: the session's stop over the rest until the browser closes", () => {
+		const no = new Error("QuotaExceededError");
+		expect(stopProblem({})).toBeUndefined();
+		// The stop is kept for the session: only Keep AI access on comes back, at a restart.
+		expect(stopProblem({ keepOn: no })).toBe(
+			"AI access is off now, but a setting could not be saved (QuotaExceededError). Keep AI access on is still saved as on: AI access comes on again when Chrome restarts.",
 		);
-		expect(done).toEqual(["disconnect", "keep-on", "session"]);
-		const fine: string[] = [];
-		await stopFirst(
-			() => fine.push("disconnect"),
-			[async () => void fine.push("keep-on")],
+		expect(stopProblem({ session: no })).toBe(
+			"AI access is off now, but a setting could not be saved (QuotaExceededError).",
 		);
-		expect(fine).toEqual(["disconnect", "keep-on"]);
+		// Neither kept: a new worker may connect again.
+		for (const failed of [
+			{ stopped: no, keepOn: no },
+			{ stopped: no, session: no },
+		])
+			expect(stopProblem(failed)).toEndWith(
+				"It may come on again the next time Chrome starts Overmark in the background.",
+			);
+		// With Keep AI access on off, nothing says it comes on again.
+		expect(stopProblem({ stopped: no })).toBe(
+			"AI access is off now, but a setting could not be saved (QuotaExceededError).",
+		);
 	});
 });
 

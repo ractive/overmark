@@ -759,6 +759,35 @@ describe.skipIf(browserBinary === undefined)(
 			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(false);
 			await closeSidePanel(h, panel);
 		}, 60_000);
+
+		test("a Stop in this browser session holds over a stored Keep AI access on, in a new worker too", async () => {
+			// What a Stop whose write of Keep AI access on failed leaves behind.
+			expect((await settingsOf(h))["keepAiOn"]).toBe(true);
+			await h.control.eval(`chrome.storage.session.set({ aiStopped: true })`);
+			await restartWorker(h);
+			await (await h.open("v1")).page.activate();
+			const panel = await openSidePanel(h);
+			const state = () =>
+				panel.eval<string>("document.documentElement.dataset.aiState");
+			await until(state, (s) => s !== undefined && s !== "", 10_000);
+			// Long enough for Keep AI access on to have connected.
+			await Bun.sleep(3000);
+			expect(await state()).toBe("disconnected");
+			expect(await panel.eval(`${byId("keep-on")}.checked`)).toBe(false);
+			expect((await settingsOf(h))["keepAiOn"]).toBe(true);
+			// The user's Connect ends it.
+			await panel.eval(`${byId("connect")}.click()`);
+			await panel.waitFor(
+				`document.documentElement.dataset.aiState === "connected"`,
+				20_000,
+			);
+			expect(
+				await h.control.eval(
+					`chrome.storage.session.get("aiStopped").then((s) => s.aiStopped)`,
+				),
+			).toBe(false);
+			await closeSidePanel(h, panel);
+		}, 60_000);
 	},
 );
 

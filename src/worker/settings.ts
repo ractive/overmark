@@ -51,6 +51,12 @@ export const KEYS = {
  * contexts only unless the extension opens it, which Overmark never does.
  */
 export const SESSION_ON = "aiOn";
+/**
+ * Also there: "Stop AI access" was clicked in this browser session. It
+ * holds over a stored Keep AI access on (whose write may have failed) until
+ * the next connect or Keep AI access on.
+ */
+export const SESSION_STOPPED = "aiStopped";
 
 /**
  * Another tab or program took the address over (`replaced`): kept across
