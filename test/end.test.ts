@@ -97,6 +97,8 @@ const noShots = (r: WorkerRequest): object =>
 		: works(r);
 
 beforeEach(() => {
+	// A scroll a test left would move the next test's marks under them.
+	window.scrollTo(0, 0);
 	window.document.body.innerHTML = `<main><p id="text">Some text</p></main>`;
 	asked.length = 0;
 	answer = works;
@@ -437,7 +439,7 @@ test("a failed mark takes the next number of the case the toolbar is shown for (
 	).toBe(7);
 });
 
-test("a re-render keeps the toolbar's buttons: a click pressed before it still lands", () => {
+test("a re-render keeps the toolbar's buttons: a click pressed before it still lands", async () => {
 	const { a, overlay } = annotator();
 	a.show({ target });
 	const button = (action: string) =>
@@ -462,6 +464,8 @@ test("a re-render keeps the toolbar's buttons: a click pressed before it still l
 	expect(button("undo")).toBe(undo);
 	expect(undo?.disabled).toBe(false);
 	expect(undo?.title).toBe("Remove mark 3");
+	// Nothing of this test's left running into the next.
+	await settle(a, () => !a.state().saving && a.state().drafts === 0);
 	// The order holds, the status and the alert where they were.
 	expect(
 		[...overlay.toolbar.querySelectorAll("button")].map(
