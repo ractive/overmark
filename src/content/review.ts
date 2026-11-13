@@ -97,6 +97,11 @@ export class Reviewer {
 		return this.#case?.id;
 	}
 
+	/** The case a load is finding marks for now, if one is under way. */
+	get loadingCaseId(): string | undefined {
+		return this.#loading?.caseId;
+	}
+
 	/**
 	 * Find the case's elements and draw its marks. Two loads of the same case
 	 * close together (the side panel's draw, an AI app's load_case, a search

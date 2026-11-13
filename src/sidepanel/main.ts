@@ -274,8 +274,10 @@ async function loadInto(
 		// newer load draws them there again.
 		if (!work.current()) {
 			if (sameDrawn(loadTarget, here)) drawn = here;
-			// A newer load of the case drew them (an AI app's load_case): its.
-			else if (!result.adopted) takeOff(here);
+			// A newer load of the case drew them (an AI app's load_case): its,
+			// unless the case is closed: "← All cases" takes its marks off
+			// whoever drew them (DEC-023).
+			else if (!result.adopted || !showing(c.id)) takeOff(here);
 			return undefined;
 		}
 		drawn = here;

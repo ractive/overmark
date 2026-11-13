@@ -121,6 +121,20 @@ describe("elements replaced after loading", () => {
 		).toHaveLength(1);
 	});
 
+	test("a clear while the case is loading stops the load: nothing is drawn after it", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const loading = reviewer.load(c);
+		// What case:clear for this case looks at while the load runs.
+		expect(reviewer.caseId).toBeUndefined();
+		expect(reviewer.loadingCaseId).toBe(c.id);
+		reviewer.clear();
+		await expect(loading).rejects.toBeInstanceOf(LoadReplaced);
+		expect(overlay.reviewing).toBe(false);
+		expect(overlay.items).toEqual([]);
+		expect(reviewer.loadingCaseId).toBeUndefined();
+	});
+
 	test("gone for good: showing says so", async () => {
 		doc.body.innerHTML = PAGE;
 		await reviewer.load(caseOf($("button")));
