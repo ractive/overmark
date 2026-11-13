@@ -183,6 +183,17 @@ export async function showToolbar(
 	return c.id;
 }
 
+/**
+ * Move the control page (a side panel document too) into a window of its
+ * own: a test that uses the real side panel then has one panel in the test's
+ * window, not two that each open and draw the case the toolbar adds to.
+ */
+export async function parkControl(h: Harness): Promise<void> {
+	await h.control.eval(
+		`chrome.tabs.getCurrent().then((tab) => chrome.windows.create({ tabId: tab.id, focused: false }))`,
+	);
+}
+
 /** The page's toolbar and marks as the side panel hears of them. */
 export const overlayOf = (h: Harness, tabId: number) =>
 	h.control.eval<OverlayState | null>(

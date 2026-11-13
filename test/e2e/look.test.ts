@@ -16,7 +16,7 @@ import { MARK_COLOUR } from "../../src/lib/marks.ts";
 import { openSidePanel, setRelay } from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
-import { markElement, saveAs, shadow } from "./steps.ts";
+import { markElement, parkControl, saveAs, shadow } from "./steps.ts";
 
 const id = (name: string) => `document.getElementById(${JSON.stringify(name)})`;
 
@@ -34,6 +34,9 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 
 	beforeAll(async () => {
 		h = await startHarness(browserBinary as string);
+		// One panel in the test's window: the control page, a panel too,
+		// would open and draw the case as well, after this one closed it.
+		await parkControl(h);
 		({ page } = await h.open("v1"));
 		await page.activate();
 		panel = await openSidePanel(h);
@@ -116,6 +119,7 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		await saveAs(
 			page,
 			"Premium form: contrast, copy and a title that takes more than one line of the panel",
+			panel,
 		);
 		// Still the case, renamed, the toolbar adding to it.
 		await panel.waitFor(
