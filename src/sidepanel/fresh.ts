@@ -14,6 +14,7 @@ import {
 	plainUrl,
 	validateCase,
 } from "../lib/case.ts";
+import type { OverlayState } from "../lib/messages.ts";
 import { shortUrl } from "./dom.ts";
 
 /** A new case's title: the page's title, else its short address. */
@@ -57,5 +58,27 @@ export function isUntouched(c: Case, typed?: string): boolean {
 		(c.verdict ?? "").trim() === "" &&
 		(typed ?? "").trim() === "" &&
 		c.title === firstTitle(c.page)
+	);
+}
+
+/**
+ * What a tab said when asked whether it holds anything of a case: its
+ * overlay's state, `none` (no content script there: nothing of Overmark's),
+ * or `unsure` (it did not answer in time: frozen, in a dialog, busy).
+ */
+export type TabAnswer = OverlayState | "none" | "unsure";
+
+/**
+ * Whether a page may still hold something of the case: a toolbar adding to
+ * it (with a mark being typed, on its way, or failed), or a tab that did not
+ * answer. An untouched case is deleted only when no tab may (DEC-026: never
+ * delete on doubt; an empty case left in the list is the cheap mistake).
+ */
+export function mayHold(
+	answers: readonly TabAnswer[],
+	caseId: string,
+): boolean {
+	return answers.some(
+		(a) => a === "unsure" || (a !== "none" && a.target?.caseId === caseId),
 	);
 }

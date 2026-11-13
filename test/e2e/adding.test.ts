@@ -567,6 +567,38 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.send("Page.close");
 	}, 120_000);
 
+	test("an empty case whose toolbar holds a comment on another tab stays when left (review of PR 57)", async () => {
+		const a = await h.open("v1");
+		let panel = await annotate(a.page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const made = await openOne(panel);
+		// A mark whose comment is still being typed: on the page only.
+		await a.page.click(shadow('[data-action="tool-note"]'));
+		await a.page.click(`document.querySelector("h1")`);
+		await a.page.waitFor(shadow(".popover textarea"));
+		await a.page.type("Still typing");
+		// The panel opened again on another tab knows nothing of that toolbar.
+		const b = await h.open("v2");
+		await b.page.activate();
+		panel = await panelHome(h);
+		const item = `document.querySelector('[data-case="${made.id}"]')`;
+		await panel.waitFor(item);
+		await panel.eval(`${item}.click()`);
+		await panel.waitFor(
+			`document.getElementById("verdict")?.dataset.case === "${made.id}"`,
+		);
+		await allCases(panel);
+		await home(panel);
+		await Bun.sleep(1000);
+		const db = await h.control.eval<Db>(READ_DB);
+		expect(db.cases.some((c) => c.id === made.id)).toBe(true);
+		expect(
+			await a.page.eval<string>(`${shadow(".popover textarea")}.value`),
+		).toBe("Still typing");
+		await b.page.send("Page.close");
+		await a.page.send("Page.close");
+	}, 60_000);
+
 	test("the tab closed with an untouched case's toolbar: the case goes, the panel on Home (DEC-026)", async () => {
 		const { page } = await h.open("v1");
 		const panel = await annotate(page);

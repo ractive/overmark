@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_TITLE, type PageInfo, withTitle } from "../src/lib/case.ts";
-import { firstTitle, isUntouched, newCase } from "../src/sidepanel/fresh.ts";
+import type { OverlayState } from "../src/lib/messages.ts";
+import {
+	firstTitle,
+	isUntouched,
+	mayHold,
+	newCase,
+} from "../src/sidepanel/fresh.ts";
 import { withOneMark } from "./fixtures.ts";
 
 const NOW = "2026-11-13T10:00:00.000Z";
@@ -87,5 +93,48 @@ describe("an untouched case goes when it is left (DEC-026)", () => {
 
 	test("imported from a file: someone's case, it stays", () => {
 		expect(isUntouched({ ...fresh(), importedAt: NOW })).toBe(false);
+	});
+});
+
+describe("never on doubt: a page that may hold a mark keeps the case (review of PR 57)", () => {
+	const state = (change: Partial<OverlayState> = {}): OverlayState => ({
+		visible: false,
+		url: "https://shop.example/cart",
+		title: "Cart",
+		drafts: 0,
+		saving: false,
+		...change,
+	});
+	const target = { caseId: "c_new", title: "Cart", nextAnnotation: 1 };
+
+	test("no content script anywhere, or toolbars of other cases: nothing holds it", () => {
+		expect(mayHold([], "c_new")).toBe(false);
+		expect(mayHold(["none", "none"], "c_new")).toBe(false);
+		expect(
+			mayHold(
+				[
+					state({
+						visible: true,
+						drafts: 2,
+						target: { ...target, caseId: "c_other" },
+					}),
+				],
+				"c_new",
+			),
+		).toBe(false);
+		// A page that shows the case's marks holds no mark of it.
+		expect(mayHold([state({ loadedCase: "c_new" })], "c_new")).toBe(false);
+	});
+
+	test("a toolbar adding to it on any tab, up or hidden with a failed mark, holds it", () => {
+		expect(mayHold(["none", state({ visible: true, target })], "c_new")).toBe(
+			true,
+		);
+		expect(mayHold([state({ drafts: 1, target })], "c_new")).toBe(true);
+		expect(mayHold([state({ saving: true, target })], "c_new")).toBe(true);
+	});
+
+	test("a tab that did not answer in time may hold one: the case stays", () => {
+		expect(mayHold(["none", "unsure"], "c_new")).toBe(true);
 	});
 });

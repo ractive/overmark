@@ -55,7 +55,7 @@ import {
 	isFound,
 	noneFound,
 } from "./follow.ts";
-import { isUntouched, newCase } from "./fresh.ts";
+import { isUntouched, mayHold, newCase, type TabAnswer } from "./fresh.ts";
 import { CaseHints } from "./hints.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
@@ -726,17 +726,26 @@ const END_TIMEOUT_MS = 20_000;
 async function endToolbars(
 	caseId: string,
 	how: { discard?: boolean; retry?: boolean },
-): Promise<{ left: number; front: OverlayState | undefined }> {
+): Promise<{
+	left: number;
+	front: OverlayState | undefined;
+	/** A tab did not answer in time: it may still hold a mark. */
+	timedOut: boolean;
+}> {
 	const front = (await activeTab())?.id;
 	const tabs = new Set(toolbarOn);
 	if (front !== undefined) tabs.add(front);
+	let timedOut = false;
 	const answers = await Promise.all(
 		[...tabs].map(async (tabId) => {
 			const answer = (await Promise.race([
 				chrome.tabs
 					.sendMessage(tabId, { type: "overlay:end", caseId, ...how })
 					.catch(() => undefined),
-				sleep(END_TIMEOUT_MS),
+				sleep(END_TIMEOUT_MS).then(() => {
+					timedOut = true;
+					return undefined;
+				}),
 			])) as OverlayState | undefined;
 			return { tabId, answer };
 		}),
@@ -750,7 +759,29 @@ async function endToolbars(
 	return {
 		left,
 		front: answers.find((a) => a.tabId === front)?.answer,
+		timedOut,
 	};
+}
+
+/**
+ * What every tab, in every window, says of its overlay: `none` where no
+ * content script answers (nothing of Overmark's is there), `unsure` where
+ * it does not answer in time.
+ */
+async function askAllTabs(): Promise<TabAnswer[]> {
+	const tabs = await chrome.tabs.query({}).catch(() => []);
+	return Promise.all(
+		tabs.map(async ({ id }): Promise<TabAnswer> => {
+			if (id === undefined) return "none";
+			return Promise.race([
+				chrome.tabs.sendMessage(id, { type: "overlay:state" }).then(
+					(s) => (s as OverlayState | undefined) ?? "unsure",
+					() => "none" as const,
+				),
+				sleep(ASK_TAB_MS).then(() => "unsure" as const),
+			]);
+		}),
+	);
 }
 
 /**
@@ -791,7 +822,7 @@ async function leaveCase(): Promise<void> {
 	// A refresh read before the end would show the toolbar as it was.
 	tabWork.cancel();
 	try {
-		const { left, front } = await endToolbars(caseId, { retry });
+		const { left, front, timedOut } = await endToolbars(caseId, { retry });
 		// Closed meanwhile (deleted elsewhere), or opened again.
 		if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
 		if (left > 0) {
@@ -801,8 +832,9 @@ async function leaveCase(): Promise<void> {
 			});
 			return;
 		}
-		// Gone before the list shows: no empty case flashes there (DEC-026).
-		await forgetUntouched(caseId);
+		// Gone before the list shows: no empty case flashes there (DEC-026);
+		// never while a tab that did not answer may still hold a mark.
+		if (!timedOut) await forgetUntouched(caseId);
 		if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
 		closeCase();
 	} finally {
@@ -943,9 +975,13 @@ async function endDeleted(
 /**
  * A case "Annotate this page" made and the user left as it was made goes
  * again, silently (DEC-026), so trying the button leaves no empty case
- * behind. Checked as the case is stored, in the delete's transaction.
+ * behind. Never on doubt: every tab in every window must say that it holds
+ * nothing of the case (a toolbar adding to it, a mark on its way or failed),
+ * and one that does not answer keeps it. Checked as the case is stored, in
+ * the delete's transaction.
  */
 async function forgetUntouched(caseId: string): Promise<boolean> {
+	if (mayHold(await askAllTabs(), caseId)) return false;
 	const typed = state.verdictDrafts.get(caseId);
 	const gone = await store
 		.deleteCaseIf(caseId, (c) => isUntouched(c, typed))
