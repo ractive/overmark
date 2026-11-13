@@ -1484,7 +1484,8 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 						`chrome.runtime.sendMessage({ type: "cases:changed", caseId: "c_ai" })`,
 					);
 					await openCase("c_ai", panel);
-					for (const part of ["ai-status", "ai-call", "stop-ai"])
+					// What the user sees of the connection: the pill's words.
+					for (const part of ["ai-label", "ai-call", "stop-ai"])
 						expect(await visible(panel, part)).toBe(true);
 
 					await panel.eval(`${id("stop-ai")}.click()`);

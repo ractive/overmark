@@ -1540,7 +1540,10 @@ describe("the AI app", () => {
 			noActions,
 		);
 		expect(el("home").hidden).toBe(true);
-		expect(el("ai-status").closest("[hidden]")).toBeNull();
+		// What the user sees of it: the pill's label, beside Stop.
+		expect(el("ai-label").closest("[hidden], .visually-hidden")).toBeNull();
+		expect(el("ai-label").textContent).toBe("AI connecting…");
+		// The whole sentence is the pill's name, for a screen reader.
 		expect(el("ai-status").textContent).toBe("Connected: Claude");
 		expect(el("stop-ai").closest("[hidden]")).toBeNull();
 		render(caseState(c, ai({ status: "Not connected" })), noActions);
