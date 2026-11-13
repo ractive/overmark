@@ -57,10 +57,10 @@ timestamp: 2026-11-04T17:00:00+01:00
    a click (both fixed in the worker: injected again after the load, tried again after
    250 ms); the panel dropped the news that the click let Overmark onto the tab when it
    came before the panel had noted that the case waits there (fixed); and the test
-   clicked a new tab before its first page had come (fixed in the test; so an early
-   click on a tab a case's address opened, which Chrome grants nothing and the panel
-   then asks again for, is not covered, and that test's wait for the notice cannot
-   tell the new tab's notice from the one of the tab in front before). **Still
+   clicked a new tab before its first page had come (fixed in the test, which now
+   clicks once the page has loaded and waits for the panel's notice of that tab; the
+   early click, which Chrome grants nothing, has a test of its own: nothing goes in,
+   the panel asks on that tab, and the click again loads the case). **Still
    open:** the `beforeAll` of the suites that pair an AI app over the test relay hanging
    for its 60 s was not reproduced here (Mac and container, under load). Every setup
    step is now logged on stderr with a time and has its own limit, so the next hang in

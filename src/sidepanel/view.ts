@@ -258,6 +258,8 @@ const DETAILS_TITLE =
 function renderAccess(n: Notice, state: PanelState): void {
 	const now = access(state);
 	n.el.hidden = now === "yes";
+	// Which tab it is about: the address and title are hidden too.
+	n.el.dataset["tab"] = state.tab === undefined ? "" : String(state.tab.id);
 	const files = now === "never" && state.fileAccess === false;
 	n.text.textContent =
 		now !== "never" ? NO_ACCESS : files ? CANNOT_RUN_FILES : CANNOT_RUN;
