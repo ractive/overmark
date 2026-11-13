@@ -382,3 +382,26 @@ test("a rename while a mark is being added is not reverted (review of PR 57)", a
 	const status = overlay.toolbar.querySelector('[data-role="status"]');
 	expect(status?.textContent).toBe("Mark 3 added to “Login button”");
 });
+
+test("a mark the page moved away from gets its screenshot again by itself once the page stands still (review of PR 57)", async () => {
+	window.document.body.innerHTML = `<main style="height: 3000px"><p id="text">Some text</p></main>`;
+	const { a, overlay } = annotator();
+	a.show({ target });
+	note(overlay, a);
+	// The page scrolls before the mark's screenshot is taken: given up.
+	window.scrollTo(0, 400);
+	window.document.dispatchEvent(new window.Event("scroll"));
+	const status = () =>
+		overlay.toolbar.querySelector('[data-role="status"]')?.textContent ?? "";
+	const alert = () =>
+		overlay.toolbar.querySelector('[data-role="alert"]')?.textContent ?? "";
+	for (let i = 0; i < 80 && !status().startsWith("Mark 3 added"); i++)
+		await Bun.sleep(50);
+	expect(status()).toBe("Mark 3 added to “Open case”");
+	expect(alert()).toBe("");
+	expect(asked.filter((r) => r.type === "capture")).toHaveLength(1);
+	expect(asked.filter((r) => r.type === "case:save")).toHaveLength(1);
+	expect(overlay.toolbar.querySelector('[data-action="retry"]')).toBeNull();
+	// The page is back where the user left it.
+	expect(window.scrollY).toBe(400);
+});

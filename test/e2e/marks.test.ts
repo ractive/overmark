@@ -115,7 +115,7 @@ describe.skipIf(browserBinary === undefined)(
 			await close(page);
 		}, 60_000);
 
-		test("a mark the page moved away from gets its screenshot with Add mark N, and the page comes back", async () => {
+		test("a mark the page moved away from gets its screenshot by itself once the page stands still, and the page comes back", async () => {
 			const { page, tabId } = await open("long");
 			await showToolbar(h, page, tabId);
 			// An AI app holds the page, so the mark's screenshot has to wait.
@@ -125,16 +125,18 @@ describe.skipIf(browserBinary === undefined)(
 			await markElement(page, "#far", "drawn further down");
 			const down = await page.eval<number>("scrollY");
 			await sendToTab(tabId, { type: "page:unblur" });
-			await Bun.sleep(1800);
-			// The page is left alone while the user works.
-			expect(await page.eval<number>("scrollY")).toBe(down);
+			// Taken again by itself once the page stands still, without Add
+			// mark N (DEC-026): saveAs clicks nothing.
 			await saveAs(page, "Waited");
+			expect(
+				await page.eval(`${shadow('[data-action="retry"]')} === null`),
+			).toBe(true);
+			// The page is back where the user left it.
 			expect(await page.eval<number>("scrollY")).toBe(down);
 			const { c } = await saved("Waited");
-			// Mark 2 went in first, mark 1 with Add mark N: each its own shot.
 			const shotOf = (n: number) =>
 				c.annotations.find((a) => a.number === n)?.shot;
-			expect([shotOf(2), shotOf(1)]).toEqual(["s1", "s2"]);
+			expect(new Set([shotOf(1), shotOf(2)]).size).toBe(2);
 			expect(
 				await countColour(h.control, "Waited", "crops/a1.webp", BLUE),
 			).toBeGreaterThan(1000);
@@ -225,6 +227,8 @@ describe.skipIf(browserBinary === undefined)(
 			);
 			await markElement(page, "#far", "the next one");
 			await shotsTaken(tabId);
+			// A screenshot that failed waits for the user: Add mark 2.
+			await page.click(shadow('[data-action="retry"]'));
 			await saveAs(page, "Failed shot");
 			const { c } = await saved("Failed shot");
 			expect(c.annotations[2]?.shot).not.toBe("s1");
@@ -252,13 +256,17 @@ describe.skipIf(browserBinary === undefined)(
 		test("a second click on Add mark N while its screenshot is awaited adds it once (DEC-026)", async () => {
 			const { page, tabId } = await open("long");
 			await showToolbar(h, page, tabId);
-			await sendToTab(tabId, { type: "page:blur", blurForms: false });
+			// The screenshot fails once: the mark waits for Add mark N.
+			await (await worker(h)).eval(`(() => {
+			const real = chrome.tabs.captureVisibleTab;
+			chrome.tabs.captureVisibleTab = () => {
+				chrome.tabs.captureVisibleTab = real;
+				return Promise.reject(new Error("no picture"));
+			};
+		})()`);
 			await markElement(page, "#near", "drawn at the top");
-			await page.eval("window.scrollTo(0, 2400)");
-			await sendToTab(tabId, { type: "page:unblur" });
-			// Its screenshot was given up: the page moved on.
 			await page.waitFor(
-				`${shadow('[data-role="alert"]')}?.textContent.startsWith("Mark 1 was not added")`,
+				`${shadow('[data-role="alert"]')}?.textContent.startsWith("Mark 1 was not added: its screenshot could not be taken")`,
 				20_000,
 			);
 			await page.eval(

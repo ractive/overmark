@@ -128,6 +128,13 @@ const frame = () =>
 		sleep(250),
 	]);
 
+/** How long the page must stand still before a mark's screenshot is taken again. */
+const STILL_MS = 800;
+/** How long one wait for a still page lasts at most. */
+const STILL_WAIT_MS = 5000;
+/** How often a mark's screenshot the page moved away from is taken again by itself. */
+const AGAIN_TRIES = 3;
+
 /** Chrome allows two screenshots a second; the overlay stays up meanwhile. */
 const SHOT_GAP_MS = 620;
 
@@ -188,6 +195,8 @@ export class Annotator {
 	#unblur: (() => void) | undefined;
 	/** The last screenshot's page scrolled while it was taken. */
 	#shotMoved = false;
+	/** When the page last scrolled or the window changed (`Date.now()`). */
+	#movedAt = 0;
 	/** What changes the case (adds, undos) runs in order. */
 	#ops: Promise<void> = Promise.resolve();
 	/**
@@ -246,6 +255,7 @@ export class Annotator {
 		const win = doc.defaultView;
 		const moved = () => {
 			this.#scrolled = true;
+			this.#movedAt = Date.now();
 			this.#schedule();
 		};
 		// Capture phase: scrolling inside a container moves elements too.
@@ -1163,7 +1173,7 @@ export class Annotator {
 	}
 
 	/** Adding a mark again, nobody is using the page: back to where it was drawn. */
-	async #takeBack(draft: Draft): Promise<void> {
+	async #takeBack(draft: Draft, strict = false): Promise<void> {
 		const win = this.overlay.doc.defaultView as Window;
 		const here = this.#scroll();
 		this.#scrollTo(draft.scroll);
@@ -1180,9 +1190,30 @@ export class Annotator {
 				behavior: "instant",
 			});
 		try {
-			await this.#take(draft);
+			// `strict`: given up again if the page moves meanwhile, as a shot
+			// taken when the mark is drawn is (#take, #shotMoved).
+			await this.#take(draft, strict ? this.#onWindow(draft) : undefined);
 		} finally {
 			this.#scrollTo(here);
+		}
+	}
+
+	/**
+	 * Until the page has stood still for a moment (no scroll, no resize) and
+	 * nobody is drawing or typing a comment, `STILL_WAIT_MS` at most; whether
+	 * it did.
+	 */
+	async #still(): Promise<boolean> {
+		const end = Date.now() + STILL_WAIT_MS;
+		for (;;) {
+			if (
+				Date.now() - this.#movedAt >= STILL_MS &&
+				this.#drag === null &&
+				this.#editing === null
+			)
+				return true;
+			if (Date.now() > end) return false;
+			await sleep(100);
 		}
 	}
 
@@ -1352,16 +1383,36 @@ export class Annotator {
 					);
 					return false;
 				}
-				if (!takeBack) {
+				if (!takeBack && draft.shotError !== undefined) {
 					this.#fail(
 						draft,
-						draft.shotError === undefined
-							? "the page changed before its screenshot was taken. Adding it again scrolls back to take one."
-							: `its screenshot could not be taken (${draft.shotError}). Adding it again takes one.`,
+						`its screenshot could not be taken (${draft.shotError}). Adding it again takes one.`,
 					);
 					return false;
 				}
-				await this.#takeBack(draft);
+				if (takeBack) await this.#takeBack(draft);
+				else {
+					// The page moved as it was drawn (DEC-026, every action saves
+					// at once): its screenshot is taken again by itself once the
+					// page stands still, a few times, before it waits for "Add
+					// mark N".
+					for (
+						let tries = 0;
+						tries < AGAIN_TRIES && draft.shot === undefined;
+						tries++
+					) {
+						if (!(await this.#still())) continue;
+						if (gone() || this.#elsewhere(draft)) return false;
+						await this.#takeBack(draft, true);
+					}
+					if (draft.shot === undefined) {
+						this.#fail(
+							draft,
+							"the page kept moving before its screenshot was taken. Adding it again scrolls back to take one.",
+						);
+						return false;
+					}
+				}
 				// Undone, or its case left, meanwhile.
 				if (gone() || this.#elsewhere(draft)) return false;
 			}

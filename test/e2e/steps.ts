@@ -237,9 +237,8 @@ export async function saveAs(page: Page, title: string): Promise<void> {
 	await page.eval(
 		`(() => { const p = ${shadow(".popover")}; if (p && !p.hidden) ${shadow('[data-action="comment-done"]')}?.click(); })()`,
 	);
-	// A mark whose screenshot the page's moving gave up waits for "Add mark
-	// N", which scrolls back to take it, as Save case… did (DEC-014).
-	const retry = shadow('[data-action="retry"]');
+	// Nothing is clicked for them: a mark whose screenshot the page's moving
+	// gave up is taken again by itself once the page stands still (DEC-026).
 	const end = Date.now() + 30_000;
 	let state = await overlayOf(h, tabId);
 	while (
@@ -251,8 +250,6 @@ export async function saveAs(page: Page, title: string): Promise<void> {
 				`the marks are not in the case; the toolbar says: ${said}`,
 			);
 		}
-		if (state?.saving === false)
-			await page.eval(`${retry}?.click()`).catch(() => undefined);
 		await Bun.sleep(250);
 		state = await overlayOf(h, tabId);
 	}
