@@ -71,10 +71,15 @@ describe("an untouched case goes when it is left (DEC-026)", () => {
 		expect(isUntouched(withOneMark(fresh()))).toBe(false);
 	});
 
-	test("its only mark taken out by the toolbar's Undo: untouched again", () => {
-		// Undo frees the number: the case is as it was made.
-		const undone = { ...withOneMark(fresh()), annotations: [], shots: [] };
-		expect(isUntouched(undone)).toBe(true);
+	test("its only mark taken out by the toolbar's Undo: the user's, it stays (review of PR 57)", () => {
+		// Undo frees the number and records that a mark was stored.
+		const undone = {
+			...withOneMark(fresh()),
+			annotations: [],
+			shots: [],
+			lastNumber: 0,
+		};
+		expect(isUntouched(undone)).toBe(false);
 	});
 
 	test("its marks deleted in the side panel: the user's, it stays", () => {

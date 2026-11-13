@@ -495,7 +495,10 @@ describe("saveCase", () => {
 		const after = (await store.getCase("c_1")) as Case;
 		expect(after.annotations).toEqual([]);
 		expect(after.shots).toEqual([]);
-		expect(after.lastNumber).toBeUndefined();
+		// A mark was stored: the case is the user's now (review of PR 57),
+		// and number 1 is free again.
+		expect(after.lastNumber).toBe(0);
+		expect(nextNumbers(after).annotation).toBe(1);
 		expect(validateCase(after)).toEqual(after);
 	});
 
@@ -669,7 +672,8 @@ describe("adding mark by mark", () => {
 		const c = (await store.getCase("c_1")) as Case;
 		expect(c.annotations.map((a) => a.number)).toEqual([1, 2]);
 		expect(c.shots.map((s) => s.id)).toEqual(["s1"]);
-		expect(c.lastNumber).toBeUndefined();
+		// It records that marks were stored (review of PR 57), below the freed number.
+		expect(c.lastNumber).toBe(2);
 		expect(keys(store)).toEqual([
 			"c_1/crops/a1.webp",
 			"c_1/crops/a2.webp",

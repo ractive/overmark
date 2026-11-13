@@ -296,7 +296,9 @@ export interface AddedAs {
  * here the mark must still be as that add stored it (not resolved, its comment
  * not edited), the user's, the highest number in the case, on a screenshot of
  * its own taken lately. Its pin was on that screenshot only, which goes with
- * it, so its number is free again (unlike a delete, DEC-014).
+ * it, so its number is free again (unlike a delete, DEC-014). `lastNumber`
+ * is set to the highest number left (0 for none): a case that has had a mark
+ * is never untouched again (DEC-026).
  * `removed: false`: it was gone already (deleted in the side panel).
  */
 export async function undoAdd(
@@ -335,10 +337,18 @@ export async function undoAdd(
 		)
 			throw refuse("cannot be undone here");
 		removed = true;
+		const annotations = current.annotations.filter((a) => a !== gone);
 		const value = validateCase({
 			...current,
-			annotations: current.annotations.filter((a) => a !== gone),
+			annotations,
 			shots: current.shots.filter((s) => s !== shot),
+			// A mark was stored, so the case is the user's (DEC-026, review of
+			// PR 57): `lastNumber` says so, set below the freed number so that
+			// the number is free again. A case with no mark left gets 0.
+			lastNumber: Math.max(
+				current.lastNumber ?? 0,
+				...annotations.map((a) => a.number),
+			),
 			updatedAt: now.toISOString(),
 		});
 		return { value, deleteImages: [gone.crop, shot.image] };

@@ -535,7 +535,8 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			(db) => !db.cases.some((c) => c.id === second.id),
 		);
 
-		// A mark, then Undo: as it was made, so it goes as well.
+		// A mark, then Undo: it has had a mark, so it is the user's and stays,
+		// empty (review of PR 57).
 		panel = await annotate(page);
 		await inCase(panel, title);
 		const third = await openOne(panel);
@@ -546,10 +547,14 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		expect((await openOne(panel)).annotations).toEqual([]);
 		await allCases(panel);
 		await home(panel);
-		await until(
-			() => h.control.eval<Db>(READ_DB),
-			(db) => !db.cases.some((c) => c.id === third.id),
+		await panel.waitFor(
+			`[...document.querySelectorAll("[data-case]")].some((e) => e.dataset.case === ${JSON.stringify(third.id)})`,
 		);
+		const undone = (await h.control.eval<Db>(READ_DB)).cases.find(
+			(c) => c.id === third.id,
+		);
+		expect(undone?.annotations).toEqual([]);
+		expect(undone?.lastNumber).toBe(0);
 
 		// One mark: it stays, and shows in the list.
 		panel = await annotate(page);

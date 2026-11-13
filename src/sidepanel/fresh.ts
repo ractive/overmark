@@ -43,11 +43,10 @@ export function newCase(id: string, page: PageInfo, now: string): Case {
 
 /**
  * The case is as "Annotate this page" made it: no marks and no screenshots,
- * no mark ever deleted (`lastNumber`), not from a file, no summary stored or
- * typed (`typed`, the summary not saved yet), and the title it was given. A
- * mark added and taken out again by the toolbar's Undo leaves it so (its
- * number is free again); a rename, a summary or a deleted mark make it the
- * user's, and it stays.
+ * no mark ever stored (`lastNumber`: a delete in the panel and the toolbar's
+ * Undo both set it), not from a file, no summary stored or typed (`typed`,
+ * the summary not saved yet), and the title it was given. A case that has
+ * once had a mark, a rename or a summary is the user's, and it stays.
  */
 export function isUntouched(c: Case, typed?: string): boolean {
 	return (

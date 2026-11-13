@@ -991,10 +991,13 @@ wouldn't have drafts — which is ok I think."
   last tab with its toolbar closes while it is open. Untouched (`isUntouched`, pure):
   no marks and no screenshots, no mark ever deleted (`lastNumber`), not imported, no
   summary stored or typed, and still the title it was given. It is known from the case
-  itself, not from a flag, so it holds across a panel closed and opened again; a mark
-  added and taken out again with the toolbar's Undo leaves the case untouched (its
-  number is free again), a rename, a summary or a mark deleted in the panel make it the
-  user's. The check runs in the delete's transaction (`deleteCaseIf`), so a mark an AI
+  itself, not from a flag, so it holds across a panel closed and opened again. **A case
+  that has once had a mark is the user's** (after the review of PR 57, replacing "Undo
+  leaves it untouched"): the toolbar's Undo frees the mark's number and sets
+  `lastNumber` to the highest number left (0 for none), as a delete in the panel sets
+  it, so a case undone back to empty stays in the list, and a sync file written for it
+  always has its case. A rename, a summary or a mark deleted in the panel make it the
+  user's too. The check runs in the delete's transaction (`deleteCaseIf`), so a mark an AI
   app adds meanwhile is never lost. **Closing the side panel** leaves the case and its
   toolbar on the page as before; opening it again opens the case. If the tab closes or
   reloads while the panel is closed, the empty case stays in the list until it is
@@ -1011,7 +1014,7 @@ wouldn't have drafts — which is ok I think."
   under This page ("“<title>” was deleted, and 1 mark not in it yet is gone with it.").
   The icon's click and the keyboard shortcut are unchanged: on a tab Overmark may not run
   on yet, "Annotate this page" is off with the access notice. Undo right after the first
-  mark takes it out; the case stays, empty and untouched. A reload or navigation takes
+  mark takes it out; the case stays, empty, and is the user's. A reload or navigation takes
   the toolbar with the page, the panel stays in the case ("Add marks" again); a tab
   switch leaves the toolbar on its tab and the marks follow (DEC-022). The panel draws
   a case on the page once it has a mark: an empty one has nothing to show ("0 of 0
