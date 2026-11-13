@@ -57,6 +57,16 @@ function sameMark(a: Annotation, b: Annotation): boolean {
 	);
 }
 
+/**
+ * A load stopped by a clear (the panel's or the page's own Hide) or by a load
+ * of another case: no failure, its marks are simply not the page's now.
+ */
+export class LoadReplaced extends Error {
+	constructor() {
+		super("Loading was replaced by another one.");
+	}
+}
+
 export class Reviewer {
 	readonly overlay: Overlay;
 	#case: Case | undefined;
@@ -67,8 +77,10 @@ export class Reviewer {
 	/** A newer load or a clear stops a load that is still running. */
 	#generation = 0;
 	/** The case a load is finding marks for now, and a newer version of it. */
-	#loading: string | undefined;
+	#loading: { caseId: string } | undefined;
 	#newer: Case | undefined;
+	/** The newest load: an older one of the same case ends with its result. */
+	#latest: { caseId: string; run: Promise<LoadResult> } | undefined;
 
 	constructor(overlay: Overlay) {
 		this.overlay = overlay;
@@ -85,8 +97,38 @@ export class Reviewer {
 		return this.#case?.id;
 	}
 
-	async load(c: Case): Promise<LoadResult> {
-		this.#loading = c.id;
+	/**
+	 * Find the case's elements and draw its marks. Two loads of the same case
+	 * close together (the side panel's draw, an AI app's load_case, a search
+	 * again) both end with the newest one's result; a load stopped by a clear
+	 * or by another case's load rejects with `LoadReplaced`.
+	 */
+	load(c: Case): Promise<LoadResult> {
+		const run: Promise<LoadResult> = this.#loadOnce(c).catch(
+			(error: unknown) => {
+				const newest = this.#latest;
+				if (
+					error instanceof LoadReplaced &&
+					newest !== undefined &&
+					newest.run !== run &&
+					newest.caseId === c.id
+				)
+					return newest.run;
+				throw error;
+			},
+		);
+		this.#latest = { caseId: c.id, run };
+		void run
+			.finally(() => {
+				if (this.#latest?.run === run) this.#latest = undefined;
+			})
+			.catch(() => undefined);
+		return run;
+	}
+
+	async #loadOnce(c: Case): Promise<LoadResult> {
+		const loading = { caseId: c.id };
+		this.#loading = loading;
 		this.#newer = undefined;
 		try {
 			const result = await this.#load(c);
@@ -97,7 +139,8 @@ export class Reviewer {
 				? result
 				: ((await this.update(newer)) ?? result);
 		} finally {
-			if (this.#loading === c.id) this.#loading = undefined;
+			// A newer load's, if one started meanwhile.
+			if (this.#loading === loading) this.#loading = undefined;
 		}
 	}
 
@@ -110,8 +153,7 @@ export class Reviewer {
 			(a, b) => a.number - b.number,
 		)) {
 			await yieldToPage();
-			if (generation !== this.#generation)
-				throw new Error("Loading was replaced by another one.");
+			if (generation !== this.#generation) throw new LoadReplaced();
 			entries.push(this.#find(search, annotation));
 		}
 		this.#case = c;
@@ -143,7 +185,7 @@ export class Reviewer {
 	 * running takes the newer version when it is done.
 	 */
 	async update(c: Case): Promise<LoadResult | null> {
-		if (this.#loading === c.id) {
+		if (this.#loading?.caseId === c.id) {
 			this.#newer = c;
 			return null;
 		}

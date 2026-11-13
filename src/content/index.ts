@@ -19,13 +19,14 @@ import type {
 	ContentRequest,
 	DescribedElement,
 	InspectResult,
+	LoadReplacedAnswer,
 	Released,
 } from "../lib/messages.ts";
 import { PageActivity } from "./activity.ts";
 import { Annotator } from "./annotator.ts";
 import { PageBlur } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
-import { Reviewer } from "./review.ts";
+import { LoadReplaced, Reviewer } from "./review.ts";
 
 declare global {
 	var __overmark: boolean | undefined;
@@ -238,9 +239,15 @@ function start(): void {
 							sendResponse(result);
 						},
 						(error: unknown) =>
-							sendResponse({
-								error: error instanceof Error ? error.message : String(error),
-							}),
+							sendResponse(
+								// Stopped by a clear, or another case's load: no failure.
+								error instanceof LoadReplaced
+									? ({ replaced: true } satisfies LoadReplacedAnswer)
+									: {
+											error:
+												error instanceof Error ? error.message : String(error),
+										},
+							),
 					);
 					return true; // answers asynchronously
 				case "case:update":

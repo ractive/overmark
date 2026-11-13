@@ -30,6 +30,7 @@ import {
 import type {
 	AnnotationMatch,
 	Broadcast,
+	LoadReplacedAnswer,
 	LoadResult,
 	OverlayState,
 } from "../lib/messages.ts";
@@ -230,10 +231,15 @@ async function loadInto(
 	const here = { tabId, caseId: c.id };
 	try {
 		loadsUnderWay++;
-		const result = await sendToTab<LoadResult | { error: string }>(tabId, {
+		const result = await sendToTab<
+			LoadResult | LoadReplacedAnswer | { error: string }
+		>(tabId, {
 			type: "case:load",
 			case: c,
 		}).finally(() => loadsUnderWay--);
+		// Stopped by a clear (Hide, the case closed) or another case's load:
+		// nothing to say, and no marks of this load's are on the page.
+		if ("replaced" in result) return undefined;
 		if ("error" in result) {
 			// A stale load's failure is about a tab no longer in question.
 			if (work.current()) hint(result.error);
@@ -802,12 +808,19 @@ function closeCase(): void {
 
 /**
  * For an action on the open case: writes its outcome under that case's
- * buttons, unless the panel left the case, or a newer action took over.
+ * buttons, unless the panel left the case, or a newer action wrote there.
+ * Only a write takes the place over: an action that says nothing (Done
+ * adding, an Export that went well) leaves what a draw finds to say it.
  */
 function caseHintWriter(): (text: string | undefined) => void {
-	const work = hintWork.start();
+	const since = hintWork.peek();
+	let mine: { current: () => boolean } | undefined;
 	return (text) => {
-		if (work.current()) update((s) => (s.caseHint = text));
+		if (mine === undefined) {
+			if (!since.current()) return;
+			mine = hintWork.start();
+		}
+		if (mine.current()) update((s) => (s.caseHint = text));
 	};
 }
 

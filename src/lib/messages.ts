@@ -39,7 +39,9 @@ export type ContentRequest =
 	| { type: "overlay:settings"; blurForms: boolean }
 	/**
 	 * Find the case's elements on this page and draw its marks (`LoadResult`, or
-	 * `{ error }`, also while the page is busy).
+	 * `{ error }`, also while the page is busy). Two loads of the case close
+	 * together both answer the newer one's result; one stopped by a clear or
+	 * by another case's load answers `LoadReplacedAnswer`, which is no error.
 	 */
 	| { type: "case:load"; case: Case }
 	/**
@@ -171,6 +173,11 @@ export interface AnnotationMatch {
 	candidates: CandidateInfo[];
 	/** Only part of the page was searched (very many elements, or out of time). */
 	truncated?: boolean;
+}
+
+/** A load stopped by a clear or by another case's load: nothing to say. */
+export interface LoadReplacedAnswer {
+	replaced: true;
 }
 
 export interface LoadResult {

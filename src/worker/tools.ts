@@ -57,6 +57,7 @@ import type {
 	ContentRequest,
 	DescribedElement,
 	InspectResult,
+	LoadReplacedAnswer,
 	LoadResult,
 	OverlayState,
 	Released,
@@ -507,10 +508,16 @@ export function createTools(deps: ToolDeps): Tool[] {
 	}
 
 	async function load(current: CurrentTab, c: Case): Promise<LoadResult> {
-		const result = await tab.send<LoadResult | { error: string }>(current.id, {
+		const result = await tab.send<
+			LoadResult | LoadReplacedAnswer | { error: string }
+		>(current.id, {
 			type: "case:load",
 			case: c,
 		});
+		if ("replaced" in result)
+			throw new CaseError(
+				"While the marks were being found, they were taken off the page (Hide) or another case was loaded onto it; call load_case again if you still want them there.",
+			);
 		if ("error" in result) throw new CaseError(result.error);
 		return result;
 	}
