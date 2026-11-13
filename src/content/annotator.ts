@@ -766,6 +766,8 @@ export class Annotator {
 		this.#target = { ...this.#target, title };
 		for (const d of this.#drafts)
 			if (d.queuedFor?.caseId === caseId) d.queuedFor = { caseId, title };
+		// "Mark 2 added to “<old title>”" says no more than the status now.
+		if (!this.#activity.saving) this.#message = "";
 		this.#renderToolbar();
 	}
 

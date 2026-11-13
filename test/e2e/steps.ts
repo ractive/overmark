@@ -1,8 +1,11 @@
-/** Steps the end-to-end tests share: the toolbar, saving, reading the database. */
+/** Steps the end-to-end tests share: the toolbar, a case, reading the database. */
 
 import { join } from "node:path";
+import { type Case, newId, type PageInfo } from "../../src/lib/case.ts";
+import type { OverlayState } from "../../src/lib/messages.ts";
+import { newCase } from "../../src/sidepanel/fresh.ts";
 import type { Page } from "./browser.ts";
-import type { Harness } from "./harness.ts";
+import { type Harness, opened } from "./harness.ts";
 
 export const HOST = `document.getElementById("overmark-root")`;
 
@@ -30,6 +33,11 @@ export interface Db {
 		id: string;
 		title: string;
 		lastNumber?: number;
+		page: {
+			url: string;
+			title: string;
+			viewport: { width: number; height: number };
+		};
 		shots: { id: string; scrollY: number }[];
 		annotations: {
 			id: string;
@@ -128,18 +136,58 @@ export async function reachOverlay(page: Page): Promise<void> {
 	});
 }
 
-/** Inject the content script if needed and show the toolbar. */
+/** A content request to the tab, injecting the content script first if needed. */
+const toTab = (tabId: number, message: object) =>
+	`chrome.tabs.sendMessage(${tabId}, ${JSON.stringify(message)}).catch(() => chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, ${JSON.stringify(message)})))`;
+
+/** Store a case from the control page, and tell the worker and other panels. */
+export const PUT_CASE = (c: Case) => `new Promise((resolve, reject) => {
+	const open = indexedDB.open("overmark");
+	open.onerror = () => reject(open.error);
+	open.onsuccess = () => {
+		const tx = open.result.transaction("cases", "readwrite");
+		tx.objectStore("cases").put(${JSON.stringify(c)});
+		tx.oncomplete = () => {
+			open.result.close();
+			chrome.runtime.sendMessage({ type: "cases:changed", caseId: ${JSON.stringify(c.id)} }).catch(() => undefined);
+			resolve(true);
+		};
+		tx.onerror = () => reject(tx.error);
+	};
+})`;
+
+/**
+ * Show the toolbar as "Annotate this page" does (DEC-026): a new case with
+ * the page's title and info, stored at once, and the toolbar adding to it.
+ * A side panel on Home opens it, as it opens the case any toolbar on the tab
+ * in front adds to (DEC-023). Answers the case's id.
+ */
 export async function showToolbar(
 	h: Harness,
 	page: Page,
 	tabId: number,
-): Promise<void> {
+): Promise<string> {
 	await page.activate();
+	const info = await h.control.eval<PageInfo>(
+		toTab(tabId, { type: "page:info" }),
+	);
+	const c = newCase(newId("c"), info, new Date().toISOString());
+	await h.control.eval(PUT_CASE(c));
 	await h.control.eval(
-		`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" }).catch(() => chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" })))`,
+		toTab(tabId, {
+			type: "overlay:show",
+			target: { caseId: c.id, title: c.title, nextAnnotation: 1 },
+		}),
 	);
 	await page.waitFor(shadow('[data-action="tool-box"]'));
+	return c.id;
 }
+
+/** The page's toolbar and marks as the side panel hears of them. */
+export const overlayOf = (h: Harness, tabId: number) =>
+	h.control.eval<OverlayState | null>(
+		`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).catch(() => null)`,
+	);
 
 /** Finish the open comment field with `text`. */
 export async function comment(page: Page, text: string): Promise<void> {
@@ -175,24 +223,79 @@ export async function markElement(
 	await comment(page, text);
 }
 
-/** Save the marks as a new case with `title` and wait until it is stored. */
+/**
+ * What "Save case…" with a title was before DEC-026: every mark drawn is in
+ * the case the toolbar adds to (a comment still open is done first), and the
+ * case is named `title`: with the Rename of the side panel that shows it,
+ * as the user does, else in the store. Waits until it is stored so.
+ */
 export async function saveAs(page: Page, title: string): Promise<void> {
-	await page.click(shadow('[data-action="save"]'));
-	await page.waitFor(shadow('input[aria-label="Case title"]'));
+	const owner = opened.get(page);
+	if (owner === undefined)
+		throw new Error("saveAs: a page the harness did not open");
+	const { h, tabId } = owner;
 	await page.eval(
-		`(() => { const i = ${shadow('input[aria-label="Case title"]')}; i.focus(); i.select(); })()`,
+		`(() => { const p = ${shadow(".popover")}; if (p && !p.hidden) ${shadow('[data-action="comment-done"]')}?.click(); })()`,
 	);
-	await page.type(title);
-	await page.click(shadow('[data-action="save-confirm"]'));
-	await page
-		.waitFor(
-			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
-			20_000,
-		)
-		.catch(async (error: unknown) => {
-			const said = await page.eval(`${shadow(".toolbar")}.textContent`);
-			throw new Error(`no save; the toolbar says: ${said}`, { cause: error });
-		});
+	const state = await until(
+		() => overlayOf(h, tabId),
+		(s) => s?.target !== undefined && s.drafts === 0 && !s.saving,
+		20_000,
+	).catch(async (error: unknown) => {
+		const said = await page.eval(`${shadow(".toolbar")}?.textContent`);
+		throw new Error(
+			`the marks are not in the case; the toolbar says: ${said}`,
+			{
+				cause: error,
+			},
+		);
+	});
+	const caseId = state?.target?.caseId as string;
+	await renameCase(h, caseId, title, tabId);
+}
+
+/**
+ * Rename the case: in the side panel that shows it (Rename, the title,
+ * Enter), else in the store, telling the toolbar on `tabId` and the panels.
+ */
+export async function renameCase(
+	h: Harness,
+	caseId: string,
+	title: string,
+	tabId?: number,
+): Promise<void> {
+	const panel = h.control;
+	const shown = `(!document.getElementById("case-view")?.hidden && document.getElementById("verdict")?.dataset.case === ${JSON.stringify(caseId)})`;
+	if (await panel.eval<boolean>(`!!${shown}`).catch(() => false)) {
+		await panel.eval(`document.getElementById("rename-case").click()`);
+		await panel.waitFor(`!document.getElementById("rename").hidden`);
+		await panel.eval(`(() => {
+			const field = document.getElementById("rename-field");
+			field.value = ${JSON.stringify(title)};
+			field.dispatchEvent(new Event("input"));
+			field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+		})()`);
+		await panel.waitFor(
+			`document.querySelector("#case-view .case-title")?.textContent === ${JSON.stringify(title)}`,
+			10_000,
+		);
+	} else {
+		const { cases } = await panel.eval<{ cases: Case[] }>(READ_DB);
+		const c = cases.find((x) => x.id === caseId);
+		if (c === undefined) throw new Error(`renameCase: no case ${caseId}`);
+		await panel.eval(
+			PUT_CASE({ ...c, title, updatedAt: new Date().toISOString() }),
+		);
+		if (tabId !== undefined)
+			await panel.eval(
+				`chrome.tabs.sendMessage(${tabId}, ${JSON.stringify({ type: "overlay:title", caseId, title })}).catch(() => undefined)`,
+			);
+	}
+	await until(
+		() => panel.eval<Db>(READ_DB),
+		(db) => db.cases.some((x) => x.id === caseId && x.title === title),
+		10_000,
+	);
 }
 
 /** Run `body` (an expression using `image`, the stored `{ blob, width, height }`) on a case's image. */
