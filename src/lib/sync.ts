@@ -408,8 +408,9 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 					});
 				} catch (error) {
 					if (!(await api.granted().catch(() => false))) throw new SyncPaused();
-					throw new TargetFailed(
-						`Chrome could not save “${name}” to your downloads: ${message(error)} Overmark tries again at the next change, or click Try again.`,
+					// Refused for this case (its name, say): the others go on.
+					throw new Error(
+						`Chrome would not save it to your downloads: ${message(error)}`,
 					);
 				}
 				end = await api.finished(id, DOWNLOAD_TIMEOUT_MS);
@@ -625,8 +626,8 @@ export class Sync {
 		current: string | undefined,
 		owner: ReadonlyMap<string, string>,
 	): Promise<string> {
-		const wanted = exportFileName(c);
-		const stem = wanted.slice(0, -EXPORT_SUFFIX.length);
+		const stem = safeStem(exportFileName(c).slice(0, -EXPORT_SUFFIX.length));
+		const wanted = `${stem}${EXPORT_SUFFIX}`;
 		if (
 			current !== undefined &&
 			(current === wanted || isNumbered(current, stem))
@@ -641,6 +642,13 @@ export class Sync {
 		}
 	}
 }
+
+/**
+ * A name Windows reserves (`con`, `nul`, `com1`…) gets `_` before it: Chrome's
+ * downloads refuse it on every platform, and a folder on Windows would too.
+ */
+const safeStem = (stem: string) =>
+	/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(stem) ? `_${stem}` : stem;
 
 /** `stem-<n>.overmark.zip`, as `#fileName` numbers a name taken. */
 function isNumbered(name: string, stem: string): boolean {

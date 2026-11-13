@@ -486,6 +486,8 @@ class FakeDownloads implements DownloadsApi {
 	ends = 0;
 	/** How the next downloads end, instead of complete. */
 	next: DownloadEnd[] = [];
+	/** Names Chrome refuses, besides Windows' own. */
+	refuse: ((filename: string) => boolean) | undefined;
 	/** The folder Chrome saved them in, if not where asked. */
 	savedIn: string | undefined;
 	#last: number | undefined;
@@ -512,6 +514,11 @@ class FakeDownloads implements DownloadsApi {
 		saveAs: false;
 	}) {
 		if (!this.allowed) throw new TypeError("chrome.downloads is undefined");
+		// Chrome refuses a name Windows reserves, on every platform.
+		const base = options.filename.split("/").pop()?.split(".")[0] ?? "";
+		if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base))
+			throw new Error("Invalid filename");
+		if (this.refuse?.(options.filename)) throw new Error("Invalid filename");
 		this.downloads.push(options);
 		const id = ++this.#id;
 		const end = this.next.shift();
@@ -642,6 +649,27 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(store.records.get("downloads")?.byCase["c_1"]?.file).toBe(
 			"login-button.overmark.zip",
 		);
+	});
+
+	test("a title Windows reserves (Con, Nul, COM1) gets a name Chrome takes", async () => {
+		await add("c_1", "Con", "2026-11-12T08:00:00Z");
+		await add("c_2", "COM1", "2026-11-12T08:01:00Z");
+		await sync.request();
+		expect([...api.files.keys()].sort()).toEqual([
+			"Overmark/_com1.overmark.zip",
+			"Overmark/_con.overmark.zip",
+		]);
+		expect(store.current?.state).toBe("synced");
+	});
+
+	test("a name Chrome refuses is that case's problem: the others are written", async () => {
+		await add("c_1", "Odd", "2026-11-12T08:01:00Z");
+		await add("c_2", "Fine", "2026-11-12T08:00:00Z");
+		api.refuse = (f) => f.endsWith("/odd.overmark.zip");
+		await sync.request();
+		expect([...api.files.keys()]).toEqual(["Overmark/fine.overmark.zip"]);
+		expect(store.current?.state).toBe("failed");
+		expect(store.current?.problem).toContain("“Odd” could not be written");
 	});
 
 	test("two cases of the same title get -2", async () => {
