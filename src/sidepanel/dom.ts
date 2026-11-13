@@ -47,15 +47,9 @@ export function formatDate(iso: string): string {
 			});
 }
 
-/** A web page's address, one a click may open (an imported case's is anyone's). */
-export function isWebPage(url: string): boolean {
-	try {
-		const { protocol } = new URL(url);
-		return protocol === "https:" || protocol === "http:";
-	} catch {
-		return false;
-	}
-}
+import { isWebPage } from "../lib/case.ts";
+
+export { isWebPage };
 
 /**
  * The match pattern for the site of a web page's `url`, as Chrome's
