@@ -588,9 +588,20 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	test("Annotate this page stays with the tab it was clicked for (review of PR 57)", async () => {
 		const a = await h.open("v1");
 		const b = await h.open("v2");
-		// The page answers late: the user is on another tab by then.
+		// Overmark runs on the tab already: one question, no injection on the
+		// way (each would count against the 5 s the page has to answer).
+		await h.control.eval(
+			`chrome.scripting.executeScript({ target: { tabId: ${a.tabId} }, files: ["content.js"] })`,
+		);
+		// The page answers only once the user is on the other tab (4 s at most,
+		// within the 5 s it has): what the question meets is that tab in front.
 		await wrapSend(`async (tabId, message, send) => {
-			if (message.type === "page:info") await new Promise((r) => setTimeout(r, 1500));
+			if (message.type === "page:info")
+				for (let i = 0; i < 80; i++) {
+					const [front] = await chrome.tabs.query({ active: true, currentWindow: true });
+					if (front?.id === ${b.tabId}) break;
+					await new Promise((r) => setTimeout(r, 50));
+				}
 			return send(tabId, message);
 		}`);
 		const panel = await annotate(a.page);
@@ -606,6 +617,9 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			10_000,
 		);
 		expect(await upOn(b.tabId)).toBe(false);
+		expect(
+			await panel.eval<string>(`document.getElementById("hint").textContent`),
+		).not.toContain("did not answer");
 		const made = await openOne(panel);
 		expect(made.page.url).toBe(`${h.base}/v1`);
 		expect(made.title).toBe("Krankenkasse vergleichen (v1)");
