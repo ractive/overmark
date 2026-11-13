@@ -36,12 +36,15 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 ## Use
 
 1. Click the Overmark icon on a tab. The side panel opens there.
-2. "Annotate this page" shows the toolbar: Element (click one), Box, Arrow, Pen and Note,
-   each followed by a comment. "Save case…" saves the marks as a new case with a title.
-   Overmark takes screenshots with the marks on them and records each marked element's
-   details. Saved marks stay on the page, fainter.
-3. From then on, and whenever the toolbar was started with "Add marks" in a case, the
-   toolbar says "Adding to “<case>”": each mark goes into that case as soon as its
+2. "Annotate this page" shows the toolbar for a new case: Element (click one), Box,
+   Arrow, Pen and Note, each followed by a comment. "Save case…" saves the marks as a new
+   case with a title, and the side panel opens it. Overmark takes screenshots with the
+   marks on them and records each marked element's details. Saved marks stay on the
+   page, fainter.
+3. The toolbar adds to a case only while that case is open in the side panel: from the
+   save on, and whenever the toolbar was started with "Add marks" in a case, the
+   toolbar says "Adding to “<case>”" ("Done adding" in the side panel stops it), and
+   each mark goes into that case as soon as its
    comment is done (Done, or the comment closed with Escape or a click elsewhere); there
    is no save step, and the case in the side panel shows it at once. Undo takes the last
    mark added since the toolbar was shown out of the case again, while nobody has
@@ -49,13 +52,18 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    reason and an "Add mark N" button to try again; it never moves to another case unless
    you click that button. Done tries such marks once more and closes the toolbar when all
    are in; while one is not, the toolbar stays up and says so, and Done again discards
-   it. New case stops adding to the case, and the next marks wait for "Save case…".
+   it. "← All cases" at the top of the side panel closes the case: the toolbar finishes
+   as with Done and adds to no case any more, and the case's marks leave the tab, also
+   those an AI app drew; with a mark not in the case yet the panel stays and says so,
+   and a second click leaves without it. A new case starts there, with "Annotate this
+   page". Closing the side panel leaves marks and toolbar on the page; opening it again
+   opens the case the page shows.
 4. On another build of the page (say `localhost:3000`), click the case in the side panel:
    its marks are drawn on the tab in front, whatever page that is. While the case is open
    they follow the tab in front: another tab, a reload or a navigation draws them there
    and takes them off the tab before; "← All cases" takes them off the page.
-   "Hide marks on this tab" takes them off, and they stay off on that tab until "Show
-   marks on this tab" or the case is opened again. When none of the case's marks is
+   "Hide marks" takes them off, and they stay off on that tab, also through a reload,
+   until "Show marks" or the case is opened again. When none of the case's marks is
    found, the case says it is probably for another page and offers to open the case's
    page. On a tab Overmark may not run on yet (after reloading the extension, say),
    Chrome hides the address, and the side panel says so with a warning: click the
@@ -177,8 +185,8 @@ Allow and Always allow, where closing it is Don't allow (the icon shows "?" whil
 question waits). With no answer within 60 seconds the call does not run, and the AI
 app is told you did not answer. "Always allow" lets that
 tool run without asking for that AI app from then on; "Allow all changes", under the
-app in the side panel's AI app card, does so for every tool that changes something,
-deleting a case too. The card lists the tools always allowed for each app, each with
+app in the side panel's AI app card (in Settings, which the AI pill at the top
+opens), does so for every tool that changes something, deleting a case too. The card lists the tools always allowed for each app, each with
 "Ask again". Both last until you disconnect the app (or make a new address), also
 across browser restarts. An AI app can be steered by text on a page it reads, so allow
 always only what you would not need to check.
