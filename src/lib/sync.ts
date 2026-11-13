@@ -664,7 +664,7 @@ export class Sync {
 				{
 					...base,
 					state: "failed",
-					problem: `${problems.join(" ")} Overmark tries again at the next change, or click Try again.`,
+					problem: `${problems.slice(0, 3).join(" ")}${problems.length > 3 ? ` And ${problems.length - 3} more cases could not be written.` : ""} Overmark tries again at the next change, or click Try again.`,
 				},
 				files(),
 			);

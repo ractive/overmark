@@ -798,6 +798,18 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(store.current?.problem).toContain("“Broken” could not be written");
 	});
 
+	test("many cases failing: three named, the rest counted", async () => {
+		for (let i = 0; i < 6; i++)
+			await add(`c_${i}`, `Case ${i}`, `2026-11-12T08:0${i}:00Z`);
+		api.url = async () => {
+			throw new Error("a screenshot is missing.");
+		};
+		await sync.request();
+		const problem = store.current?.problem ?? "";
+		expect(problem.match(/” could not be written:/g)).toHaveLength(3);
+		expect(problem).toContain("And 3 more cases could not be written.");
+	});
+
 	test("without a Downloads target (no such API): failed, saying so", async () => {
 		sync = new Sync({ cases, store });
 		await add("c_1", "Login");

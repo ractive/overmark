@@ -10,6 +10,7 @@ import {
 	type DownloadEnd,
 	type DownloadsApi,
 	LAST_DOWNLOAD_KEY,
+	TargetFailed,
 } from "../lib/sync.ts";
 import {
 	OFFSCREEN_PATH,
@@ -52,13 +53,29 @@ function offscreen(): Promise<void> {
 	return opening;
 }
 
+const message = (error: unknown) =>
+	error instanceof Error ? error.message : String(error);
+
+/**
+ * Ask the offscreen document. Its not opening or not answering is the
+ * target's failure, not each case's: the run stops there.
+ */
 async function ask(request: OffscreenRequest): Promise<OffscreenResponse> {
-	await offscreen();
-	const answer = (await chrome.runtime.sendMessage(request)) as
-		| OffscreenResponse
-		| undefined;
+	let answer: OffscreenResponse | undefined;
+	try {
+		await offscreen();
+		answer = (await chrome.runtime.sendMessage(request)) as
+			| OffscreenResponse
+			| undefined;
+	} catch (error) {
+		throw new TargetFailed(
+			`Overmark could not prepare the files for your downloads: ${message(error)} Overmark tries again at the next change, or click Try again.`,
+		);
+	}
 	if (answer === undefined)
-		throw new Error("the offscreen document did not answer");
+		throw new TargetFailed(
+			"Overmark could not prepare the files for your downloads: its offscreen document did not answer. Overmark tries again at the next change, or click Try again.",
+		);
 	return answer;
 }
 

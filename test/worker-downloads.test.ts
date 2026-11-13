@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { TargetFailed } from "../src/lib/sync.ts";
 import { memoryKv } from "../src/worker/kv.ts";
 import { sampleCase } from "./fixtures.ts";
 
@@ -79,6 +80,26 @@ describe("the offscreen document (DEC-025)", () => {
 		expect(fake.log).toEqual(["close", "create"]);
 		await api.end?.();
 		expect(fake.log).toEqual(["close", "create", "close"]);
+	});
+
+	test("not answering, or not opening, fails the target, not the case", async () => {
+		const api = downloads.chromeDownloads(memoryKv());
+		fake.answer = () => {
+			throw new Error("Could not establish connection.");
+		};
+		await expect(api.url(sampleCase("c_1"))).rejects.toBeInstanceOf(
+			TargetFailed,
+		);
+		fake.answer = () => undefined;
+		await expect(api.url(sampleCase("c_1"))).rejects.toBeInstanceOf(
+			TargetFailed,
+		);
+		// The export failing is the case's own.
+		fake.answer = () => ({ ok: false, error: "a screenshot is missing" });
+		const error = await api.url(sampleCase("c_1")).catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(Error);
+		expect(error).not.toBeInstanceOf(TargetFailed);
+		fake.answer = () => ({ ok: true, url: "blob:x/1" });
 	});
 });
 
