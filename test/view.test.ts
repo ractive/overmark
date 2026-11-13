@@ -1869,90 +1869,223 @@ describe("one import at a time", () => {
 	});
 });
 
-describe("the sync to a folder (DEC-021)", () => {
-	const sync = (
+describe("the sync (DEC-021, DEC-025)", () => {
+	const draw = (
 		change: (s: PanelState["sync"]) => void,
 		actions = noActions,
+		view?: Case,
 	) => {
-		const state = initialState();
+		const state = view === undefined ? initialState() : caseState(view);
 		change(state.sync);
 		render(state, actions);
 		return el<HTMLDivElement>("sync");
 	};
+	const sync = draw;
 	const buttons = (box: HTMLElement) =>
 		[...box.querySelectorAll("button")].map((b) => [
 			b.textContent,
 			b.title !== "",
 		]);
+	const labels = (box: HTMLElement) => buttons(box).map(([label]) => label);
+	const synced = (s: PanelState["sync"]) => {
+		s.target = "downloads";
+		s.targetId = "downloads";
+		s.status = {
+			folderId: "downloads",
+			state: "synced",
+			lastSyncedAt: "2026-11-12T09:30:00Z",
+		};
+	};
+	const pausedFolder = (s: PanelState["sync"]) => {
+		s.target = "folder";
+		s.targetId = "f";
+		s.folder = "iCloud cases";
+		s.status = { folderId: "f", state: "paused", reason: "access" };
+	};
+	const banner = () => el<HTMLDivElement>("sync-banner");
 
-	test("not syncing: one button that says what it does", () => {
+	test("off: what it does, Sync to Downloads first, Choose a folder…, and the note", () => {
 		const box = sync(() => {});
-		expect(buttons(box)).toEqual([["Sync to a folder…", true]]);
-		expect(box.querySelector("button")?.title).toContain(
-			"A deleted case keeps its file",
+		expect(box.querySelector(".sync-state")?.textContent).toBe("Sync is off.");
+		expect(buttons(box)).toEqual([
+			["Sync to Downloads", true],
+			["Choose a folder…", true],
+		]);
+		expect(box.querySelector('[data-action="sync-downloads"]')?.className).toBe(
+			"primary",
 		);
+		expect(box.querySelector(".sync-note")?.textContent).toContain(
+			"works with this panel closed",
+		);
+		expect(
+			(box.querySelector('[data-action="sync-choose"]') as HTMLElement).title,
+		).toContain("A deleted case keeps its file");
 	});
 
-	test("syncing: the folder, when it was last synced, Change folder and Stop syncing", () => {
+	test("asking for downloads: what Chrome asks, no buttons", () => {
 		const box = sync((s) => {
-			s.folder = "Overmark";
-			s.status = {
-				folderId: "f",
-				state: "synced",
-				lastSyncedAt: "2026-11-12T09:30:00Z",
-			};
+			s.asking = true;
 		});
+		expect(box.textContent).toContain(
+			"Chrome asks whether Overmark may manage your downloads.",
+		);
+		expect(labels(box)).toEqual([]);
+	});
+
+	test("synced to Downloads: where, when, Show in folder · Change… · Stop syncing", () => {
+		let shown = 0;
+		const box = sync(synced, actionsWith({ syncShow: () => shown++ }));
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to Overmark",
+			"Syncing to Downloads/Overmark",
 		);
 		expect(box.querySelector(".sync-line")?.textContent).toStartWith(
 			"Last synced ",
 		);
 		expect(buttons(box)).toEqual([
-			["Change folder…", true],
+			["Show in folder", true],
+			["Change…", true],
 			["Stop syncing", true],
 		]);
+		(box.querySelector('[data-action="sync-show"]') as HTMLElement).click();
+		expect(shown).toBe(1);
+		expect(banner().hidden).toBe(true);
 	});
 
-	test("writing: how many cases are left", () => {
+	test("syncing to a folder: its name, how many cases are left", () => {
 		const box = sync((s) => {
+			s.target = "folder";
+			s.targetId = "f";
 			s.folder = "Overmark";
 			s.status = { folderId: "f", state: "syncing", left: 3 };
 		});
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Syncing to “Overmark”",
+		);
 		expect(box.querySelector(".sync-line")?.textContent).toBe(
 			"Writing 3 cases…",
 		);
+		expect(labels(box)).toEqual(["Change…", "Stop syncing"]);
 	});
 
-	test("paused: says so, with Allow access first", () => {
+	test("Change…: the Off state's buttons with Cancel, the target still shown", () => {
+		const box = sync((s) => {
+			synced(s);
+			s.changing = true;
+		});
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Syncing to Downloads/Overmark",
+		);
+		expect(labels(box)).toEqual([
+			"Sync to Downloads",
+			"Choose a folder…",
+			"Cancel",
+		]);
+	});
+
+	test("paused, the folder: the section says so, with the banner's buttons", () => {
 		let allowed = 0;
+		let downloads = 0;
 		const box = sync(
-			(s) => {
-				s.folder = "Overmark";
-				s.status = {
-					folderId: "f",
-					state: "paused",
-					lastSyncedAt: "2026-11-12T09:30:00Z",
-				};
-			},
-			actionsWith({ syncAllow: () => allowed++ }),
+			pausedFolder,
+			actionsWith({
+				syncAllow: () => allowed++,
+				syncDownloads: () => downloads++,
+			}),
 		);
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Sync paused: allow access again",
+			"Paused: Chrome wants your OK for “iCloud cases” again.",
 		);
-		expect(buttons(box).map(([label]) => label)).toEqual([
+		expect(labels(box)).toEqual([
 			"Allow access",
-			"Change folder…",
+			"Use Downloads instead",
+			"Change…",
 			"Stop syncing",
 		]);
+		(box.querySelector('[data-action="sync-allow"]') as HTMLElement).click();
 		(
-			box.querySelector('[data-action="sync-allow"]') as HTMLButtonElement
+			box.querySelector('[data-action="sync-use-downloads"]') as HTMLElement
 		).click();
-		expect(allowed).toBe(1);
+		expect([allowed, downloads]).toEqual([1, 1]);
 	});
 
-	test("failed: what went wrong and Try again", () => {
+	test("paused: the banner, on Home and in a case, that cannot be dismissed", () => {
+		let allowed = 0;
+		for (const view of [undefined, sampleCase("c_1")]) {
+			draw(pausedFolder, actionsWith({ syncAllow: () => allowed++ }), view);
+			const b = banner();
+			expect(b.hidden).toBe(false);
+			expect(b.getAttribute("role")).toBe("status");
+			expect(b.dataset["sync"]).toBe("paused");
+			expect(b.querySelector("p")?.textContent).toBe(
+				"Sync is paused. Chrome needs your OK to write to “iCloud cases” again.",
+			);
+			expect(b.querySelector("strong")?.textContent).toBe("Sync is paused.");
+			expect(labels(b)).toEqual(["Allow access", "Use Downloads instead"]);
+			(b.querySelector('[data-action="sync-allow"]') as HTMLElement).click();
+		}
+		expect(allowed).toBe(2);
+		expect(el("case-view").hidden).toBe(false);
+	});
+
+	test("a no to Allow access: said under the banner's text", () => {
+		draw((s) => {
+			pausedFolder(s);
+			s.refused = true;
+		});
+		expect(banner().textContent).toContain(
+			"Chrome did not allow it. Click Allow access to ask again, or use Downloads instead.",
+		);
+	});
+
+	test("what a banner button could not do is said in the banner, in a case too", () => {
+		const box = draw(
+			(s) => {
+				pausedFolder(s);
+				s.problem = "Chrome did not allow Overmark to save to your downloads.";
+			},
+			noActions,
+			sampleCase("c_1"),
+		);
+		expect(banner().querySelector("[role=alert]")?.textContent).toBe(
+			"Chrome did not allow Overmark to save to your downloads.",
+		);
+		// Once is enough: not again in the section.
+		expect(box.querySelector("[role=alert]")).toBeNull();
+	});
+
+	test("paused, the downloads permission gone: Allow downloads", () => {
+		let asked = 0;
+		const box = draw(
+			(s) => {
+				s.target = "downloads";
+				s.targetId = "downloads";
+				s.status = {
+					folderId: "downloads",
+					state: "paused",
+					reason: "downloads",
+				};
+			},
+			actionsWith({ syncAllowDownloads: () => asked++ }),
+		);
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Paused: Overmark may no longer save to your downloads.",
+		);
+		expect(banner().querySelector("p")?.textContent).toBe(
+			"Sync is paused. Overmark may no longer save to your downloads.",
+		);
+		expect(labels(banner())).toEqual(["Allow downloads"]);
+		(
+			banner().querySelector(
+				'[data-action="sync-allow-downloads"]',
+			) as HTMLElement
+		).click();
+		expect(asked).toBe(1);
+	});
+
+	test("failed: the problem and Try again, in the section and the banner", () => {
 		const box = sync((s) => {
+			s.target = "folder";
+			s.targetId = "f";
 			s.folder = "Overmark";
 			s.status = {
 				folderId: "f",
@@ -1963,26 +2096,29 @@ describe("the sync to a folder (DEC-021)", () => {
 		expect(box.querySelector("[role=alert]")?.textContent).toBe(
 			"The folder “Overmark” is no longer there.",
 		);
-		expect(buttons(box).map(([label]) => label)).toContain("Try again");
+		expect(labels(box)).toContain("Try again");
+		expect(banner().dataset["sync"]).toBe("failed");
+		expect(banner().querySelector("p")?.textContent).toBe(
+			"Sync failed. The folder “Overmark” is no longer there.",
+		);
+		expect(labels(banner())).toEqual(["Try again"]);
+	});
+
+	test("the banner goes with the state", () => {
+		draw(pausedFolder);
+		expect(banner().hidden).toBe(false);
+		draw(synced);
+		expect(banner().hidden).toBe(true);
+		expect(banner().childElementCount).toBe(0);
 	});
 
 	test("drawn again only when it shows something else", () => {
-		const first = sync((s) => {
-			s.folder = "Overmark";
-			s.status = {
-				folderId: "f",
-				state: "synced",
-				lastSyncedAt: "2026-11-12T09:30:00Z",
-			};
-		}).querySelector("button");
-		const again = sync((s) => {
-			s.folder = "Overmark";
-			s.status = {
-				folderId: "f",
-				state: "synced",
-				lastSyncedAt: "2026-11-12T09:30:00Z",
-			};
-		}).querySelector("button");
+		const first = sync(synced).querySelector("button");
+		const again = sync(synced).querySelector("button");
 		expect(again).toBe(first);
+		draw(pausedFolder);
+		const bannerButton = banner().querySelector("button");
+		draw(pausedFolder);
+		expect(banner().querySelector("button")).toBe(bannerButton);
 	});
 });

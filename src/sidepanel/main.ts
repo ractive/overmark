@@ -52,7 +52,7 @@ import {
 	Panel,
 	type PanelState,
 } from "./state.ts";
-import { startSync } from "./sync.ts";
+import { startSync, syncActions } from "./sync.ts";
 import { type Actions, NO_ACCESS, render } from "./view.ts";
 
 const store = new IdbStore();
@@ -1233,13 +1233,10 @@ const actions: Actions = {
 		}
 	},
 
-	syncChoose: () => panelSync.choose(),
-	syncStop: () => panelSync.stop(),
-	syncAllow: () => panelSync.allow(),
-	syncRetry: () => panelSync.retry(),
+	...syncActions(() => panelSync),
 };
 
-/** The sync to a folder (DEC-021): the worker writes, the panel chooses. */
+/** The sync to Downloads or a folder (DEC-021, DEC-025): the worker writes, the panel chooses. */
 const panelSync = startSync(update);
 
 // --- settings and import -------------------------------------------------------------

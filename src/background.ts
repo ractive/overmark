@@ -13,8 +13,10 @@
  * extension is updated, reloaded or disabled, which clear
  * `chrome.storage.session`.
  *
- * It also writes the cases to the folder the user chose for the sync
- * (DEC-021), after every change and at each start, whoever made the change.
+ * It also writes the cases for the sync (DEC-021, DEC-025), to Downloads or
+ * to the folder the user chose, after every change and at each start,
+ * whoever made the change, and puts "!" on the icon while the sync needs the
+ * user.
  */
 
 import { isSafeId, pendingImage } from "./lib/case.ts";
@@ -38,31 +40,101 @@ import {
 } from "./lib/messages.ts";
 import { fromPage, numberFree, saveCase, undoAdd } from "./lib/save.ts";
 import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
-import { kvSyncStore, SYNC_DATABASE, Sync } from "./lib/sync.ts";
+import {
+	type ChosenFolder,
+	downloadsTarget,
+	folderTarget,
+	kvSyncStore,
+	PENDING_DOWNLOAD_KEY,
+	type PendingDownload,
+	SYNC_DATABASE,
+	Sync,
+	type SyncTarget,
+} from "./lib/sync.ts";
 import { inject } from "./lib/tabs.ts";
 import { AddLedger } from "./lib/undo.ts";
+import { badge } from "./worker/badge.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
+import { chromeDownloads } from "./worker/downloads.ts";
 import {
 	isPanelSender,
 	PANEL_PORT,
 	type WorkerMessage,
 } from "./worker/protocol.ts";
 
+declare const OVERMARK_TEST_BUILD: boolean | undefined;
+
 const store = new IdbStore();
 const added = new AddLedger(chrome.storage.session);
 
 /**
- * The one writer of the sync folder (DEC-021). Chrome lets it write only
- * while an extension page (the side panel) is open and the user allowed the
- * folder; otherwise it says "paused" and writes what changed meanwhile once
- * the panel asks again.
+ * The one writer of the sync (DEC-021, DEC-025). To Downloads it writes
+ * whenever it likes, with the panel closed too. To a folder Chrome lets it
+ * write only while an extension page (the side panel) is open and the user
+ * allowed the folder; otherwise it says "paused" and writes what changed
+ * meanwhile once the panel asks again. It runs at each start, so the icon's
+ * "!" is there after a browser restart before the panel is opened.
  */
+const syncKv = kvWhenOpen(() => openKv(SYNC_DATABASE));
+
+/**
+ * The end-to-end tests' folder is one of the private file system, which
+ * never needs Chrome's OK: in a test build, `test:access` set to "prompt" in
+ * the sync's database makes the worker see a folder that needs it again.
+ */
+function testFolder(chosen: ChosenFolder): SyncTarget {
+	const target = folderTarget(chosen, store);
+	return {
+		...target,
+		permission: async () =>
+			(await syncKv.get("test:access")) !== "prompt" && target.permission(),
+	};
+}
+
 const sync = new Sync({
 	cases: store,
-	store: kvSyncStore(kvWhenOpen(() => openKv(SYNC_DATABASE))),
-	notify: () => void broadcast({ type: "sync:changed" }),
+	store: kvSyncStore(syncKv),
+	downloads: downloadsTarget(chromeDownloads(syncKv)),
+	// Saves in a row are one download per case, not one each (a burst of
+	// Chrome's download bubble).
+	quietMs: 2000,
+	...(typeof OVERMARK_TEST_BUILD !== "undefined" && OVERMARK_TEST_BUILD
+		? { folder: testFolder }
+		: {}),
+	notify: (status) => {
+		badge.sync(status);
+		void broadcast({ type: "sync:changed" });
+	},
 });
 void sync.request();
+
+/**
+ * The end of a download the sync waits for wakes the worker, should it have
+ * stopped meanwhile: its run settles it. At the top level where Overmark has
+ * the (optional) permission, and once it is given.
+ */
+let hearingDownloads = false;
+function hearDownloads(): void {
+	if (hearingDownloads || chrome.downloads?.onChanged === undefined) return;
+	hearingDownloads = true;
+	chrome.downloads.onChanged.addListener((delta) => {
+		if (delta.state === undefined) return;
+		void syncKv.get(PENDING_DOWNLOAD_KEY).then(
+			(p) => {
+				if ((p as PendingDownload | undefined)?.id === delta.id)
+					void sync.request();
+			},
+			() => undefined,
+		);
+	});
+}
+hearDownloads();
+// The downloads permission taken back, or given.
+chrome.permissions.onRemoved.addListener(() => void sync.request());
+chrome.permissions.onAdded.addListener(() => {
+	hearDownloads();
+	void sync.request();
+});
 
 // Screenshots of saves that never finished (the tab was closed or navigated
 // while saving) would otherwise stay in storage unseen.
@@ -252,7 +324,7 @@ chrome.runtime.onMessage.addListener(
 			(request?.type === "cases:changed" || request?.type === "sync:run") &&
 			fromExtensionPage(sender)
 		) {
-			void sync.request();
+			void sync.request(request.type === "sync:run" && request.force === true);
 			return false;
 		}
 		if (!isWorkerRequest(request)) return false;

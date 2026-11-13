@@ -25,8 +25,8 @@ import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
 import { AlwaysAllowed } from "./always.ts";
+import { badge } from "./badge.ts";
 import { decide } from "./decide.ts";
-import { showSpark } from "./icon.ts";
 import { KeepOn } from "./keep-on.ts";
 import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
@@ -853,28 +853,18 @@ export class Connection {
 	/**
 	 * The icon says what is going on with no panel open: a question waits
 	 * ("?"), it is connecting or retrying ("…"), or AI access is on (a green
-	 * spark in the icon, no badge).
+	 * spark in the icon, no badge); the sync's "!" comes in between (badge.ts).
 	 */
 	#showBadge(): void {
-		const questions = this.#questions.list.length;
 		const mcp = this.#mcp;
-		// One decision for the badge, the title and the spark.
-		const [text, color, title, spark] =
-			questions > 0
-				? [
-						"?",
-						"#b45309",
-						`Overmark: ${questions === 1 ? "an AI app asks" : `${questions} questions wait`} for your answer. Open the side panel to answer.`,
-						false,
-					]
-				: mcp.state === "connected"
-					? ["", "#15803d", "Overmark: AI access is on", true]
+		badge.ai({
+			questions: this.#questions.list.length,
+			ai:
+				mcp.state === "connected"
+					? "connected"
 					: mcp.state === "connecting" || mcp.reconnecting
-						? ["…", "#6b7280", "Overmark: connecting to the AI app", false]
-						: ["", "#6b7280", "Overmark", false];
-		void showSpark(spark);
-		void chrome.action.setBadgeText({ text }).catch(() => {});
-		void chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
-		void chrome.action.setTitle({ title }).catch(() => {});
+						? "connecting"
+						: "off",
+		});
 	}
 }

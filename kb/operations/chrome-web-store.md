@@ -108,13 +108,13 @@ PRs (`.github/dependabot.yml`).
 > even when the page has changed.
 >
 > Export a case, or all of them, as a zip with a Markdown summary and the images, keep
-> every case synced to a folder you choose (in iCloud Drive or Dropbox, say), or connect an AI app
+> every case synced to your downloads or a folder you choose (in iCloud Drive or Dropbox, say), or connect an AI app
 > such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
 > page in front, read a marked element's HTML and CSS there, take screenshots, and
 > record what should change. Changes it wants to
 > make are shown to you first, every time.
 >
-> Your cases stay in your browser unless you export one, sync them to a folder or connect an AI app. Overmark
+> Your cases stay in your browser unless you export one, sync them to your downloads or a folder or connect an AI app. Overmark
 > works inside the page, so that page's own scripts can see what it shows there and the
 > keys you press there.
 
@@ -128,11 +128,12 @@ of the same pages, alone or with an AI app the user connects.
 | `activeTab` | Add the annotation toolbar to the tab where the user clicked the icon, read the marked elements' details, and take screenshots of that tab. |
 | `alarms` | While the user has the AI app connected, wake the background service worker once a minute, so the connection comes back after the computer slept. |
 | `notifications` | When the connected AI app wants to change something (add a mark, record the summary for the developer, change a mark's status, add, change or delete one of its findings on a mark, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Don't allow. Nothing changes without that answer. |
+| `offscreen` | The sync to Downloads, which the user turns on with "Sync to Downloads": the background service worker cannot make a URL for a case's file (no `URL.createObjectURL`), so while it writes the cases it opens an offscreen document (reason `BLOBS`) that builds one case's export file and makes its blob URL, which the worker downloads; the document closes when the cases are written. |
 | `scripting` | Inject the toolbar and outlines into that tab. |
 | `sidePanel` | The side panel lists cases, loads them onto the tab, and shows the AI app's connection and its questions. |
 | `storage` | Session storage, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others, and whether AI access is on. (The AI connection's settings and the secret from which its address is derived are in the extension's own IndexedDB, used by its service worker only; local storage only to delete what an unreleased build kept there.) |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
-| `downloads` (optional) | Asked for when the user clicks Export (or Export all cases) in the side panel. Overmark saves its own export file through `chrome.downloads.download` and reads that one download's path (`downloads.search` by its id), to show the user where the file went with Copy and "Show in folder" (`downloads.show`). It reads no other download. Without it the export is saved as a plain download, without the path. |
+| `downloads` (optional) | Asked for when the user clicks Export (or Export all cases) or "Sync to Downloads" in the side panel. Overmark saves its own export file through `chrome.downloads.download` and reads that one download's path (`downloads.search` by its id), to show the user where the file went with Copy and "Show in folder" (`downloads.show`). With the sync to Downloads it writes each case as its own file to `Overmark/` in the downloads folder, overwriting that case's file when the case changes, and erases its own previous entry from the download list (`downloads.erase`, the file stays). It reads no other download. Without it the export is saved as a plain download, without the path, and the sync can only go to a folder the user chooses. |
 | `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page from its address or shows a case's marks on a tab Overmark may not run on yet ("Show marks on this tab" or the case's Load button), so the marks load without clicking the icon. All sites only when the user turns on "allow on all sites". |
 
 **Remote code:** No. All code is in the package; the connection to the relay carries

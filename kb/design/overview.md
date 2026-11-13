@@ -66,8 +66,9 @@ is what a case is about, and finding the element again is a best-effort extra:
 | Part | Job |
 |---|---|
 | Content script (`src/content/`) | Toolbar and drawing overlay in a shadow DOM, element picker, element details, a screenshot per mark as it is drawn, highlighting a loaded case |
-| Service worker (`src/background.ts`, `src/worker/`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases; `TabMcp` with the tools and their questions (DEC-015) |
-| Side panel (`src/sidepanel/`) | Case list, case viewer (its marks follow the tab in front, `follow.ts`), summary for the developer, AI findings, export and import; a view of the AI connection (status, pairing, questions) |
+| Service worker (`src/background.ts`, `src/worker/`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases; `TabMcp` with the tools and their questions (DEC-015); the one writer of the sync, to Downloads or a folder, also with the panel closed, and the icon's badge ("?" a question, "!" the sync paused or failed, "…" connecting; DEC-021, DEC-025) |
+| Offscreen document (`src/offscreen/`) | Opened by the worker for a sync run to Downloads: exports a case and makes the blob URL the worker downloads (a service worker has none, DEC-025) |
+| Side panel (`src/sidepanel/`) | Case list, case viewer (its marks follow the tab in front, `follow.ts`), summary for the developer, AI findings, export and import, the sync's choice and the banner above every view while it is paused or failed; a view of the AI connection (status, pairing, questions) |
 | Library (`src/lib/`) | Case format, element details, matching, zip, export, IndexedDB store, images |
 
 Storage is IndexedDB in the extension's origin (database `overmark`, stores `cases` and
@@ -88,9 +89,14 @@ the page's origin and never touches it directly.
   the worker's own IndexedDB (`overmark-settings`, DEC-016), not in `chrome.storage.local`,
   which content scripts may reach; the worker deletes what overmark#26 kept there and
   takes none of it over.
+- `offscreen`: the sync to Downloads makes its blob URLs in an offscreen document
+  (DEC-025). No install warning.
 - `unlimitedStorage`: IndexedDB holds the only copy of the cases, so the browser must not
   evict it when disk space runs low. Chrome documents the permission as exempt from quota
   and eviction, and it adds no install warning, which keeps DEC-003's small warning.
+- Optional `downloads`, asked in the click of Export (to show where the file went,
+  DEC-020) or of "Sync to Downloads" (DEC-025), which writes every case to
+  `Overmark/` in Chrome's downloads folder through it. The test build has it at install.
 - Optional `<all_urls>`, asked for in the side panel ("Allow on all sites", in the options
   and in the notice the panel shows on a tab Overmark may not run on yet, DEC-022) only
   when the user wants Overmark without clicking the icon on each tab. `captureVisibleTab` accepts

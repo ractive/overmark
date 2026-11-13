@@ -50,7 +50,7 @@ describe("extension ID", () => {
 });
 
 describe("manifest", () => {
-	test("development: key, activeTab, alarms and notifications, optional downloads and <all_urls> only", () => {
+	test("development: key, activeTab, alarms, notifications and offscreen, optional downloads and <all_urls> only", () => {
 		const m = createManifest("1.2.3", { key: "abc" });
 		expect(m["manifest_version"]).toBe(3);
 		expect(m["version"]).toBe("1.2.3");
@@ -59,6 +59,7 @@ describe("manifest", () => {
 			"activeTab",
 			"alarms",
 			"notifications",
+			"offscreen",
 			"scripting",
 			"sidePanel",
 			"storage",
@@ -90,6 +91,7 @@ describe("build", () => {
 			"background.js",
 			"content.js",
 			"sidepanel/index.html",
+			"offscreen/index.html",
 			"icons/icon-16.png",
 			"icons/icon-128.png",
 		]) {
@@ -164,6 +166,10 @@ describe("build", () => {
 			const content = await Bun.file(join(outdir, "content.js")).text();
 			expect(content).not.toContain("OVERMARK_TEST_BUILD");
 			expect(content).toContain('"closed"');
+			// Nor the worker's way to pause a folder that cannot be (DEC-025).
+			const worker = await Bun.file(join(outdir, "background.js")).text();
+			expect(worker).not.toContain("OVERMARK_TEST_BUILD");
+			expect(worker).not.toContain("test:access");
 			// Nor the side panel's way to take a folder without the picker (DEC-021).
 			const panel = new Bun.Glob("sidepanel/**/*.js");
 			let scripts = 0;

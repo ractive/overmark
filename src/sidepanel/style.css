@@ -400,24 +400,58 @@ ul.cases .load {
 	margin: 0 0 6px;
 }
 
-/* The sync to a folder (DEC-021). */
+/* The sync to Downloads or a folder (DEC-021, DEC-025). */
 .sync {
 	margin-top: 12px;
 	padding-top: 10px;
 	border-top: 1px solid var(--rule);
 }
 
+.sync > .group-title {
+	margin-top: 0;
+}
+
 #sync p {
 	margin: 0 0 6px;
 }
 
-.sync .sync-state {
+#sync .sync-state {
 	overflow-wrap: anywhere;
 }
 
-.sync[data-sync="paused"] .sync-state {
+#sync[data-sync="paused"] .sync-state {
 	color: var(--warn);
 	font-weight: 600;
+}
+
+#sync .sync-note {
+	font-size: 12px;
+}
+
+/* What the sync needs of the user, above every view; not dismissable (DEC-025). */
+.sync-banner {
+	margin: 8px 12px 0;
+	padding: 8px 10px;
+	border-left: 3px solid var(--warn);
+	border-radius: 4px 8px 8px 4px;
+	background: var(--wash);
+}
+
+.sync-banner[data-sync="failed"] {
+	border-left-color: var(--danger);
+}
+
+.sync-banner p {
+	margin: 0 0 6px;
+	overflow-wrap: anywhere;
+}
+
+.sync-banner[data-sync="paused"] strong {
+	color: var(--warn);
+}
+
+.sync-banner[data-sync="failed"] strong {
+	color: var(--danger);
 }
 
 /* --- the start: this tab, the cases, the AI app, options ------------------ */

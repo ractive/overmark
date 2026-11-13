@@ -33,9 +33,14 @@ import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
 import { noneFound } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
 import type { AiCall, Exported, PanelState } from "./state.ts";
+import {
+	renderSyncBanner,
+	renderSyncSection,
+	type SyncActions,
+} from "./sync-view.ts";
 
 /** What the user can do; main.ts carries it out and updates the state. */
-export interface Actions {
+export interface Actions extends SyncActions {
 	toggleAnnotate(): void;
 	openCase(id: string): void;
 	closeCase(): void;
@@ -79,12 +84,6 @@ export interface Actions {
 	importReplace(): void;
 	importCopy(): void;
 	importCancel(): void;
-	/** "Sync to a folder…" and "Change folder…" (Chrome's picker, in the click). */
-	syncChoose(): void;
-	syncStop(): void;
-	/** "Allow access": Chrome's prompt for the folder, in the click. */
-	syncAllow(): void;
-	syncRetry(): void;
 }
 
 const bar = byId<HTMLElement>("bar");
@@ -112,7 +111,6 @@ const importTitle = importButton.title;
 const exportAllTitle = exportAll.title;
 const exportAllSaved = byId<HTMLDivElement>("export-all-saved");
 const importErrorText = byId<HTMLParagraphElement>("import-error-text");
-const syncBox = byId<HTMLDivElement>("sync");
 const importPrompt = h("div", {
 	class: "hint",
 	id: "import-prompt",
@@ -339,143 +337,6 @@ function renderSaved(
 	);
 }
 
-// --- the sync folder (DEC-021) --------------------------------------------------
-
-/** The tooltips of the sync's buttons. */
-export const SYNC_CHOOSE_TITLE =
-	"Choose a folder, in iCloud Drive or Dropbox say: Overmark writes each case there as its own .zip file, as Export does, and again whenever it changes. A deleted case keeps its file. Nothing is read from the folder.";
-const SYNC_CHANGE_TITLE =
-	"Choose another folder: the cases are written there from now on; the files in this one stay";
-const SYNC_STOP_TITLE =
-	"Stop writing the cases to this folder; the files there stay";
-const SYNC_ALLOW_TITLE =
-	"Chrome asks whether Overmark may edit files in the folder again; then the cases changed meanwhile are written";
-const SYNC_RETRY_TITLE = "Write the cases that are not in the folder yet";
-
-/** Under "Sync paused": why, and what Allow access does. */
-export const syncPausedText = (folder: string) =>
-	`Chrome asks again for “${folder}” after the side panel was closed or the browser restarted. The cases changed meanwhile are written once you allow it. If Chrome offers to allow it on every visit, it stops asking.`;
-
-function syncButton(
-	action: string,
-	label: string,
-	title: string,
-	onclick: () => void,
-	primary = false,
-): HTMLButtonElement {
-	return h(
-		"button",
-		{
-			type: "button",
-			"data-action": action,
-			title,
-			onclick,
-			...(primary ? { class: "primary" } : {}),
-		},
-		label,
-	);
-}
-
-/** "Last synced …", or what the worker is at. */
-function syncLine(status: PanelState["sync"]["status"]): string {
-	if (status?.state === "syncing")
-		return status.left === 1
-			? "Writing 1 case…"
-			: `Writing ${status.left ?? 0} cases…`;
-	if (status?.lastSyncedAt !== undefined)
-		return `Last synced ${formatDate(status.lastSyncedAt)}`;
-	return status === undefined ? "Starting…" : "Not synced yet";
-}
-
-/**
- * "Sync to a folder…", or the folder with its state and Change folder… and
- * Stop syncing. Drawn again only when what it shows changed.
- */
-function renderSync({ sync }: PanelState, actions: Actions): void {
-	const status = sync.status;
-	const key = JSON.stringify([
-		sync.folder,
-		status?.state,
-		status?.lastSyncedAt,
-		status?.left,
-		status?.problem,
-		sync.problem,
-	]);
-	if (syncBox.dataset["key"] === key) return;
-	syncBox.dataset["key"] = key;
-	const problem =
-		sync.problem === undefined
-			? []
-			: [h("p", { class: "hint", role: "alert" }, sync.problem)];
-	if (sync.folder === undefined) {
-		syncBox.dataset["sync"] = "off";
-		syncBox.replaceChildren(
-			h(
-				"div",
-				{ class: "row" },
-				syncButton("sync-choose", "Sync to a folder…", SYNC_CHOOSE_TITLE, () =>
-					actions.syncChoose(),
-				),
-			),
-			...problem,
-		);
-		return;
-	}
-	const state = status?.state ?? "syncing";
-	syncBox.dataset["sync"] = state;
-	const parts: HTMLElement[] = [];
-	if (state === "paused") {
-		parts.push(
-			h("p", { class: "sync-state" }, "Sync paused: allow access again"),
-			h("p", { class: "meta" }, syncPausedText(sync.folder)),
-		);
-	} else {
-		parts.push(
-			h(
-				"p",
-				{ class: "sync-state" },
-				"Syncing to ",
-				h("strong", { class: "folder" }, sync.folder),
-			),
-		);
-	}
-	parts.push(h("p", { class: "meta sync-line" }, syncLine(status)));
-	if (state === "failed" && status?.problem !== undefined)
-		parts.push(h("p", { class: "hint", role: "alert" }, status.problem));
-	parts.push(...problem);
-	parts.push(
-		h(
-			"div",
-			{ class: "row" },
-			...(state === "paused"
-				? [
-						syncButton(
-							"sync-allow",
-							"Allow access",
-							SYNC_ALLOW_TITLE,
-							() => actions.syncAllow(),
-							true,
-						),
-					]
-				: []),
-			...(state === "failed"
-				? [
-						syncButton("sync-retry", "Try again", SYNC_RETRY_TITLE, () =>
-							actions.syncRetry(),
-						),
-					]
-				: []),
-			syncButton("sync-change", "Change folder…", SYNC_CHANGE_TITLE, () =>
-				actions.syncChoose(),
-			),
-			syncButton("sync-stop", "Stop syncing", SYNC_STOP_TITLE, () =>
-				actions.syncStop(),
-			),
-		),
-	);
-	syncBox.replaceChildren(...parts);
-}
-
 // --- home ----------------------------------------------------------------------
 
 /** A case: opening it draws its marks on the tab in front (DEC-022). */
@@ -678,7 +539,7 @@ function renderHome(state: PanelState, actions: Actions): void {
 	);
 	renderCases(state, actions);
 	renderImportPrompt(state, actions);
-	renderSync(state, actions);
+	renderSyncSection(state, actions);
 }
 
 // --- one case ------------------------------------------------------------------
@@ -1964,6 +1825,7 @@ function renderAi({ ai }: PanelState): void {
 /** Draw the panel from `state`. */
 export function render(state: PanelState, actions: Actions): void {
 	lastActions = actions;
+	renderSyncBanner(state, actions);
 	renderAi(state);
 	const onCase = state.view.kind === "case";
 	home.hidden = onCase;
