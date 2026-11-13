@@ -383,7 +383,14 @@ describe.skipIf(browserBinary === undefined)(
 				`${byId("ai-status")}.textContent === "Not connected"`,
 			);
 			expect(relay.relay.sessionCount).toBe(0);
-			expect((await settingsOf(h))["keepAiOn"]).toBe(false);
+			// Off, and written only if it was on (here it never was).
+			expect((await settingsOf(h))["keepAiOn"] ?? false).toBe(false);
+			// The session remembers the stop, until the connect below.
+			expect(
+				await h.control.eval(
+					`chrome.storage.session.get("aiStopped").then((s) => s.aiStopped)`,
+				),
+			).toBe(true);
 			expect(await badge()).toBe("");
 			// The pairing is still there: the same token works after a connect.
 			await panel.eval(`${byId("connect")}.click()`);
