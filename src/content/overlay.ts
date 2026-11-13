@@ -219,7 +219,10 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	.toolbar button, .reviewbar button, .popover button {
 		border: 1px solid CanvasText; background: Canvas; color: CanvasText;
 	}
-	.toolbar button[aria-pressed="true"], .toolbar button.primary, .popover button.primary {
+	/* Also hovered and focused: no state brings amber back under the system's text colour. */
+	.toolbar button[aria-pressed="true"], .toolbar button[aria-pressed="true"]:hover, .toolbar button[aria-pressed="true"]:focus-visible,
+	.toolbar button.primary, .toolbar button.primary:hover, .toolbar button.primary:focus-visible,
+	.popover button.primary, .popover button.primary:hover, .popover button.primary:focus-visible {
 		forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight;
 	}
 	.toolbar button:disabled { border-color: GrayText; color: GrayText; opacity: 1; }

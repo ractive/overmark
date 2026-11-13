@@ -263,6 +263,29 @@ describe("the overlay's style", () => {
 		expect(source).toContain("color-scheme: light;");
 		expect(source).toContain("@media (forced-colors: active)");
 		expect(source).toContain("background: Highlight;");
+		// In forced colours no state of an amber button brings amber back: its
+		// hover and focus rules outside the block are more specific than a
+		// plain selector inside it, so the block names them too.
+		const forced = source.slice(
+			source.indexOf("@media (forced-colors: active)"),
+		);
+		const highlight = forced.slice(0, forced.indexOf("background: Highlight;"));
+		const rule = highlight.slice(highlight.lastIndexOf("}") + 1);
+		for (const selector of [
+			'.toolbar button[aria-pressed="true"]:hover',
+			".toolbar button.primary:hover",
+			".toolbar button.primary:focus-visible",
+			".popover button.primary:hover",
+		])
+			expect(rule).toContain(selector);
+		const amber = [
+			...source.matchAll(/^(.*)\{[^}]*background: \$\{L\.amber(Hover)?\}/gm),
+		]
+			.flatMap((m) => (m[1] as string).split(","))
+			.map((selector) => selector.trim())
+			.filter((selector) => selector !== "");
+		expect(amber.length).toBeGreaterThanOrEqual(5);
+		for (const selector of amber) expect(rule).toContain(selector);
 		// No page width decides the toolbar's layout: it is measured.
 		expect(source).not.toMatch(/@media \((max|min)-width/);
 	});
