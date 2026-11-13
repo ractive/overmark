@@ -34,6 +34,28 @@ async function panelPages(h: Harness): Promise<string[]> {
  * (`sidePanel.open` with the DevTools Protocol's user gesture), once its
  * page has the worker's state.
  */
+/**
+ * Until the tab in front has taken its size beside the side panel and keeps
+ * it (three reads in a row), 5 s at most: the panel takes its width from the
+ * page a moment after it opens (on Linux in CI later than here), and a test
+ * that clicks the toolbar at once would press where a button was before the
+ * page narrowed and the toolbar laid itself out again.
+ */
+async function tabSettled(h: Harness): Promise<void> {
+	const size = () =>
+		h.control.eval<string>(
+			`chrome.windows.getLastFocused({ windowTypes: ["normal"], populate: true }).then((w) => { const t = w.tabs.find((x) => x.active); return t ? t.width + "x" + t.height : ""; })`,
+		);
+	const end = Date.now() + 5000;
+	let last = await size();
+	for (let steady = 0; steady < 3 && Date.now() < end; ) {
+		await Bun.sleep(150);
+		const now = await size();
+		steady = now === last ? steady + 1 : 0;
+		last = now;
+	}
+}
+
 export async function openSidePanel(h: Harness): Promise<Page> {
 	const before = new Set(await panelPages(h));
 	const opened = (await h.control.send("Runtime.evaluate", {
@@ -59,6 +81,7 @@ export async function openSidePanel(h: Harness): Promise<Page> {
 			if (side === undefined) continue;
 			if (side) {
 				await page.waitFor(`document.documentElement.dataset.aiState`, 10_000);
+				await tabSettled(h);
 				return page;
 			}
 			before.add(id);
