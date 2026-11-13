@@ -26,6 +26,7 @@ import {
 	imagesOf,
 	markElement,
 	READ_DB,
+	resetPanel,
 	saveAs,
 	shadow,
 	showToolbar,
@@ -110,9 +111,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 
 	// The control page is a side panel too: a toolbar a test showed for a
 	// case opened that case there (DEC-023), and its marks would follow.
-	beforeEach(async () => {
-		await toAllCases();
-	});
+	beforeEach(() => resetPanel(h));
 
 	test("marks drawn with the toolbar are saved as a case with screenshots", async () => {
 		const { page, tabId } = await h.open("v1");

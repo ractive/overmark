@@ -21,6 +21,7 @@ import {
 	HOST,
 	markElement,
 	READ_DB,
+	resetPanel,
 	saveAs,
 	shadow,
 	showToolbar,
@@ -50,12 +51,7 @@ describe.skipIf(browserBinary === undefined)(
 		// The control page is a side panel too: a save opened its case there
 		// (DEC-023), whose marks would follow to the next tab, and whose
 		// toolbar rule hides a new case's toolbar on a tab it follows to.
-		beforeEach(async () => {
-			await h.control.eval(
-				`document.getElementById("back").hidden || document.getElementById("back").click()`,
-			);
-			await h.control.waitFor(`!document.getElementById("home").hidden`);
-		});
+		beforeEach(() => resetPanel(h));
 
 		const saved = async (title: string) => {
 			const db = await h.control.eval<Db>(READ_DB);

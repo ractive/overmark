@@ -4,7 +4,14 @@
  * case with a title, as before.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
@@ -15,6 +22,7 @@ import {
 	openCase,
 	panelHome,
 	READ_DB,
+	resetPanel,
 	saveAs,
 	shadow,
 	showToolbar,
@@ -78,6 +86,9 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	afterAll(async () => {
 		await h?.stop();
 	});
+
+	// No page of a test before, the control page (a panel too) on Home.
+	beforeEach(() => resetPanel(h));
 
 	/** The toolbar is up on the tab, as the page says. */
 	const toolbarUp = (tabId: number) =>

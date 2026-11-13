@@ -24,6 +24,7 @@ import {
 	type Db,
 	markElement,
 	READ_DB,
+	resetPanel,
 	saveAs,
 	settingsOf,
 	shadow,
@@ -99,7 +100,9 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		await putCases(cases);
 		// Blur form fields is the worker's; the blur test turns it off again.
 		await h.control.eval(`localStorage.clear()`);
-		await openPanel();
+		// No page of a test before, the panel on Home: one failing test does
+		// not take the next ones along.
+		await resetPanel(h);
 	}
 
 	/** Open the case with this id in `page`. */
@@ -1001,6 +1004,292 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await b.page.send("Page.close");
 		},
 	);
+
+	describe("loads close together", () => {
+		const hint = `${id("case-hint")}.textContent`;
+		const REPLACED = "Loading was replaced";
+
+		/**
+		 * A case of `n` marks on v1 drawn on nothing: its load takes many of
+		 * the page's timer turns (so a message sent right behind it lands
+		 * while it runs), and none is ever found (so it is searched again at
+		 * 1 s and 2 s).
+		 */
+		const manyMarks = (id: string, n = 60): Case => {
+			const c = sampleCase(id);
+			return {
+				...c,
+				page: { ...c.page, url: `${h.base}/v1` },
+				annotations: Array.from({ length: n }, (_, i) => ({
+					id: `a${i + 1}`,
+					number: i + 1,
+					shot: "s1",
+					comment: `Mark ${i + 1}`,
+					author: "user" as const,
+					shape: { kind: "note" as const, at: { x: 10 + i, y: 10 } },
+					crop: `crops/a${i + 1}.webp`,
+					element: null,
+				})),
+			};
+		};
+
+		slowTest(
+			"the page's own Hide during a search again holds, also after a switch of tabs",
+			async () => {
+				await fresh([manyMarks("c_hide_again")]);
+				const { page, tabId } = await h.open("v1");
+				await page.activate();
+				// The first search draws; the clear lands right behind the next one.
+				await wrapSend(`async (tabId, message, send) => {
+					if (message.type !== "case:load") return send(tabId, message);
+					globalThis.loads = (globalThis.loads ?? 0) + 1;
+					if (globalThis.loads !== 2) return send(tabId, message);
+					const mine = send(tabId, message);
+					// As the Hide on the page's bar.
+					const cleared = send(tabId, { type: "case:clear" });
+					const answer = await mine;
+					await cleared;
+					globalThis.hidden = true;
+					return answer;
+				}`);
+				await openCase("c_hide_again");
+				const button = id("load-case");
+				await h.control.waitFor(
+					`globalThis.hidden && !${button}.hidden && ${button}.textContent === "Show marks" && ${id("tab-line")}.textContent === "Marks are hidden on this tab."`,
+					10_000,
+				);
+				expect(await pageCase(tabId)).toBeNull();
+				// Another tab: the case follows there; back: not drawn again.
+				const other = await h.open("v2");
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === "c_hide_again",
+					"the marks on the other tab",
+				);
+				await page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === null,
+					"the marks to leave the other tab",
+				);
+				await h.control.waitFor(
+					`!${button}.hidden && ${button}.textContent === "Show marks" && ${id("tab-line")}.textContent === "Marks are hidden on this tab."`,
+				);
+				expect(await pageCase(tabId)).toBeNull();
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await other.page.send("Page.close");
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"the case opened again while its searches again wait: it is drawn",
+			async () => {
+				await fresh([manyMarks("c_again")]);
+				const { page, tabId } = await h.open("v1");
+				await page.activate();
+				await openCase("c_again");
+				await until(
+					async () => (await pageCase(tabId)) === "c_again",
+					"the marks on the page",
+				);
+				// The searches again (1 s, 2 s) are under way: back to the list,
+				// and the case opened again at once.
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to go",
+				);
+				await openCase("c_again");
+				await until(
+					async () => (await pageCase(tabId)) === "c_again",
+					"the marks drawn again",
+				);
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"Save case…, then Done adding while the draw is under way: the found line comes",
+			async () => {
+				await fresh();
+				const { page, tabId } = await h.open("v1");
+				await showToolbar(h, page, tabId);
+				await markElement(page, "h1", "Too long");
+				// The draw the adopted case starts answers only after Done adding.
+				await h.control.eval(`globalThis.go = false`);
+				await wrapSend(`async (tabId, message, send) => {
+					const answer = await send(tabId, message);
+					if (message.type === "case:load") {
+						globalThis.held = true;
+						while (!globalThis.go) await new Promise((r) => setTimeout(r, 20));
+					}
+					return answer;
+				}`);
+				await saveAs(page, "Done while drawing");
+				await h.control.waitFor(
+					`document.querySelector("#case-view h2")?.textContent === "Done while drawing" && globalThis.held`,
+					10_000,
+				);
+				await h.control.waitFor(
+					`${id("add-marks")}.textContent === "Done adding"`,
+				);
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(
+					async () =>
+						!(await h.control.eval<boolean>(
+							`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.visible)`,
+						)),
+					"the toolbar to go",
+				);
+				await h.control.eval(`globalThis.go = true`);
+				await h.control.waitFor(`${hint}.includes("1 of 1 marks found")`);
+				expect(await h.control.eval<string>(hint)).not.toContain(REPLACED);
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"the panel's draw overtaken by an AI app's load_case of the case: both end with its marks",
+			async () => {
+				// Many marks: the second load reaches the page while the first runs.
+				const caseId = "c_twice";
+				await fresh([manyMarks(caseId)]);
+				const { page, tabId } = await h.open("v1");
+				// Overmark runs there already: the message behind the draw reaches it.
+				await h.control.eval(
+					`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`,
+				);
+				// Right behind the panel's draw, as an AI app's load_case of the
+				// same case: the page finds the marks once more.
+				await wrapSend(`async (tabId, message, send) => {
+					if (message.type !== "case:load" || globalThis.raced)
+						return send(tabId, message);
+					globalThis.raced = true;
+					const mine = send(tabId, message);
+					globalThis.other = send(tabId, message);
+					return mine;
+				}`);
+				await page.activate();
+				await openCase(caseId);
+				await h.control.waitFor(`${hint}.includes("0 of 60 marks found")`);
+				expect(await h.control.eval<string>(hint)).not.toContain(REPLACED);
+				expect(
+					await h.control.eval<number>(
+						`globalThis.other.then((r) => r.matches.length)`,
+					),
+				).toBe(60);
+				expect(await pageCase(tabId)).toBe(caseId);
+				expect(
+					await h.control.eval<string>(`${id("load-case")}.textContent`),
+				).toBe("Hide marks");
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"a clear close behind the panel's draw: the panel shows what the page shows, and Show marks draws",
+			async () => {
+				// Many marks: the clear reaches the page while the load runs, mostly.
+				const caseId = "c_cleared";
+				await fresh([manyMarks(caseId)]);
+				const { page, tabId } = await h.open("v1");
+				// Overmark runs there already: the message behind the draw reaches it.
+				await h.control.eval(
+					`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`,
+				);
+				// Right behind the panel's draw, a clear of whatever the page shows,
+				// as the Hide on the page's own bar, an AI app's tool or another
+				// window's panel would. Which takes effect first is the page's
+				// business: the draw stopped (replaced), or done and then cleared.
+				await wrapSend(`async (tabId, message, send) => {
+					if (message.type !== "case:load" || globalThis.raced)
+						return send(tabId, message);
+					globalThis.raced = true;
+					const mine = send(tabId, message);
+					const cleared = send(tabId, { type: "case:clear" });
+					const answer = await mine;
+					await cleared;
+					globalThis.answered = true;
+					return answer;
+				}`);
+				await page.activate();
+				await openCase(caseId);
+				const button = id("load-case");
+				// The draw is over, either way: its button is back.
+				await h.control.waitFor(
+					`globalThis.answered && !${button}.hidden && ${button}.textContent === "Show marks"`,
+				);
+				expect(await pageCase(tabId)).toBeNull();
+				expect(await h.control.eval<string>(hint)).not.toContain(REPLACED);
+				expect(await h.control.eval<string>(hint)).not.toContain("marks found");
+				expect(
+					await h.control.eval<string>(`${id("tab-line")}.textContent`),
+				).toBe("Marks are hidden on this tab.");
+				// Show marks is the newest load: it draws them.
+				await h.control.eval(`${button}.click()`);
+				await h.control.waitFor(`${hint}.includes("0 of 60 marks found")`);
+				await until(
+					async () => (await pageCase(tabId)) === caseId,
+					"the marks on the page",
+				);
+				expect(await h.control.eval<string>(`${button}.textContent`)).toBe(
+					"Hide marks",
+				);
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"the page cleared by something else right after the panel's draw: the panel follows the page",
+			async () => {
+				await fresh();
+				const { page, tabId, caseId } = await annotated(
+					"Cleared after drawing",
+				);
+				await openPanel();
+				// The draw is done on the page; then, before the panel has its
+				// answer, a clear from elsewhere takes the marks off again.
+				await wrapSend(`async (tabId, message, send) => {
+					if (message.type !== "case:load" || globalThis.raced)
+						return send(tabId, message);
+					globalThis.raced = true;
+					const answer = await send(tabId, message);
+					await send(tabId, { type: "case:clear" });
+					globalThis.answered = true;
+					return answer;
+				}`);
+				await page.activate();
+				await openCase(caseId);
+				const button = id("load-case");
+				await h.control.waitFor(
+					`globalThis.answered && !${button}.hidden && ${button}.textContent === "Show marks"`,
+				);
+				expect(await pageCase(tabId)).toBeNull();
+				expect(await h.control.eval<string>(hint)).not.toContain("marks found");
+				await h.control.waitFor(
+					`${id("tab-line")}.textContent === "Marks are hidden on this tab."`,
+				);
+				await h.control.eval(`${button}.click()`);
+				await until(
+					async () => (await pageCase(tabId)) === caseId,
+					"the marks on the page",
+				);
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.send("Page.close");
+			},
+		);
+	});
 
 	describe("one toolbar per open case (DEC-023)", () => {
 		const back = id("back");

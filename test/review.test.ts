@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { Overlay } from "../src/content/overlay.ts";
-import { Reviewer } from "../src/content/review.ts";
+import { LoadReplaced, Reviewer } from "../src/content/review.ts";
 import type { Annotation, Case, Shape } from "../src/lib/case.ts";
 import { describeElement } from "../src/lib/element.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -364,5 +364,107 @@ describe("a loaded case that changes", () => {
 		const result = await loading;
 		expect(result.matches.length).toBe(1);
 		expect(overlay.items.length).toBe(1);
+	});
+});
+
+describe("loads close together", () => {
+	const PAGE = `<main><h1>Prämien</h1><button>Berechnen</button></main>`;
+
+	test("two loads of one case both end with the newer one's result", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const first = reviewer.load(c);
+		const second = reviewer.load(c);
+		const [a, b] = await Promise.all([first, second]);
+		expect(b.matches.map((m) => m.status)).toEqual(["found"]);
+		// The older one's is the newer's, and says so: its marks are that
+		// load's, not this caller's to take off.
+		expect(a).toEqual({ ...b, adopted: true });
+		expect(b.adopted).toBeUndefined();
+		expect(reviewer.caseId).toBe(c.id);
+	});
+
+	test("a clear during a load stops it: replaced, no failure", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const loading = reviewer.load(c);
+		reviewer.clear();
+		await expect(loading).rejects.toBeInstanceOf(LoadReplaced);
+		expect(reviewer.caseId).toBeUndefined();
+	});
+
+	test("another case's load stops the one before: replaced", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const other = { ...caseOf($("h1")), id: "c_other" };
+		const first = reviewer.load(c);
+		const second = reviewer.load(other);
+		await expect(first).rejects.toBeInstanceOf(LoadReplaced);
+		expect((await second).caseId).toBe("c_other");
+	});
+
+	test("a change during the second of two loads is drawn once it ends", async () => {
+		doc.body.innerHTML = PAGE;
+		const one = caseOf($("button"));
+		const c: Case = {
+			...one,
+			annotations: [
+				...one.annotations,
+				{ ...(one.annotations[0] as Annotation), id: "a2", number: 2 },
+			],
+		};
+		const first = reviewer.load(c);
+		const second = reviewer.load(c);
+		expect(
+			await reviewer.update({
+				...c,
+				annotations: [c.annotations[0] as Annotation],
+			}),
+		).toBeNull();
+		expect((await second).matches.length).toBe(1);
+		expect((await first).matches.length).toBe(1);
+	});
+});
+
+describe("a load that draws a newer copy at its end", () => {
+	const PAGE = `<main><h1>Prämien</h1><button>Berechnen</button><a href="#">Link</a><p>Text hier</p></main>`;
+	const withMarks = (base: Case, ...selectors: string[]): Case => ({
+		...base,
+		annotations: [
+			...base.annotations,
+			...selectors.map((sel, i) => ({
+				...(base.annotations[0] as Annotation),
+				id: `a${i + 2}`,
+				number: i + 2,
+				element: describeElement($(sel)),
+			})),
+		],
+	});
+	/** Until the load has found its marks and turns to the newer copy. */
+	const found = async () => {
+		while (reviewer.caseId === undefined)
+			await new Promise((r) => setTimeout(r, 0));
+	};
+
+	test("a clear while it draws the newer copy: replaced, not its first result", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const loading = reviewer.load(c);
+		expect(await reviewer.update(withMarks(c, "a", "p"))).toBeNull();
+		await found();
+		reviewer.clear();
+		await expect(loading).rejects.toBeInstanceOf(LoadReplaced);
+	});
+
+	test("a newer load while it draws the newer copy: both end with the newest", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const newer = withMarks(c, "a", "p");
+		const loading = reviewer.load(c);
+		expect(await reviewer.update(newer)).toBeNull();
+		await found();
+		const again = reviewer.load(newer);
+		expect((await again).matches.length).toBe(3);
+		expect((await loading).matches.length).toBe(3);
 	});
 });

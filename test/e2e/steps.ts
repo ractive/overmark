@@ -316,6 +316,39 @@ export async function restartWorker(h: Harness): Promise<void> {
 	);
 }
 
+/**
+ * Before a test: no page left from the tests before (a tab is found by its
+ * address, and a page left with a toolbar or a case's marks is someone
+ * else's state), and every side panel document (the control page, a real
+ * side panel, one opened in a tab) on Home with no case open. A case left
+ * open in one follows to the test's tab, draws its marks and hides its new
+ * case's toolbar (DEC-023), so one failing test would take the ones after
+ * it along. Pages close without the question unsaved marks ask.
+ */
+export async function resetPanel(h: Harness): Promise<void> {
+	const panelUrl = `chrome-extension://${h.extensionId}/sidepanel/index.html`;
+	const pages = async () =>
+		(await h.browser.targets()).filter((t) => t.type === "page");
+	const closing = (await pages())
+		.filter((t) => /^(https?|file):/.test(t.url))
+		.map((t) => t.targetId);
+	for (const targetId of closing)
+		await h.browser
+			.send("Target.closeTarget", { targetId })
+			.catch(() => undefined);
+	await until(pages, (now) => !now.some((t) => closing.includes(t.targetId)));
+	const home = `!document.getElementById("home").hidden && document.getElementById("back").hidden`;
+	await h.control.goto(panelUrl);
+	await h.control.waitFor(home);
+	for (const t of await pages()) {
+		if (t.targetId === h.control.targetId || !t.url.startsWith(panelUrl))
+			continue;
+		const other = await h.browser.attachPage(t.targetId);
+		await other.goto(panelUrl);
+		await other.waitFor(home);
+	}
+}
+
 /** The side panel's document in the control page, in front, on its home view. */
 export async function panelHome(h: Harness): Promise<Page> {
 	await h.control.goto(

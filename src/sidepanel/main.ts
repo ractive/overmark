@@ -30,6 +30,7 @@ import {
 import type {
 	AnnotationMatch,
 	Broadcast,
+	LoadReplacedAnswer,
 	LoadResult,
 	OverlayState,
 } from "../lib/messages.ts";
@@ -51,6 +52,7 @@ import {
 	isFound,
 	noneFound,
 } from "./follow.ts";
+import { CaseHints } from "./hints.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
 	type Exported,
@@ -121,7 +123,8 @@ const tabWork = new Latest();
 const casesWork = new Latest();
 const caseWork = new Latest();
 const imagesWork = new Latest();
-const hintWork = new Latest();
+/** Who may write under the open case's buttons (hints.ts). */
+const caseHints = new CaseHints();
 const sitesWork = new Latest();
 const downloadsWork = new Latest();
 
@@ -164,6 +167,8 @@ function startLoad(target: Drawn): ReturnType<Latest["start"]> {
 function stopLoads(): void {
 	loadTarget = undefined;
 	loadWork.cancel();
+	// A draw waiting to search again is over too: a follow may draw anew.
+	setDrawing(undefined);
 }
 
 /**
@@ -237,10 +242,20 @@ async function loadInto(
 	const here = { tabId, caseId: c.id };
 	try {
 		loadsUnderWay++;
-		const result = await sendToTab<LoadResult | { error: string }>(tabId, {
+		const result = await sendToTab<
+			LoadResult | LoadReplacedAnswer | { error: string }
+		>(tabId, {
 			type: "case:load",
 			case: c,
 		}).finally(() => loadsUnderWay--);
+		// Stopped by a clear (Hide, the case closed) or another case's load:
+		// nothing to say, and no marks of this load's are on the page. Still
+		// the newest: what the page shows now decides (the Hide on its bar).
+		if ("replaced" in result) {
+			// What an earlier search found no longer holds either.
+			if (work.current() && !(await followPage(c.id, tabId))) hint(undefined);
+			return undefined;
+		}
 		if ("error" in result) {
 			// A stale load's failure is about a tab no longer in question.
 			if (work.current()) hint(result.error);
@@ -250,7 +265,8 @@ async function loadInto(
 		// newer load draws them there again.
 		if (!work.current()) {
 			if (sameDrawn(loadTarget, here)) drawn = here;
-			else takeOff(here);
+			// A newer load of the case drew them (an AI app's load_case): its.
+			else if (!result.adopted) takeOff(here);
 			return undefined;
 		}
 		drawn = here;
@@ -258,6 +274,14 @@ async function loadInto(
 		// results describe that tab (see refreshTab).
 		if ((await activeTab())?.id !== tabId) {
 			takeOff(here);
+			return undefined;
+		}
+		// What the page shows now decides: a clear right behind the draw (the
+		// Hide on its bar, an AI app, another window's panel) may have taken
+		// the marks off before this answer came, and its news came while the
+		// load was under way, when it says nothing (DEC-023).
+		if (!(await followPage(c.id, tabId))) {
+			hint(undefined);
 			return undefined;
 		}
 		const found = result.matches.filter(isFound).length;
@@ -285,6 +309,30 @@ async function loadInto(
 		if (work.current()) hint(describeError(error));
 		return undefined;
 	}
+}
+
+/**
+ * After a draw of the case on the tab: what the page shows now decides
+ * (DEC-023), as its news would, which says nothing while a load is under
+ * way. Cleared (the Hide on its bar, an AI app, another window's panel): it
+ * holds as the page's own Hide does (DEC-022), and the searches again stop;
+ * another case there is an AI app's, left to it. Answers whether the page
+ * still shows the case (or cannot say: it has navigated).
+ */
+async function followPage(caseId: string, tabId: number): Promise<boolean> {
+	const now = await overlayState(tabId);
+	if (now === undefined || now.loadedCase === caseId) return true;
+	if (sameDrawn(drawn, { tabId, caseId })) drawn = undefined;
+	if (now.loadedCase === undefined) {
+		hiddenOn.add(tabId);
+		if (loadTarget?.tabId === tabId) stopLoads();
+	}
+	update((s) => {
+		if (s.tab?.id === tabId) s.overlay = now;
+		if (s.loaded?.tabId === tabId && s.loaded.caseId === caseId)
+			s.loaded = undefined;
+	});
+	return false;
 }
 
 /**
@@ -630,7 +678,7 @@ async function refreshCase(): Promise<void> {
 
 /** Open a case, and draw its marks on the tab in front (DEC-022). */
 function openCase(id: string): void {
-	hintWork.cancel();
+	caseHints.cancel();
 	const other = state.view.kind !== "case" || state.view.id !== id;
 	// Opened again: a Hide on a tab holds no longer.
 	if (other) hiddenOn.clear();
@@ -783,7 +831,7 @@ function closeCase(): void {
 	const caseId = state.view.kind === "case" ? state.view.id : undefined;
 	caseWork.cancel();
 	imagesWork.cancel();
-	hintWork.cancel();
+	caseHints.cancel();
 	stopLoads();
 	hiddenOn.clear();
 	pendingLoad = undefined;
@@ -814,12 +862,13 @@ function closeCase(): void {
 
 /**
  * For an action on the open case: writes its outcome under that case's
- * buttons, unless the panel left the case, or a newer action took over.
+ * buttons, unless the panel left the case, or an action clicked after it
+ * wrote there already (hints.ts).
  */
 function caseHintWriter(): (text: string | undefined) => void {
-	const work = hintWork.start();
+	const may = caseHints.action();
 	return (text) => {
-		if (work.current()) update((s) => (s.caseHint = text));
+		if (may()) update((s) => (s.caseHint = text));
 	};
 }
 
@@ -828,9 +877,9 @@ function caseHintWriter(): (text: string | undefined) => void {
  * of the user's has written there since, and stops no action's hint itself.
  */
 function followHint(): (text: string | undefined) => void {
-	const work = hintWork.peek();
+	const may = caseHints.draw();
 	return (text) => {
-		if (work.current()) update((s) => (s.caseHint = text));
+		if (may()) update((s) => (s.caseHint = text));
 	};
 }
 
@@ -1083,7 +1132,7 @@ const actions: Actions = {
 
 	hideFromTab(c) {
 		stopLoads();
-		hintWork.cancel();
+		caseHints.cancel();
 		// Where the panel loaded the case, and the tab in front where an AI app did.
 		const tabs = new Set<number>();
 		if (state.loaded?.caseId === c.id) tabs.add(state.loaded.tabId);
