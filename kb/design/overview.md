@@ -79,7 +79,9 @@ is what a case is about, and finding the element again is a best-effort extra:
 
 The look (DEC-024): the side panel is paper with ink on it, in light and dark, from one
 token block in `style.css`; amber is a view's one action that starts drawing, the other
-main actions are ink, and a mark's colour is its status. The page's overlay has one fixed
+main actions are ink, and a mark's colour is its status (open, to verify, verified,
+closed). The marks list has a margin with each mark's pin on a rail: the pin's colour is
+the status, its fill the match. The page's overlay has one fixed
 look on every page and in both schemes: ink bars with a white ring, every stroke over a
 white casing, solid when the mark's element is found and dashed when it is unsure.
 `test/contrast.test.ts` holds every colour pair to its WCAG ratio.

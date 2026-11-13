@@ -844,7 +844,10 @@ of page width (the review said 720), and the tools become icons under 820, Undo 
 Close under 620; their words stay as accessible names. The found line keeps "3 of 4
 marks found on …" and adds "Dashed: unsure." only when a dashed mark is drawn. The AI
 pill also says "AI connecting…", and shows a red dot when AI access is off with a
-problem to tell; the whole status stays in the pill's name and tooltip.
+problem to tell; the whole status stays in the pill's name and tooltip. The rail is a
+mix of `--edge` and `--paper` (decoration, between a rule and an edge); the banner's
+button stands right of the text only where it is the only one and the panel is at
+least 400 px wide.
 
 ## DEC-025: Sync to Downloads by default, to any folder as an option, and an Allow that cannot be missed (owner)
 
