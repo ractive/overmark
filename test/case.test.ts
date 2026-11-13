@@ -31,7 +31,6 @@ import {
 	withoutFinding,
 	withReopen,
 	withResolution,
-	withResolutionNote,
 	withVerified,
 } from "../src/lib/case.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -932,23 +931,6 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 		});
 		expect(roundTrip(back)).toEqual(back);
 		expect(roundTrip(verified)).toEqual(verified);
-	});
-
-	test("a note only: the rest of the resolution stays", () => {
-		const verified = withVerified(
-			withResolution(one(), "a1", { kind: "fixed", note: "Old" }, T1),
-			"a1",
-			undefined,
-			T2,
-		);
-		const noted = withResolutionNote(verified, "a1", "  New  ", T3);
-		expect(noted.annotations[0]?.resolution).toEqual({
-			kind: "fixed",
-			note: "New",
-			at: T1,
-			verified: { at: T2 },
-		});
-		expect(() => withResolutionNote(one(), "a1", "x", T1)).toThrow("is open");
 	});
 
 	test("reopens keep `was` whole and the newest 20; a long note is cut", () => {

@@ -1065,27 +1065,6 @@ export function withChoice(
 	);
 }
 
-/** The case with the resolution's note replaced, nothing else of it. */
-export function withResolutionNote(
-	c: Case,
-	annotationId: string,
-	note: string,
-	now: string,
-): Case {
-	return changed(
-		c,
-		annotationId,
-		(a) => {
-			if (a.resolution === undefined)
-				throw new CaseError(`Mark ${a.number} is open: it has no note.`);
-			const { note: _, ...rest } = a.resolution;
-			const text = cutText(note.trim(), MAX_COMMENT);
-			return { ...a, resolution: { ...rest, ...(text ? { note: text } : {}) } };
-		},
-		now,
-	);
-}
-
 /**
  * The case with the mark's fix verified. Only a fixed mark can be; one that
  * is verified already stays as it was.

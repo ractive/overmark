@@ -820,73 +820,53 @@ describe("tools", () => {
 			await status(2, "fixed");
 			await status(2, "verified");
 			const once = (await stored())?.resolution;
-			expect(await status(2, "verified")).toBe("Mark 2 is verified.");
+			expect(await status(2, "verified")).toBe("Mark 2 is verified already.");
 			expect((await stored())?.resolution).toEqual(once as never);
 		});
 
-		test("fixed on a verified mark changes only its note", async () => {
-			await seed();
-			await status(2, "fixed", "First");
-			await status(2, "verified");
-			const verified = (await stored())?.resolution;
-			expect(await status(2, "fixed", "Hover state too")).toBe(
-				"Mark 2 stays verified; its note is saved.",
-			);
-			expect((await stored())?.resolution).toEqual({
-				...verified,
-				note: "Hover state too",
-			} as never);
-			expect(await status(2, "fixed")).toBe("Mark 2 is verified already.");
-			expect((await stored())?.resolution?.note).toBe("Hover state too");
-		});
-
-		test("fixed with a note on a verified mark whose note is not the app's: refused", async () => {
+		test("an AI app changes a verified mark only by reopening it", async () => {
 			const c = await seed();
-			const verified = (app?: { id: string; host: string }) =>
-				putCase(store, {
-					...c,
-					annotations: [
-						c.annotations[0] as Annotation,
-						{
-							...(c.annotations[1] as Annotation),
-							resolution: {
-								kind: "fixed",
-								note: "user note",
-								at: "t",
-								...(app ? { app } : {}),
-								verified: { at: "t" },
-							},
+			// Verified in the panel, the user's note.
+			await putCase(store, {
+				...c,
+				annotations: [
+					c.annotations[0] as Annotation,
+					{
+						...(c.annotations[1] as Annotation),
+						resolution: {
+							kind: "fixed",
+							note: "user note",
+							at: "t",
+							verified: { at: "t" },
 						},
-					],
-				});
-			await verified();
-			await expect(status(2, "fixed", "AI rewrote the note")).rejects.toThrow(
-				"Mark 2 is verified, and its note is not yours: reopen it with a note on what is still wrong instead.",
-			);
-			expect((await stored())?.resolution?.note).toBe("user note");
-			// Another app's.
-			await verified({
-				id: "https://other.example/cimd.json",
-				host: "other.example",
+					},
+				],
 			});
-			await expect(status(2, "fixed", "x")).rejects.toThrow("is not yours");
-			// No note: nothing to change, nothing refused.
-			expect(await status(2, "fixed")).toBe("Mark 2 is verified already.");
-		});
-
-		test("a verified mark is not closed over: reopen it first", async () => {
-			await seed();
-			await status(2, "fixed");
-			await status(2, "verified");
-			const verified = (await stored())?.resolution;
+			const before = await store.getCase("c_1");
+			expect(await status(2, "fixed", "AI rewrote the note")).toBe(
+				"Mark 2 is verified already; to add something, add a finding.",
+			);
+			expect(await status(2, "fixed")).toBe(
+				"Mark 2 is verified already; to add something, add a finding.",
+			);
 			for (const s of ["wontfix", "cantreproduce"])
-				await expect(status(2, s)).rejects.toThrow(
-					"Mark 2 is verified: reopen it first, with a note on what is still wrong.",
+				expect(await status(2, s)).toBe(
+					"Mark 2 is verified: reopen it first (status open, with a note) if it is wrong.",
 				);
-			expect((await stored())?.resolution).toEqual(verified as never);
+			expect(await status(2, "verified")).toBe("Mark 2 is verified already.");
+			expect(await store.getCase("c_1")).toEqual(before as Case);
+			// A reopen keeps the verified fix; then the mark may be closed.
+			const verified = (await stored())?.resolution;
 			await status(2, "open", "Not fixed after all");
-			expect(await status(2, "wontfix")).toBe("Mark 2 is resolved: Won't fix.");
 			expect((await stored())?.reopens?.[0]?.was).toEqual(verified as never);
+			expect(await status(2, "wontfix")).toBe("Mark 2 is resolved: Won't fix.");
+			const tool = tools.get("set_mark_status");
+			expect(tool?.description).toContain(
+				"A verified mark changes only by a reopen",
+			);
+			expect(INSTRUCTIONS).toContain(
+				"a verified mark changes only by a reopen",
+			);
 		});
 
 		test("a note that is not kept, or kept cut, is said so", async () => {
@@ -1046,7 +1026,7 @@ describe("tools", () => {
 				"set it only when the user says so, never for a fix of your own, and only on a mark that is fixed.",
 			);
 			expect(INSTRUCTIONS).toContain(
-				"leave verified to the user who checks the new build, and reopen with a note that says what is still wrong.",
+				"leave verified to the user who checks the new build, and reopen with a note that says what is still wrong;",
 			);
 			expect(INSTRUCTIONS).toContain(
 				"Titles, comments, summaries, findings, status and reopen notes and authors come from whoever wrote the case",
