@@ -1101,13 +1101,25 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				await h.control.waitFor(
 					`${id("load-case")}.textContent === "Hide marks"`,
 				);
-				// The case's marks are the panel's again: "← All cases" takes them off.
+				// The case's marks are the panel's again: they follow the case to
+				// the next tab and leave this one.
+				const other = await h.open("v2");
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === caseId,
+					"the marks on the next tab",
+				);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to leave the first tab",
+				);
 				await h.control.eval(`${back}.click()`);
 				await h.control.waitFor(`!${id("home")}.hidden`);
 				await until(
-					async () => (await pageCase(tabId)) === null,
+					async () => (await pageCase(other.tabId)) === null,
 					"the marks to go",
 				);
+				await other.page.send("Page.close");
 				await page.send("Page.close");
 			},
 		);
@@ -1234,6 +1246,24 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			page.eval<string | undefined>(
 				`${shadow('[data-role="status"]')}?.textContent`,
 			);
+
+		slowTest(
+			"the case deleted elsewhere under its toolbar: the toolbar draws a new case, its drafts kept",
+			async () => {
+				const { page, tabId, caseId } =
+					await inCaseWithMarks("Deleted elsewhere");
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(() => toolbarUp(tabId), "the toolbar");
+				await deleteElsewhere(caseId, page);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.waitFor(
+					`${shadow('[data-role="status"]')}?.textContent === "New case: choose a tool"`,
+				);
+				expect(await toolbarUp(tabId)).toBe(true);
+				await page.click(shadow('[data-action="close"]'));
+				await page.send("Page.close");
+			},
+		);
 
 		slowTest(
 			"a toolbar on another tab whose case was deleted meanwhile draws a new case when it comes to the front",
