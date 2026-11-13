@@ -976,7 +976,10 @@ export class Annotator {
 			target === undefined
 				? this.#button("Close", "close", () => this.hide(), "close")
 				: this.#button("Done", "close", () => void this.#finish(), "close");
-		if (target !== undefined) {
+		// As an icon on a narrow page it needs its tooltip, as every other one.
+		if (target === undefined)
+			close.title = "Close the toolbar; the marks stay on this page";
+		else {
 			close.title =
 				this.#leftOut === undefined
 					? "Stop adding marks"

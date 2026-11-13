@@ -283,3 +283,21 @@ test("All cases during a new case's save: a show for that case waiting for it is
 	expect(a.state().target?.caseId).not.toBe("c_x");
 	expect(a.state().visible).toBe(false);
 });
+
+test("every button of the toolbar that can be an icon alone has a tooltip, Close too", () => {
+	const { a, overlay } = annotator();
+	a.show({});
+	const bare = () =>
+		[...overlay.toolbar.querySelectorAll("button")]
+			.filter((b) => b.querySelector("svg") !== null && !b.disabled)
+			.filter((b) => b.title === "")
+			.map((b) => b.dataset["action"]);
+	// A new case: the tools, Close and the move button.
+	expect(bare()).toEqual([]);
+	expect(
+		overlay.toolbar.querySelector<HTMLElement>('[data-action="close"]')?.title,
+	).toBe("Close the toolbar; the marks stay on this page");
+	// Adding to a case: Done says what it does too.
+	a.show({ target });
+	expect(bare()).toEqual([]);
+});
