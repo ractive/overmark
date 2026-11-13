@@ -652,7 +652,7 @@ async function hideNewCase(tabId?: number): Promise<void> {
  */
 async function endToolbars(
 	caseId: string,
-	discard: boolean,
+	how: { discard?: boolean; retry?: boolean },
 ): Promise<{ left: number; front: OverlayState | undefined }> {
 	const front = (await activeTab())?.id;
 	const tabs = new Set(toolbarOn);
@@ -660,7 +660,7 @@ async function endToolbars(
 	const answers = await Promise.all(
 		[...tabs].map(async (tabId) => {
 			const answer = (await chrome.tabs
-				.sendMessage(tabId, { type: "overlay:end", caseId, discard })
+				.sendMessage(tabId, { type: "overlay:end", caseId, ...how })
 				.catch(() => undefined)) as OverlayState | undefined;
 			return { tabId, answer };
 		}),
@@ -698,18 +698,23 @@ const leavingNow = (): PanelState["leaving"] => state.leaving;
  * "← All cases" (DEC-023): the toolbar adding to the case finishes as its
  * Done does and adds to no case any more, then the case closes and its marks
  * leave the tab in front. A mark that could not be added keeps the toolbar
- * up and the panel in the case, which says so. The next click ends it again,
- * and the page decides: a mark its last Done left out goes then, as with its
- * own Done again; one drawn or tried since is tried once more (DEC-014).
+ * up and the panel in the case, which says so: the first click is no Done
+ * again, so a mark an earlier Done left out is tried once more. The next
+ * click ends it again, and the page decides: a mark its last Done left out
+ * goes then, as with its own Done again; one drawn or tried since is tried
+ * once more (DEC-014).
  */
 async function leaveCase(): Promise<void> {
 	if (state.view.kind !== "case" || state.leaving?.phase === "finishing")
 		return;
 	const caseId = state.view.id;
+	// The first click tries the marks an earlier Done left out once more;
+	// the second is the page's Done again.
+	const retry = state.leaving?.phase !== "blocked";
 	update((s) => (s.leaving = { phase: "finishing" }));
 	// A refresh read before the end would show the toolbar as it was.
 	tabWork.cancel();
-	const { left, front } = await endToolbars(caseId, false);
+	const { left, front } = await endToolbars(caseId, { retry });
 	// Closed meanwhile (deleted elsewhere), or opened again.
 	if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
 	if (left > 0) {
@@ -1231,7 +1236,7 @@ const actions: Actions = {
 		const hint = caseHintWriter();
 		void (async () => {
 			// The toolbar adding to it goes first, with the marks not in it yet.
-			await endToolbars(c.id, true);
+			await endToolbars(c.id, { discard: true });
 			await store.deleteCase(c.id);
 			closeCase();
 			void clearDeleted(c.id);

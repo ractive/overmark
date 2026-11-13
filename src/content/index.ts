@@ -205,10 +205,15 @@ function start(): void {
 				case "overlay:end":
 					// Answered once the toolbar is finished: hidden, or up with a
 					// mark that is not in the case yet.
-					annotator.end(message.caseId, message.discard ?? false).then(
-						() => sendResponse(state()),
-						() => sendResponse(state()),
-					);
+					annotator
+						.end(message.caseId, {
+							discard: message.discard ?? false,
+							retry: message.retry ?? false,
+						})
+						.then(
+							() => sendResponse(state()),
+							() => sendResponse(state()),
+						);
 					return true; // answers asynchronously
 				case "overlay:state":
 					sendResponse(state());

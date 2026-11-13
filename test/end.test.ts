@@ -193,8 +193,8 @@ test("a mark that could not be added keeps the toolbar up and the case; discard 
 	expect(a.state().target?.caseId).toBe("c_open");
 	expect(a.state().drafts).toBe(1);
 	expect(asked.some((r) => r.type === "case:save")).toBe(false);
-	// The second "← All cases": without it.
-	await a.end("c_open", true);
+	// Delete: without it.
+	await a.end("c_open", { discard: true });
 	expect(a.state().visible).toBe(false);
 	expect(a.state().target).toBeUndefined();
 	expect(a.state().drafts).toBe(0);
@@ -218,4 +218,29 @@ test("the page tells the side panel when its drafts or its case change", async (
 		a,
 		() => status?.textContent?.startsWith("No screenshot") ?? false,
 	);
+});
+
+test("All cases after the toolbar's Done left a mark out tries it once more, and says so", async () => {
+	answer = noShots;
+	const { a, overlay } = annotator();
+	a.show({ target });
+	note(overlay, a);
+	const alert = () =>
+		overlay.toolbar.querySelector('[data-role="alert"]')?.textContent ?? "";
+	await settle(a, () => alert().startsWith("Mark 3 was not added"));
+	// The toolbar's own Done: the mark stays out, Done again would discard it.
+	overlay.toolbar
+		.querySelector<HTMLButtonElement>('[data-action="close"]')
+		?.click();
+	await settle(a, () => alert().includes("Done again to discard it"));
+	// The panel's first "← All cases" is no Done again: the mark stays.
+	await a.end("c_open", { retry: true });
+	expect(a.state().visible).toBe(true);
+	expect(a.state().drafts).toBe(1);
+	expect(a.state().target?.caseId).toBe("c_open");
+	// Its second click is: the page's Done again decides.
+	await a.end("c_open");
+	expect(a.state().visible).toBe(false);
+	expect(a.state().drafts).toBe(0);
+	expect(a.state().target).toBeUndefined();
 });

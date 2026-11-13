@@ -757,9 +757,19 @@ export class Annotator {
 	 * the toolbar is hidden, add to no case any more, so the next show starts
 	 * a new one. A mark that could not be added keeps the toolbar up, adding
 	 * to the case, unless `discard`: then the marks not in the case go.
+	 * Without `retry` it is Done's own second click where an earlier Done left
+	 * marks out (they go); with it they are tried once more.
 	 */
-	async end(caseId: string, discard = false): Promise<void> {
+	async end(
+		caseId: string,
+		{
+			discard = false,
+			retry = false,
+		}: { discard?: boolean; retry?: boolean } = {},
+	): Promise<void> {
 		if (this.#target?.caseId !== caseId) return;
+		// Not a Done again: what an earlier Done left out is tried once more.
+		if (retry) this.#leftOut = undefined;
 		if (discard) await this.#discardLeft();
 		else await this.#finish();
 		// Shown for another case meanwhile, or a mark is still not in this one.
