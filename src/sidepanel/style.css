@@ -759,13 +759,14 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	white-space: pre-line;
 }
 
-/* --- what the sync needs of the user, above every view (DEC-025) ------------- */
+/* --- what needs the user, above every view: the sync (DEC-025), an AI problem - */
 
 /*
  * From edge to edge, not dismissable: a warning while the sync is paused, red
  * when it failed; the first sentence says which, the button helps.
  */
-.sync-banner {
+.sync-banner,
+.ai-problem {
 	display: grid;
 	grid-template-columns: 16px minmax(0, 1fr);
 	gap: 6px var(--s2);
@@ -776,7 +777,8 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 }
 
 /* The warning sign, in the banner's colour. */
-.sync-banner::before {
+.sync-banner::before,
+.ai-problem::before {
 	content: "";
 	width: 16px;
 	height: 16px;
@@ -787,16 +789,20 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	mask: var(--warning-sign) center / contain no-repeat;
 }
 
-.sync-banner[data-sync="failed"] {
+/* A failed sync, and an AI connection with a problem: red, as the pill's dot. */
+.sync-banner[data-sync="failed"],
+.ai-problem {
 	border-bottom-color: var(--danger);
 	background: var(--danger-bg);
 }
 
-.sync-banner[data-sync="failed"]::before {
+.sync-banner[data-sync="failed"]::before,
+.ai-problem::before {
 	background: var(--danger);
 }
 
-.sync-banner > * {
+.sync-banner > *,
+.ai-problem > * {
 	grid-column: 2;
 	margin: 0;
 	overflow-wrap: anywhere;

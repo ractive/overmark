@@ -32,7 +32,7 @@ import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
 import { noneFound } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
-import type { AiCall, Exported, PanelState } from "./state.ts";
+import type { AiCall, AiProblem, Exported, PanelState } from "./state.ts";
 import {
 	renderSyncBanner,
 	renderSyncSection,
@@ -110,6 +110,8 @@ const backLabel = byId<HTMLSpanElement>("back-label");
 const aiButton = byId<HTMLButtonElement>("ai-button");
 const aiAction = byId<HTMLSpanElement>("ai-action");
 const aiCall = byId<HTMLParagraphElement>("ai-call");
+const aiProblem = byId<HTMLDivElement>("ai-problem");
+const aiProblemText = byId<HTMLParagraphElement>("ai-problem-text");
 const stopAi = byId<HTMLButtonElement>("stop-ai");
 const keepOn = byId<HTMLInputElement>("keep-on");
 const importError = byId<HTMLDivElement>("import-error");
@@ -1920,22 +1922,39 @@ function callText(call: AiCall): string {
 	return `Last AI call: ${call.tool}, by ${call.app}, at ${time}`;
 }
 
-/** The connection with no problem to tell (ai.ts `statusText`). */
-const AI_OFF = "Not connected";
-
 /** `text` as a sentence another can follow. */
 const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
+/** A problem in the pill's two or three words; the sentence is under the bar. */
+const PROBLEM_LABEL: Record<AiProblem, string> = {
+	tab: "AI: side panel only",
+	updated: "AI: reopen panel",
+	unavailable: "AI unavailable",
+	connection: "AI problem",
+};
 
 /**
  * The top bar's pill (DEC-023, DEC-024): the connection in two or three
  * words, a dot in its colour, and in the tooltip the whole of it and what a
- * click does.
+ * click does. A problem is red and named; its sentence shows under the bar
+ * (`renderAi`), so nobody has to hover to learn of it.
  */
 export function aiPill(ai: PanelState["ai"]): {
 	label: string;
 	dot: "off" | "problem" | "waiting" | "connected";
 	title: string;
 } {
+	if (ai.problem !== undefined) {
+		const retrying = ai.problem === "connection" && ai.active;
+		return {
+			label: retrying ? "AI retrying…" : PROBLEM_LABEL[ai.problem],
+			dot: "problem",
+			title:
+				ai.problem === "connection"
+					? `${sentence(ai.status)} Click for the AI app card.`
+					: sentence(ai.status),
+		};
+	}
 	if (ai.connected && ai.apps > 0)
 		return {
 			label: `AI on · ${ai.apps} app${ai.apps === 1 ? "" : "s"}`,
@@ -1954,26 +1973,27 @@ export function aiPill(ai: PanelState["ai"]): {
 			dot: "waiting",
 			title: `${sentence(ai.status)} Click for the AI app card.`,
 		};
-	const problem = ai.status !== AI_OFF;
 	return {
 		label: "AI off",
-		dot: problem ? "problem" : "off",
-		title: problem
-			? `${sentence(ai.status)} Click to set it up.`
-			: "AI access is off. Click to turn it on and set it up.",
+		dot: "off",
+		title: "AI access is off. Click to turn it on and set it up.",
 	};
 }
 
 function renderAi({ ai }: PanelState): void {
 	const pill = aiPill(ai);
 	aiLabel.textContent = pill.label;
-	// The whole status, for a screen reader and the tests; the pill shows the label.
+	// The whole status in the pill's name, for a screen reader; the pill shows the label.
 	aiStatus.textContent = ai.status;
 	aiButton.title = pill.title;
 	// Waiting for an app to pair: nothing to do but wait (a click shows how).
-	aiAction.hidden = ai.active && !ai.connected;
+	aiAction.hidden = (ai.active && !ai.connected) || ai.problem !== undefined;
 	aiAction.textContent = ai.connected ? "Manage" : "Turn on";
 	bar.dataset["ai"] = pill.dot;
+	// What is wrong, in words, on every view (DEC-024).
+	aiProblem.hidden = ai.problem === undefined;
+	aiProblemText.textContent =
+		ai.problem === undefined ? "" : sentence(ai.status);
 	stopAi.hidden = !ai.active;
 	keepOn.checked = ai.keepOn;
 	setHint(aiCall, ai.lastCall && callText(ai.lastCall));

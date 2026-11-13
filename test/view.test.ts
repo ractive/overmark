@@ -1547,6 +1547,129 @@ describe("the AI app", () => {
 		expect(el("stop-ai").hidden).toBe(true);
 	});
 
+	test("a problem is said in words without hovering: a red dot, its name in the pill, its sentence under the bar on every view (DEC-024)", () => {
+		const c = sampleCase("c_problem");
+		const seen = () => ({
+			label: el("ai-label").textContent,
+			dot: el("bar").dataset["ai"],
+			line: el("ai-problem").hidden
+				? undefined
+				: el("ai-problem-text").textContent,
+			title: el("ai-button").title,
+		});
+		const off = { connected: false, apps: 0, active: false };
+		for (const [change, want] of [
+			[
+				// The panel's page in a tab.
+				{
+					...off,
+					problem: "tab",
+					status: "Open the side panel from the Overmark icon for AI access",
+				},
+				{
+					label: "AI: side panel only",
+					line: "Open the side panel from the Overmark icon for AI access.",
+					title: "Open the side panel from the Overmark icon for AI access.",
+				},
+			],
+			[
+				// The extension was updated under an open panel.
+				{
+					...off,
+					problem: "updated",
+					status: "Overmark was updated: close and open this panel again.",
+				},
+				{
+					label: "AI: reopen panel",
+					line: "Overmark was updated: close and open this panel again.",
+					title: "Overmark was updated: close and open this panel again.",
+				},
+			],
+			[
+				// The worker's connection could not start.
+				{
+					...off,
+					problem: "unavailable",
+					status: "AI access is not available: no storage",
+				},
+				{
+					label: "AI unavailable",
+					line: "AI access is not available: no storage.",
+					title: "AI access is not available: no storage.",
+				},
+			],
+			[
+				// A connect that failed, or an address taken over.
+				{
+					...off,
+					problem: "connection",
+					status: "Not connected: the address is in use elsewhere.",
+				},
+				{
+					label: "AI problem",
+					line: "Not connected: the address is in use elsewhere.",
+					title:
+						"Not connected: the address is in use elsewhere. Click for the AI app card.",
+				},
+			],
+			[
+				// Lost, and trying again by itself: still a problem, and Stop ends it.
+				{
+					...off,
+					active: true,
+					problem: "connection",
+					status: "Connection lost, retrying…",
+				},
+				{
+					label: "AI retrying…",
+					line: "Connection lost, retrying…",
+					title: "Connection lost, retrying… Click for the AI app card.",
+				},
+			],
+		] as [Partial<PanelState["ai"]>, Record<string, string>][]) {
+			// In a case, at home and in Settings alike.
+			for (const state of [
+				caseState(c, ai(change)),
+				(() => {
+					const s = initialState();
+					ai(change)(s);
+					return s;
+				})(),
+				caseState(c, (s) => {
+					ai(change)(s);
+					s.settings = true;
+				}),
+			]) {
+				render(state, noActions);
+				expect(seen()).toEqual({ ...want, dot: "problem" } as never);
+				// Above the views, under the top bar.
+				expect(el("ai-problem").previousElementSibling).toBe(el("bar"));
+				expect(el("ai-problem").getAttribute("role")).toBe("status");
+			}
+		}
+		// After an update the pill no longer says what was true before it.
+		render(
+			caseState(
+				c,
+				ai({
+					status: "Connected: Claude",
+					connected: true,
+					apps: 1,
+					active: true,
+				}),
+			),
+			noActions,
+		);
+		expect(seen()).toMatchObject({ label: "AI on · 1 app", line: undefined });
+		// The problem gone, the line goes.
+		render(caseState(c), noActions);
+		expect(seen()).toMatchObject({
+			label: "AI off",
+			dot: "off",
+			line: undefined,
+		});
+	});
+
 	test("its last call shows once there is one", () => {
 		const c = sampleCase("c_call");
 		render(caseState(c), noActions);
@@ -1621,19 +1744,9 @@ describe("the AI app", () => {
 			"waiting",
 			"Connecting… Click for the AI app card.",
 		]);
-		// Off with something to tell: the dot says so, the tooltip what.
-		render(
-			caseState(
-				c,
-				ai({ status: "Not connected: the address is in use elsewhere." }),
-			),
-			noActions,
-		);
-		expect(pill()).toEqual([
-			"AI off",
-			"problem",
-			"Not connected: the address is in use elsewhere. Click to set it up.",
-		]);
+		// Healthy in each of these: nothing is said under the bar.
+		expect(el("ai-problem").hidden).toBe(true);
+		expect(el("ai-problem-text").textContent).toBe("");
 		// Stop is short beside the pill; its name says what it stops.
 		expect(el("stop-ai").textContent).toBe("Stop");
 		expect(el("stop-ai").getAttribute("aria-label")).toBe("Stop AI access");

@@ -13,7 +13,7 @@ import { join } from "node:path";
 import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
-import { oldSettings, statusText } from "../src/sidepanel/ai.ts";
+import { oldSettings, problemOf, statusText } from "../src/sidepanel/ai.ts";
 import { stopFirst, stopProblem } from "../src/worker/connection.ts";
 import {
 	DATABASE,
@@ -791,6 +791,30 @@ describe("the panel's status line", () => {
 		],
 	] as [Partial<AiState>, string][])("%o", (change, text) => {
 		expect(statusText({ ...base, ...change })).toBe(text);
+	});
+
+	test("which of these tell of something wrong: the panel shows that sentence under its top bar", () => {
+		const problem = (change: Partial<AiState>) =>
+			problemOf({ ...base, ...change });
+		// All is well, or nothing is on.
+		expect(problem({})).toBeUndefined();
+		expect(problem({ state: "connected" })).toBeUndefined();
+		expect(problem({ state: "connecting" })).toBeUndefined();
+		// A failed connect, with or without another try on its way.
+		expect(problem({ problem: "Could not connect" })).toBe("connection");
+		expect(problem({ problem: "Could not connect", retrying: true })).toBe(
+			"connection",
+		);
+		// Lost and reconnecting; taken over; the saved relay refused.
+		expect(problem({ reconnecting: true })).toBe("connection");
+		expect(problem({ replaced: { sibling: false } })).toBe("connection");
+		expect(problem({ relayNote: "The saved relay x cannot be used." })).toBe(
+			"connection",
+		);
+		// Connected again: what went wrong before is over.
+		expect(
+			problem({ state: "connected", problem: "Could not connect" }),
+		).toBeUndefined();
 	});
 });
 

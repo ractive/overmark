@@ -532,8 +532,14 @@ describe.skipIf(browserBinary === undefined)("who may command it", () => {
 		await h.control.waitFor(`${byId("connect")}.disabled`);
 		// Nor can it change Blur form fields: that goes over the port too.
 		expect(await h.control.eval(`${byId("blur-forms")}.disabled`)).toBe(true);
-		expect(await h.control.eval(`${byId("ai-status")}.textContent`)).toContain(
-			"side panel",
+		// Said where it is seen: under the top bar, and in the pill.
+		expect(
+			await h.control.eval(
+				`${byId("ai-problem")}.getClientRects().length > 0 && ${byId("ai-problem-text")}.textContent`,
+			),
+		).toBe("Open the side panel from the Overmark icon for AI access.");
+		expect(await h.control.eval(`${byId("ai-label")}.textContent`)).toBe(
+			"AI: side panel only",
 		);
 	});
 
@@ -883,8 +889,14 @@ describe.skipIf(browserBinary === undefined)(
 				`document.documentElement.dataset.aiState === "failed"`,
 				10_000,
 			);
+			// Said in words under the top bar, and named in the pill.
 			expect(
-				await panel.eval<string>(`${byId("ai-status")}.textContent`),
+				await panel.eval<[boolean, string, string | undefined]>(
+					`[${byId("ai-problem")}.getClientRects().length > 0, ${byId("ai-label")}.textContent, ${byId("bar")}.dataset.ai]`,
+				),
+			).toEqual([true, "AI unavailable", "problem"]);
+			expect(
+				await panel.eval<string>(`${byId("ai-problem-text")}.textContent`),
 			).toContain("AI access is not available");
 			expect(await panel.eval(`${byId("blur-forms")}.disabled`)).toBe(true);
 			expect(await panel.eval(`${byId("connect")}.disabled`)).toBe(true);

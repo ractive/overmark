@@ -848,8 +848,11 @@ row; the tools as icons; Undo and Close as icons too; the buttons closer. Their 
 stay as accessible names. The side panel holds at 345 px of content (Chrome's 360 px
 less a classic scrollbar): there the AI pill's words give way first. The found line keeps "3 of 4
 marks found on …" and adds "Dashed: unsure." only when a dashed mark is drawn. The AI
-pill also says "AI connecting…", and shows a red dot when AI access is off with a
-problem to tell; the whole status stays in the pill's name and tooltip. The rail is a
+pill also says "AI connecting…". A problem (the panel's page in a tab, an update under
+an open panel, a connection that cannot start, failed, was lost or taken over) is said
+without hovering: the pill's dot is red and it names the problem in two or three
+words, and the sentence shows under the top bar on every view. The whole status stays
+in the pill's name and tooltip. The rail is a
 mix of `--edge` and `--paper` (decoration, between a rule and an edge); the banner's
 button stands right of the text only where it is the only one and the panel is at
 least 400 px wide.

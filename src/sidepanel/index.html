@@ -18,6 +18,8 @@
 			<button id="ai-button" type="button" class="ai-pill"><span class="dot" aria-hidden="true"></span><span id="ai-label">AI off</span><span id="ai-status" class="visually-hidden">Not connected</span><span id="ai-action" class="visually-hidden">Turn on</span></button>
 			<button id="stop-ai" type="button" hidden aria-label="Stop AI access" title="Pause AI access now, from any view: AI apps can no longer reach Overmark, and they stay paired. The same as turning off the AI access switch in the AI app card; both also turn off Keep AI access on.">Stop</button>
 		</header>
+		<!-- What is wrong with the AI connection, in words, on every view (DEC-024). -->
+		<div id="ai-problem" class="ai-problem" role="status" hidden><p id="ai-problem-text"></p></div>
 		<p id="ai-call" class="meta" hidden></p>
 		<!-- The AI connection lives in the service worker; the questions and the AI app card show it (ai.ts). -->
 		<div id="questions" class="ai-box" aria-live="polite"></div>
