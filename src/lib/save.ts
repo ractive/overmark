@@ -241,7 +241,17 @@ export async function saveCase(
 			annotations,
 			verdict: current?.verdict ?? null,
 			importedAt: current?.importedAt,
-			lastNumber: current?.lastNumber,
+			// The highest number used, the new marks' too: a case's format
+			// refuses a lastNumber below a mark's (it was kept as it was, so
+			// a mark added after a delete or an Undo could not be stored).
+			...(current?.lastNumber === undefined
+				? {}
+				: {
+						lastNumber: Math.max(
+							current.lastNumber,
+							...annotations.map((a) => a.number),
+						),
+					}),
 		});
 		return { value, images };
 	});

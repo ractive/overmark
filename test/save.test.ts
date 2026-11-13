@@ -379,6 +379,23 @@ describe("saveCase", () => {
 		]);
 	});
 
+	test("a mark added after a delete raises lastNumber with it (was refused by the format)", async () => {
+		const store = new MemoryStore();
+		await newCase(store); // marks 1 and 2
+		await store.updateCase("c_1", (c) => ({
+			value: { ...(c as Case), lastNumber: 2 },
+		}));
+		await captured(store, "c_1", "p_b");
+		const saved = await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_b")], [draft(3, "p_b")])),
+			crop,
+		);
+		expect(saved.annotations.map((a) => a.number)).toEqual([1, 2, 3]);
+		expect(saved.lastNumber).toBe(3);
+		expect(validateCase(saved)).toEqual(saved);
+	});
+
 	test("a later mark leaves the case's page as its first mark had it", async () => {
 		const store = new MemoryStore();
 		await putCase(store, sampleCase("c_1"));
