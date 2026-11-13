@@ -1009,6 +1009,60 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		const hint = `${id("case-hint")}.textContent`;
 		const REPLACED = "Loading was replaced";
 
+		/**
+		 * A case of `n` marks on v1 drawn on nothing: its load takes many of
+		 * the page's timer turns (so a message sent right behind it lands
+		 * while it runs), and none is ever found (so it is searched again at
+		 * 1 s and 2 s).
+		 */
+		const manyMarks = (id: string, n = 60): Case => {
+			const c = sampleCase(id);
+			return {
+				...c,
+				page: { ...c.page, url: `${h.base}/v1` },
+				annotations: Array.from({ length: n }, (_, i) => ({
+					id: `a${i + 1}`,
+					number: i + 1,
+					shot: "s1",
+					comment: `Mark ${i + 1}`,
+					author: "user" as const,
+					shape: { kind: "note" as const, at: { x: 10 + i, y: 10 } },
+					crop: `crops/a${i + 1}.webp`,
+					element: null,
+				})),
+			};
+		};
+
+		slowTest(
+			"the case opened again while its searches again wait: it is drawn",
+			async () => {
+				await fresh([manyMarks("c_again")]);
+				const { page, tabId } = await h.open("v1");
+				await page.activate();
+				await openCase("c_again");
+				await until(
+					async () => (await pageCase(tabId)) === "c_again",
+					"the marks on the page",
+				);
+				// The searches again (1 s, 2 s) are under way: back to the list,
+				// and the case opened again at once.
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to go",
+				);
+				await openCase("c_again");
+				await until(
+					async () => (await pageCase(tabId)) === "c_again",
+					"the marks drawn again",
+				);
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.send("Page.close");
+			},
+		);
+
 		slowTest(
 			"Save case…, then Done adding while the draw is under way: the found line comes",
 			async () => {

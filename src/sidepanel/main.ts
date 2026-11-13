@@ -160,6 +160,8 @@ function startLoad(target: Drawn): ReturnType<Latest["start"]> {
 function stopLoads(): void {
 	loadTarget = undefined;
 	loadWork.cancel();
+	// A draw waiting to search again is over too: a follow may draw anew.
+	setDrawing(undefined);
 }
 
 /**
