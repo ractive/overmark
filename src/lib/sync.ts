@@ -488,6 +488,11 @@ export interface SyncDeps {
 	folder?: (chosen: ChosenFolder) => SyncTarget;
 	/** A case's file for a folder (Export's own); tests may fail it. */
 	exportCase?: ExportCase;
+	/**
+	 * Wait this long after the last request before a run (not for Try
+	 * again): a burst of changes is one write per case, one download each.
+	 */
+	quietMs?: number;
 }
 
 /**
@@ -498,6 +503,8 @@ export class Sync {
 	readonly #deps: SyncDeps;
 	#dirty = false;
 	#force = false;
+	/** When the last request came. */
+	#last = 0;
 	#running: Promise<void> | undefined;
 
 	constructor(deps: SyncDeps) {
@@ -511,6 +518,7 @@ export class Sync {
 	request(force = false): Promise<void> {
 		this.#dirty = true;
 		this.#force ||= force;
+		this.#last = Date.now();
 		this.#running ??= this.#loop();
 		return this.#running;
 	}
@@ -523,6 +531,12 @@ export class Sync {
 	async #loop(): Promise<void> {
 		try {
 			while (this.#dirty) {
+				const quiet = this.#deps.quietMs ?? 0;
+				for (;;) {
+					const wait = this.#last + quiet - Date.now();
+					if (this.#force || wait <= 0) break;
+					await new Promise((r) => setTimeout(r, wait));
+				}
 				this.#dirty = false;
 				const force = this.#force;
 				this.#force = false;

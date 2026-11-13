@@ -93,6 +93,9 @@ const sync = new Sync({
 	cases: store,
 	store: kvSyncStore(syncKv),
 	downloads: downloadsTarget(chromeDownloads(syncKv)),
+	// Saves in a row are one download per case, not one each (a burst of
+	// Chrome's download bubble).
+	quietMs: 2000,
 	...(typeof OVERMARK_TEST_BUILD !== "undefined" && OVERMARK_TEST_BUILD
 		? { folder: testFolder }
 		: {}),

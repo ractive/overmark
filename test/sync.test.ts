@@ -810,6 +810,31 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(problem).toContain("And 3 more cases could not be written.");
 	});
 
+	test("a burst of changes waits for a quiet moment: one download per case", async () => {
+		sync = new Sync({
+			cases,
+			store,
+			downloads: downloadsTarget(api),
+			quietMs: 30,
+		});
+		const c = await add("c_1", "Login");
+		const done = sync.request();
+		for (let i = 1; i <= 3; i++) {
+			await Bun.sleep(10);
+			await putCase(cases, { ...c, updatedAt: `2026-11-12T09:0${i}:00Z` });
+			void sync.request();
+		}
+		await done;
+		await sync.idle();
+		expect(api.downloads).toHaveLength(1);
+		// Try again does not wait.
+		await putCase(cases, { ...c, updatedAt: "2026-11-12T10:00:00Z" });
+		const start = Date.now();
+		await sync.request(true);
+		expect(Date.now() - start).toBeLessThan(30);
+		expect(api.downloads).toHaveLength(2);
+	});
+
 	test("without a Downloads target (no such API): failed, saying so", async () => {
 		sync = new Sync({ cases, store });
 		await add("c_1", "Login");
