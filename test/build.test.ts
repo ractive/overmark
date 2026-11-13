@@ -117,13 +117,25 @@ describe("build", () => {
 		// The pages are split, which names every chunk chunk-<hash>.js: a
 		// lazy one (the client's WebMCP mirror since 0.16.1, say, for
 		// `webmcp: true`, which Overmark leaves off) would be one more script.
-		for (const page of ["sidepanel", "offscreen"]) {
-			const scripts = [
-				...new Bun.Glob(`${page}/**/*.js`).scanSync({ cwd: outdir }),
-			];
-			expect(scripts).toHaveLength(1);
-			const code = await Bun.file(join(outdir, scripts[0] as string)).text();
-			expect(code).not.toMatch(/\bimport\s*\(/);
+		// Each page's files, exactly: the html, one chunk with its map, and
+		// the side panel's stylesheet.
+		const pages = {
+			sidepanel: ["chunk-#.css", "chunk-#.js", "chunk-#.js.map", "index.html"],
+			offscreen: ["chunk-#.js", "chunk-#.js.map", "index.html"],
+		};
+		for (const [page, expected] of Object.entries(pages)) {
+			const files = [
+				...new Bun.Glob(`${page}/**/*`).scanSync({ cwd: outdir }),
+			].sort();
+			expect(
+				files.map((f) =>
+					f.slice(page.length + 1).replace(/-[a-z0-9]+\./, "-#."),
+				),
+			).toEqual(expected);
+			for (const file of files.filter((f) => f.endsWith(".js")))
+				expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
+					/\bimport\s*\(/,
+				);
 		}
 	});
 
