@@ -1931,6 +1931,21 @@ describe("the title is renamed where it is shown (DEC-026)", () => {
 					cancelable: true,
 				}) as unknown as Event,
 			);
+		// The Enter that ends an IME composition is the composition's.
+		field.dispatchEvent(
+			new window.KeyboardEvent("keydown", {
+				key: "Enter",
+				isComposing: true,
+				cancelable: true,
+			}) as unknown as Event,
+		);
+		field.dispatchEvent(
+			new window.KeyboardEvent("keydown", {
+				key: "Enter",
+				keyCode: 229,
+				cancelable: true,
+			}) as unknown as Event,
+		);
 		key("Enter");
 		key("Escape");
 		el<HTMLButtonElement>("rename-save").click();

@@ -788,6 +788,9 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		oninput: () => actions.typeRename(renameField.value),
 		onkeydown: (e) => {
 			const k = e as KeyboardEvent;
+			// The Enter (or Escape) that ends an IME composition is the
+			// composition's, not a save.
+			if (k.isComposing || k.keyCode === 229) return;
 			if (k.key === "Enter") {
 				k.preventDefault();
 				actions.saveRename(created.current, renameField.value);
