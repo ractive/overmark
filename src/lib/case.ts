@@ -890,6 +890,17 @@ function appOf(value: unknown, path: string): { app?: FindingApp } {
 	};
 }
 
+/**
+ * The resolution a reopen ended, its note cut to a reopen note's length:
+ * twenty of them stay per mark, and a mark's history is bounded, or a case
+ * outgrows what a file may hold.
+ */
+function cutWas(was: Resolution): Resolution {
+	return was.note && was.note.length > MAX_REOPEN_NOTE
+		? { ...was, note: cutText(was.note, MAX_REOPEN_NOTE) }
+		: was;
+}
+
 /** A mark's reopens, the newest `MAX_REOPENS`; none or an empty list: none. */
 function reopensOf(value: unknown, path: string): { reopens?: Reopen[] } {
 	if (value === undefined) return {};
@@ -905,7 +916,7 @@ function reopensOf(value: unknown, path: string): { reopens?: Reopen[] } {
 				: { note: str(note, `${p}.note`, MAX_REOPEN_NOTE) }),
 			at: str(r["at"], `${p}.at`, 64),
 			...appOf(r["app"], `${p}.app`),
-			was: resolution(r["was"], `${p}.was`),
+			was: cutWas(resolution(r["was"], `${p}.was`)),
 			...importedOf(r["imported"], `${p}.imported`),
 		};
 	});
@@ -1130,11 +1141,7 @@ export function withReopen(
 				...(note ? { note } : {}),
 				at: now,
 				...(reopen.app ? { app: reopen.app } : {}),
-				// Twenty of them stay: each kept as long as a reopen note, or a
-				// case outgrows what a file may hold.
-				was: was.note
-					? { ...was, note: cutText(was.note, MAX_REOPEN_NOTE) }
-					: was,
+				was: cutWas(was),
 			};
 			return { ...open, reopens: [...reopens, entry].slice(-MAX_REOPENS) };
 		},

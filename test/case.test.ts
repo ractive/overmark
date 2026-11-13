@@ -885,12 +885,12 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 		expect(back.annotations[0]?.reopens?.[0]?.was.note?.length).toBe(
 			MAX_REOPEN_NOTE,
 		);
-		// A file with a longer one is read as it is.
+		// A file with a longer one is read cut the same way, not refused.
 		const file = JSON.parse(JSON.stringify(back));
 		file.annotations[0].reopens[0].was.note = "z".repeat(MAX_COMMENT);
 		expect(
 			validateCase(file).annotations[0]?.reopens?.[0]?.was.note?.length,
-		).toBe(MAX_COMMENT);
+		).toBe(MAX_REOPEN_NOTE);
 	});
 
 	test("only a fixed mark can be verified", () => {

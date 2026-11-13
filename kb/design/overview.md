@@ -169,7 +169,8 @@ know, and with it the whole file. Every Verify field is optional: `verified { at
 is read only on a fix (dropped on another kind), `app` names the AI app that set a
 status through a tool (absent: set in the panel), and `reopens` lists, oldest first and
 at most 20, each time the mark was opened again with its note (at most 2,000
-characters) and the whole resolution it ended (its note cut to the same 2,000). Like a finding, a resolution, its
+characters) and the whole resolution it ended, its note cut to the same 2,000 when the reopen is written
+and when a file is read: a mark's history stays under about 85,000 characters. Like a finding, a resolution, its
 verification and each reopen that came in from a file get `imported: true` on import,
 whatever the file says: who set them and when is the file's word. An older build reading a file of this one
 drops `verified`, `reopens` and `app`; `case.md` in the same zip still has them.

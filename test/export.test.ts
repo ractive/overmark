@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import type { Annotation, Case, Finding } from "../src/lib/case.ts";
+import {
+	type Annotation,
+	type Case,
+	type Finding,
+	MAX_COMMENT,
+	MAX_REOPEN_NOTE,
+	MAX_REOPENS,
+	withReopen,
+	withResolution,
+	withVerified,
+} from "../src/lib/case.ts";
 import {
 	caseFolders,
 	exportAllCases,
@@ -366,6 +376,70 @@ describe("statuses through a file (DEC-023)", () => {
 		expect(again.annotations[0]?.resolution?.imported).toBe(true);
 		expect(again.annotations[0]?.reopens?.[0]?.imported).toBe(true);
 	});
+
+	test("a case whose marks' histories are at the caps exports and imports again", async () => {
+		const store = new MemoryStore();
+		const base = sampleCase("c_caps");
+		const shot = {
+			id: "s1",
+			image: "shots/s1.webp",
+			scrollX: 0,
+			scrollY: 0,
+			viewport: { width: 1280, height: 800, dpr: 2 },
+			capturedAt: "2026-11-04T10:00:00Z",
+		};
+		// Twice the marks at which reopens' whole notes passed the 20 MB limit.
+		const MARKS = 100;
+		let c: Case = {
+			...base,
+			shots: [shot],
+			annotations: Array.from({ length: MARKS }, (_, i) =>
+				annotation(i + 1, { element: null }),
+			),
+		};
+		const fix = "f".repeat(MAX_COMMENT);
+		const still = "s".repeat(MAX_REOPEN_NOTE);
+		for (const a of c.annotations) {
+			for (let i = 0; i < MAX_REOPENS; i++) {
+				c = withResolution(
+					c,
+					a.id,
+					{ kind: "fixed", note: fix, app: CLAUDE },
+					"t",
+				);
+				c = withReopen(c, a.id, { note: still, app: CLAUDE }, "t");
+			}
+			c = withResolution(
+				c,
+				a.id,
+				{ kind: "fixed", note: fix, app: CLAUDE },
+				"t",
+			);
+		}
+		c = withVerified(c, "a1", undefined, "t");
+		await putCase(store, c);
+		await store.putImage(c.id, "shots/s1.webp", {
+			blob: webp("shots/s1.webp"),
+			width: 10,
+			height: 10,
+		});
+		for (const a of c.annotations)
+			await store.putImage(c.id, a.crop, {
+				blob: webp(a.crop),
+				width: 10,
+				height: 10,
+			});
+		const back = await importCase(
+			new MemoryStore(),
+			await exportCase(store, c),
+		);
+		expect(back.annotations).toHaveLength(MARKS);
+		const last = back.annotations.at(-1) as Annotation;
+		expect(last.reopens).toHaveLength(MAX_REOPENS);
+		expect(last.reopens?.[0]?.note).toBe(still);
+		expect(last.reopens?.[0]?.was.note?.length).toBe(MAX_REOPEN_NOTE);
+		expect(last.resolution?.note).toBe(fix);
+	}, 30_000);
 
 	test("case.md says which statuses came from a file", async () => {
 		const { store, c } = await stored();
