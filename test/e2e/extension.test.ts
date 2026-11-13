@@ -58,7 +58,7 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		await h.control.eval(inject);
 		await h.control.eval(inject);
 		const state = await h.control.eval<{ visible: boolean; title: string }>(
-			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" })`,
+			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show", target: { caseId: "c_shown", title: "Shown", nextAnnotation: 1 } })`,
 		);
 		expect(state.visible).toBe(true);
 		expect(state.title).toBe("Krankenkasse vergleichen (v1)");
@@ -86,7 +86,7 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 			`(() => { const old = document.createElement("div"); old.id = "overmark-root"; old.dataset.orphan = "true"; document.documentElement.append(old); })()`,
 		);
 		const state = await h.control.eval<{ visible: boolean }>(
-			`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" }))`,
+			`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show", target: { caseId: "c_shown", title: "Shown", nextAnnotation: 1 } }))`,
 		);
 		expect(state.visible).toBe(true);
 		expect(
@@ -115,11 +115,8 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 
 	test("marks drawn with the toolbar are saved as a case with screenshots", async () => {
 		const { page, tabId } = await h.open("v1");
-		await page.activate();
-		await h.control.eval(
-			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" }).catch(() => chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" })))`,
-		);
-		await page.waitFor(shadow('[data-action="tool-box"]'));
+		// As "Annotate this page": the case first, the toolbar adding to it.
+		await showToolbar(h, page, tabId);
 
 		// 1: a box around the submit button
 		await page.click(shadow('[data-action="tool-box"]'));
@@ -162,30 +159,28 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await page.type("Add a phone number");
 		await page.click(shadow('[data-action="comment-done"]'));
 
-		expect(
-			await page.eval<number>(
-				`${shadow("svg.marks")}.querySelectorAll("g[data-number]").length`,
-			),
-		).toBe(3);
-
-		// Save
-		await page.click(shadow('[data-action="save"]'));
-		await page.waitFor(shadow('input[aria-label="Case title"]'));
-		await page.eval(
-			`(() => { const i = ${shadow('input[aria-label="Case title"]')}; i.focus(); i.select(); })()`,
-		);
-		await page.type("Prämienrechner");
-		await page.click(shadow('[data-action="save-confirm"]'));
+		// Each in the case as its comment is done (DEC-014, DEC-026), and the
+		// toolbar's own and the loaded case's draw them.
 		await page.waitFor(
-			`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+			`${shadow('[data-role="status"]')}?.textContent === "Mark 3 added to “Krankenkasse vergleichen (v1)”"`,
 			20_000,
 		);
+		expect(
+			await page.eval<string[]>(
+				`[...new Set([...${shadow("svg.marks")}.querySelectorAll("g[data-number], [data-review]")].map((g) => g.dataset.number ?? g.dataset.review))].sort()`,
+			),
+		).toEqual(["1", "2", "3"]);
+
+		// The title, as a person types it in the panel's Rename.
+		await saveAs(page, "Prämienrechner");
 
 		const db = await h.control.eval<Db>(READ_DB);
 		expect(db.cases).toHaveLength(1);
 		const saved = db.cases[0];
 		expect(saved?.title).toBe("Prämienrechner");
-		expect(saved?.shots).toHaveLength(2);
+		// One screenshot per mark added (DEC-014): marks 1 and 2 shared the
+		// page's picture, each has its own copy with its pin.
+		expect(saved?.shots).toHaveLength(3);
 		const [a1, a2, a3] = saved?.annotations ?? [];
 		expect(a1?.shape.kind).toBe("box");
 		expect(a1?.comment).toBe("Contrast too low");
@@ -196,7 +191,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		expect(a3?.shape.kind).toBe("element");
 		expect(a3?.element?.text).toBe("Unser Team hilft Ihnen gerne weiter.");
 		expect(a3?.shot).not.toBe(a1?.shot);
+		// The case's own (the page's picture waits for the next mark meanwhile).
 		const keys = db.images
+			.filter((i) => i.key.startsWith(`${saved?.id}/`))
 			.map((i) => i.key.split("/").slice(1).join("/"))
 			.sort();
 		expect(keys).toEqual([
@@ -205,6 +202,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			"crops/a3.webp",
 			"shots/s1.webp",
 			"shots/s2.webp",
+			"shots/s3.webp",
 		]);
 		for (const image of db.images) {
 			expect(image.type).toBe("image/webp");
@@ -229,8 +227,8 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 	}, 60_000);
 
 	/**
-	 * "← All cases" where the panel shows a case: "Save case…" opens the case
-	 * it saved (DEC-023), and an open case's marks follow to the tab in front.
+	 * "← All cases" where the panel shows a case: it opens the case a toolbar
+	 * adds to (DEC-023), and an open case's marks follow to the tab in front.
 	 */
 	async function toAllCases(saved?: string): Promise<void> {
 		// Opened a moment after the save.
@@ -244,52 +242,6 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		);
 		await h.control.waitFor(`!document.getElementById("home").hidden`);
 	}
-
-	test("marks drawn before choosing a case are renumbered for it and go into it", async () => {
-		const before = (await h.control.eval<Db>(READ_DB)).cases[0];
-		if (before === undefined) throw new Error("the previous test saves a case");
-		// "Save case…" opened it in the panel (DEC-023): its marks would follow
-		// to the new tab.
-		await toAllCases();
-		const { page, tabId } = await h.open("v1");
-		await page.activate();
-		await h.control.eval(
-			`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show" }))`,
-		);
-		await page.waitFor(shadow('[data-action="tool-note"]'));
-		await page.click(shadow('[data-action="tool-note"]'));
-		await page.click(`document.querySelector("h1")`);
-		await page.waitFor(shadow(".popover textarea"));
-		await page.type("Larger heading");
-		await page.click(shadow('[data-action="comment-done"]'));
-		const numbers = () =>
-			page.eval<string[]>(
-				`[...${shadow("svg.marks")}.querySelectorAll("g[data-number]")].map((g) => g.dataset.number)`,
-			);
-		expect(await numbers()).toEqual(["1"]);
-
-		// "Add marks" for the saved case (marks 1–3): no save step.
-		await h.control.eval(
-			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show", target: { caseId: ${JSON.stringify(before.id)}, title: ${JSON.stringify(before.title)}, nextAnnotation: 4 } })`,
-		);
-		expect(await numbers()).toEqual(["4"]);
-		await page.waitFor(
-			`${shadow('[data-role="status"]')}?.textContent === "Mark 4 added to “Prämienrechner”"`,
-			20_000,
-		);
-		// The page's picture goes with the toolbar.
-		await page.click(shadow('[data-action="close"]'));
-		const db = await until(
-			() => h.control.eval<Db>(READ_DB),
-			(now) => !now.images.some((i) => i.key.includes("/pending/")),
-		);
-		const after = db.cases.find((c) => c.id === before.id);
-		expect(after?.annotations.map((a) => a.number)).toEqual([1, 2, 3, 4]);
-		expect(after?.shots.map((s) => s.id)).toEqual(["s1", "s2", "s3"]);
-		expect(after?.annotations[3]?.shot).toBe("s3");
-		expect(db.images.some((i) => i.key.endsWith("/crops/a4.webp"))).toBe(true);
-		await page.send("Page.close");
-	}, 60_000);
 
 	test("the toolbar stays on one line in a normal window", async () => {
 		const { page, tabId } = await h.open("v1");
@@ -726,7 +678,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			h.control.eval<boolean>(
 				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.visible)`,
 			);
-		/** The panel shows the case `title`, as "Save case…" opens it. */
+		/** The panel shows the case `title`, as it opens the case a toolbar adds to. */
 		const inCase = (title: string) =>
 			h.control.waitFor(
 				`!document.getElementById("case-view").hidden && document.querySelector("#case-view h2")?.textContent === ${JSON.stringify(title)}`,
@@ -745,7 +697,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await showToolbar(h, page, tabId);
 			await markElement(page, "[data-truth=submit]", "Too pale");
 			await saveAs(page, "Going on");
-			// "Save case…" opens the case in the panel, adding to it.
+			// The case is open in the panel, the toolbar adding to it (DEC-026).
 			await inCase("Going on");
 			await h.control.waitFor(
 				`document.getElementById("add-marks").textContent === "Done adding"`,
@@ -783,9 +735,10 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 				`${annotate}.textContent === "Annotate this page"`,
 			);
 			await h.control.eval(`${annotate}.click()`);
-			await page.waitFor(`${status} === "New case: choose a tool"`);
+			await page.waitFor(
+				`${status} === "Adding to “Krankenkasse vergleichen (v1)”"`,
+			);
 			await markElement(page, "h1", "Larger heading");
-			await page.waitFor(`${status} === "New case: 1 mark"`);
 			await saveAs(page, "Another one");
 			const db = await h.control.eval<Db>(READ_DB);
 			expect(titled(db, "Going on")[0]?.annotations).toHaveLength(2);
@@ -851,7 +804,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			// A new case starts with All cases, then Annotate this page.
 			await allCases();
 			await h.control.eval(`${annotate}.click()`);
-			await page.waitFor(`${status} === "New case: choose a tool"`);
+			await page.waitFor(
+				`${status} === "Adding to “Krankenkasse vergleichen (v1)”"`,
+			);
 			await box("Third");
 			await saveAs(page, "Same screen, new case");
 			expect(await marksOf("Same screen, new case")).toBe(1);
@@ -879,7 +834,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await caseMarksAre(page, []);
 
 			await h.control.eval(`${annotate}.click()`);
-			await page.waitFor(`${status} === "New case: choose a tool"`);
+			await page.waitFor(
+				`${status} === "Adding to “Krankenkasse vergleichen (v1)”"`,
+			);
 			await markElement(page, "[data-truth=tip]", "Starts again");
 			await saveAs(page, "Started again");
 			await inCase("Started again");
@@ -919,7 +876,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 				`${annotate}.textContent === "Annotate this page" && !document.getElementById("home").hidden`,
 			);
 			await h.control.eval(`${annotate}.click()`);
-			await page.waitFor(`${status} === "New case: choose a tool"`);
+			await page.waitFor(
+				`${status} === "Adding to “Krankenkasse vergleichen (v1)”"`,
+			);
 			expect(
 				await page.eval<string[]>(
 					`[...${shadow("svg.marks")}.querySelectorAll(".saved g[data-number]")].map((g) => g.dataset.number)`,

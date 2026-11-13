@@ -454,7 +454,9 @@ async function follow(): Promise<void> {
 		hidden: hiddenOn,
 	});
 	if (step.clear !== undefined) takeOff(step.clear);
-	if (front === undefined) return;
+	// A case without marks (just created, DEC-026) has nothing to draw: its
+	// first mark draws it (refreshCase).
+	if (front === undefined || c.annotations.length === 0) return;
 	if (front.id !== followed) {
 		// What the hints said was about the tab before (opening the case
 		// cleared them already).
@@ -652,9 +654,14 @@ async function refreshCase(): Promise<void> {
 	if (!work.current()) return;
 	if (c === undefined) return closeCase();
 	const opened = state.current?.id !== c.id;
+	const first =
+		!opened &&
+		state.current?.annotations.length === 0 &&
+		c.annotations.length > 0;
 	update((s) => (s.current = c));
-	// Just opened: its marks go to the tab in front (DEC-022).
-	if (opened) void follow();
+	// Just opened, or its first mark is in: its marks go to the tab in front
+	// (DEC-022, DEC-026).
+	if (opened || first) void follow();
 	if (state.images?.caseId === c.id && state.images.version === c.updatedAt)
 		return;
 	const images = imagesWork.start();

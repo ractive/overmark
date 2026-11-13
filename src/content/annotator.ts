@@ -93,6 +93,8 @@ interface Draft {
 	shot?: { view: View; shape: Shape; box?: Rect };
 	/** The case it was queued for: it never goes into another one unasked. */
 	queuedFor?: { caseId: string; title: string };
+	/** Why its screenshot could not be taken, if it could not. */
+	shotError?: string;
 }
 
 /** One screenshot, and the marks that share it. */
@@ -1042,7 +1044,8 @@ export class Annotator {
 		this.#shots = this.#shots
 			.then(() => this.#shoot(draft, same, shape))
 			.catch((error: unknown) => {
-				this.#message = `No screenshot of mark ${draft.number} yet: ${errorText(error)}`;
+				draft.shotError = errorText(error);
+				this.#message = `No screenshot of mark ${draft.number} yet: ${draft.shotError}`;
 				this.#renderToolbar();
 			});
 	}
@@ -1352,7 +1355,9 @@ export class Annotator {
 				if (!takeBack) {
 					this.#fail(
 						draft,
-						"the page changed before its screenshot was taken. Adding it again scrolls back to take one.",
+						draft.shotError === undefined
+							? "the page changed before its screenshot was taken. Adding it again scrolls back to take one."
+							: `its screenshot could not be taken (${draft.shotError}). Adding it again takes one.`,
 					);
 					return false;
 				}

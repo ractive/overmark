@@ -13,7 +13,12 @@ import {
 } from "bun:test";
 import type { Annotation, Shot } from "../../src/lib/case.ts";
 import type { Page } from "./browser.ts";
-import { browserBinary, type Harness, startHarness } from "./harness.ts";
+import {
+	browserBinary,
+	type Harness,
+	opened,
+	startHarness,
+} from "./harness.ts";
 import {
 	comment,
 	countColour,
@@ -48,9 +53,8 @@ describe.skipIf(browserBinary === undefined)(
 			await h?.stop();
 		});
 
-		// The control page is a side panel too: a save opened its case there
-		// (DEC-023), whose marks would follow to the next tab, and whose
-		// toolbar rule hides a new case's toolbar on a tab it follows to.
+		// The control page is a side panel too: it opened the case each toolbar
+		// added to (DEC-023), whose marks would follow to the next tab.
 		beforeEach(() => resetPanel(h));
 
 		const saved = async (title: string) => {
@@ -65,24 +69,37 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.tabs.sendMessage(${tabId}, ${JSON.stringify(request)})`,
 			);
 
-		let opened = 0;
+		let count = 0;
 		/** A page in a new tab, with an address no tab closing right now has. */
-		const open = (path: string) => h.open(`${path}?tab=${opened++}`);
+		const open = (path: string) => h.open(`${path}?tab=${count++}`);
 
 		/** Close a tab without the question unsaved marks ask. */
 		const close = (page: Page) =>
 			h.browser.send("Target.closeTarget", { targetId: page.targetId });
 
-		/** Wait until the toolbar's queue has taken the screenshots asked for. */
-		const shotsTaken = () => Bun.sleep(900);
+		/**
+		 * Wait until the toolbar's marks are in the case (their screenshots
+		 * taken), or a moment where one cannot be (a test's own failure).
+		 */
+		const shotsTaken = async (tabId: number) => {
+			await Bun.sleep(300);
+			const end = Date.now() + 8000;
+			while (Date.now() < end) {
+				const s = await sendToTab<{ drafts: number; saving: boolean }>(tabId, {
+					type: "overlay:state",
+				});
+				if (s.drafts === 0 && !s.saving) return;
+				await Bun.sleep(100);
+			}
+		};
 
 		test("marks in a scrolling container each keep what they were drawn on", async () => {
 			const { page, tabId } = await open("app");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#near", "near");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await markElement(page, "#far", "far");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Scroller");
 			const { c } = await saved("Scroller");
 			expect(c.shots).toHaveLength(2);
@@ -98,7 +115,7 @@ describe.skipIf(browserBinary === undefined)(
 			await close(page);
 		}, 60_000);
 
-		test("a mark the page moved away from gets its screenshot at saving, and the page comes back", async () => {
+		test("a mark the page moved away from gets its screenshot with Add mark N, and the page comes back", async () => {
 			const { page, tabId } = await open("long");
 			await showToolbar(h, page, tabId);
 			// An AI app holds the page, so the mark's screenshot has to wait.
@@ -114,7 +131,10 @@ describe.skipIf(browserBinary === undefined)(
 			await saveAs(page, "Waited");
 			expect(await page.eval<number>("scrollY")).toBe(down);
 			const { c } = await saved("Waited");
-			expect(c.annotations.map((a) => a.shot)).toEqual(["s1", "s2"]);
+			// Mark 2 went in first, mark 1 with Add mark N: each its own shot.
+			const shotOf = (n: number) =>
+				c.annotations.find((a) => a.number === n)?.shot;
+			expect([shotOf(2), shotOf(1)]).toEqual(["s1", "s2"]);
 			expect(
 				await countColour(h.control, "Waited", "crops/a1.webp", BLUE),
 			).toBeGreaterThan(1000);
@@ -122,7 +142,12 @@ describe.skipIf(browserBinary === undefined)(
 				await countColour(h.control, "Waited", "crops/a2.webp", GREEN),
 			).toBeGreaterThan(1000);
 			expect(
-				await countColour(h.control, "Waited", "shots/s1.webp", GREEN),
+				await countColour(
+					h.control,
+					"Waited",
+					`shots/${shotOf(1)}.webp`,
+					GREEN,
+				),
 			).toBe(0);
 			await close(page);
 		}, 60_000);
@@ -163,12 +188,12 @@ describe.skipIf(browserBinary === undefined)(
 			const { page, tabId } = await open("long");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#near", "at the top");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await markElement(page, "#far", "undone");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await page.click(shadow('[data-action="undo"]'));
 			await markElement(page, "#far", "kept");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "After undo");
 			const { c } = await saved("After undo");
 			expect(c.annotations.map((a) => a.shot)).toEqual(["s1", "s2"]);
@@ -182,7 +207,7 @@ describe.skipIf(browserBinary === undefined)(
 			const { page, tabId } = await open("long");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#near", "at the top");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await page.eval("window.scrollTo(0, 2400)");
 			await Bun.sleep(100);
 			// The next screenshot fails, with the tab in front and nothing moving.
@@ -195,10 +220,11 @@ describe.skipIf(browserBinary === undefined)(
 		})()`);
 			await markElement(page, "#far", "its screenshot fails");
 			await page.waitFor(
-				`${shadow('[data-role="status"]')}?.textContent.includes("No screenshot")`,
+				`${shadow('[data-role="alert"]')}?.textContent.includes("its screenshot could not be taken (no picture)")`,
+				20_000,
 			);
 			await markElement(page, "#far", "the next one");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Failed shot");
 			const { c } = await saved("Failed shot");
 			expect(c.annotations[2]?.shot).not.toBe("s1");
@@ -212,52 +238,50 @@ describe.skipIf(browserBinary === undefined)(
 			const { page, tabId } = await open("ui");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#label", "before");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await page.click(shadow('[data-action="tool-element"]'));
 			await page.click(`document.getElementById("plain")`);
 			await page.type("X");
 			await markElement(page, "#other", "after");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Typed");
 			expect((await saved("Typed")).c.shots).toHaveLength(2);
 			await close(page);
 		}, 60_000);
 
-		test("a second click on Save while a screenshot is awaited saves once", async () => {
+		test("a second click on Add mark N while its screenshot is awaited adds it once (DEC-026)", async () => {
 			const { page, tabId } = await open("long");
 			await showToolbar(h, page, tabId);
 			await sendToTab(tabId, { type: "page:blur", blurForms: false });
 			await markElement(page, "#near", "drawn at the top");
 			await page.eval("window.scrollTo(0, 2400)");
 			await sendToTab(tabId, { type: "page:unblur" });
-			await Bun.sleep(1000);
-			await page.click(shadow('[data-action="save"]'));
-			await page.waitFor(shadow('input[aria-label="Case title"]'));
-			await page.eval(
-				`(() => { const i = ${shadow('input[aria-label="Case title"]')}; i.focus(); i.select(); })()`,
+			// Its screenshot was given up: the page moved on.
+			await page.waitFor(
+				`${shadow('[data-role="alert"]')}?.textContent.startsWith("Mark 1 was not added")`,
+				20_000,
 			);
-			await page.type("Clicked twice");
 			await page.eval(
-				`(() => { const b = ${shadow('[data-action="save-confirm"]')}; b.click(); b.click(); })()`,
+				`(() => { const b = ${shadow('[data-action="retry"]')}; b.click(); b.click(); })()`,
 			);
 			await page.waitFor(
-				`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+				`${shadow('[data-role="status"]')}?.textContent.startsWith("Mark 1 added")`,
 				20_000,
 			);
 			await Bun.sleep(1200);
-			expect(
-				await page.eval<string>(
-					`${shadow('[data-role="status"]')}.textContent`,
-				),
-			).toStartWith("Saved");
+			const caseId = (
+				await sendToTab<{ target: { caseId: string } }>(tabId, {
+					type: "overlay:state",
+				})
+			).target.caseId;
 			const db = await h.control.eval<Db>(READ_DB);
-			expect(db.cases.filter((c) => c.title === "Clicked twice")).toHaveLength(
-				1,
-			);
+			expect(
+				db.cases.find((c) => c.id === caseId)?.annotations.map((a) => a.number),
+			).toEqual([1]);
 			await close(page);
 		}, 60_000);
 
-		test("a mark without a screenshot from another route stops the save, and is kept", async () => {
+		test("a mark without a screenshot from another route is not added, and is kept", async () => {
 			const { page, tabId } = await open("app");
 			await showToolbar(h, page, tabId);
 			// An AI app holds the page, so the mark's screenshot has to wait.
@@ -265,12 +289,15 @@ describe.skipIf(browserBinary === undefined)(
 			await markElement(page, "#near", "on the first route");
 			await page.eval("goToB()");
 			await sendToTab(tabId, { type: "page:unblur" });
-			await Bun.sleep(1200);
-			await page.click(shadow('[data-action="save"]'));
-			await page.waitFor(shadow('input[aria-label="Case title"]'));
-			await page.click(shadow('[data-action="save-confirm"]'));
 			await page.waitFor(
-				`${shadow('[data-role="status"]')}?.textContent.includes("another page")`,
+				`${shadow('[data-role="alert"]')}?.textContent.includes("another page")`,
+				20_000,
+			);
+			// Add mark 1 says so again: a screenshot of this route would show another.
+			await page.click(shadow('[data-action="retry"]'));
+			await page.waitFor(
+				`${shadow('[data-role="alert"]')}?.textContent.includes("another page")`,
+				20_000,
 			);
 			expect(
 				await sendToTab<{ drafts: number }>(tabId, { type: "overlay:state" }),
@@ -315,16 +342,20 @@ describe.skipIf(browserBinary === undefined)(
 			const { page, tabId } = await open("app");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#near", "on route a");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await page.eval("goToB()");
 			await markElement(page, "#route-b", "on route b");
-			await shotsTaken();
-			// The first mark's element left with its route: it is not drawn over this one.
-			expect(
-				await page.eval<number>(
-					`${HOST}.shadowRoot.querySelectorAll(".drafts [data-number]").length`,
-				),
-			).toBe(1);
+			await shotsTaken(tabId);
+			// The first mark's element left with its route: it is not drawn over
+			// this one, by the toolbar or by the case drawn on the page.
+			const drawn = () =>
+				page.eval<string[]>(
+					`[...new Set([...${HOST}.shadowRoot.querySelectorAll(".drafts [data-number], .saved [data-number], [data-review]")].map((g) => g.dataset.number ?? g.dataset.review))]`,
+				);
+			const end = Date.now() + 5000;
+			while (JSON.stringify(await drawn()) !== '["2"]' && Date.now() < end)
+				await Bun.sleep(100);
+			expect(await drawn()).toEqual(["2"]);
 			await saveAs(page, "Routes");
 			const { c } = await saved("Routes");
 			const shots = c.shots as unknown as { url: string }[];
@@ -346,10 +377,10 @@ describe.skipIf(browserBinary === undefined)(
 			const { page, tabId } = await open("ui");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#item", "the menu item");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await page.eval(`document.getElementById("menu").remove()`);
 			await markElement(page, "#label", "the label");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Menu");
 			const { c } = await saved("Menu");
 			expect(c.annotations[0]?.element?.text).toBe("Menu item");
@@ -363,19 +394,20 @@ describe.skipIf(browserBinary === undefined)(
 			await close(page);
 		}, 60_000);
 
-		test("marks drawn while nothing changed share a screenshot, and undo leaves no trace", async () => {
+		test("marks drawn while nothing changed share one capture, each its own copy; undo leaves no trace", async () => {
 			const { page, tabId } = await open("ui");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#label", "first");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await markElement(page, "#other", "second");
 			await markElement(page, "#item", "third");
 			await page.click(shadow('[data-action="undo"]'));
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Shared");
 			const { c, images } = await saved("Shared");
-			expect(c.shots).toHaveLength(1);
-			expect(c.annotations.map((a) => a.shot)).toEqual(["s1", "s1"]);
+			// Added one by one, each mark has a copy of the one capture (DEC-014).
+			expect(c.shots).toHaveLength(2);
+			expect(c.annotations.map((a) => a.shot)).toEqual(["s1", "s2"]);
 			expect(
 				images
 					.map((i) => i.key)
@@ -398,7 +430,7 @@ describe.skipIf(browserBinary === undefined)(
 				// Changed with the toolbar up: the setting must reach it.
 				await sendToTab(tabId, { type: "overlay:settings", blurForms: blur });
 				await markElement(page, "#label", "a mark");
-				await shotsTaken();
+				await shotsTaken(tabId);
 				await saveAs(page, title);
 				await close(page);
 			};
@@ -416,32 +448,27 @@ describe.skipIf(browserBinary === undefined)(
 			).toBe(0);
 		}, 60_000);
 
-		test("a save refused while an AI app holds the page keeps the title and says why", async () => {
+		test("an add waits while an AI app holds the page, and goes in after (DEC-026)", async () => {
 			const { page, tabId } = await open("ui");
-			await showToolbar(h, page, tabId);
-			await markElement(page, "#label", "a mark");
-			await shotsTaken();
+			const caseId = await showToolbar(h, page, tabId);
+			await page.click(shadow('[data-action="tool-element"]'));
+			await page.click(`document.getElementById("label")`);
+			await page.waitFor(shadow(".popover textarea"));
+			await shotsTaken(tabId);
 			await sendToTab(tabId, { type: "page:blur", blurForms: false });
-			await page.click(shadow('[data-action="save"]'));
-			await page.waitFor(shadow('input[aria-label="Case title"]'));
-			await page.eval(
-				`(() => { const i = ${shadow('input[aria-label="Case title"]')}; i.focus(); i.select(); })()`,
-			);
-			await page.type("My own title");
-			await page.click(shadow('[data-action="save-confirm"]'));
-			await page.waitFor(
-				`${shadow('[data-role="status"]')}?.textContent.includes("AI app")`,
-			);
-			expect(
-				await page.eval(`${shadow('input[aria-label="Case title"]')}.value`),
-			).toBe("My own title");
+			await page.type("a mark");
+			await page.click(shadow('[data-action="comment-done"]'));
+			await Bun.sleep(1000);
+			const marks = async () =>
+				(await h.control.eval<Db>(READ_DB)).cases.find((c) => c.id === caseId)
+					?.annotations.length;
+			expect(await marks()).toBe(0);
 			await sendToTab(tabId, { type: "page:unblur" });
-			await page.click(shadow('[data-action="save-confirm"]'));
 			await page.waitFor(
-				`${shadow('[data-role="status"]')}?.textContent.startsWith("Saved")`,
+				`${shadow('[data-role="status"]')}?.textContent.startsWith("Mark 1 added")`,
 				20_000,
 			);
-			expect((await saved("My own title")).c.annotations).toHaveLength(1);
+			expect(await marks()).toBe(1);
 			await close(page);
 		}, 60_000);
 
@@ -477,7 +504,7 @@ describe.skipIf(browserBinary === undefined)(
 			await page.eval("trapFocus()");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#label", "typed despite the trap");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Trap");
 			const { c } = await saved("Trap");
 			expect(c.annotations[0]?.comment).toBe("typed despite the trap");
@@ -490,7 +517,7 @@ describe.skipIf(browserBinary === undefined)(
 			await page.eval(`document.getElementById("dialog").showModal()`);
 			await page.waitFor(`${HOST}.parentElement.id === "dialog"`);
 			await markElement(page, "#in-dialog", "in the dialog");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Dialog");
 			const { c } = await saved("Dialog");
 			expect(c.annotations[0]?.element?.text).toBe("In the dialog");
@@ -506,15 +533,16 @@ describe.skipIf(browserBinary === undefined)(
 			const tabId = await h.control.eval<number>(
 				`chrome.tabs.query({}).then((tabs) => tabs.find((t) => t.url?.startsWith(${JSON.stringify(url)}))?.id)`,
 			);
+			opened.set(page, { h, tabId });
 			await showToolbar(h, page, tabId);
 			await markElement(page, "#label", "on http");
-			await shotsTaken();
+			await shotsTaken(tabId);
 			await saveAs(page, "Plain http");
 			expect((await saved("Plain http")).c.annotations).toHaveLength(1);
 			await close(page);
 		}, 60_000);
 
-		test("leaving a page with unsaved marks asks first", async () => {
+		test("leaving a page with a mark not in the case yet asks first", async () => {
 			const { page, tabId } = await open("ui");
 			await showToolbar(h, page, tabId);
 			const leaving = () =>
@@ -522,9 +550,11 @@ describe.skipIf(browserBinary === undefined)(
 					`(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; })()`,
 				);
 			expect(await leaving()).toBe(false);
-			await markElement(page, "#label", "unsaved");
+			// An AI app holds the page: the mark waits for its screenshot.
+			await sendToTab(tabId, { type: "page:blur", blurForms: false });
+			await markElement(page, "#label", "not in yet");
 			expect(await leaving()).toBe(true);
-			await shotsTaken();
+			await sendToTab(tabId, { type: "page:unblur" });
 			await saveAs(page, "Left");
 			expect(await leaving()).toBe(false);
 			await close(page);
