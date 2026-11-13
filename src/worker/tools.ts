@@ -1084,8 +1084,13 @@ export function createTools(deps: ToolDeps): Tool[] {
 		},
 		annotations: { consequentialHint: true, idempotentHint: true },
 		execute: async ({ caseId, mark, status, note }, { client }) => {
-			// Recorded as findings record their app (DEC-023).
-			const app = client.kind === "relay" ? findingApp(client) : undefined;
+			// Recorded as findings record their app (DEC-023): a status with no
+			// app is the user's, set in the panel, so no other caller sets one.
+			if (client.kind !== "relay")
+				throw new CaseError(
+					"Only an AI app connected through Overmark's relay may set a mark's status: a status records the app that set it, and a call through the browser's WebMCP comes from no known app.",
+				);
+			const app = findingApp(client);
 			let result = "";
 			await store.updateCase(caseId, (current) => {
 				const { c, a } = caseAndMark(current, caseId, mark);

@@ -908,6 +908,26 @@ describe("tools", () => {
 			);
 		});
 
+		test("only an AI app through the relay sets a status: it records who did", async () => {
+			await seed();
+			const before = await store.getCase("c_1");
+			for (const client of [
+				{ kind: "webmcp" },
+				{ kind: "local" },
+			] as unknown as ToolCallClient[])
+				await expect(
+					call(
+						"set_mark_status",
+						{ caseId: "c_1", mark: 2, status: "fixed" },
+						new AbortController().signal,
+						client,
+					),
+				).rejects.toThrow(
+					"Only an AI app connected through Overmark's relay may set a mark's status",
+				);
+			expect(await store.getCase("c_1")).toEqual(before as Case);
+		});
+
 		test("get_case: status, reopens with who, verified with who", async () => {
 			await seed();
 			await status(2, "fixed", "Darker");
