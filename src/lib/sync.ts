@@ -440,7 +440,9 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 		id: DOWNLOADS_ID,
 		kind: "downloads",
 		permission: () => api.granted().catch(() => false),
-		// The folder is Overmark's own: a file there is one it wrote.
+		// Nothing there can be looked at: a file of the name is overwritten. The
+		// folder is shared by every profile and browser syncing to Downloads
+		// (the README says so).
 		exists: async () => false,
 		async write(name, c) {
 			// Its export failing is the case's own problem.
