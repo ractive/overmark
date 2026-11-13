@@ -44,8 +44,6 @@ interface CallResult {
 	content: { type: string; text?: string }[];
 }
 
-/** Write these cases into the store. */
-
 const verdictOf = async (h: Harness, caseId: string) =>
 	(await h.control.eval<{ cases: Case[] }>(READ_DB)).cases.find(
 		(c) => c.id === caseId,

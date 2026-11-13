@@ -215,10 +215,25 @@ async function connectTo(
 	});
 	const ws = new WebSocket(endpoint);
 	await new Promise<void>((resolve, reject) => {
-		ws.addEventListener("open", () => resolve(), { once: true });
+		// Within launch's own clean-up: a hang here would leave a Chrome behind.
+		const timer = setTimeout(() => {
+			ws.close();
+			reject(new Error("CDP connection did not open"));
+		}, 10_000);
+		ws.addEventListener(
+			"open",
+			() => {
+				clearTimeout(timer);
+				resolve();
+			},
+			{ once: true },
+		);
 		ws.addEventListener(
 			"error",
-			() => reject(new Error("CDP connection failed")),
+			() => {
+				clearTimeout(timer);
+				reject(new Error("CDP connection failed"));
+			},
 			{ once: true },
 		);
 	});

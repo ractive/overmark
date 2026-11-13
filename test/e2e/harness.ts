@@ -132,7 +132,7 @@ async function start(binary: string, launch: Launch): Promise<Harness> {
 			openControl(launched, extensionId),
 		).catch((error: unknown) => {
 			throw new Error(
-				`the extension did not load; is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
+				`the extension did not load (${error instanceof Error ? error.message : String(error)}); is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
 				{ cause: error },
 			);
 		});
