@@ -1115,7 +1115,7 @@ export function withReopen(
 	if (a !== undefined && a.resolution === undefined) {
 		if (reopen.refuseOpen)
 			throw new CaseError(
-				`Mark ${a.number} is open already; your note was not saved.`,
+				`Mark ${a.number} is open already: it was reopened meanwhile. Your note is not saved; add it to the comment, or Cancel.`,
 			);
 		return c;
 	}

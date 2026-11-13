@@ -867,7 +867,9 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 		const c = one();
 		expect(() =>
 			withReopen(c, "a1", { note: "Still pale", refuseOpen: true }, T1),
-		).toThrow("Mark 1 is open already; your note was not saved.");
+		).toThrow(
+			"Mark 1 is open already: it was reopened meanwhile. Your note is not saved; add it to the comment, or Cancel.",
+		);
 		// An AI app's call stays idempotent.
 		expect(withReopen(c, "a1", { note: "x" }, T1)).toBe(c);
 	});
