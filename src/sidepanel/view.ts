@@ -1751,11 +1751,38 @@ function renderAi({ ai }: PanelState): void {
 }
 
 /**
+ * A click on the back button this soon after the last one, which it did
+ * something else for, is that double click's second (as Delete's).
+ */
+export const BACK_CLICK_GAP_MS = 500;
+
+/** The back button's last click, and what it did then. */
+let lastBack: { at: number; role: string } | undefined;
+
+/**
  * The top bar's back button (DEC-023): "← All cases" closes the open case,
- * "← Back" leaves Settings for the view underneath; none on Home.
+ * "← Back" leaves Settings for the view underneath; none on Home. One button
+ * that changes its meaning under the pointer: the second click of a double
+ * click does nothing (as Delete's).
  */
 function renderBack(state: PanelState, actions: Actions): void {
 	const onCase = state.view.kind === "case";
+	const role = state.settings
+		? "settings"
+		: `case ${state.leaving?.phase ?? ""}`;
+	const click = (act: () => void) => () => {
+		const at = Date.now();
+		const last = lastBack;
+		lastBack = { at, role };
+		if (
+			last !== undefined &&
+			last.role !== role &&
+			at >= last.at &&
+			at - last.at < BACK_CLICK_GAP_MS
+		)
+			return;
+		act();
+	};
 	back.hidden = !state.settings && !onCase;
 	if (state.settings) {
 		back.textContent = "← Back";
@@ -1765,7 +1792,7 @@ function renderBack(state: PanelState, actions: Actions): void {
 		);
 		back.title = onCase ? "Back to the open case" : "Back to the cases";
 		back.disabled = false;
-		back.onclick = () => actions.closeSettings();
+		back.onclick = click(() => actions.closeSettings());
 		return;
 	}
 	back.textContent = "← All cases";
@@ -1773,7 +1800,7 @@ function renderBack(state: PanelState, actions: Actions): void {
 	back.title =
 		"Close this case: the toolbar stops adding to it, and its marks leave this tab";
 	back.disabled = state.leaving?.phase === "finishing";
-	back.onclick = () => actions.closeCase();
+	back.onclick = click(() => actions.closeCase());
 }
 
 /** Draw the panel from `state`. */

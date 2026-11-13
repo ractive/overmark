@@ -1,4 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	setSystemTime,
+	test,
+} from "bun:test";
 import { Window } from "happy-dom";
 import {
 	FOUND_COLOUR,
@@ -1254,6 +1261,42 @@ describe("the top bar and Settings (DEC-023)", () => {
 		expect(el("back").nextElementSibling).toBe(el("ai-button"));
 		el("back").click();
 		expect(called).toEqual(["close"]);
+	});
+
+	test("a double click on the back button is one click: it changed its meaning under the pointer", () => {
+		const called: string[] = [];
+		const actions = actionsWith({
+			closeSettings: () => void called.push("settings"),
+			closeCase: () => void called.push("case"),
+		});
+		const c = sampleCase("c_double");
+		try {
+			setSystemTime(new Date("2020-01-01T10:00:00Z"));
+			render(
+				caseState(c, (s) => (s.settings = true)),
+				actions,
+			);
+			setSystemTime(new Date("2020-01-01T10:00:05Z"));
+			el("back").click();
+			// Settings closes: the same button is "← All cases" now.
+			render(caseState(c), actions);
+			setSystemTime(new Date("2020-01-01T10:00:05.200Z"));
+			el("back").click();
+			expect(called).toEqual(["settings"]);
+			setSystemTime(new Date("2020-01-01T10:00:06Z"));
+			el("back").click();
+			expect(called).toEqual(["settings", "case"]);
+			// Blocked a moment after the first click: the second is no decision.
+			render(
+				caseState(c, (s) => (s.leaving = { phase: "blocked", left: 1 })),
+				actions,
+			);
+			setSystemTime(new Date("2020-01-01T10:00:06.100Z"));
+			el("back").click();
+			expect(called).toEqual(["settings", "case"]);
+		} finally {
+			setSystemTime();
+		}
 	});
 
 	test("while the toolbar finishes, the back button waits and the case says so", () => {

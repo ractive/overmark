@@ -1288,6 +1288,8 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					expect(
 						await panel.eval<string>(`${id("add-marks")}.textContent`),
 					).toBe("Done adding");
+					// Not a double click's second: that would do nothing.
+					await Bun.sleep(600);
 					await panel.eval(`${back}.click()`);
 					await panel.waitFor(`!${id("home")}.hidden`);
 					await until(
