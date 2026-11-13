@@ -259,6 +259,21 @@ async function loadInto(
 			takeOff(here);
 			return undefined;
 		}
+		// What the page shows now decides: a clear right behind the draw (the
+		// Hide on its bar, an AI app, another window's panel) may have taken
+		// the marks off before this answer came, and its news came while the
+		// load was under way, when it says nothing (DEC-023).
+		const now = await overlayState(tabId);
+		if (now !== undefined && now.loadedCase !== c.id) {
+			if (sameDrawn(drawn, here)) drawn = undefined;
+			// Cleared: it holds as the page's own Hide does (DEC-022); another
+			// case there is an AI app's, left to it.
+			if (now.loadedCase === undefined) hiddenOn.add(tabId);
+			update((s) => {
+				if (s.tab?.id === tabId) s.overlay = now;
+			});
+			return undefined;
+		}
 		const found = result.matches.filter(isFound).length;
 		const settling = again && found < result.matches.length;
 		update((s) => {

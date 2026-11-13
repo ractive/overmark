@@ -1087,7 +1087,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		);
 
 		slowTest(
-			"the panel's draw stopped by a clear says nothing about it",
+			"a clear close behind the panel's draw: the panel shows what the page shows, and Show marks draws",
 			async () => {
 				await fresh();
 				const { page, tabId, caseId } = await annotated(
@@ -1095,24 +1095,81 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				);
 				await openPanel();
 				// Right behind the panel's draw, a clear of whatever the page shows,
-				// as the Hide on the page's own bar does.
+				// as the Hide on the page's own bar, an AI app's tool or another
+				// window's panel would. Which takes effect first is the page's
+				// business: the draw stopped (replaced), or done and then cleared.
 				await wrapSend(`async (tabId, message, send) => {
 					if (message.type !== "case:load" || globalThis.raced)
 						return send(tabId, message);
 					globalThis.raced = true;
 					const mine = send(tabId, message);
-					globalThis.cleared = send(tabId, { type: "case:clear" });
-					return mine;
+					const cleared = send(tabId, { type: "case:clear" });
+					const answer = await mine;
+					await cleared;
+					globalThis.answered = true;
+					return answer;
 				}`);
 				await page.activate();
 				await openCase(caseId);
-				await h.control.waitFor(`globalThis.raced`);
-				await h.control.eval(`globalThis.cleared`);
-				await Bun.sleep(3000);
+				const button = id("load-case");
+				// The draw is over, either way: its button is back.
+				await h.control.waitFor(
+					`globalThis.answered && !${button}.hidden && ${button}.textContent === "Show marks"`,
+				);
+				expect(await pageCase(tabId)).toBeNull();
 				expect(await h.control.eval<string>(hint)).not.toContain(REPLACED);
-				// Show marks draws them, as the newest load.
-				await showMarks();
-				expect(await pageCase(tabId)).toBe(caseId);
+				expect(await h.control.eval<string>(hint)).not.toContain("marks found");
+				// Show marks is the newest load: it draws them.
+				await h.control.eval(`${button}.click()`);
+				await h.control.waitFor(`${hint}.includes("1 of 1 marks found")`);
+				await until(
+					async () => (await pageCase(tabId)) === caseId,
+					"the marks on the page",
+				);
+				expect(await h.control.eval<string>(`${button}.textContent`)).toBe(
+					"Hide marks",
+				);
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"the page cleared by something else right after the panel's draw: the panel follows the page",
+			async () => {
+				await fresh();
+				const { page, tabId, caseId } = await annotated(
+					"Cleared after drawing",
+				);
+				await openPanel();
+				// The draw is done on the page; then, before the panel has its
+				// answer, a clear from elsewhere takes the marks off again.
+				await wrapSend(`async (tabId, message, send) => {
+					if (message.type !== "case:load" || globalThis.raced)
+						return send(tabId, message);
+					globalThis.raced = true;
+					const answer = await send(tabId, message);
+					await send(tabId, { type: "case:clear" });
+					globalThis.answered = true;
+					return answer;
+				}`);
+				await page.activate();
+				await openCase(caseId);
+				const button = id("load-case");
+				await h.control.waitFor(
+					`globalThis.answered && !${button}.hidden && ${button}.textContent === "Show marks"`,
+				);
+				expect(await pageCase(tabId)).toBeNull();
+				expect(await h.control.eval<string>(hint)).not.toContain("marks found");
+				await h.control.waitFor(
+					`${id("tab-line")}.textContent === "Marks are hidden on this tab."`,
+				);
+				await h.control.eval(`${button}.click()`);
+				await until(
+					async () => (await pageCase(tabId)) === caseId,
+					"the marks on the page",
+				);
 				await h.control.eval(`${id("back")}.click()`);
 				await h.control.waitFor(`!${id("home")}.hidden`);
 				await page.send("Page.close");
