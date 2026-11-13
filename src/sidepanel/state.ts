@@ -82,6 +82,28 @@ export interface PanelState {
 	hint: string | undefined;
 	cases: Case[];
 	view: { kind: "home" } | { kind: "case"; id: string };
+	/**
+	 * The Settings view (the AI app card, the options) is drawn instead of
+	 * the view underneath, which stays as it is: an open case stays open.
+	 */
+	settings: boolean;
+	/**
+	 * "← All cases" at work (DEC-023): the toolbar adding to the case is
+	 * finishing; or it could not, with marks not in the case yet, and the
+	 * next click leaves without them.
+	 */
+	leaving:
+		| { phase: "finishing" }
+		| { phase: "blocked"; left: number }
+		| undefined;
+	/**
+	 * Tabs the user took the open case's marks off ("Hide marks"): they are
+	 * not drawn there again by themselves until "Show marks", or the case is
+	 * opened again (DEC-022).
+	 */
+	hiddenOn: Set<number>;
+	/** The panel is drawing the open case's marks on this tab now. */
+	drawing: number | undefined;
 	/** The open case, once read. */
 	current: Case | undefined;
 	images: CaseImages | undefined;
@@ -165,6 +187,10 @@ export const initialState = (): PanelState => ({
 	hint: undefined,
 	cases: [],
 	view: { kind: "home" },
+	settings: false,
+	leaving: undefined,
+	hiddenOn: new Set(),
+	drawing: undefined,
 	current: undefined,
 	images: undefined,
 	caseHint: undefined,
