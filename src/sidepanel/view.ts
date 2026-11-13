@@ -87,6 +87,8 @@ const annotateTitle = annotate.title;
 const casesList = byId<HTMLDivElement>("cases");
 const allSites = byId<HTMLInputElement>("all-sites");
 const aiStatus = byId<HTMLSpanElement>("ai-status");
+const aiLabel = byId<HTMLSpanElement>("ai-label");
+const backLabel = byId<HTMLSpanElement>("back-label");
 const aiButton = byId<HTMLButtonElement>("ai-button");
 const aiAction = byId<HTMLSpanElement>("ai-action");
 const aiCall = byId<HTMLParagraphElement>("ai-call");
@@ -963,7 +965,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			"button",
 			{
 				type: "button",
-				class: "small",
+				class: "small strong",
 				id: "save-verdict",
 				hidden: true,
 				onclick: () => actions.saveVerdict(c.id, verdict.value),
@@ -1066,7 +1068,7 @@ export function leavingText(
 	if (leaving === undefined) return undefined;
 	if (leaving.phase === "finishing") return "Finishing the marks…";
 	const one = leaving.left === 1;
-	return `${leaving.left} mark${one ? " is" : "s are"} not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without ${one ? "it" : "them"}.`;
+	return `${leaving.left} mark${one ? " is" : "s are"} not in the case yet; the toolbar on the page says why. Click All cases again to leave without ${one ? "it" : "them"}.`;
 }
 
 // --- a mark's status and its actions ---------------------------------------
@@ -1728,37 +1730,74 @@ function callText(call: AiCall): string {
 	return `Last AI call: ${call.tool}, by ${call.app}, at ${time}`;
 }
 
+/** The connection with no problem to tell (ai.ts `statusText`). */
+const AI_OFF = "Not connected";
+
+/** `text` as a sentence another can follow. */
+const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
+/**
+ * The top bar's pill (DEC-023, DEC-024): the connection in two or three
+ * words, a dot in its colour, and in the tooltip the whole of it and what a
+ * click does.
+ */
+export function aiPill(ai: PanelState["ai"]): {
+	label: string;
+	dot: "off" | "problem" | "waiting" | "connected";
+	title: string;
+} {
+	if (ai.connected && ai.apps > 0)
+		return {
+			label: `AI on · ${ai.apps} app${ai.apps === 1 ? "" : "s"}`,
+			dot: "connected",
+			title: `${sentence(ai.status)} Click to manage ${ai.apps === 1 ? "it" : "them"}.`,
+		};
+	if (ai.connected)
+		return {
+			label: "AI on, no app yet",
+			dot: "waiting",
+			title: `${sentence(ai.status)} Click for the address and code.`,
+		};
+	if (ai.active)
+		return {
+			label: "AI connecting…",
+			dot: "waiting",
+			title: `${sentence(ai.status)} Click for the AI app card.`,
+		};
+	const problem = ai.status !== AI_OFF;
+	return {
+		label: "AI off",
+		dot: problem ? "problem" : "off",
+		title: problem
+			? `${sentence(ai.status)} Click to set it up.`
+			: "AI access is off. Click to turn it on and set it up.",
+	};
+}
+
 function renderAi({ ai }: PanelState): void {
+	const pill = aiPill(ai);
+	aiLabel.textContent = pill.label;
+	// The whole status, for a screen reader and the tests; the pill shows the label.
 	aiStatus.textContent = ai.status;
-	// A long problem is cut to one line: then its whole is the button's title.
-	aiButton.title =
-		aiStatus.scrollWidth > aiStatus.clientWidth
-			? ai.status
-			: ai.active
-				? "Go to the AI app card: the paired apps and what they may do"
-				: "Turn AI access on and go to the AI app card";
+	aiButton.title = pill.title;
 	// Waiting for an app to pair: nothing to do but wait (a click shows how).
 	aiAction.hidden = ai.active && !ai.connected;
 	aiAction.textContent = ai.connected ? "Manage" : "Turn on";
-	bar.dataset["ai"] = ai.connected
-		? "connected"
-		: ai.active
-			? "waiting"
-			: "off";
+	bar.dataset["ai"] = pill.dot;
 	stopAi.hidden = !ai.active;
 	keepOn.checked = ai.keepOn;
 	setHint(aiCall, ai.lastCall && callText(ai.lastCall));
 }
 
 /**
- * The top bar's back button (DEC-023): "← All cases" closes the open case,
- * "← Back" leaves Settings for the view underneath; none on Home.
+ * The top bar's back button (DEC-023): "All cases" closes the open case,
+ * "Back" leaves Settings for the view underneath; none on Home.
  */
 function renderBack(state: PanelState, actions: Actions): void {
 	const onCase = state.view.kind === "case";
 	back.hidden = !state.settings && !onCase;
 	if (state.settings) {
-		back.textContent = "← Back";
+		backLabel.textContent = "Back";
 		back.setAttribute(
 			"aria-label",
 			onCase ? "Back to the case" : "Back to all cases",
@@ -1768,7 +1807,7 @@ function renderBack(state: PanelState, actions: Actions): void {
 		back.onclick = () => actions.closeSettings();
 		return;
 	}
-	back.textContent = "← All cases";
+	backLabel.textContent = "All cases";
 	back.setAttribute("aria-label", "All cases: close this case");
 	back.title =
 		"Close this case: the toolbar stops adding to it, and its marks leave this tab";

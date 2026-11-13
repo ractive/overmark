@@ -99,6 +99,29 @@ export const isFound = (m: AnnotationMatch): boolean =>
 	m.status !== "lost" && m.status !== "no-element";
 
 /**
+ * A match drawn dashed on the page (review.ts): its element is only probable
+ * or one of several, or the mark recorded none and sits where it was.
+ */
+export const isUnsure = (m: AnnotationMatch): boolean =>
+	m.status === "no-element" ||
+	(m.status !== "lost" &&
+		!(m.status !== "ambiguous" && m.candidates[m.current]?.found === true));
+
+/**
+ * What a draw found, in the case's This-tab block; `page` is the page's short
+ * address. The page shows the rest: a mark's colour is its status, and only
+ * the dash needs a word.
+ */
+export function foundText(
+	matches: readonly AnnotationMatch[],
+	page: string,
+): string {
+	const found = matches.filter(isFound).length;
+	const said = `${found} of ${matches.length} marks found on ${page}.`;
+	return matches.some(isUnsure) ? `${said} Dashed: unsure.` : said;
+}
+
+/**
  * None of the case's marks was found on the page: at least one mark recorded
  * an element, and none of those is there. Resolved marks count as any other.
  * A case of marks without elements (boxes, arrows on nothing) says nothing

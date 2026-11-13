@@ -173,6 +173,8 @@ export interface PanelState {
 	ai: {
 		status: string;
 		connected: boolean;
+		/** How many AI apps are paired, while connected. */
+		apps: number;
 		/** Connected, or on the way there: something "Stop AI access" can end. */
 		active: boolean;
 		/** "Keep AI access on". */
@@ -215,6 +217,7 @@ export const initialState = (): PanelState => ({
 	ai: {
 		status: "Not connected",
 		connected: false,
+		apps: 0,
 		active: false,
 		keepOn: false,
 		lastCall: undefined,

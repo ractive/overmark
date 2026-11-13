@@ -109,7 +109,7 @@ describe.skipIf(browserBinary === undefined)("web components", () => {
 		);
 		// Outlined around the button, not the whole component.
 		const widths = await page.eval<number[]>(
-			`[...${shadow("svg.marks")}.querySelectorAll("[data-review] rect")].map((r) => Number(r.getAttribute("width")))`,
+			`[...${shadow("svg.marks")}.querySelectorAll("[data-review] rect:not([data-casing])")].map((r) => Number(r.getAttribute("width")))`,
 		);
 		expect(widths.length).toBe(3);
 		expect(Math.max(...widths)).toBeLessThan(400);

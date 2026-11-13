@@ -1,13 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import {
-	FOUND_COLOUR,
-	PROBABLE_COLOUR,
-	RESOLVED_COLOUR,
-} from "../src/content/overlay.ts";
 import type { Annotation, Case } from "../src/lib/case.ts";
 import { summarize } from "../src/lib/element.ts";
-import { MARK_COLOUR } from "../src/lib/marks.ts";
 import type { AnnotationMatch } from "../src/lib/messages.ts";
 import { initialState, type PanelState } from "../src/sidepanel/state.ts";
 import type { Actions } from "../src/sidepanel/view.ts";
@@ -563,13 +557,6 @@ describe("a mark's status and actions", () => {
 			["wontfix", "flex-grow: 1"],
 		]);
 	});
-
-	test("the panel's resolved colour is the page's", async () => {
-		const css = await Bun.file(
-			new URL("../src/sidepanel/style.css", import.meta.url),
-		).text();
-		expect(css).toContain(`--resolved: ${RESOLVED_COLOUR};`);
-	});
 });
 
 describe("Load and Hide", () => {
@@ -1101,6 +1088,79 @@ describe("the AI app", () => {
 		render(caseState(sampleCase("c_b1"), ai({ connected: true })), noActions);
 		expect(el("ai-action").textContent).toBe("Manage");
 	});
+
+	test("the pill: a few words, a dot in the state's colour, and the rest in its name and tooltip (DEC-024)", () => {
+		const c = sampleCase("c_pill");
+		const pill = () => [
+			el("ai-label").textContent,
+			el("bar").dataset["ai"],
+			el("ai-button").title,
+		];
+		render(caseState(c), noActions);
+		expect(pill()).toEqual([
+			"AI off",
+			"off",
+			"AI access is off. Click to turn it on and set it up.",
+		]);
+		// The whole status stays in the button, for a screen reader.
+		expect(el("ai-status").textContent).toBe("Not connected");
+		expect(el("ai-status").classList.contains("visually-hidden")).toBe(true);
+		render(
+			caseState(
+				c,
+				ai({
+					status: "Waiting for an AI app to pair",
+					connected: true,
+					active: true,
+				}),
+			),
+			noActions,
+		);
+		expect(pill()).toEqual([
+			"AI on, no app yet",
+			"waiting",
+			"Waiting for an AI app to pair. Click for the address and code.",
+		]);
+		const on = (apps: number, status: string) =>
+			caseState(c, ai({ status, connected: true, active: true, apps }));
+		render(on(1, "Connected: Claude"), noActions);
+		expect(pill()).toEqual([
+			"AI on · 1 app",
+			"connected",
+			"Connected: Claude. Click to manage it.",
+		]);
+		render(on(2, "Connected: Claude, ChatGPT"), noActions);
+		expect(pill()).toEqual([
+			"AI on · 2 apps",
+			"connected",
+			"Connected: Claude, ChatGPT. Click to manage them.",
+		]);
+		render(
+			caseState(c, ai({ status: "Connecting…", active: true })),
+			noActions,
+		);
+		expect(pill()).toEqual([
+			"AI connecting…",
+			"waiting",
+			"Connecting… Click for the AI app card.",
+		]);
+		// Off with something to tell: the dot says so, the tooltip what.
+		render(
+			caseState(
+				c,
+				ai({ status: "Not connected: the address is in use elsewhere." }),
+			),
+			noActions,
+		);
+		expect(pill()).toEqual([
+			"AI off",
+			"problem",
+			"Not connected: the address is in use elsewhere. Click to set it up.",
+		]);
+		// Stop is short beside the pill; its name says what it stops.
+		expect(el("stop-ai").textContent).toBe("Stop");
+		expect(el("stop-ai").getAttribute("aria-label")).toBe("Stop AI access");
+	});
 });
 
 describe("settings and errors at home", () => {
@@ -1236,7 +1296,7 @@ describe("the annotate button (DEC-023)", () => {
 });
 
 describe("the top bar and Settings (DEC-023)", () => {
-	test("Home: no back button; a case: ← All cases, which closes it", () => {
+	test("Home: no back button; a case: All cases with a chevron, which closes it", () => {
 		const called: string[] = [];
 		const actions = actionsWith({
 			closeCase: () => void called.push("close"),
@@ -1245,7 +1305,8 @@ describe("the top bar and Settings (DEC-023)", () => {
 		expect(el("back").hidden).toBe(true);
 		render(caseState(sampleCase("c_top")), actions);
 		expect(el("back").hidden).toBe(false);
-		expect(el("back").textContent).toBe("← All cases");
+		expect(el("back").textContent).toBe("All cases");
+		expect(el("back").querySelector("svg[aria-hidden=true]")).not.toBeNull();
 		expect(el("back").getAttribute("aria-label")).toBe(
 			"All cases: close this case",
 		);
@@ -1270,7 +1331,7 @@ describe("the top bar and Settings (DEC-023)", () => {
 		);
 		expect(el<HTMLButtonElement>("back").disabled).toBe(false);
 		expect(el("leave-hint").textContent).toBe(
-			"1 mark is not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without it.",
+			"1 mark is not in the case yet; the toolbar on the page says why. Click All cases again to leave without it.",
 		);
 		render(caseState(c), noActions);
 		expect(el("leave-hint").hidden).toBe(true);
@@ -1293,7 +1354,7 @@ describe("the top bar and Settings (DEC-023)", () => {
 		expect(el("settings").hidden).toBe(false);
 		expect(el("case-view").hidden).toBe(true);
 		expect(el("home").hidden).toBe(true);
-		expect(el("back").textContent).toBe("← Back");
+		expect(el("back").textContent).toBe("Back");
 		el("back").click();
 		expect(called).toEqual(["back"]);
 		// The case stays open underneath: its view is there when Back returns.
@@ -1305,7 +1366,7 @@ describe("the top bar and Settings (DEC-023)", () => {
 		home.settings = true;
 		render(home, actions);
 		expect(el("home").hidden).toBe(true);
-		expect(el("back").textContent).toBe("← Back");
+		expect(el("back").textContent).toBe("Back");
 		home.settings = false;
 		render(home, actions);
 		expect(el("settings").hidden).toBe(true);
@@ -1457,15 +1518,6 @@ describe("the case view's actions and this tab (DEC-023)", () => {
 			`${c.page.viewport.width}×${c.page.viewport.height}`,
 		);
 	});
-});
-
-test("the panel's mark colours are the page's", async () => {
-	const css = await Bun.file(
-		new URL("../src/sidepanel/style.css", import.meta.url),
-	).text();
-	expect(css).toContain(`--mark: ${MARK_COLOUR};`);
-	expect(css).toContain(`--mark-found: ${FOUND_COLOUR};`);
-	expect(css).toContain(`--mark-unsure: ${PROBABLE_COLOUR};`);
 });
 
 describe("a loaded mark", () => {

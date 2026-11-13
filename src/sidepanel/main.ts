@@ -40,7 +40,13 @@ import {
 	type SavedFile,
 	saveFile,
 } from "./download.ts";
-import { type Drawn, followStep, isFound, noneFound } from "./follow.ts";
+import {
+	type Drawn,
+	followStep,
+	foundText,
+	isFound,
+	noneFound,
+} from "./follow.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
 	type Exported,
@@ -264,7 +270,7 @@ async function loadInto(
 		hint(
 			noneFound(result.matches) && !settling
 				? undefined
-				: foundText(found, result.matches.length, result.url),
+				: foundText(result.matches, shortUrl(result.url)),
 		);
 		return { found, total: result.matches.length };
 	} catch (error) {
@@ -272,10 +278,6 @@ async function loadInto(
 		return undefined;
 	}
 }
-
-/** What a draw found, under the case's buttons. */
-const foundText = (found: number, total: number, url: string) =>
-	`${found} of ${total} marks found on ${shortUrl(url)}. Green: found. Amber, dashed: probable or unsure.`;
 
 /**
  * The page shows the case already (the panel opened it from there): what it
@@ -287,7 +289,6 @@ async function readLoaded(c: Case, tabId: number): Promise<void> {
 		.sendMessage(tabId, { type: "case:update", case: c })
 		.catch(() => null)) as LoadResult | null;
 	if (result === null || !showing(c.id) || state.loaded !== undefined) return;
-	const found = result.matches.filter(isFound).length;
 	update((s) => {
 		s.loaded = {
 			caseId: c.id,
@@ -296,7 +297,7 @@ async function readLoaded(c: Case, tabId: number): Promise<void> {
 		};
 	});
 	if (!noneFound(result.matches))
-		hint(foundText(found, result.matches.length, result.url));
+		hint(foundText(result.matches, shortUrl(result.url)));
 }
 
 /**

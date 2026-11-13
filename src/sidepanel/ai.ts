@@ -290,6 +290,7 @@ export async function startAi(
 				...s.ai,
 				status: statusText(a),
 				connected,
+				apps: connected ? a.grants.length : 0,
 				active: a.state !== "disconnected" || a.reconnecting || a.retrying,
 				keepOn: a.keepOn,
 				lastCall: a.lastCall,
@@ -648,7 +649,8 @@ export async function startAi(
 					type: "button",
 					"data-answer": value,
 					title: titles[value],
-					class: primary ? "primary" : false,
+					// Not amber: that is the view's one action that starts drawing.
+					class: primary ? "strong" : false,
 					// Allow and Always allow only once the panel has been in front a
 					// while: the click that brings it forward cannot approve.
 					disabled: value !== "deny",

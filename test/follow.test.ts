@@ -4,6 +4,8 @@ import {
 	canDrawOn,
 	type FollowInput,
 	followStep,
+	foundText,
+	isUnsure,
 	noneFound,
 } from "../src/sidepanel/follow.ts";
 
@@ -181,5 +183,72 @@ describe("none of the case's marks found", () => {
 	test("only marks without an element, or none at all: nothing to tell by", () => {
 		expect(noneFound([match(1, "no-element")])).toBe(false);
 		expect(noneFound([])).toBe(false);
+	});
+});
+
+describe("what a draw found, in a line (DEC-024)", () => {
+	const candidate = (found: boolean) => ({
+		score: found ? 0.9 : 0.6,
+		summary: "button",
+		selector: "button",
+		visible: true,
+		found,
+	});
+	const match = (
+		n: number,
+		status: AnnotationMatch["status"],
+		sure = status === "found",
+	): AnnotationMatch => ({
+		annotationId: `a${n}`,
+		number: n,
+		status,
+		score: status === "lost" ? 0 : 0.9,
+		current: 0,
+		candidates:
+			status === "lost" || status === "no-element" ? [] : [candidate(sure)],
+	});
+
+	test("a mark is dashed on the page when its element is not sure, or it has none", () => {
+		expect(isUnsure(match(1, "found"))).toBe(false);
+		expect(isUnsure(match(1, "probable"))).toBe(true);
+		// One of several, however good the shown one is.
+		expect(isUnsure(match(1, "ambiguous", true))).toBe(true);
+		expect(isUnsure(match(1, "no-element"))).toBe(true);
+		// Not drawn at all.
+		expect(isUnsure(match(1, "lost"))).toBe(false);
+		// Another candidate chosen: that one decides.
+		expect(
+			isUnsure({
+				...match(1, "found"),
+				current: 1,
+				candidates: [candidate(true), candidate(false)],
+			}),
+		).toBe(true);
+	});
+
+	test("all found and sure: the count and the page, no word on colours", () => {
+		expect(
+			foundText([match(1, "found"), match(2, "found")], "127.0.0.1/v2"),
+		).toBe("2 of 2 marks found on 127.0.0.1/v2.");
+	});
+
+	test("the dash is explained only where one is drawn", () => {
+		expect(
+			foundText(
+				[match(1, "found"), match(2, "probable"), match(3, "lost")],
+				"127.0.0.1/v2",
+			),
+		).toBe("2 of 3 marks found on 127.0.0.1/v2. Dashed: unsure.");
+		expect(foundText([match(1, "found"), match(2, "lost")], "x.ch")).toBe(
+			"1 of 2 marks found on x.ch.",
+		);
+		expect(foundText([match(1, "no-element")], "x.ch")).toBe(
+			"0 of 1 marks found on x.ch. Dashed: unsure.",
+		);
+	});
+
+	test("it names no colour: a mark's colour is its status", () => {
+		const said = foundText([match(1, "probable")], "x.ch");
+		expect(said).not.toMatch(/green|amber/i);
 	});
 });

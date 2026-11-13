@@ -727,7 +727,13 @@ export class Annotator {
 		const b = doc.createElement("button");
 		b.type = "button";
 		if (image !== undefined) b.append(icon(doc, image));
-		b.append(label);
+		// Its own element: on a narrow page only the icon shows (overlay.ts).
+		if (label !== "") {
+			const word = doc.createElement("span");
+			word.className = "word";
+			word.textContent = label;
+			b.append(word);
+		}
 		b.dataset["action"] = action;
 		b.addEventListener("click", onClick);
 		return b;

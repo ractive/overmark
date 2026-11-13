@@ -1077,7 +1077,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				expect(box.height).toBeGreaterThanOrEqual(32);
 				expect(box.width).toBeGreaterThanOrEqual(112);
 				expect(await h.control.eval<string>(`${back}.textContent`)).toBe(
-					"← All cases",
+					"All cases",
 				);
 				// It stays in view while the case scrolls.
 				await h.control.eval(`window.scrollTo(0, 400)`);
@@ -1271,7 +1271,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 
 					await panel.eval(`${id("ai-button")}.click()`);
 					await panel.waitFor(
-						`!${id("settings")}.hidden && ${id("case-view")}.hidden && ${back}.textContent === "← Back"`,
+						`!${id("settings")}.hidden && ${id("case-view")}.hidden && ${back}.textContent === "Back"`,
 					);
 					// A real click in the AI app card reaches it now.
 					await panel.click(id("relay"));

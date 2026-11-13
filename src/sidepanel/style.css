@@ -1,49 +1,96 @@
-/* Ink and amber are the icon's; a mark's colour is the page's. */
+/*
+ * A proof sheet (DEC-024): paper with ink on it. Structure comes from space,
+ * rules and edges that can be seen; amber marks the one action of a view that
+ * starts drawing; a mark's colour is its status. test/contrast.test.ts reads
+ * the two token blocks and holds every pair to its contrast.
+ */
 :root {
 	color-scheme: light dark;
-	--ink: #1d2433;
-	/* The open case's band: the whole case, set apart from its marks. */
-	--band: #1d2433;
-	--on-ink: #ffffff;
-	--on-ink-muted: #b8c0d0;
-	--on-ink-rule: rgba(255, 255, 255, 0.16);
-	--on-ink-link: #9cc3ff;
-	--on-ink-danger: #ff9b9b;
-	--amber: #ffb000;
-	--amber-press: #eea400;
+	/* Surfaces: the panel; cards, fields, buttons; code, plain chips, hover */
+	--paper: #f6f4ee;
 	--sheet: #ffffff;
-	--wash: #f2f4f7;
-	--fg: #1d2433;
-	--muted: #5b6475;
-	--rule: #dfe3ea;
-	--focus: #1f6feb;
-	--link: #1f6feb;
-	--danger: #c62828;
-	--ok: #1a7f37;
-	--warn: #a85800;
-	/* A mark's colours on the page (overlay.ts), in light and dark alike. */
-	--mark: #e5195f;
-	--mark-found: #1a7f37;
-	--mark-unsure: #b45f06;
-	/* Only here: a lost mark is not drawn on the page. */
-	--mark-lost: #c62828;
-	/* A resolved mark, here and on the page (overlay.ts). */
-	--resolved: #6b7385;
+	--wash: #ebe8e0;
+	/* Text; meta and placeholders */
+	--ink: #1b2130;
+	--ink-2: #535c6e;
+	/* Lines: separators (decoration only); boundaries of buttons, fields, chips */
+	--rule: #dedad0;
+	--edge: #7b8291;
+	/* Action */
+	--accent: #ffb000;
+	--accent-hover: #f0a400;
+	--accent-ink: #1b2130;
+	--accent-edge: #a06c00;
+	--strong: #1b2130;
+	--on-strong: #ffffff;
+	--link: #1a55c2;
+	--focus: #1a55c2;
+	/* A mark's status: text and fill, and its tint */
+	--st-open: #c20f4c;
+	--st-open-bg: #fce4ec;
+	--st-verify: #4347c9;
+	--st-verify-bg: #e8e9fd;
+	--st-verified: #166d2d;
+	--st-verified-bg: #dff2e3;
+	--st-closed: #535c6e;
+	--st-closed-bg: #e9ebef;
+	--on-pin: #ffffff;
+	/* Messages */
+	--danger: #b3261e;
+	--danger-bg: #fbe6e3;
+	--on-danger: #ffffff;
+	--warn: #7d4500;
+	--warn-bg: #fff0cc;
+	--warn-edge: #a86400;
+	/* Type */
+	--font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	--font-num: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+	--font-mono:
+		ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+	/* Space and shape */
+	--s1: 4px;
+	--s2: 8px;
+	--s3: 12px;
+	--s4: 16px;
+	--s5: 24px;
+	--s6: 32px;
+	--r-control: 6px;
+	--r-card: 10px;
+	--r-pill: 999px;
+	/* The top bar's height: what sticks under it starts there. */
+	--bar: 44px;
 }
 
 @media (prefers-color-scheme: dark) {
 	:root {
-		--band: #232b3c;
-		--sheet: #161b26;
-		--wash: #1f2533;
-		--fg: #e8ebf1;
-		--muted: #9aa3b5;
-		--rule: #2e3647;
-		--focus: #6ea8ff;
-		--link: #6ea8ff;
-		--danger: #ef7070;
-		--ok: #7bc47f;
-		--warn: #f0b04a;
+		--paper: #11141a;
+		--sheet: #1a1e27;
+		--wash: #242a37;
+		--ink: #eceef3;
+		--ink-2: #a6aebd;
+		--rule: #2b313d;
+		--edge: #737c8e;
+		--accent-hover: #ffc233;
+		--accent-edge: #ffb000;
+		--strong: #eceef3;
+		--on-strong: #11141a;
+		--link: #8fb8ff;
+		--focus: #8fb8ff;
+		--st-open: #ff7aa5;
+		--st-open-bg: #3a1524;
+		--st-verify: #a9adff;
+		--st-verify-bg: #22244d;
+		--st-verified: #72d18c;
+		--st-verified-bg: #13301d;
+		--st-closed: #a6aebd;
+		--st-closed-bg: #272c38;
+		--on-pin: #11141a;
+		--danger: #ff8f85;
+		--danger-bg: #3a1714;
+		--on-danger: #11141a;
+		--warn: #ffc861;
+		--warn-bg: #33270d;
+		--warn-edge: #c98a1a;
 	}
 }
 
@@ -51,21 +98,22 @@
 	box-sizing: border-box;
 }
 
+/* A click on a control scrolled into view lands beside the top bar. */
+html {
+	scroll-padding-top: calc(var(--bar) + var(--s2));
+}
+
 body {
 	/* Chrome's own style sheet for extension pages sets the body to 75%. */
-	font:
-		13px / 1.45 system-ui,
-		-apple-system,
-		"Segoe UI",
-		sans-serif;
+	font: 13px / 19px var(--font);
 	margin: 0;
-	background: var(--sheet);
-	color: var(--fg);
+	background: var(--paper);
+	color: var(--ink);
 }
 
 :focus-visible {
 	outline: 2px solid var(--focus);
-	outline-offset: 1px;
+	outline-offset: 2px;
 }
 
 [hidden] {
@@ -81,218 +129,137 @@ body {
 	white-space: nowrap;
 }
 
-/* A click on a control scrolled into view lands beside the top bar. */
-html {
-	scroll-padding-top: 52px;
-}
-
-/*
- * The top bar (DEC-023): the way back on the left, the AI connection on the
- * right; Chrome shows the name and icon above the panel. It stays in view.
- */
-header {
-	position: sticky;
-	top: 0;
-	z-index: 3;
-	display: flex;
-	align-items: center;
-	justify-content: flex-end;
-	gap: 8px;
-	min-height: 44px;
-	padding: 6px 14px;
-	background: var(--band);
-	color: var(--on-ink);
-}
-
-/* "← All cases" / "← Back": large enough to be seen, and hit. */
-#back {
-	flex: none;
-	margin-right: auto;
-	min-width: 112px;
-	min-height: 32px;
-	padding: 4px 14px;
-	border: 1px solid var(--on-ink-muted);
-	border-radius: 999px;
-	background: rgba(255, 255, 255, 0.08);
-	color: var(--on-ink);
-	font-size: 13px;
-	font-weight: 600;
-}
-
-#back:hover:not(:disabled) {
-	border-color: var(--on-ink);
-	background: rgba(255, 255, 255, 0.16);
-}
-
-header .meta {
-	color: var(--on-ink-muted);
-}
-
-/* The connection's state, and a click away from changing it. */
-.ai-pill {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-	max-width: 100%;
-	min-width: 0;
-	padding: 3px 4px 3px 10px;
-	border: 1px solid var(--on-ink-rule);
-	border-radius: 999px;
-	background: rgba(255, 255, 255, 0.04);
-	color: var(--on-ink-muted);
-	font-size: 12px;
-}
-
-/* The connection's dot: on the pill, so the status can end in "…". */
-.ai-pill::before {
-	content: "";
-	flex: none;
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: var(--on-ink-muted);
-}
-
-.ai-pill:hover:not(:disabled) {
-	border-color: var(--on-ink-muted);
-	background: rgba(255, 255, 255, 0.1);
-	color: var(--on-ink);
-}
-
-#ai-status {
-	display: block;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-header[data-ai="waiting"] .ai-pill::before {
-	background: var(--amber);
-	box-shadow: 0 0 0 3px rgba(255, 176, 0, 0.25);
-}
-
-header[data-ai="connected"] .ai-pill::before {
-	background: #4cd07d;
-	box-shadow: 0 0 0 3px rgba(76, 208, 125, 0.22);
-}
-
-header[data-ai="connected"] #ai-status {
-	color: var(--on-ink);
-}
-
-.ai-action {
-	flex: none;
-	padding: 1px 9px;
-	border-radius: 999px;
-	background: var(--amber);
-	color: var(--ink);
-	font-weight: 600;
-}
-
-header[data-ai="connected"] .ai-action {
-	background: rgba(255, 255, 255, 0.14);
-	color: var(--on-ink);
-}
-
-header button:not(.ai-pill) {
-	padding: 2px 8px;
-	border-color: var(--on-ink-rule);
-	background: none;
-	color: var(--on-ink);
-	font-size: 12px;
-}
-
-header button:not(.ai-pill):hover:not(:disabled) {
-	background: rgba(255, 255, 255, 0.12);
-}
-
-/* The last AI call: one line under the top bar. */
-#ai-call {
-	margin: 0;
-	padding: 0 14px 6px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	text-align: right;
-	background: var(--band);
-	color: var(--on-ink-muted);
-}
-
-/* Under "Annotate this page": what it does now. */
-.annotate-hint {
-	margin: 6px 0 0;
-}
-
-h3.group-title {
-	margin-top: 16px;
-}
-
-main {
-	padding: 14px;
-	display: grid;
-	gap: 20px;
-}
+/* --- type -------------------------------------------------------------------- */
 
 h2 {
-	margin: 0 0 8px;
-	font-size: 13px;
+	margin: 0 0 var(--s2);
+	font-size: 15px;
+	line-height: 20px;
+	font-weight: 700;
+}
+
+h3,
+.group-title {
+	margin: var(--s4) 0 var(--s2);
+	font-size: 12px;
+	line-height: 16px;
 	font-weight: 600;
+	color: var(--ink-2);
 }
 
-.page {
-	margin: 0 0 8px;
+p {
+	margin: 0 0 var(--s2);
+}
+
+.meta {
+	color: var(--ink-2);
+	font-size: 12px;
+	line-height: 17px;
 	overflow-wrap: anywhere;
-	color: var(--muted);
 }
 
-.hint {
-	margin: 0 0 8px;
-	padding: 8px 10px;
-	border-radius: 8px;
-	background: var(--wash);
+.empty {
+	margin: 0;
+	color: var(--ink-2);
 }
 
+a {
+	color: var(--link);
+	text-underline-offset: 2px;
+}
+
+code,
+pre {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 17px;
+}
+
+/* --- buttons ------------------------------------------------------------------ */
+
+/* The default button: a sheet with an edge. */
 button {
-	font: inherit;
-	padding: 6px 12px;
-	border-radius: 8px;
-	border: 1px solid var(--rule);
+	min-height: 30px;
+	padding: 4px var(--s3);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-control);
 	background: var(--sheet);
-	color: var(--fg);
+	color: var(--ink);
+	font: inherit;
+	font-weight: 600;
 	cursor: pointer;
 	transition:
 		background-color 0.12s,
 		border-color 0.12s;
 }
 
-button:hover:not(:disabled) {
+button:where(:hover:not(:disabled)) {
 	background: var(--wash);
-	border-color: var(--muted);
 }
 
+button.small {
+	min-height: 26px;
+	padding: 2px 10px;
+	font-size: 12px;
+	line-height: 16px;
+}
+
+/* The one action of a view that starts drawing. */
 button.primary {
-	border-color: transparent;
-	background: var(--amber);
-	color: var(--ink);
-	font-weight: 600;
+	min-height: 36px;
+	border-color: var(--accent-edge);
+	background: var(--accent);
+	color: var(--accent-ink);
 }
 
 button.primary:hover:not(:disabled) {
-	border-color: transparent;
-	background: var(--amber-press);
+	background: var(--accent-hover);
 }
 
 button.wide {
 	width: 100%;
-	padding-block: 8px;
+	min-height: 36px;
 }
 
-button:disabled {
-	opacity: 0.5;
-	cursor: default;
+/* A view's other main actions: ink. */
+button.strong {
+	border-color: var(--strong);
+	background: var(--strong);
+	color: var(--on-strong);
 }
 
+button.strong:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--strong) 84%, var(--paper));
+	background: color-mix(in srgb, var(--strong) 84%, var(--paper));
+}
+
+/* A quiet one is its words: Hide marks, Expand all, an address. */
+button.quiet,
+button.link {
+	min-height: 24px;
+	padding: 0;
+	border: 0;
+	border-radius: 3px;
+	background: none;
+	color: var(--link);
+	text-align: start;
+}
+
+button.quiet:hover:not(:disabled),
+button.link:hover:not(:disabled) {
+	background: none;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+button.page-link {
+	font: 12px / 17px var(--font-mono);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	overflow-wrap: anywhere;
+}
+
+/* Quiet until it is armed: then the one filled, so the second click is meant. */
 button.danger {
 	margin-left: auto;
 	border-color: transparent;
@@ -300,155 +267,624 @@ button.danger {
 	color: var(--danger);
 }
 
-/*
- * "Really delete?": the one filled button, so the second click is meant.
- * After the hover rules, so the pointer still over it leaves it filled.
- */
-button.danger[data-armed],
-button.danger[data-armed]:hover:not(:disabled) {
+button.danger:hover:not(:disabled) {
+	background: var(--danger-bg);
+}
+
+button[data-armed],
+button[data-armed]:hover:not(:disabled) {
 	border-color: var(--danger);
 	background: var(--danger);
-	color: var(--sheet);
+	color: var(--on-danger);
 }
 
-button.link {
-	border: 0;
+/* Never opacity alone: a disabled button is flat and says so in its colours. */
+button:disabled {
+	border-color: var(--rule);
+	background: var(--wash);
+	color: var(--ink-2);
+	cursor: default;
+}
+
+button:is(.quiet, .link, .danger):disabled {
+	border-color: transparent;
 	background: none;
-	padding: 0;
-	color: var(--muted);
-}
-
-button.link:hover:not(:disabled) {
-	background: none;
-	color: var(--fg);
-}
-
-button.page-link {
-	color: var(--link);
-	text-align: start;
-	text-decoration: underline;
-	text-underline-offset: 2px;
-	overflow-wrap: anywhere;
 }
 
 .row {
 	display: flex;
-	gap: 6px;
 	flex-wrap: wrap;
 	align-items: center;
+	gap: var(--s2);
+}
+
+/* --- fields, switches, checkboxes ------------------------------------------- */
+
+textarea,
+input:is([type="text"], [type="url"], [type="search"]),
+.field input {
+	padding: 6px var(--s2);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-control);
+	background: var(--sheet);
+	color: var(--ink);
+	font: inherit;
+}
+
+textarea {
+	display: block;
+	width: 100%;
+	min-height: 80px;
+	resize: vertical;
+}
+
+::placeholder {
+	color: var(--ink-2);
+	opacity: 1;
+}
+
+textarea + .row {
+	margin-top: var(--s2);
+}
+
+.field {
+	display: grid;
+	gap: var(--s1);
+	margin-bottom: var(--s3);
+	color: var(--ink-2);
+	font-size: 12px;
+	line-height: 16px;
+	font-weight: 600;
+}
+
+.field input {
+	font-size: 13px;
+	line-height: 19px;
+	font-weight: 400;
+}
+
+.field input:invalid {
+	border-color: var(--danger);
 }
 
 .check {
 	display: flex;
-	gap: 7px;
-	align-items: baseline;
-	margin-top: 8px;
-	color: var(--muted);
+	align-items: flex-start;
+	gap: var(--s2);
+	margin-top: var(--s2);
+	cursor: pointer;
 }
 
 .check input {
-	margin: 0;
-	accent-color: var(--amber);
+	flex: none;
+	width: 15px;
+	height: 15px;
+	margin: 2px 0 0;
+	accent-color: var(--strong);
 }
 
-.group-title {
-	margin: 14px 0 4px;
-	font-size: 12px;
+.switch {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--s2);
 	font-weight: 600;
-	color: var(--muted);
+	cursor: pointer;
 }
+
+.switch input {
+	appearance: none;
+	flex: none;
+	position: relative;
+	margin: 0;
+	width: 34px;
+	height: 20px;
+	border-radius: var(--r-pill);
+	background: var(--edge);
+	cursor: pointer;
+	transition: background-color 0.15s;
+}
+
+.switch input::after {
+	content: "";
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--on-strong);
+	transition: transform 0.15s;
+}
+
+.switch input:checked {
+	background: var(--strong);
+}
+
+.switch input:checked::after {
+	transform: translateX(14px);
+}
+
+.switch input:disabled {
+	background: var(--wash);
+	box-shadow: inset 0 0 0 1px var(--rule);
+	cursor: default;
+}
+
+.switch input:disabled::after {
+	background: var(--ink-2);
+}
+
+/* An app's "Allow all changes" (DEC-018). */
+.switch.small {
+	margin-top: var(--s1);
+	font-weight: 400;
+	color: var(--ink-2);
+}
+
+.switch.small input {
+	width: 28px;
+	height: 16px;
+}
+
+.switch.small input::after {
+	top: 2px;
+	left: 2px;
+	width: 12px;
+	height: 12px;
+}
+
+.switch.small input:checked::after {
+	transform: translateX(12px);
+}
+
+/* --- notes, notices, chips --------------------------------------------------- */
+
+/* What the last action came to, or what a control is for: a note on a wash. */
+.hint {
+	margin: 0 0 var(--s2);
+	padding: var(--s2) var(--s3);
+	border-radius: var(--r-card);
+	background: var(--wash);
+	overflow-wrap: anywhere;
+}
+
+.hint > :last-child {
+	margin-bottom: 0;
+}
+
+/* Something failed. */
+.hint[role="alert"],
+#import-error {
+	border: 1px solid var(--danger);
+	background: var(--danger-bg);
+}
+
+/*
+ * Something stands in the way and there is a way out: Overmark may not run on
+ * the tab in front, none of the case's marks were found there (DEC-022), a
+ * case in a file is here already, the address is in use elsewhere.
+ */
+.notice,
+#import-prompt,
+#pair-problem,
+#pair-replaced {
+	padding: 10px var(--s3);
+	border: 1px solid var(--warn-edge);
+	border-radius: var(--r-card);
+	background: var(--warn-bg);
+	color: var(--ink);
+}
+
+.notice {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--s2);
+}
+
+.notice-icon {
+	flex: none;
+	margin-top: 1px;
+	color: var(--warn);
+}
+
+.notice-body {
+	display: grid;
+	justify-items: start;
+	gap: var(--s2);
+	min-width: 0;
+}
+
+.notice-body p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.notice button,
+.size button {
+	min-height: 26px;
+	padding: 2px 10px;
+	font-size: 12px;
+	line-height: 16px;
+}
+
+/*
+ * A mark's status as a colour: `--tone` for text and fills, `--tint` behind
+ * text. On anything that carries a mark's status (`data-status`) or the group
+ * a status counts in (`data-group`): open; fixed and to be verified; verified;
+ * closed without a fix.
+ */
+[data-status="open"],
+[data-group="open"] {
+	--tone: var(--st-open);
+	--tint: var(--st-open-bg);
+}
+
+[data-status="fixed"],
+[data-group="toVerify"] {
+	--tone: var(--st-verify);
+	--tint: var(--st-verify-bg);
+}
+
+[data-status="verified"],
+[data-group="verified"] {
+	--tone: var(--st-verified);
+	--tint: var(--st-verified-bg);
+}
+
+[data-status="wontfix"],
+[data-status="cantreproduce"],
+[data-group="closed"] {
+	--tone: var(--st-closed);
+	--tint: var(--st-closed-bg);
+}
+
+/* A status with its count, to filter by; a pill is the same on a card, smaller. */
+.chip,
+.pill {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--s1);
+	border: 1.5px solid transparent;
+	border-radius: var(--r-pill);
+	background: var(--tint, var(--wash));
+	color: var(--tone, var(--ink-2));
+	font-size: 12px;
+	line-height: 16px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.chip {
+	min-height: 24px;
+	padding: 0 10px;
+}
+
+.pill {
+	min-height: 20px;
+	padding: 0 var(--s2);
+}
+
+button.chip:hover:not(:disabled) {
+	background: var(--tint, var(--wash));
+	border-color: color-mix(in srgb, var(--tone, var(--edge)) 50%, transparent);
+}
+
+button.chip[aria-pressed="true"],
+button.chip[aria-pressed="true"]:hover:not(:disabled) {
+	border-color: var(--tone, var(--edge));
+}
+
+.chip .n,
+.count {
+	font-family: var(--font-num);
+	font-variant-numeric: tabular-nums;
+}
+
+/* How many, beside a heading. */
+.count {
+	margin-left: 2px;
+	padding: 1px 7px;
+	border-radius: var(--r-pill);
+	background: var(--wash);
+	color: var(--ink-2);
+	font-size: 12px;
+	line-height: 16px;
+	font-weight: 700;
+}
+
+/* --- the top bar -------------------------------------------------------------- */
+
+/*
+ * The way back on the left, the AI connection on the right (DEC-023); Chrome
+ * shows the name and icon above the panel. On paper, and it stays in view.
+ */
+#bar {
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--s2);
+	height: var(--bar);
+	padding: 0 var(--s4);
+	border-bottom: 1px solid var(--rule);
+	background: var(--paper);
+}
+
+:where(#bar) button {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	border-radius: var(--r-pill);
+}
+
+/* "All cases" / "Back": large enough to be seen, and hit. */
+#back {
+	justify-content: center;
+	gap: var(--s1);
+	margin-right: auto;
+	min-width: 112px;
+	min-height: 32px;
+	padding: 0 14px 0 var(--s2);
+}
+
+#back .icon {
+	flex: none;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.75;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+/* The connection in a few words, and a click away from changing it. */
+.ai-pill {
+	gap: 6px;
+	min-width: 0;
+	min-height: 28px;
+	padding: 0 var(--s3) 0 10px;
+	font-size: 12px;
+	line-height: 16px;
+}
+
+.ai-pill .dot,
+.ai-state .dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--ink-2);
+}
+
+/* Amber on paper needs its edge to be a dot. */
+:where(#bar)[data-ai="waiting"] .dot,
+.ai-state:is(
+		[data-state="connecting"],
+		[data-state="retrying"],
+		[data-state="waiting"]
+	)
+	.dot {
+	background: var(--accent);
+	box-shadow: 0 0 0 1px var(--accent-edge);
+}
+
+:where(#bar)[data-ai="connected"] .dot,
+.ai-state[data-state="on"] .dot {
+	background: var(--st-verified);
+}
+
+:where(#bar)[data-ai="problem"] .dot {
+	background: var(--danger);
+}
+
+#stop-ai {
+	min-height: 28px;
+	padding: 0 var(--s3);
+	font-size: 12px;
+	line-height: 16px;
+}
+
+/* The last AI call: one line under the top bar. */
+#ai-call {
+	margin: 0;
+	padding: 6px var(--s4);
+	border-bottom: 1px solid var(--rule);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* --- an AI app's questions, above every view (ai.ts) ------------------------- */
+
+.ai-box {
+	display: grid;
+	gap: var(--s3);
+	padding: var(--s3) var(--s4);
+	border-bottom: 1px solid var(--rule);
+}
+
+#questions:empty {
+	display: none;
+}
+
+/* Each waits for an answer: a sheet with an edge. */
+.question {
+	padding: var(--s3);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-card);
+	background: var(--sheet);
+}
+
+.question p {
+	margin: 0 0 6px;
+}
+
+.question pre {
+	margin: 0 0 var(--s2);
+	padding: 6px var(--s2);
+	max-height: 12em;
+	overflow: auto;
+	border-radius: var(--r-control);
+	background: var(--wash);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.question .row {
+	margin-bottom: var(--s2);
+}
+
+.question > :last-child {
+	margin-bottom: 0;
+}
+
+/* The confirmation names the case and the page on lines of their own. */
+.tab-mcp-description {
+	white-space: pre-line;
+}
+
+/* --- the views ---------------------------------------------------------------- */
+
+main {
+	display: block;
+}
+
+/* Sections on paper: space, and a rule between them. */
+#home > section,
+#settings > section {
+	padding: var(--s4) var(--s4) 20px;
+}
+
+#home > section + section,
+#settings > section + section {
+	border-top: 1px solid var(--rule);
+}
+
+/* --- home: this page ---------------------------------------------------------- */
+
+:where(#home) > section:first-child {
+	display: grid;
+	gap: var(--s2);
+}
+
+:where(#home) > section:first-child > * {
+	margin: 0;
+	min-width: 0;
+}
+
+/* The tab's address, as an address, close under its heading. */
+:where(#home) > section:first-child > .page {
+	margin-top: -6px;
+	color: var(--ink-2);
+	font: 12px / 17px var(--font-mono);
+	overflow-wrap: anywhere;
+}
+
+:where(#home) > section:first-child > .wide {
+	margin-top: var(--s1);
+}
+
+/* Under "Annotate this page": what it does now. */
+.annotate-hint {
+	margin: 0;
+}
+
+/* --- home: the cases ---------------------------------------------------------- */
 
 #cases > .group-title:first-child {
 	margin-top: 0;
 }
 
-.empty {
-	color: var(--muted);
-	margin: 0;
-}
-
-.meta {
-	color: var(--muted);
-	font-size: 12px;
-	overflow-wrap: anywhere;
-}
-
+/* Rows from edge to edge of the panel, a rule between them. */
 ul.cases {
 	list-style: none;
-	margin: 0;
+	margin: 0 calc(-1 * var(--s4));
 	padding: 0;
 	border-top: 1px solid var(--rule);
 }
 
-ul.cases li {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding-right: 6px;
+.cases > li {
 	border-bottom: 1px solid var(--rule);
 }
 
-ul.cases li:hover {
-	background: var(--wash);
-}
-
 ul.cases [data-case] {
-	flex: 1;
-	min-width: 0;
+	position: relative;
 	display: grid;
 	gap: 1px;
-	padding: 8px 6px;
+	width: 100%;
+	min-width: 0;
+	padding: 10px 40px 12px var(--s4);
 	border: 0;
 	border-radius: 0;
 	background: none;
+	font-weight: 400;
 	text-align: left;
 }
 
+/* It opens: a chevron at its end. */
+ul.cases [data-case]::after {
+	content: "";
+	position: absolute;
+	top: 50%;
+	right: 20px;
+	width: 7px;
+	height: 7px;
+	border-top: 1.75px solid var(--ink-2);
+	border-right: 1.75px solid var(--ink-2);
+	transform: translateY(-50%) rotate(45deg);
+}
+
 ul.cases [data-case]:hover:not(:disabled) {
-	background: none;
+	background: var(--wash);
+}
+
+ul.cases [data-case]:hover::after {
+	border-color: var(--ink);
+}
+
+ul.cases [data-case]:focus-visible {
+	outline-offset: -2px;
 }
 
 ul.cases .title {
+	font-size: 14px;
+	line-height: 20px;
 	font-weight: 600;
 	overflow-wrap: anywhere;
 }
 
-ul.cases .load {
-	flex: none;
-	padding: 3px 10px;
-}
-
-.import {
-	margin-top: 10px;
-}
+/* --- home: files and the sync -------------------------------------------------- */
 
 #import-error,
 #import-done,
+#import-prompt,
 #export-all-saved {
-	margin-top: 8px;
+	margin-top: var(--s2);
+}
+
+#import-prompt > :last-child {
+	margin-bottom: 0;
+}
+
+:where(#import-error) p {
+	margin: 0 0 var(--s2);
 }
 
 /* Where an export went: the path, Copy and Show in folder (DEC-020). */
 .saved p {
-	margin: 0 0 4px;
+	margin: 0 0 var(--s1);
 }
 
 .saved .path {
 	display: block;
-	margin-bottom: 6px;
+	margin-bottom: var(--s2);
 	overflow-wrap: anywhere;
-	font-size: 12px;
-}
-
-#import-error p {
-	margin: 0 0 6px;
 }
 
 /* The sync to a folder (DEC-021). */
 .sync {
-	margin-top: 12px;
-	padding-top: 10px;
-	border-top: 1px solid var(--rule);
+	margin-top: var(--s2);
 }
 
 #sync p {
@@ -464,76 +900,42 @@ ul.cases .load {
 	font-weight: 600;
 }
 
-/* --- the start: this tab, the cases, the AI app, options ------------------ */
-
-#home {
-	padding: 0;
-	gap: 0;
+/* Amber is the view's one action that starts drawing: these are ink. */
+.sync button.primary,
+.mark-form button.primary {
+	min-height: 30px;
+	border-color: var(--strong);
+	background: var(--strong);
+	color: var(--on-strong);
 }
 
-#home > section {
-	padding: 14px;
+.mark-form button.primary.small {
+	min-height: 26px;
+}
+
+.sync button.primary:hover:not(:disabled),
+.mark-form button.primary:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--strong) 84%, var(--paper));
+	background: color-mix(in srgb, var(--strong) 84%, var(--paper));
+}
+
+/* --- the open case ------------------------------------------------------------ */
+
+/* What the whole case is and what can be done with it, on paper. */
+.case-header {
+	display: grid;
+	gap: var(--s3);
+	padding: var(--s4);
 	border-bottom: 1px solid var(--rule);
 }
 
-#home > section:last-child {
-	border-bottom: 0;
-}
-
-#home h2 {
-	margin-bottom: 10px;
-	font-size: 14px;
-	font-weight: 700;
-}
-
-/* This tab, and what to do on it: the band, as an open case has. */
-#home > section:first-child {
-	display: grid;
-	gap: 8px;
-	padding-bottom: 16px;
-	border-bottom: 0;
-	background: var(--band);
-	color: var(--on-ink);
-}
-
-#home > section:first-child > * {
+.case-header > * {
 	margin: 0;
+	min-width: 0;
 }
 
-#home > section:first-child h2 {
-	color: var(--on-ink-muted);
-	font-size: 12px;
-	font-weight: 600;
-}
-
-#home > section:first-child .page {
-	color: var(--on-ink);
-	font-weight: 600;
-}
-
-#home > section:first-child .hint {
-	background: rgba(255, 255, 255, 0.08);
-}
-
-/* --- the open case -------------------------------------------------------- */
-
-#case-view {
-	padding: 0;
-	gap: 0;
-}
-
-/* The case's band: what the whole case is and what can be done with it. */
-.case-header {
-	display: grid;
-	gap: 10px;
-	padding: 12px 14px 16px;
-	background: var(--band);
-	color: var(--on-ink);
-}
-
-.case-header h2 {
+.case-title {
 	display: -webkit-box;
-	margin: 2px 0 0;
 	overflow: hidden;
 	-webkit-box-orient: vertical;
 	-webkit-line-clamp: 2;
@@ -544,27 +946,19 @@ ul.cases .load {
 	overflow-wrap: anywhere;
 }
 
-.case-header > * {
-	margin: 0;
-}
-
-.case-header .meta {
-	color: var(--on-ink-muted);
-}
-
 /* Where and when the marks were made, in one line: a · b · c. */
 .case-meta {
-	margin-top: -4px;
-	font-size: 12px;
+	margin-top: -8px;
 }
 
 .case-meta > :not([hidden]) ~ :not([hidden])::before {
 	content: " · ";
 }
 
-.case-header .case-meta button.page-link {
-	max-width: 100%;
-	font-size: 12px;
+/* The address is a link in the line, not a button beside it. */
+.case-meta button.page-link {
+	display: inline;
+	min-height: 0;
 }
 
 /* The case's counts and bar, where its status block goes. */
@@ -572,13 +966,26 @@ ul.cases .load {
 	display: none;
 }
 
-.case-status .progress {
-	margin-top: 4px;
+.mark-counts {
+	flex-basis: 100%;
+	margin: 0;
 }
 
-/* Add marks (or Done adding) and Export. */
+.case-status .mark-counts {
+	margin: 0 0 6px;
+}
+
+/* Add marks (or Done adding), as wide as there is room, and Export. */
+.case-actions {
+	flex-wrap: nowrap;
+}
+
 .case-actions > button {
-	min-height: 30px;
+	min-height: 36px;
+}
+
+.case-actions > #add-marks {
+	flex: 1;
 }
 
 /* What the tab in front shows of the case: a line and a quiet button. */
@@ -590,183 +997,41 @@ ul.cases .load {
 
 .this-tab > * {
 	margin: 0;
+	min-width: 0;
 }
 
-.tab-line {
-	color: var(--on-ink-muted);
+.this-tab > .notice {
+	justify-self: stretch;
 }
 
-button.quiet {
+/* What the last draw came to: a line, not a box. */
+.this-tab > .hint {
 	padding: 0;
-	border: 0;
+	border-radius: 0;
 	background: none;
-	color: var(--link);
-	font-weight: 600;
 }
 
-button.quiet:hover:not(:disabled) {
-	background: none;
-	text-decoration: underline;
-}
-
-.case-header button.quiet,
-.case-header button.quiet:hover:not(:disabled) {
-	border: 0;
-	background: none;
-	color: var(--on-ink-link);
-}
-
-/* Delete this case: alone at the bottom, away from the hand-over. */
-.case-footer {
-	padding: 16px 14px 24px;
-	border-top: 1px solid var(--rule);
-}
-
-.case-footer button.danger {
-	margin-left: 0;
-}
-
-/* This tab is not the size the marks were made at: amber, with the fix. */
+/* This tab is not the size the marks were made at, with the fix. */
 .this-tab > .size {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 6px 10px;
-	padding: 8px 10px;
-	border-left: 3px solid var(--amber);
-	border-radius: 4px 8px 8px 4px;
-	background: rgba(255, 176, 0, 0.1);
-	color: var(--on-ink);
+	gap: var(--s1) var(--s2);
 }
 
-.this-tab > .size button {
-	margin: 0;
-	border-color: rgba(255, 176, 0, 0.5);
-}
-
-.case-header button {
-	border-color: var(--on-ink-rule);
-	background: none;
-	color: var(--on-ink);
-}
-
-.case-header button:hover:not(:disabled) {
-	border-color: var(--on-ink-muted);
-	background: rgba(255, 255, 255, 0.08);
-}
-
-.case-header button.primary,
-.case-header button.primary:hover:not(:disabled) {
-	border-color: transparent;
-	background: var(--amber);
-	color: var(--ink);
-}
-
-.case-header button.primary:hover:not(:disabled) {
-	background: var(--amber-press);
-}
-
-.case-header button.link {
-	justify-self: start;
-	color: var(--on-ink-muted);
-	font-size: 12px;
-}
-
-.case-header button.link:hover:not(:disabled) {
-	background: none;
-	color: var(--on-ink);
-}
-
-.case-header button.page-link {
-	color: var(--on-ink-link);
-	font-size: inherit;
-}
-
-.case-header button.danger {
-	color: var(--on-ink-danger);
-	border-color: transparent;
-}
-
-.case-header button.danger[data-armed],
-.case-header button.danger[data-armed]:hover:not(:disabled) {
-	border-color: var(--on-ink-danger);
-	background: var(--on-ink-danger);
-	color: var(--ink);
-}
-
-/*
- * Overmark may not run on the tab in front, or found none of the case's
- * marks there (DEC-022): amber with a warning sign, and the way out. On the
- * band, which is dark in the light style too.
- */
-.notice {
-	display: flex;
-	align-items: flex-start;
-	gap: 8px;
-	padding: 8px 10px;
-	border-left: 3px solid var(--amber);
-	border-radius: 4px 8px 8px 4px;
-	background: rgba(255, 176, 0, 0.1);
-	color: var(--on-ink);
-}
-
-.notice-icon {
-	flex: none;
-	margin-top: 1px;
-	color: var(--amber);
-}
-
-.notice-body {
-	display: grid;
-	justify-items: start;
-	gap: 6px;
-	min-width: 0;
-}
-
-.notice-body p {
-	margin: 0;
-	overflow-wrap: anywhere;
-}
-
-.notice button {
-	padding: 3px 10px;
-	font-size: 12px;
-	border-color: rgba(255, 176, 0, 0.5);
-	background: none;
-	color: var(--on-ink);
-}
-
-.notice button:hover:not(:disabled) {
-	border-color: var(--amber);
-	background: rgba(255, 176, 0, 0.16);
-}
-
-/* What the last action came to: a note, not a box. */
-.case-header .hint {
-	margin: 0;
-	padding: 2px 0 2px 10px;
-	border-left: 2px solid var(--on-ink-rule);
-	border-radius: 0;
-	background: none;
-	color: var(--on-ink-muted);
-}
-
-.size button {
-	padding: 2px 8px;
-	font-size: 12px;
-}
-
+/* The summary for the developer: the case's, above its marks. */
 .verdict {
 	display: grid;
 	gap: 6px;
-	padding-top: 12px;
-	border-top: 1px solid var(--on-ink-rule);
+	padding-top: var(--s3);
+	border-top: 1px solid var(--rule);
 }
 
 .verdict-head {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: var(--s2);
+	min-height: 26px;
 }
 
 .verdict label {
@@ -781,102 +1046,100 @@ button.quiet:hover:not(:disabled) {
 .verdict textarea {
 	/* Two rows, growing with the text to eight. */
 	field-sizing: content;
-	min-height: calc(2lh + 12px);
-	max-height: calc(8lh + 12px);
-	border-color: var(--on-ink-rule);
-	background: rgba(0, 0, 0, 0.18);
-	color: var(--on-ink);
+	min-height: calc(2lh + 14px);
+	max-height: calc(8lh + 14px);
 }
 
-.verdict textarea::placeholder {
-	color: var(--on-ink-muted);
+/* Delete this case: alone at the bottom, away from the hand-over. */
+.case-footer {
+	padding: var(--s4) var(--s4) var(--s5);
 }
 
-/* --- its marks ------------------------------------------------------------- */
+/* Its word on the gutter while it is quiet; a button once it is armed. */
+.case-footer button.danger {
+	margin-left: 0;
+}
 
-/* Stays in view while the list scrolls under it. */
+.case-footer button.danger:not([data-armed]) {
+	padding-inline: 0;
+	border-radius: 3px;
+}
+
+.case-footer button.danger:not([data-armed]):hover:not(:disabled) {
+	background: none;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+:where(#case-view) > .meta {
+	margin: var(--s4);
+}
+
+/* --- its marks ---------------------------------------------------------------- */
+
+/* Stays in view, under the top bar, while the list scrolls under it. */
 .marks-bar {
 	position: sticky;
-	/* Under the top bar. */
-	top: 44px;
+	top: var(--bar);
 	z-index: 1;
 	display: flex;
 	flex-wrap: wrap;
-	align-items: baseline;
+	align-items: center;
 	justify-content: space-between;
-	gap: 2px 12px;
-	padding: 12px 14px 10px;
-	background: var(--sheet);
+	gap: 2px var(--s3);
+	padding: 10px var(--s4);
 	border-bottom: 1px solid var(--rule);
+	background: var(--paper);
 }
 
 .marks-bar h2 {
 	margin: 0;
-	font-size: 14px;
-	font-weight: 700;
 }
 
-.count {
-	margin-left: 2px;
-	padding: 1px 7px;
-	border-radius: 9px;
-	background: var(--wash);
-	color: var(--muted);
-	font-size: 12px;
-	font-weight: 600;
-	font-variant-numeric: tabular-nums;
-}
-
-.mark-counts {
-	flex-basis: 100%;
-	margin: 0;
-}
-
-/* The counts as a picture: open marks, then each way they were settled. */
+/*
+ * The counts as a picture: a segment per status, paper between them. The
+ * words beside it say the same.
+ */
 .progress {
 	display: flex;
 	flex-basis: 100%;
 	gap: 2px;
-	height: 6px;
-	margin-top: 8px;
-	border-radius: 3px;
+	height: 8px;
+	border-radius: 4px;
 	overflow: hidden;
 }
 
 .progress > span {
 	min-width: 4px;
+	background: var(--st-closed);
 }
 
 /* In a case's row: the same picture, quieter. */
 ul.cases .progress {
 	height: 4px;
-	margin-top: 5px;
+	margin-top: 6px;
 	max-width: 160px;
 }
 
 .progress [data-kind="open"] {
-	background: var(--mark);
+	background: var(--st-open);
 }
 
 .progress [data-kind="fixed"] {
-	background: var(--ok);
-}
-
-.progress [data-kind="wontfix"] {
-	background: var(--resolved);
+	background: var(--st-verified);
 }
 
 /* Striped: told apart from Won't fix without a paler, fainter grey. */
 .progress [data-kind="cantreproduce"] {
 	background: repeating-linear-gradient(
 		-45deg,
-		var(--resolved) 0 3px,
+		var(--st-closed) 0 3px,
 		transparent 3px 5px
 	);
 }
 
 .marks > .empty {
-	padding: 12px 14px;
+	padding: var(--s3) var(--s4);
 }
 
 ol.annotations {
@@ -885,19 +1148,27 @@ ol.annotations {
 	padding: 0;
 }
 
+/* A mark's colour is its status: open until it is settled. */
 .annotation {
+	--tone: var(--st-open);
+	--tint: var(--st-open-bg);
 	border-bottom: 1px solid var(--rule);
 }
 
-.annotation[data-open] {
-	background: color-mix(in srgb, var(--wash) 55%, transparent);
+.annotation[data-resolved] {
+	--tone: var(--st-closed);
+	--tint: var(--st-closed-bg);
 }
 
 .mark-head {
 	display: flex;
 	align-items: flex-start;
-	gap: 8px;
-	padding-right: 14px;
+	gap: var(--s2);
+	padding-right: var(--s4);
+}
+
+.mark-head:hover {
+	background: var(--wash);
 }
 
 /* The whole head opens and closes the mark; Show sits beside it. */
@@ -907,11 +1178,12 @@ ol.annotations {
 	display: grid;
 	grid-template-columns: 10px auto minmax(0, 1fr) auto auto;
 	align-items: start;
-	gap: 8px;
-	padding: 10px 0 10px 12px;
+	gap: var(--s2);
+	padding: 10px 0 10px var(--s4);
 	border: 0;
 	border-radius: 0;
 	background: none;
+	font-weight: 400;
 	text-align: left;
 }
 
@@ -919,8 +1191,8 @@ ol.annotations {
 	background: none;
 }
 
-.mark-head:hover {
-	background: var(--wash);
+.mark-toggle:focus-visible {
+	outline-offset: -2px;
 }
 
 .chevron {
@@ -928,14 +1200,56 @@ ol.annotations {
 	width: 7px;
 	height: 7px;
 	margin-left: 1px;
-	border-right: 1.5px solid var(--muted);
-	border-bottom: 1.5px solid var(--muted);
+	border-right: 1.75px solid var(--ink-2);
+	border-bottom: 1.75px solid var(--ink-2);
 	transform: rotate(-45deg);
 	transition: transform 0.15s;
 }
 
 .annotation[data-open] .chevron {
 	transform: rotate(45deg);
+}
+
+/*
+ * The pin: its colour is the mark's status, its fill the match. Found (or
+ * not looked for): filled. Unsure: a dashed ring around it. Not found: hollow.
+ */
+.number {
+	display: inline-grid;
+	place-items: center;
+	min-width: 24px;
+	height: 24px;
+	padding-inline: 5px;
+	border-radius: 12px;
+	background: var(--tone);
+	color: var(--on-pin);
+	font: 700 12px / 1 var(--font-num);
+	font-variant-numeric: tabular-nums;
+}
+
+.annotation[data-colour="unsure"] .number {
+	outline: 1.5px dashed var(--tone);
+	outline-offset: 2px;
+}
+
+.annotation[data-colour="lost"] .number {
+	background: none;
+	box-shadow: inset 0 0 0 2px var(--tone);
+	color: var(--tone);
+}
+
+.comment {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.comment.none {
+	color: var(--ink-2);
+}
+
+/* A settled mark steps back; its crop stays as it is, to compare. */
+.annotation[data-resolved] .comment {
+	color: var(--ink-2);
 }
 
 /* Two lines while closed; all of it once open. */
@@ -951,37 +1265,33 @@ ol.annotations {
 	display: block;
 }
 
-.mark-toggle .tag {
-	margin-top: 3px;
-}
-
-/* The mark's state in a word; the number's colour alone is not enough. */
+/* Beside the comment: who wrote it, how many findings, the state in a word. */
+.tag,
 .mark-toggle .state {
-	margin-top: 3px;
-	padding: 0 6px;
-	border-radius: 8px;
+	flex: none;
+	margin-top: 2px;
+	padding: 2px var(--s2);
+	border-radius: var(--r-pill);
 	background: var(--wash);
-	color: var(--muted);
-	font-size: 11px;
+	color: var(--ink-2);
+	font-size: 12px;
+	line-height: 16px;
 	font-weight: 600;
 	white-space: nowrap;
 }
 
-.annotation[data-colour="found"]:not([data-resolved]) .state {
-	color: var(--ok);
-}
-
-.annotation[data-colour="unsure"]:not([data-resolved]) .state {
-	color: var(--warn);
+.annotation[data-resolved] .state {
+	background: var(--tint);
+	color: var(--tone);
 }
 
 .annotation[data-colour="lost"]:not([data-resolved]) .state {
 	color: var(--danger);
 }
 
-/* Focus moving up the list stops below the bar, not under it. */
+/* Focus moving up the list stops below the bars, not under them. */
 .annotation :is(button, input, textarea) {
-	scroll-margin-top: 80px;
+	scroll-margin-top: calc(var(--bar) + 48px);
 }
 
 .mark-head .show {
@@ -989,12 +1299,21 @@ ol.annotations {
 	margin-top: 9px;
 }
 
+/* Open: the rest of the mark on a sheet, under its comment. */
 .annotation .body {
 	display: grid;
-	gap: 8px;
+	gap: var(--s2);
 	min-width: 0;
-	/* Under the comment: 12 + chevron 10 + 8 + number 24 + 8. */
-	padding: 0 14px 14px 62px;
+	/* Its text under the comment's: 16 + chevron 10 + 8 + pin 24 + 8. */
+	margin: 0 var(--s4) var(--s3) 54px;
+	padding: var(--s3);
+	border: 1px solid var(--rule);
+	border-radius: var(--r-card);
+	background: var(--sheet);
+}
+
+.annotation .body > * {
+	min-width: 0;
 }
 
 .annotation .body .meta {
@@ -1005,8 +1324,8 @@ ol.annotations {
 .annotation img {
 	display: block;
 	max-width: 100%;
-	border: 1px solid var(--rule);
-	border-radius: 6px;
+	border: 1px solid var(--edge);
+	border-radius: var(--r-control);
 }
 
 /* A mark's crop: small, so the list stays a list; a click shows it large. */
@@ -1014,9 +1333,10 @@ button.crop {
 	display: block;
 	justify-self: start;
 	max-width: 100%;
+	min-height: 0;
 	padding: 0;
 	border: 0;
-	border-radius: 6px;
+	border-radius: var(--r-control);
 	background: none;
 	cursor: zoom-in;
 }
@@ -1039,138 +1359,50 @@ button.crop[aria-pressed="true"] img {
 }
 
 button.crop:hover img {
-	border-color: var(--muted);
+	border-color: var(--ink);
 }
 
-/* --- its screenshots ------------------------------------------------------- */
-
-.shots-section {
-	padding: 0 14px 16px;
-}
-
-.shots-section summary {
-	display: flex;
-	align-items: baseline;
-	gap: 0;
-	padding: 12px 0 10px;
-	font-size: 14px;
-	font-weight: 700;
-	cursor: pointer;
-	list-style: none;
-}
-
-.shots-section summary::-webkit-details-marker {
-	display: none;
-}
-
-.shots-section summary::before {
-	content: "";
-	align-self: center;
-	width: 7px;
-	height: 7px;
-	margin: 0 10px 0 3px;
-	border-right: 1.5px solid var(--muted);
-	border-bottom: 1.5px solid var(--muted);
-	transform: rotate(-45deg);
-	transition: transform 0.15s;
-}
-
-.shots-section[open] summary::before {
-	transform: rotate(45deg);
-}
-
-.shots {
-	display: grid;
-	gap: 8px;
-}
-
-.number {
-	display: inline-grid;
-	place-items: center;
-	min-width: 24px;
-	height: 24px;
-	padding-inline: 5px;
-	border-radius: 12px;
-	background: var(--mark);
-	color: #fff;
-	font:
-		700 12px / 1 ui-rounded,
-		system-ui,
-		sans-serif;
-	font-variant-numeric: tabular-nums;
-}
-
-.annotation[data-colour="found"] .number {
-	background: var(--mark-found);
-}
-
-.annotation[data-colour="unsure"] .number {
-	background: var(--mark-unsure);
-}
-
-.annotation[data-colour="lost"] .number {
-	background: var(--mark-lost);
-}
-
-/* A resolved mark steps back, as it does on the page. */
-.annotation[data-resolved] .number {
-	background: var(--resolved);
-}
-
-.annotation[data-resolved] .comment,
-.annotation[data-resolved] img {
-	opacity: 0.6;
-}
-
-/* The mark is painted into its crop in pink: grey it with the picture. */
-.annotation[data-resolved] img {
-	filter: grayscale(1);
-}
-
+/* How it was settled, and the note with it. */
 .resolution {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px 8px;
+	gap: var(--s1) var(--s2);
 	align-items: baseline;
 	margin: 0;
 	font-size: 12px;
+	line-height: 17px;
 }
 
 .resolution .kind {
 	flex: none;
 	font-weight: 600;
-	padding: 0 6px;
-	border-radius: 8px;
-	background: var(--wash);
+	color: var(--st-closed);
 }
 
 .resolution[data-kind="fixed"] .kind {
-	color: var(--ok);
+	color: var(--st-verified);
 }
 
 .resolution .note {
-	color: var(--muted);
+	color: var(--ink-2);
 	overflow-wrap: anywhere;
 }
 
 /* An AI app's findings: apart from the user's comment, with a rule beside them. */
 .findings {
 	display: grid;
-	gap: 4px;
-	padding-left: 8px;
-	border-left: 2px solid var(--rule);
+	gap: var(--s1);
+	padding-left: 10px;
+	border-left: 2px solid var(--st-verify);
 }
 
 .findings h3 {
 	margin: 0;
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--muted);
 }
 
 .findings ul {
 	display: grid;
-	gap: 6px;
+	gap: var(--s2);
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -1185,97 +1417,16 @@ button.crop:hover img {
 .finding-meta {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px 8px;
+	gap: var(--s1) var(--s2);
 	align-items: center;
 	justify-content: space-between;
 	overflow-wrap: anywhere;
 }
 
-.mark-actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-}
-
-.mark-actions button.danger:not([data-armed]) {
-	border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-}
-
-.mark-actions button.danger:not([data-armed]):hover:not(:disabled) {
-	border-color: var(--danger);
-	background: color-mix(in srgb, var(--danger) 8%, transparent);
-}
-
-button.small {
-	padding: 2px 8px;
-	font-size: 12px;
-}
-
-.mark-form {
-	display: grid;
-	gap: 8px;
-	padding: 8px;
-	border: 1px solid var(--rule);
-	border-radius: 8px;
-	background: var(--wash);
-}
-
-.mark-form fieldset {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px 12px;
-	margin: 0;
-	padding: 0;
-	border: 0;
-}
-
-.mark-form legend {
-	width: 100%;
-	padding: 0 0 4px;
-	font-size: 12px;
-	color: var(--muted);
-}
-
-.mark-form .choice {
-	display: inline-flex;
-	gap: 4px;
-	align-items: center;
-}
-
-.mark-form .note {
-	font: inherit;
-	padding: 4px 8px;
-	border: 1px solid var(--rule);
-	border-radius: 6px;
-	background: var(--sheet);
-	color: var(--fg);
-}
-
-.mark-form textarea {
-	min-height: 64px;
-}
-
-.comment {
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-}
-
-.comment.none {
-	color: var(--muted);
-}
-
-.tag {
-	flex: none;
-	font-size: 11px;
-	padding: 0 6px;
-	border-radius: 8px;
-	background: var(--wash);
-	color: var(--muted);
-}
-
+/* Where the mark's element is on the tab in front. */
 .match {
 	display: grid;
-	gap: 4px;
+	gap: var(--s1);
 }
 
 .match .meta {
@@ -1285,7 +1436,7 @@ button.small {
 .match .line {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px 8px;
+	gap: var(--s1) var(--s2);
 	align-items: center;
 	justify-content: space-between;
 }
@@ -1294,146 +1445,150 @@ button.small {
 	font-weight: 600;
 }
 
-.match.found .status {
-	color: var(--ok);
-}
-
-.match.unsure .status {
-	color: var(--warn);
-}
-
 .match.lost .status {
 	color: var(--danger);
 }
 
 .match button {
-	padding: 2px 9px;
+	min-height: 26px;
+	padding: 2px 10px;
 	font-size: 12px;
+	line-height: 16px;
 }
 
-textarea {
-	display: block;
-	width: 100%;
-	min-height: 80px;
-	font: inherit;
-	padding: 6px 8px;
-	border-radius: 8px;
-	border: 1px solid var(--rule);
-	background: var(--sheet);
-	color: var(--fg);
-	resize: vertical;
+.mark-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
 }
 
-textarea + .row {
-	margin-top: 6px;
-}
-
-.field {
+/* Resolving a mark, or its comment being edited. */
+.mark-form {
 	display: grid;
-	gap: 4px;
-	margin-bottom: 8px;
-	color: var(--muted);
+	gap: var(--s2);
+	padding-top: var(--s2);
+	border-top: 1px solid var(--rule);
 }
 
-.field input {
-	font: inherit;
-	padding: 5px 8px;
-	border-radius: 8px;
-	border: 1px solid var(--rule);
+.mark-form fieldset {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--s1) var(--s3);
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.mark-form legend {
+	width: 100%;
+	padding: 0 0 var(--s1);
+	font-size: 12px;
+	line-height: 16px;
+	font-weight: 600;
+	color: var(--ink-2);
+}
+
+.mark-form .choice {
+	display: inline-flex;
+	gap: var(--s1);
+	align-items: center;
+}
+
+.mark-form .choice input {
+	margin: 0;
+	accent-color: var(--strong);
+}
+
+.mark-form .note {
+	padding: 4px var(--s2);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-control);
 	background: var(--sheet);
-	color: var(--fg);
+	color: var(--ink);
+	font: inherit;
 }
 
-.field input:invalid {
-	border-color: var(--danger);
+.mark-form textarea {
+	min-height: 64px;
 }
 
-/* The AI app card (card.ts): the title with the AI access switch beside it. */
+/* --- its screenshots ----------------------------------------------------------- */
+
+.shots-section {
+	padding: 0 var(--s4) var(--s4);
+	border-bottom: 1px solid var(--rule);
+}
+
+.shots-section:not([open]) {
+	padding-bottom: 0;
+}
+
+.shots-section summary {
+	display: flex;
+	align-items: center;
+	gap: 0;
+	padding: var(--s3) 0;
+	font-size: 15px;
+	line-height: 20px;
+	font-weight: 700;
+	cursor: pointer;
+	list-style: none;
+}
+
+.shots-section summary::-webkit-details-marker {
+	display: none;
+}
+
+.shots-section summary::before {
+	content: "";
+	width: 7px;
+	height: 7px;
+	margin: 0 11px 0 2px;
+	border-right: 1.75px solid var(--ink-2);
+	border-bottom: 1.75px solid var(--ink-2);
+	transform: rotate(-45deg);
+	transition: transform 0.15s;
+}
+
+.shots-section[open] summary::before {
+	transform: rotate(45deg);
+}
+
+.shots-section .count {
+	margin-left: 6px;
+}
+
+.shots {
+	display: grid;
+	gap: var(--s2);
+}
+
+/* --- settings: the AI app card (card.ts) ------------------------------------- */
+
+/* The title with the AI access switch beside it. */
 .card-head {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 8px;
-	margin-bottom: 8px;
+	gap: var(--s2);
+	margin-bottom: var(--s2);
 }
 
 .card-head h2 {
 	margin: 0;
 }
 
-.switch {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-	font-weight: 600;
-	cursor: pointer;
-}
-
-.switch input {
-	appearance: none;
-	flex: none;
-	position: relative;
-	margin: 0;
-	width: 34px;
-	height: 20px;
-	border-radius: 999px;
-	background: var(--rule);
-	cursor: pointer;
-	transition: background-color 0.15s;
-}
-
-.switch input::after {
-	content: "";
-	position: absolute;
-	top: 2px;
-	left: 2px;
-	width: 16px;
-	height: 16px;
-	border-radius: 50%;
-	background: var(--sheet);
-	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-	transition: transform 0.15s;
-}
-
-.switch input:checked {
-	background: var(--ok);
-}
-
-.switch input:checked::after {
-	transform: translateX(14px);
-}
-
-.switch input:disabled {
-	opacity: 0.5;
-	cursor: default;
-}
-
-/* The card's state, its dot coloured as the header's. */
+/* The card's state, its dot coloured as the top bar's. */
 .ai-state {
 	display: flex;
 	align-items: baseline;
-	gap: 7px;
-	margin: 0 0 8px;
+	gap: var(--s2);
+	margin: 0 0 var(--s3);
 	overflow-wrap: anywhere;
 }
 
 .ai-state .dot {
-	flex: none;
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	background: var(--muted);
 	transform: translateY(-1px);
-}
-
-.ai-state[data-state="connecting"] .dot,
-.ai-state[data-state="retrying"] .dot,
-.ai-state[data-state="waiting"] .dot {
-	background: var(--amber);
-}
-
-.ai-state[data-state="on"] .dot {
-	background: var(--ok);
 }
 
 .ai-state[data-state="on"] {
@@ -1442,56 +1597,121 @@ textarea + .row {
 
 .ai-card > .row,
 .ai-card > p {
-	margin: 0 0 8px;
+	margin: 0 0 var(--s3);
 }
 
-button.link.add-app {
-	color: var(--link);
+#pair-replaced > :last-child {
+	margin-bottom: 0;
 }
 
-button.link.add-app:hover:not(:disabled) {
-	color: var(--link);
-	text-decoration: underline;
+/* The AI apps that are paired, and what each may do. */
+ul.grants {
+	list-style: none;
+	margin: 0 0 var(--s3);
+	padding: 0;
 }
 
-/* The address and the code: the step, set apart from the settings under it. */
+ul.grants:empty {
+	display: none;
+}
+
+ul.grants > li {
+	padding: var(--s2) 0;
+	border-top: 1px solid var(--rule);
+}
+
+ul.grants > li:last-child {
+	border-bottom: 1px solid var(--rule);
+}
+
+.grant-head,
+ul.always li {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: var(--s2);
+}
+
+.grant-head {
+	font-weight: 600;
+}
+
+.grant-head .meta {
+	font-weight: 400;
+}
+
+.grant-head button {
+	flex: none;
+	min-height: 26px;
+	padding: 2px 10px;
+	font-size: 12px;
+	line-height: 16px;
+}
+
+ul.grants > li > .meta {
+	margin: 2px 0 0;
+}
+
+ul.always {
+	list-style: none;
+	margin: var(--s1) 0 0;
+	padding: 0;
+}
+
+ul.always .meta {
+	min-width: 0;
+}
+
+ul.always button.link {
+	flex: none;
+	font-size: 12px;
+	line-height: 16px;
+}
+
+/* The address and the code: the step, on a sheet of its own. */
 .pairing {
-	margin: 0 0 12px;
-	padding: 10px 12px;
-	border-radius: 8px;
-	background: var(--wash);
+	margin: 0 0 var(--s4);
+	padding: var(--s3);
+	border: 1px solid var(--rule);
+	border-radius: var(--r-card);
+	background: var(--sheet);
 }
 
 .pairing .group-title {
 	margin-top: 0;
+	font-size: 13px;
+	line-height: 19px;
+	color: var(--ink);
 }
 
 .pairing p {
-	margin: 0 0 8px;
+	margin: 0 0 var(--s2);
 }
 
 .pairing > .row {
-	margin-bottom: 8px;
+	margin-bottom: var(--s2);
 }
 
 .pairing > .row:last-child {
 	margin-bottom: 0;
 }
 
-.pairing a {
-	color: var(--link);
+.pairing .address,
+.pairing .code {
+	padding: 6px var(--s2);
+	border-radius: var(--r-control);
+	background: var(--wash);
 }
 
 .pairing .address {
 	flex: 1 1 12em;
 	min-width: 0;
 	overflow-wrap: anywhere;
-	font-size: 12px;
 }
 
 .pairing .code {
-	font-size: 20px;
-	font-weight: 600;
+	font: 700 20px / 26px var(--font-mono);
+	font-variant-numeric: tabular-nums;
 	letter-spacing: 0.08em;
 }
 
@@ -1503,11 +1723,11 @@ button.copy {
 
 /* "How do I add it?": per AI app its steps, each command with its own Copy. */
 .setup {
-	margin: 0 0 4px;
+	margin: 0 0 var(--s1);
 	padding: 0 10px;
 	border: 1px solid var(--rule);
-	border-radius: 8px;
-	background: var(--sheet);
+	border-radius: var(--r-control);
+	background: var(--paper);
 }
 
 .setup summary {
@@ -1522,7 +1742,7 @@ button.copy {
 
 .setup-steps {
 	list-style: none;
-	margin: 4px 0 10px;
+	margin: var(--s1) 0 10px;
 	padding: 0;
 	display: flex;
 	flex-direction: column;
@@ -1542,147 +1762,34 @@ button.copy {
 	display: flex;
 	align-items: flex-start;
 	gap: 6px;
-	margin-top: 4px;
+	margin-top: var(--s1);
 }
 
 .setup pre {
 	flex: 1;
 	min-width: 0;
 	margin: 0;
-	padding: 6px 8px;
-	border-radius: 8px;
+	padding: 6px var(--s2);
+	border-radius: var(--r-control);
 	background: var(--wash);
-	font-size: 12px;
 	white-space: pre-wrap;
 	word-break: break-all;
 }
 
 .pairing .setup p {
-	margin: 4px 0 0;
+	margin: var(--s1) 0 0;
 }
 
 .setup code {
-	padding: 0 4px;
+	padding: 0 var(--s1);
 	border-radius: 4px;
 	background: var(--wash);
-	font-size: 12px;
 }
 
 /* What a Copy did: one line kept for it, so the box does not move when it speaks. */
 .pairing .copy-status {
-	min-height: 1.45em;
-	margin: 0 0 4px;
-}
-
-/* "Disconnect? Click again": filled, so the second click is meant. */
-ul.grants button[data-armed],
-ul.grants button[data-armed]:hover:not(:disabled) {
-	border-color: var(--danger);
-	background: var(--danger);
-	color: var(--sheet);
-}
-
-/* The questions, under the header (ai.ts). */
-.ai-box {
-	padding: 12px 14px;
-	border-bottom: 1px solid var(--rule);
-}
-
-#questions:empty {
-	display: none;
-}
-
-.ai-box p {
-	margin: 0 0 6px;
-}
-
-.ai-box pre {
-	margin: 0 0 8px;
-	padding: 6px 8px;
-	max-height: 12em;
-	overflow: auto;
-	border-radius: 8px;
-	background: var(--wash);
-	font-size: 12px;
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-}
-
-.question + .question {
-	margin-top: 12px;
-	padding-top: 12px;
-	border-top: 1px solid var(--rule);
-}
-
-ul.grants {
-	list-style: none;
-	margin: 0 0 8px;
-	padding: 0;
-}
-
-ul.grants > li {
-	padding: 4px 0;
-}
-
-ul.grants > li + li {
-	border-top: 1px solid var(--rule);
-}
-
-.grant-head,
-ul.always li {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	gap: 8px;
-}
-
-/* An app's "Allow all changes" and its tools always allowed (DEC-018). */
-.switch.small {
-	margin-top: 4px;
-	font-weight: normal;
-	color: var(--muted);
-}
-
-.switch.small input {
-	width: 28px;
-	height: 16px;
-}
-
-.switch.small input::after {
-	width: 12px;
-	height: 12px;
-}
-
-.switch.small input:checked {
-	background: var(--amber);
-}
-
-.switch.small input:checked::after {
-	transform: translateX(12px);
-}
-
-ul.grants > li > .meta {
-	margin: 2px 0 0;
-}
-
-ul.always {
-	list-style: none;
-	margin: 4px 0 0;
-	padding: 0;
-}
-
-ul.always .meta {
-	min-width: 0;
-}
-
-ul.always button.link {
-	color: var(--link);
-	font-size: 12px;
-}
-
-ul.always button.link:hover:not(:disabled) {
-	color: var(--link);
-	text-decoration: underline;
+	min-height: 17px;
+	margin: 0 0 var(--s1);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1695,7 +1802,30 @@ ul.always button.link:hover:not(:disabled) {
 	}
 }
 
-/* The confirmation names the case and the page on lines of their own. */
-.tab-mcp-description {
-	white-space: pre-line;
+/* The user's own colours: every edge stays one, and a fill says what it said. */
+@media (forced-colors: active) {
+	button.primary,
+	button.strong,
+	button[data-armed] {
+		border-color: ButtonText;
+	}
+
+	.switch input {
+		border: 1px solid ButtonText;
+	}
+
+	.switch input::after {
+		background: ButtonText;
+	}
+
+	.switch input:checked {
+		background: Highlight;
+	}
+
+	.number,
+	.progress > span,
+	.ai-pill .dot,
+	.ai-state .dot {
+		forced-color-adjust: none;
+	}
 }
