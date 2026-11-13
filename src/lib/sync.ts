@@ -483,10 +483,14 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 					end.error === "USER_CANCELED",
 				);
 			}
-			// Saved somewhere else: Chrome asked, and the user chose another place.
+			// Saved somewhere else: the user chose another place in Chrome's
+			// Save dialog, or another extension or a setting moved it.
 			if (!savedAs(end.filename, name)) {
 				await api.erase(id).catch(() => undefined);
-				throw new TargetFailed(downloadProblem("USER_CANCELED", name), true);
+				throw new TargetFailed(
+					`Chrome saved “${name}” as “${end.filename}”, not in Downloads/${DOWNLOADS_FOLDER}: the place was chosen in its Save dialog (“Ask where to save each file before downloading” in its settings), or another extension moved it. Turn that off, or choose a folder instead, then click Try again.`,
+					true,
+				);
 			}
 			const before = await api.last().catch(() => undefined);
 			await api.setLast(id);

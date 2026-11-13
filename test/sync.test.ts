@@ -773,7 +773,11 @@ describe("the sync to Downloads (DEC-025)", () => {
 		api.savedIn = "/Users/me/Desktop";
 		await sync.request();
 		expect(store.current?.state).toBe("failed");
-		expect(store.current?.problem).toContain("Ask where to save each file");
+		// Where it went, and that something else chose it: no dialog need have shown.
+		expect(store.current?.problem).toContain(
+			"/Users/me/Desktop/login.overmark.zip",
+		);
+		expect(store.current?.problem).not.toContain("Chrome asked");
 	});
 
 	test("no end within the time: failed, and the download cancelled", async () => {
