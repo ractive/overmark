@@ -1,7 +1,7 @@
 ---
 type: iteration
 title: "Iteration 17: one coherent flow for tester, developer and tester again; a new look; Verify; sync without missed prompts"
-status: in-progress
+status: completed
 description: "Overnight plan of 2026-11-12/13 (the owner): a Fable UX review of the whole extension from the three roles, then a reworked flow (annotating only inside an open case; All cases closes it), a new visual design with real contrast, a Verify step for the tester, and folder sync that does not depend on a missed Allow click (a Downloads subfolder as default, any folder as an option)."
 timestamp: 2026-11-13T00:30:00+01:00
 tags: [iteration, ui, ux, design, sync, verify]
@@ -146,5 +146,29 @@ Merge PR 42 first; iteration 17 builds on it.
 - [x] Flow PR merged
 - [x] Verify PR merged
 - [x] Sync PR merged
-- [ ] New look PR merged
-- [ ] `~/overmark-extension` rebuilt from main; morning report
+- [x] New look PR merged
+- [x] `~/overmark-extension` rebuilt from main; morning report
+
+## Result (2026-11-13, 07:15)
+
+Built overnight by one session directing builder and reviewer agents; every pull
+request but two small ones (the documents, a ten-line test fix) had an independent
+review whose findings were all fixed before the merge. Merged, in order:
+[#42](https://github.com/ractive/overmark/pull/42) (iteration 16's review findings),
+[#43](https://github.com/ractive/overmark/pull/43) (the UX review, DEC-023 to DEC-025),
+[#44](https://github.com/ractive/overmark/pull/44) (tab-mcp client 0.15.0),
+[#45](https://github.com/ractive/overmark/pull/45) (the code review and its first fixes),
+[#47](https://github.com/ractive/overmark/pull/47) (Verify),
+[#48](https://github.com/ractive/overmark/pull/48) (Sync),
+[#49](https://github.com/ractive/overmark/pull/49) (`case.md`, the store listing),
+[#46](https://github.com/ractive/overmark/pull/46) (Flow),
+[#50](https://github.com/ractive/overmark/pull/50) (a test),
+[#51](https://github.com/ractive/overmark/pull/51) (the look),
+[#52](https://github.com/ractive/overmark/pull/52) (a load race the Flow change brought,
+found by main's CI and by the look's builder, fixed the same night). Nothing is
+released. `~/overmark-extension` is built from main at `dd2d0e2`.
+
+The owner also asked that night for a code review of the whole extension
+([the review](../research/code-review-2026-11.md)): CR-01, CR-03, CR-07, CR-08, CR-09
+and CR-13 are fixed; what is left is in
+[the open questions](../open-questions.md), with what only the owner can try or decide.
