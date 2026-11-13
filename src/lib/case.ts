@@ -550,6 +550,16 @@ export function isPageOf(c: Case, url: string): boolean {
 	return isPageUrl(c.page.url, url);
 }
 
+/** A web page's address, one a click may open (an imported case's is anyone's). */
+export function isWebPage(url: string): boolean {
+	try {
+		const { protocol } = new URL(url);
+		return protocol === "https:" || protocol === "http:";
+	} catch {
+		return false;
+	}
+}
+
 /** `isPageOf` for a case's page address. */
 export function isPageUrl(caseUrl: string, url: string): boolean {
 	if (!samePath(caseUrl, url)) return false;
