@@ -164,6 +164,7 @@ describe("the worker's connection with client 0.16", () => {
 		store.failing = false;
 		store.slowMs = 0;
 		const kv = memoryKv({ relay: relay.url, panelHandedOver: true });
+		currentKv = kv;
 		const w = await startWorker(kv);
 		workers.push(w);
 		w.send({ type: "connect" });
@@ -192,18 +193,22 @@ describe("the worker's connection with client 0.16", () => {
 		return { w, kv, address, ids };
 	}
 
+	/** The settings database of the last worker `paired` started. */
+	let currentKv: Kv | undefined;
 	const grant = (w: Worker, name: string) =>
 		w.last().grants.find((g) => g.name === name);
 
-	test("Review of PR 58, 1: an answer for one Disconnect is not taken for another waiting", async () => {
+	/**
+	 * Two Disconnects in flight: One is gone at the relay (it was not told),
+	 * Two's revoke waits in the store when One's is asked for, and then
+	 * fails. The relay answers One at once: it knows no such grant.
+	 */
+	async function twoDisconnects() {
 		const { w, ids } = await paired(["One", "Two"]);
-		// One is gone at the relay, which does not tell the session.
 		await store.revoke(
 			{ grantId: ids["One"] as string },
 			{ now: Date.now(), keepUntil: Date.now() },
 		);
-		// Two's revoke waits in the store when One's is asked for, and then
-		// fails. The relay answers One at once: it knows no such grant.
 		const listed = w.last().grants.map((g) => g.name);
 		store.slowMs = 300;
 		store.failing = true;
@@ -211,31 +216,76 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "revoke", grantId: ids["Two"] });
 		await Bun.sleep(20);
 		w.send({ type: "revoke", grantId: ids["One"] });
-		await until(
-			() =>
-				grant(w, "Two")?.problem !== undefined &&
-				grant(w, "One")?.problem !== undefined,
-		);
+		await until(() => grant(w, "Two")?.problem !== undefined);
 		await Bun.sleep(50);
-		// One's revoke reached the relay only once Two's was answered.
-		expect(store.log).toEqual([
-			"listGrants",
-			"revoke",
-			"revoke answered",
-			"listGrants",
-		]);
+		const log = store.log;
 		store.log = undefined;
-		// Each app with its own answer: Two stays, in its place, with its
-		// Allow all changes.
-		expect(w.last().grants.map((g) => g.name)).toEqual(listed);
+		// Two stays, in its place, with its own answer and its Allow all changes.
 		expect(grant(w, "Two")?.problem).toBe(
 			"Two was not disconnected: the relay could not save this. Try again.",
 		);
 		expect(grant(w, "Two")?.allowAll).toBe(true);
-		expect(grant(w, "One")?.problem).toBe(
-			"The relay no longer knows One, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
+		return { w, ids, listed, log };
+	}
+
+	test("Review of PR 58, 1: with relay 0.10.2 each Disconnect gets its own answer, and an app the relay does not know leaves the list", async () => {
+		const { w, ids, listed } = await twoDisconnects();
+		// The relay names the grant its unknown_id is for: One leaves the
+		// list (client 0.16.1), with its Always allow, and nothing is said.
+		expect(w.last().grants.map((g) => g.name)).toEqual(
+			listed.filter((name) => name !== "One"),
 		);
-		expect(grant(w, "One")?.allowAll).toBe(false);
+		const kept = (await currentKv?.get("alwaysAllowed")) as object | undefined;
+		expect(Object.keys(kept ?? {})).toEqual([ids["Two"] as string]);
+	});
+
+	test("Review of PR 58, 1: with a relay before 0.10.2 (its errors name nothing) the Disconnects go one at a time", async () => {
+		// What such a relay sends: the error frame without `for` and `grantId`.
+		const Real = before.WebSocket as typeof WebSocket;
+		globals["WebSocket"] = class extends Real {
+			override addEventListener(
+				type: string,
+				listener: EventListenerOrEventListenerObject,
+				options?: boolean | AddEventListenerOptions,
+			): void {
+				if (type !== "message" || typeof listener !== "function")
+					return super.addEventListener(type, listener, options);
+				super.addEventListener(
+					type,
+					(event) => {
+						const data = (event as MessageEvent).data;
+						const message =
+							typeof data === "string" ? JSON.parse(data) : undefined;
+						if (message?.type !== "error") return listener(event);
+						delete message.for;
+						delete message.grantId;
+						listener(
+							new MessageEvent("message", { data: JSON.stringify(message) }),
+						);
+					},
+					options,
+				);
+			}
+		};
+		try {
+			const { w, listed, log } = await twoDisconnects();
+			// One's revoke reached the relay only once Two's was answered.
+			expect(log).toEqual([
+				"listGrants",
+				"revoke",
+				"revoke answered",
+				"listGrants",
+			]);
+			await until(() => grant(w, "One")?.problem !== undefined);
+			// The library cannot tell which grant it is: One stays listed.
+			expect(w.last().grants.map((g) => g.name)).toEqual(listed);
+			expect(grant(w, "One")?.problem).toBe(
+				"The relay no longer knows One, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
+			);
+			expect(grant(w, "One")?.allowAll).toBe(false);
+		} finally {
+			globals["WebSocket"] = before.WebSocket;
+		}
 	});
 
 	test("Review of PR 58, 2: a Disconnect sent and then cut off by Stop could not be confirmed", async () => {

@@ -251,8 +251,10 @@ export class Connection {
 		{ error: unknown; sent: boolean }
 	>();
 	/**
-	 * Disconnects, one at a time: the relay's error does not say which
-	 * revoke it answers, so the library rejects every revoke waiting for it.
+	 * Disconnects, one at a time. Relays from 0.10.2 name the grant their
+	 * error answers and the library pairs it; an older one (the user may set
+	 * any relay) names nothing, and the library then rejects every revoke
+	 * waiting with that error, another app's included.
 	 */
 	#revokes: Promise<void> = Promise.resolve();
 	/** Panel commands, one after the other. */
