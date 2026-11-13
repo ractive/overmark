@@ -283,9 +283,16 @@ export async function chooseFolder(
 	return chosen;
 }
 
-/** Stop syncing: a folder stays in `folders`, to be recognised again. */
+/**
+ * Stop syncing: a folder stays in `folders`, to be recognised again. The
+ * newest download's id goes: Chrome may give it to another download later.
+ */
 export const stopSyncing = (kv: Kv): Promise<void> =>
-	kv.set({ [TARGET_KEY]: undefined, [FOLDER_KEY]: undefined });
+	kv.set({
+		[TARGET_KEY]: undefined,
+		[FOLDER_KEY]: undefined,
+		[LAST_DOWNLOAD_KEY]: undefined,
+	});
 
 /** A case's version: an import may keep `updatedAt` and still change it. */
 export const versionOf = (c: Case) => `${c.updatedAt}|${c.importedAt ?? ""}`;
@@ -389,6 +396,18 @@ export interface DownloadsApi {
 
 /** How long a download of one case may take. */
 export const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * An entry of Chrome's download list that the sync wrote: by this
+ * extension, into `Overmark/`. An id stored earlier may be another
+ * download's by now (Chrome numbers anew after its history is cleared).
+ */
+export const isSyncDownload = (
+	item: { byExtensionId?: string | undefined; filename?: string } | undefined,
+	extensionId: string,
+) =>
+	item?.byExtensionId === extensionId &&
+	(item.filename ?? "").replaceAll("\\", "/").includes(`/${DOWNLOADS_FOLDER}/`);
 
 /** A file that was saved, at `path`, `Overmark/<name>` in the downloads? */
 const savedAs = (path: string, name: string) =>

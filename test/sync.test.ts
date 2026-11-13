@@ -14,6 +14,7 @@ import {
 	FOLDER_KEY,
 	FOLDERS_KEY,
 	kvSyncStore,
+	LAST_DOWNLOAD_KEY,
 	type PickedFolder,
 	Sync,
 	type SyncChoice,
@@ -918,8 +919,11 @@ describe("the stored choice (DEC-025)", () => {
 		// The folder is no longer the one synced to, and stays known.
 		expect(await kv.get(FOLDER_KEY)).toBeUndefined();
 		expect((await kv.get(FOLDERS_KEY)) as ChosenFolder[]).toHaveLength(1);
+		await kv.set({ [LAST_DOWNLOAD_KEY]: 57 });
 		await stopSyncing(kv);
 		expect(await kvSyncStore(kv).choice()).toBeUndefined();
+		// Its id may be another download's one day.
+		expect(await kv.get(LAST_DOWNLOAD_KEY)).toBeUndefined();
 	});
 });
 

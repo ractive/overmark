@@ -9,6 +9,7 @@ import type { Kv } from "../lib/kv.ts";
 import {
 	type DownloadEnd,
 	type DownloadsApi,
+	isSyncDownload,
 	LAST_DOWNLOAD_KEY,
 	TargetFailed,
 } from "../lib/sync.ts";
@@ -154,8 +155,10 @@ export function chromeDownloads(kv: Kv): DownloadsApi {
 		download: (options) => chrome.downloads.download(options),
 		finished,
 		cancel: (id) => chrome.downloads.cancel(id),
-		erase: async (id) => {
-			await chrome.downloads.erase({ id });
+		async erase(id) {
+			const [item] = await chrome.downloads.search({ id });
+			if (isSyncDownload(item, chrome.runtime.id))
+				await chrome.downloads.erase({ id });
 		},
 		last: async () => {
 			const id = await kv.get(LAST_DOWNLOAD_KEY);

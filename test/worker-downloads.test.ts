@@ -15,6 +15,7 @@ const fake = {
 	created: 0,
 	closed: 0,
 	log: [] as string[],
+	erased: [] as number[],
 	answer: (_m: unknown): unknown => ({ ok: true, url: "blob:x/1" }),
 };
 
@@ -29,6 +30,10 @@ beforeAll(async () => {
 				addListener: (l: Listener) => fake.listeners.add(l),
 				removeListener: (l: Listener) => fake.listeners.delete(l),
 			},
+			erase: async ({ id }: { id: number }) => {
+				fake.erased.push(id);
+				return [id];
+			},
 			search: async ({ id }: { id: number }) => {
 				if (fake.searchFails) throw new Error("search failed");
 				const item = fake.items.get(id);
@@ -36,6 +41,7 @@ beforeAll(async () => {
 			},
 		},
 		runtime: {
+			id: "overmark",
 			getPlatformInfo: async () => {
 				fake.pings++;
 				return {};
@@ -145,5 +151,30 @@ describe("waiting for a download (DEC-025)", () => {
 		await expect(downloads.finished(11, 5000)).rejects.toThrow("search failed");
 		fake.searchFails = false;
 		expect(fake.listeners.size).toBe(0);
+	});
+});
+
+describe("Overmark's own entries in Chrome's list (DEC-025)", () => {
+	test("erased only when Overmark wrote it into Overmark/: an id reused later is someone else's", async () => {
+		const api = downloads.chromeDownloads(memoryKv());
+		fake.items.set(20, {
+			id: 20,
+			byExtensionId: "overmark",
+			filename: "/Users/me/Downloads/Overmark/a.overmark.zip",
+		});
+		fake.items.set(21, {
+			id: 21,
+			filename: "/Users/me/Downloads/holiday.jpg",
+		});
+		fake.items.set(22, {
+			id: 22,
+			byExtensionId: "overmark",
+			filename: "/Users/me/Downloads/overmark-cases.overmark.zip",
+		});
+		await api.erase(20);
+		await api.erase(21);
+		await api.erase(22);
+		await api.erase(23);
+		expect(fake.erased).toEqual([20]);
 	});
 });

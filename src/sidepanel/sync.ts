@@ -16,6 +16,7 @@ import {
 	chooseDownloads,
 	chooseFolder,
 	FOLDER_KEY,
+	isSyncDownload,
 	LAST_DOWNLOAD_KEY,
 	type PickedFolder,
 	STATUS_KEY,
@@ -259,7 +260,7 @@ export function startSync(
 			const id = await kv.get(LAST_DOWNLOAD_KEY).catch(() => undefined);
 			if (typeof id === "number") {
 				const [item] = await chrome.downloads.search({ id });
-				if (item?.exists) {
+				if (item?.exists && isSyncDownload(item, chrome.runtime.id)) {
 					chrome.downloads.show(id);
 					return;
 				}
