@@ -35,8 +35,11 @@ export const CLICK_LOAD_WAIT_MS = 30_000;
 export const CLICK_RETRY_MS = 250;
 
 /**
- * Resolves once the tab has loaded: `false` if it was closed first or did
- * not load within `timeoutMs`.
+ * Resolves once the tab's new page is there: its address came (the page
+ * committed; only with access is it told), or it has loaded. `false` if the
+ * tab was closed first or neither came within `timeoutMs`. Best effort: the
+ * listeners live in the worker, and a worker Chrome stops meanwhile takes
+ * them along (then nothing is injected again, as before).
  */
 function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
 	return new Promise((resolve) => {
@@ -46,8 +49,13 @@ function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
 			chrome.tabs.onRemoved.removeListener(removed);
 			resolve(ok);
 		};
-		const updated = (id: number, info: { status?: string }) => {
-			if (id === tabId && info.status === "complete") done(true);
+		const updated = (id: number, info: { status?: string; url?: string }) => {
+			// executeScript waits for the page to be idle by itself.
+			if (
+				id === tabId &&
+				(info.status === "complete" || info.url !== undefined)
+			)
+				done(true);
 		};
 		const removed = (id: number) => {
 			if (id === tabId) done(false);
@@ -71,10 +79,10 @@ function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
  *
  * - Clicked while the tab loads, the page the script would go into is the
  *   one on its way out, and the next one comes without it. The grant holds
- *   across a navigation within the site (a reload, a link), so once the page
- *   has loaded the script goes in again. A page that comes from elsewhere
- *   (a new tab's first page) is not granted: the panel asks for the click
- *   again.
+ *   across a navigation within the origin (a reload, a link on the same
+ *   scheme, host and port), so once the new page is there the script goes
+ *   in again. A page of another origin (a new tab's first page, a redirect
+ *   to www. or https) is not granted: the panel asks for the click again.
  * - Right after a click on a loaded page Chrome now and then refuses the
  *   script; a moment later it lets it in.
  */

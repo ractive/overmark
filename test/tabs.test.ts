@@ -31,6 +31,13 @@ function fakeChrome() {
 			onUpdated: event(listeners.updated),
 			onRemoved: event(listeners.removed),
 		},
+		/** The new page committed: its address comes, while it still loads. */
+		committed() {
+			for (const l of listeners.updated)
+				(l as (id: number, info: { url: string }) => void)(7, {
+					url: "https://example.com/next",
+				});
+		},
 		loaded() {
 			fake.status = "complete";
 			for (const l of listeners.updated)
@@ -94,6 +101,16 @@ describe("the content script after a click on the icon", () => {
 			expect(chrome.calls).toBe(2);
 			expect(chrome.listening()).toBe(0);
 		}
+	});
+
+	test("the new page has come but still loads (a slow resource): in at once", async () => {
+		chrome.answers = ["ok"];
+		const done = injectOnClick({ id: 7, status: "loading" }, fast);
+		await settle();
+		chrome.committed();
+		await done;
+		expect(chrome.calls).toBe(2);
+		expect(chrome.listening()).toBe(0);
 	});
 
 	test("loaded before the listeners were there: again all the same", async () => {
