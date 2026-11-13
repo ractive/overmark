@@ -3,7 +3,14 @@
  * Testing or Chromium locally, required in CI (see harness.ts).
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
 import { RESOLVED_OPACITY } from "../../src/content/overlay.ts";
 import { webpSize } from "../../src/lib/export.ts";
@@ -99,6 +106,12 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 
 	afterAll(async () => {
 		await h?.stop();
+	});
+
+	// The control page is a side panel too: a toolbar a test showed for a
+	// case opened that case there (DEC-023), and its marks would follow.
+	beforeEach(async () => {
+		await toAllCases();
 	});
 
 	test("marks drawn with the toolbar are saved as a case with screenshots", async () => {
@@ -220,7 +233,13 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 	 * "← All cases" where the panel shows a case: "Save case…" opens the case
 	 * it saved (DEC-023), and an open case's marks follow to the tab in front.
 	 */
-	async function toAllCases(): Promise<void> {
+	async function toAllCases(saved?: string): Promise<void> {
+		// Opened a moment after the save.
+		if (saved !== undefined)
+			await h.control.waitFor(
+				`document.querySelector("#case-view h2")?.textContent === ${JSON.stringify(saved)}`,
+				10_000,
+			);
 		await h.control.eval(
 			`document.getElementById("back").hidden || document.getElementById("back").click()`,
 		);
@@ -325,8 +344,8 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		);
 		await comment(v1.page, "Here");
 		await saveAs(v1.page, "Drawn marks");
-		await v1.page.click(shadow('[data-action="close"]'));
-		await toAllCases();
+		// "← All cases" ends the toolbar too, as its Done would.
+		await toAllCases("Drawn marks");
 
 		const v2 = await h.open("v2");
 		await v2.page.eval(
@@ -393,7 +412,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await showToolbar(h, v1.page, v1.tabId);
 			await markElement(v1.page, "[data-truth=tip]", "Say how much");
 			await saveAs(v1.page, "Opened from its case");
-			await toAllCases();
+			await toAllCases("Opened from its case");
 			await v1.page.send("Page.close");
 			await panel();
 			await openTheCase("Opened from its case");
@@ -419,8 +438,8 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await showToolbar(h, v1.page, v1.tabId);
 			await markElement(v1.page, "[data-truth=tip]", "Loaded on opening");
 			await saveAs(v1.page, "Opened on its page");
-			await v1.page.click(shadow('[data-action="close"]'));
-			await toAllCases();
+			// "← All cases" ends the toolbar too, as its Done would.
+			await toAllCases("Opened on its page");
 			await v1.page.activate();
 			await panel();
 			const row = `[...document.querySelectorAll("[data-group=here] [data-case]")].find((e) => e.textContent.includes("Opened on its page"))`;
@@ -466,7 +485,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			);
 			await markElement(v1.page, "#late", "Not there next time");
 			await saveAs(v1.page, "Hidden while searched");
-			await toAllCases();
+			await toAllCases("Hidden while searched");
 			await v1.page.send("Page.close");
 			await panel();
 			await openTheCase("Hidden while searched");
@@ -522,7 +541,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await showToolbar(h, v1.page, v1.tabId);
 			await markElement(v1.page, "[data-truth=tip]", "Sized");
 			await saveAs(v1.page, "Made at one size");
-			await toAllCases();
+			await toAllCases("Made at one size");
 			const made = await v1.page.eval<{ width: number; height: number }>(
 				"({ width: innerWidth, height: innerHeight })",
 			);
@@ -560,8 +579,8 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await markElement(v1.page, "[data-truth=submit]", "Two");
 		await markElement(v1.page, "[data-truth=contact]", "Three");
 		await saveAs(v1.page, "Settled marks");
-		await v1.page.click(shadow('[data-action="close"]'));
-		await toAllCases();
+		// "← All cases" ends the toolbar too, as its Done would.
+		await toAllCases("Settled marks");
 		await v1.page.activate();
 		await h.control.goto(
 			`chrome-extension://${h.extensionId}/sidepanel/index.html`,

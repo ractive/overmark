@@ -111,11 +111,13 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 	 * control page, which is a panel too: both go back to the list, or an
 	 * open case's marks would follow to the next tab in front.
 	 */
-	async function toAllCases(panel: Page): Promise<void> {
+	async function toAllCases(panel: Page, title: string): Promise<void> {
 		for (const page of [panel, h.control]) {
-			await page.eval(
-				`document.getElementById("back").hidden || document.getElementById("back").click()`,
+			await page.waitFor(
+				`document.querySelector("#case-view h2")?.textContent === ${JSON.stringify(title)}`,
+				10_000,
 			);
+			await page.eval(`document.getElementById("back").click()`);
 			await page.waitFor(`!document.getElementById("home").hidden`);
 		}
 	}
@@ -150,7 +152,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await clicked.page.waitFor(`!${shadow(".toolbar")}.hidden`);
 		await markElement(clicked.page, "[data-truth=submit]", "Too pale");
 		await saveAs(clicked.page, "From the store package");
-		await toAllCases(panel);
+		await toAllCases(panel, "From the store package");
 		const db = await h.control.eval<Db>(READ_DB);
 		const saved = db.cases[0];
 		expect(saved?.title).toBe("From the store package");
@@ -208,7 +210,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await first.page.waitFor(`!${shadow(".toolbar")}.hidden`);
 		await markElement(first.page, "[data-truth=tip]", "Say how much");
 		await saveAs(first.page, "Opened from its address");
-		await toAllCases(panel);
+		await toAllCases(panel, "Opened from its address");
 		await first.page.send("Page.close");
 		for (;;) {
 			const tabs = await h.browser.targets();
@@ -312,7 +314,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 		await markElement(first.page, "#late", "Not there next time");
 		await saveAs(first.page, "As the owner uses it");
-		await toAllCases(panel);
+		await toAllCases(panel, "As the owner uses it");
 		await first.page.send("Page.close");
 
 		// A tab on the case's page that Overmark may not see yet.

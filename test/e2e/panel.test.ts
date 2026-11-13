@@ -125,17 +125,25 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			`(() => { const send = chrome.tabs.sendMessage.bind(chrome.tabs); chrome.tabs.sendMessage = (tabId, message) => (${body})(tabId, message, send); })()`,
 		);
 
+	/** "Save case…" opened the case `title` in the panel (DEC-023): back to the list. */
+	async function afterSave(title: string, page = h.control): Promise<void> {
+		await page.waitFor(
+			`document.querySelector("#case-view h2")?.textContent === ${JSON.stringify(title)}`,
+			10_000,
+		);
+		await backHome(page);
+		await page.waitFor(`!${id("home")}.hidden`);
+	}
+
 	/** A page with a saved case of one mark, and that case's id. */
 	async function annotated(title: string) {
 		const { page, tabId } = await h.open("v1");
 		await showToolbar(h, page, tabId);
 		await markElement(page, "h1", "Too long");
 		await saveAs(page, title);
-		await page.click(shadow('[data-action="close"]'));
-		// "Save case…" opened the case in the panel (DEC-023): back to the
-		// list, which takes its marks off the page.
-		await h.control.eval(`${id("back")}.hidden || ${id("back")}.click()`);
-		await h.control.waitFor(`!${id("home")}.hidden`);
+		// "Save case…" opens the case in the panel (DEC-023): back to the
+		// list, which ends the toolbar (as its Done) and takes the marks off.
+		await afterSave(title);
 		const saved = (await readDb()).cases.find((c) => c.title === title);
 		return { page, tabId, caseId: saved?.id as string };
 	}
@@ -740,7 +748,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			);
 			await markElement(page, "#late", "Not there next time");
 			await saveAs(page, "Hidden on the page");
-			await page.click(shadow('[data-action="close"]'));
+			await afterSave("Hidden on the page");
 			const saved = (await readDb()).cases.find(
 				(c) => c.title === "Hidden on the page",
 			);
@@ -808,10 +816,8 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await showToolbar(h, page, tabId);
 			await markElement(page, "[data-truth=submit]", "Too pale");
 			await saveAs(page, "Not for this page");
-			await page.click(shadow('[data-action="close"]'));
 			// "Save case…" opened it (DEC-023): its marks would follow the page.
-			await backHome();
-			await h.control.waitFor(`!${id("home")}.hidden`);
+			await afterSave("Not for this page");
 			const saved = (await readDb()).cases.find(
 				(c) => c.title === "Not for this page",
 			);
