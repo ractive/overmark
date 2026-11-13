@@ -74,7 +74,7 @@ function status(a: Annotation): string[] {
 	if (r?.verified)
 		lines.push(
 			"- Status: Verified",
-			`- Fixed: ${inline(r.at)}${by(r.app)}${fromFile(r.imported)}`,
+			`- Fixed: ${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)}`,
 		);
 	else {
 		const when = r
@@ -85,7 +85,7 @@ function status(a: Annotation): string[] {
 	if (r?.note) lines.push(`- Note: ${inline(r.note)}`);
 	if (r?.verified)
 		lines.push(
-			`- Verified: ${inline(r.verified.at)}${by(r.verified.app)}${fromFile(r.verified.imported)}`,
+			`- Verified: ${inline(r.verified.at)}${r.verified.app ? `,${by(r.verified.app)}` : ""}${fromFile(r.verified.imported)}`,
 		);
 	for (const reopen of a.reopens ?? []) {
 		lines.push(

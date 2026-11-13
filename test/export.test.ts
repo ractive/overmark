@@ -377,7 +377,7 @@ describe("statuses through a file (DEC-023)", () => {
 		);
 		const md = caseMarkdown(back);
 		expect(md).toContain(
-			"- Status: Verified\n- Fixed: 2026-11-14T09:00:00Z by Claude (claude.ai) (as the file says)\n- Note: Hover state too\n",
+			"- Status: Verified\n- Fixed: 2026-11-14T09:00:00Z, by Claude (claude.ai) (as the file says)\n- Note: Hover state too\n",
 		);
 		expect(md).toContain("- Verified: 2026-11-14T15:00:00Z (as the file says)");
 		expect(md).toContain(
