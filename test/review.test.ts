@@ -422,3 +422,46 @@ describe("loads close together", () => {
 		expect((await first).matches.length).toBe(1);
 	});
 });
+
+describe("a load that draws a newer copy at its end", () => {
+	const PAGE = `<main><h1>Prämien</h1><button>Berechnen</button><a href="#">Link</a><p>Text hier</p></main>`;
+	const withMarks = (base: Case, ...selectors: string[]): Case => ({
+		...base,
+		annotations: [
+			...base.annotations,
+			...selectors.map((sel, i) => ({
+				...(base.annotations[0] as Annotation),
+				id: `a${i + 2}`,
+				number: i + 2,
+				element: describeElement($(sel)),
+			})),
+		],
+	});
+	/** Until the load has found its marks and turns to the newer copy. */
+	const found = async () => {
+		while (reviewer.caseId === undefined)
+			await new Promise((r) => setTimeout(r, 0));
+	};
+
+	test("a clear while it draws the newer copy: replaced, not its first result", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const loading = reviewer.load(c);
+		expect(await reviewer.update(withMarks(c, "a", "p"))).toBeNull();
+		await found();
+		reviewer.clear();
+		await expect(loading).rejects.toBeInstanceOf(LoadReplaced);
+	});
+
+	test("a newer load while it draws the newer copy: both end with the newest", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const newer = withMarks(c, "a", "p");
+		const loading = reviewer.load(c);
+		expect(await reviewer.update(newer)).toBeNull();
+		await found();
+		const again = reviewer.load(newer);
+		expect((await again).matches.length).toBe(3);
+		expect((await loading).matches.length).toBe(3);
+	});
+});

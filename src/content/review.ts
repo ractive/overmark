@@ -135,9 +135,12 @@ export class Reviewer {
 			const newer = this.#newer;
 			this.#newer = undefined;
 			this.#loading = undefined;
-			return newer === undefined
-				? result
-				: ((await this.update(newer)) ?? result);
+			if (newer === undefined) return result;
+			const generation = this.#generation;
+			const updated = await this.update(newer);
+			// Stopped while it drew the newer copy: its first result is gone too.
+			if (generation !== this.#generation) throw new LoadReplaced();
+			return updated ?? result;
 		} finally {
 			// A newer load's, if one started meanwhile.
 			if (this.#loading === loading) this.#loading = undefined;
