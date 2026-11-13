@@ -379,6 +379,28 @@ describe("saveCase", () => {
 		]);
 	});
 
+	test("marks are kept in the order of their numbers, whatever order they went in", async () => {
+		const store = new MemoryStore();
+		await putCase(store, sampleCase("c_1"));
+		await captured(store, "c_1", "p_b");
+		await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_b")], [draft(2, "p_b")])),
+			crop,
+		);
+		// Mark 1 goes in after mark 2 ("Add mark 1" took its screenshot later).
+		await captured(store, "c_1", "p_a");
+		const saved = await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_a")], [draft(1, "p_a")])),
+			crop,
+		);
+		expect(saved.annotations.map((a) => [a.number, a.shot])).toEqual([
+			[1, "s2"],
+			[2, "s1"],
+		]);
+	});
+
 	test("a page makes no case: the side panel creates them (DEC-026)", async () => {
 		const store = new MemoryStore();
 		await captured(store, "c_1", "p_a");

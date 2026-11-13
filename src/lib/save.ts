@@ -221,6 +221,9 @@ export async function saveCase(
 			const image = crops.get(draft);
 			if (image !== undefined) images.set(cropImage(id), image);
 		}
+		// In the order of their numbers, whatever order they went in: a mark
+		// added again with "Add mark N" can come after a later one (DEC-014).
+		annotations.sort((a, b) => a.number - b.number);
 		const value = validateCase({
 			format: CASE_FORMAT,
 			id: request.caseId,

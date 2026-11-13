@@ -109,7 +109,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 	});
 
 	/**
-	 * "Save case…" opened the case (DEC-023), in the side panel and in the
+	 * The case is open (DEC-023, DEC-026), in the side panel and in the
 	 * control page, which is a panel too: both go back to the list, or an
 	 * open case's marks would follow to the next tab in front.
 	 */

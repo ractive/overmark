@@ -38,7 +38,7 @@ import type {
 	OverlayState,
 } from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
-import { NoAccessError, sendToTab } from "../lib/tabs.ts";
+import { inject, NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { blurFormsNow, startAi } from "./ai.ts";
 import { byId, isWebPage, shortUrl, sitePattern } from "./dom.ts";
 import {
@@ -1090,13 +1090,24 @@ async function annotate(): Promise<void> {
 		const tab = await activeTab();
 		if (tab?.id === undefined) return;
 		tabWork.cancel();
-		let page: PageInfo;
+		let page: PageInfo | undefined;
 		try {
-			page = await sendToTab<PageInfo>(tab.id, { type: "page:info" });
+			const ask = () =>
+				sendToTab<PageInfo | undefined>(tab.id as number, {
+					type: "page:info",
+				});
+			page = await ask();
+			// Something there that does not answer it (not this build's
+			// content script): once more, with it injected.
+			if (page === undefined) {
+				await inject(tab.id);
+				page = await ask();
+			}
 		} catch (error) {
 			update((s) => (s.hint = describeError(error)));
 			return;
 		}
+		if (page === undefined) throw new Error("the page did not answer");
 		const id = newId("c");
 		const made = newCase(id, page, new Date().toISOString());
 		const c = await store.updateCase(id, (current) => {
