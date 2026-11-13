@@ -47,6 +47,9 @@ type Picker = (options: {
 
 type Update = (change: (s: PanelState) => void) => void;
 
+/** Set when the downloads permission was given for the sync, not for Export. */
+const ASKED_KEY = "downloads:for-sync";
+
 const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
@@ -179,6 +182,10 @@ export function startSync(
 	 * worker writes to Downloads.
 	 */
 	function syncDownloads(): void {
+		// Asked before the prompt: whether Export had the permission already.
+		const had = Promise.resolve()
+			.then(() => chrome.permissions.contains(DOWNLOADS))
+			.catch(() => true);
 		const allowed = askForDownloads();
 		update((s) => {
 			s.sync.asking = true;
@@ -194,6 +201,8 @@ export function startSync(
 			}
 			try {
 				await chooseDownloads(kv);
+				// Given for the sync: Stop syncing gives it back.
+				if (!(await had)) await kv.set({ [ASKED_KEY]: true });
 			} catch (error) {
 				problem(`Could not sync to Downloads: ${message(error)}`);
 				return;
@@ -209,14 +218,23 @@ export function startSync(
 
 	function syncStop(): void {
 		const fromDownloads = target === "downloads";
+		const ours = kv.get(ASKED_KEY).then(
+			(v) => v === true,
+			() => false,
+		);
 		// A folder stays known: choosing it again keeps what was written there.
 		void stopSyncing(kv).then(
 			() => {
-				// The permission goes back with it: Export or Sync to Downloads asks
+				// The permission goes back with it when the sync asked for it (not
+				// when Export had it already): Export or Sync to Downloads asks
 				// again. (A build that has it at install cannot give it back.)
 				if (fromDownloads)
-					void Promise.resolve()
-						.then(() => chrome.permissions.remove(DOWNLOADS))
+					void ours
+						.then(async (yes) => {
+							if (!yes) return;
+							await kv.set({ [ASKED_KEY]: undefined });
+							await chrome.permissions.remove(DOWNLOADS);
+						})
 						.catch(() => undefined);
 				update((s) => {
 					s.sync.problem = undefined;

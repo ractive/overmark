@@ -1084,33 +1084,41 @@ describe("the sync's database, opened when first used", () => {
 		}
 	});
 
-	test("Stop syncing to Downloads gives the downloads permission back", async () => {
-		const globals = globalThis as unknown as Record<string, unknown>;
-		const chromeBefore = globals["chrome"];
-		const removed: unknown[] = [];
-		globals["chrome"] = {
-			runtime: { sendMessage: () => Promise.resolve() },
-			permissions: {
-				remove: async (p: unknown) => {
-					removed.push(p);
-					return true;
+	for (const [had, back] of [
+		[false, true],
+		[true, false],
+	] as const)
+		test(`Stop syncing to Downloads ${back ? "gives the permission back when the sync asked for it" : "keeps it when Export had it already"}`, async () => {
+			const globals = globalThis as unknown as Record<string, unknown>;
+			const chromeBefore = globals["chrome"];
+			const removed: unknown[] = [];
+			globals["chrome"] = {
+				runtime: { sendMessage: () => Promise.resolve() },
+				permissions: {
+					contains: async () => had,
+					request: async () => true,
+					remove: async (p: unknown) => {
+						removed.push(p);
+						return true;
+					},
 				},
-			},
-		};
-		try {
-			const state = initialState();
-			const kv = referenceKv();
-			await chooseDownloads(kv);
-			const panel = startSync((change) => change(state), kv);
-			await panel.refresh();
-			panel.syncStop();
-			await until(() => removed.length > 0);
-			expect(removed).toEqual([{ permissions: ["downloads"] }]);
-			expect(await kvSyncStore(kv).choice()).toBeUndefined();
-		} finally {
-			globals["chrome"] = chromeBefore;
-		}
-	});
+			};
+			try {
+				const state = initialState();
+				const kv = referenceKv();
+				const panel = startSync((change) => change(state), kv);
+				await panel.refresh();
+				panel.syncDownloads();
+				await until(async () => (await kv.get(TARGET_KEY)) === "downloads");
+				await panel.refresh();
+				panel.syncStop();
+				await until(async () => (await kvSyncStore(kv).choice()) === undefined);
+				await Bun.sleep(10);
+				expect(removed).toEqual(back ? [{ permissions: ["downloads"] }] : []);
+			} finally {
+				globals["chrome"] = chromeBefore;
+			}
+		});
 
 	test("Stop syncing to a folder leaves the permission alone", async () => {
 		const globals = globalThis as unknown as Record<string, unknown>;
