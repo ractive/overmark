@@ -1020,3 +1020,26 @@ wouldn't have drafts — which is ok I think."
   a case on the page once it has a mark: an empty one has nothing to show ("0 of 0
   marks found" is not said). `list_cases` and `get_case` show an empty case with zero
   marks; `add_annotation` adds to a case as before.
+- **After the review of PR 57.** *Never delete on doubt:* an untouched case is deleted
+  only when every tab in every window has answered that it holds nothing of the case (no
+  toolbar adding to it); a tab that does not answer in time, or an `overlay:end` that
+  timed out, keeps it (`mayHold`, pure). *The tab clicked for:* "Annotate this page"
+  makes the case from that tab's page and shows the toolbar there, whatever tab is in
+  front when the page answers; a page that does not answer within 5 s gets "This page
+  did not answer. Reload it and try again." and the button works again. *The first
+  mark's page:* when a mark goes into a case with no screenshot yet, the case's `page`
+  becomes that mark's (address, title, language, viewport), in the same transaction;
+  the title is not touched. *A rename* is told to toolbars on every tab, and an add or
+  undo under way no longer puts the old title back. *The first mark's draw* asks a page
+  busy with the next mark again until it is free, without its busy sentence. *A title
+  typed in Rename* and not saved keeps an empty case, as a typed summary does. *Enter*
+  ending an IME composition does not save a rename. *A title needs a character that
+  shows* (`cleanTitle`): the C0 and C1 controls (U+0000–U+001F, U+007F–U+009F) and the
+  bidi embeddings, overrides (U+202A–U+202E) and isolates (U+2066–U+2069) are taken out
+  of a title from Rename or a page; titles already stored stay as they are. *A mark
+  whose screenshot the page moved away from* is taken again by itself once the page has
+  not scrolled or resized for 800 ms and nobody draws or types a comment (5 s at most,
+  three times), scrolled back to and given up again if the page moves; only then does
+  it wait with "Add mark N". A screenshot that failed still waits for the user. Found on
+  the way: a mark added after a delete was refused by the format (`lastNumber` below
+  its number); `saveCase` now raises `lastNumber` with the new marks.

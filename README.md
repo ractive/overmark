@@ -51,8 +51,9 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    case in the side panel shows it at once. Marks in the case stay on the page,
    fainter. Undo takes the last
    mark added since the toolbar was shown out of the case again, while nobody has
-   resolved or edited it. A mark that could not be added stays on the page with the
-   reason and an "Add mark N" button to try again; it never moves to another case unless
+   resolved or edited it. A mark whose screenshot the page moved away from is taken
+   again by itself once the page stands still. A mark that could not be added stays on
+   the page with the reason and an "Add mark N" button to try again; it never moves to another case unless
    you click that button. Done tries such marks once more and closes the toolbar when all
    are in; while one is not, the toolbar stays up and says so, and Done again discards
    it. "← All cases" at the top of the side panel closes the case: the toolbar finishes
