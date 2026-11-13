@@ -38,7 +38,7 @@ import {
 	type WorkerRequest,
 	type WorkerResponse,
 } from "./lib/messages.ts";
-import { numberFree, saveCase, undoAdd } from "./lib/save.ts";
+import { fromPage, numberFree, saveCase, undoAdd } from "./lib/save.ts";
 import { IdbStore, PENDING_MAX_AGE_MS } from "./lib/store.ts";
 import {
 	type ChosenFolder,
@@ -213,7 +213,7 @@ async function handle(
 			if (from !== undefined && !isSafeId(from)) throw new Error("invalid id");
 			const saved = await saveCase(
 				store,
-				request.request,
+				fromPage(request.request),
 				cropImages,
 				new Date(),
 				drawMarks,

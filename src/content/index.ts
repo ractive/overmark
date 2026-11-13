@@ -6,10 +6,12 @@
 import { isPageUrl } from "../lib/case.ts";
 import { cssSelector, describeElement } from "../lib/element.ts";
 import {
+	insideInput,
 	inspectElement,
 	isOffLimits,
 	type Relation,
 	resolveSelector,
+	selectorProblem,
 } from "../lib/inspect.ts";
 import type {
 	BlurResult,
@@ -52,14 +54,12 @@ function mark(
 	number: number,
 	blurForms: boolean,
 ): DescribedElement {
-	let matches: Element[];
-	try {
-		matches = [...document.querySelectorAll(selector)].filter(
-			(e) => !overlay.host.contains(e),
-		);
-	} catch {
-		return { ok: false, error: `Not a valid CSS selector: ${selector}` };
-	}
+	// The same rules as get_mark_element's: whether it matches is an answer (CR-01).
+	const problem = selectorProblem(document, selector);
+	if (problem !== undefined) return { ok: false, error: problem };
+	const matches = [...document.querySelectorAll(selector)].filter(
+		(e) => !overlay.host.contains(e) && !insideInput(e),
+	);
 	if (matches.length === 0)
 		return { ok: false, error: `No element on this page matches ${selector}` };
 	// Layouts often keep a hidden copy: a mark on it would sit in the corner.

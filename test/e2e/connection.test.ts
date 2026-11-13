@@ -139,6 +139,100 @@ describe.skipIf(browserBinary === undefined)(
 			await panel.waitFor(`!document.querySelector("[data-question]")`);
 		});
 
+		test("a long summary shows whole in the panel's question, scrolling (CR-03)", async () => {
+			const summary = `${"Harmless. ".repeat(400)}${"Unseen before. ".repeat(1000)}END-OF-SUMMARY`;
+			const asked = call("set_summary", { caseId: "c_1", summary });
+			// The note follows the box's layout.
+			await panel.waitFor(
+				`document.querySelector("[data-question] [data-scroll-note]")?.textContent`,
+				10_000,
+			);
+			const shown = await panel.eval<{
+				text: string;
+				meta: string;
+				scrolls: boolean;
+			}>(`(() => {
+				const card = document.querySelector("[data-question]");
+				const pre = card.querySelector("pre");
+				return {
+					text: pre.textContent,
+					meta: [...card.querySelectorAll("p.meta")].map((p) => p.textContent).join(" "),
+					scrolls: pre.scrollHeight > pre.clientHeight,
+				};
+			})()`);
+			expect(shown.text).toContain(summary);
+			expect(shown.text.endsWith('END-OF-SUMMARY"\n}')).toBe(true);
+			expect(shown.scrolls).toBe(true);
+			expect(shown.meta).toContain(
+				`(${shown.text.length.toLocaleString("en-US")} characters: scroll to read all of them)`,
+			);
+			await answerInPanel(panel, "deny");
+			expect((await asked).isError).toBe(true);
+			await panel.waitFor(`!document.querySelector("[data-question]")`);
+		});
+
+		test("the scroll note goes by whether the box overflows, not by a length", async () => {
+			const width = (w: number) =>
+				panel.send("Emulation.setDeviceMetricsOverride", {
+					width: w,
+					height: 800,
+					deviceScaleFactor: 1,
+					mobile: false,
+				});
+			/** The note and the box once the layout has settled. */
+			const box = async () => {
+				await panel.eval(
+					"new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))",
+				);
+				return panel.eval<{ note: string; scrolls: boolean }>(`(() => {
+					const card = document.querySelector("[data-question]");
+					const pre = card.querySelector("pre");
+					return {
+						note: card.querySelector("[data-scroll-note]")?.textContent ?? "",
+						scrolls: pre.scrollHeight > pre.clientHeight,
+					};
+				})()`);
+			};
+			/** Ask, and wait for the question in the panel. */
+			const ask = async (summary: string) => {
+				const asked = call("set_summary", { caseId: "c_1", summary });
+				await panel.waitFor(
+					`document.querySelector("[data-question] pre")`,
+					10_000,
+				);
+				return { asked };
+			};
+			const deny = async ({ asked }: { asked: Promise<unknown> }) => {
+				await answerInPanel(panel, "deny");
+				await asked;
+				await panel.waitFor(`!document.querySelector("[data-question]")`);
+			};
+			try {
+				// The side panel's width: about 500 characters do not fit the box.
+				await width(380);
+				const middle = await ask(
+					"Lower the contrast of the button. ".repeat(15),
+				);
+				const narrow = await box();
+				expect(narrow.scrolls).toBe(true);
+				expect(narrow.note).toContain(
+					"characters: scroll to read all of them)",
+				);
+				// Wider, the same text fits: the note goes.
+				await width(2400);
+				const wide = await box();
+				expect(wide.scrolls).toBe(false);
+				expect(wide.note).toBe("");
+				await deny(middle);
+				await width(380);
+				const short = await ask("Fine.");
+				expect(await box()).toEqual({ note: "", scrolls: false });
+				await deny(short);
+			} finally {
+				await panel.send("Emulation.clearDeviceMetricsOverride");
+			}
+		});
+
 		test("a panel closed during a question hands it to a notification", async () => {
 			const asked = call("set_summary", { caseId: "c_1", summary: "Handed" });
 			await panel.waitFor(`document.querySelector("[data-question]")`, 10_000);
@@ -289,7 +383,14 @@ describe.skipIf(browserBinary === undefined)(
 				`${byId("ai-status")}.textContent === "Not connected"`,
 			);
 			expect(relay.relay.sessionCount).toBe(0);
-			expect((await settingsOf(h))["keepAiOn"]).toBe(false);
+			// Off, and written only if it was on (here it never was).
+			expect((await settingsOf(h))["keepAiOn"] ?? false).toBe(false);
+			// The session remembers the stop, until the connect below.
+			expect(
+				await h.control.eval(
+					`chrome.storage.session.get("aiStopped").then((s) => s.aiStopped)`,
+				),
+			).toBe(true);
 			expect(await badge()).toBe("");
 			// The pairing is still there: the same token works after a connect.
 			await panel.eval(`${byId("connect")}.click()`);
@@ -663,6 +764,35 @@ describe.skipIf(browserBinary === undefined)(
 			const panel = await openSidePanel(h);
 			expect(await panel.eval(`${byId("relay")}.value`)).toBe(relay.url);
 			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(false);
+			await closeSidePanel(h, panel);
+		}, 60_000);
+
+		test("a Stop in this browser session holds over a stored Keep AI access on, in a new worker too", async () => {
+			// What a Stop whose write of Keep AI access on failed leaves behind.
+			expect((await settingsOf(h))["keepAiOn"]).toBe(true);
+			await h.control.eval(`chrome.storage.session.set({ aiStopped: true })`);
+			await restartWorker(h);
+			await (await h.open("v1")).page.activate();
+			const panel = await openSidePanel(h);
+			const state = () =>
+				panel.eval<string>("document.documentElement.dataset.aiState");
+			await until(state, (s) => s !== undefined && s !== "", 10_000);
+			// Long enough for Keep AI access on to have connected.
+			await Bun.sleep(3000);
+			expect(await state()).toBe("disconnected");
+			expect(await panel.eval(`${byId("keep-on")}.checked`)).toBe(false);
+			expect((await settingsOf(h))["keepAiOn"]).toBe(true);
+			// The user's Connect ends it.
+			await panel.eval(`${byId("connect")}.click()`);
+			await panel.waitFor(
+				`document.documentElement.dataset.aiState === "connected"`,
+				20_000,
+			);
+			expect(
+				await h.control.eval(
+					`chrome.storage.session.get("aiStopped").then((s) => s.aiStopped)`,
+				),
+			).toBe(false);
 			await closeSidePanel(h, panel);
 		}, 60_000);
 	},

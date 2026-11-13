@@ -22,9 +22,14 @@ import type { Answer, QuestionView } from "./protocol.ts";
 export const QUESTION_TIMEOUT_MS = 60_000;
 /** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
-/** The arguments shown in the panel, and in a notification, are cut to this. */
-export const MAX_ARGS = 4000;
+/**
+ * The arguments in a notification are cut to this; the panel shows all of
+ * them (CR-03), which the tools' schemas bound (the library checks them
+ * before it asks): `set_summary` takes 20,000 characters.
+ */
 export const MAX_ARGS_NOTIFICATION = 150;
+/** A notification's message is cut to this. */
+export const MAX_NOTIFICATION_MESSAGE = 300;
 /** A tool's title in a notification's title is cut to this. */
 export const MAX_NOTIFICATION_TITLE = 60;
 
@@ -33,6 +38,8 @@ export const MAX_NOTIFICATION_TITLE = 60;
  * click on its body): Chrome gives a notification at most two buttons.
  */
 export const NOTIFICATION_BUTTONS = ["Allow", "Always allow"] as const;
+/** The one button of a notification that cannot show all the arguments. */
+export const REFUSE_ONLY = ["Don't allow"] as const;
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -52,6 +59,8 @@ export interface NotificationText {
 	title: string;
 	message: string;
 	contextMessage: string;
+	/** `NOTIFICATION_BUTTONS`, or `REFUSE_ONLY` when the arguments did not fit. */
+	buttons: readonly string[];
 }
 
 const cut = (text: string, max: number) =>
@@ -78,28 +87,54 @@ export function appName(client: ConfirmRequest["client"]): string {
 	return client.name ? `${visible(client.name)} (${client.host})` : client.host;
 }
 
-/** A notification's text for a question: the case it is about, else the arguments. */
+const characters = (n: number) =>
+	`${n.toLocaleString("en-US")} character${n === 1 ? "" : "s"}`;
+
+/**
+ * A notification's text for a question: the case it is about and the
+ * arguments (`args`, in one line), whole. Where they do not fit, it says to
+ * read them in the side panel and offers only Don't allow: nobody allows
+ * text they were not shown (CR-03, DEC-018). The case's lines are cut
+ * before the arguments are.
+ */
 export function notificationText(
 	view: QuestionView,
-	summary: string,
+	args: string,
 ): NotificationText {
 	const what = cut(view.title ?? view.tool, MAX_NOTIFICATION_TITLE);
-	const about = view.lines.length > 0 ? view.lines.join(" ") : summary;
-	return {
+	const head = `${view.app} wants to run ${view.tool}: `;
+	const about = view.lines.join(" ");
+	const shown = about === "" ? args : ` Arguments: ${args}`;
+	const room = MAX_NOTIFICATION_MESSAGE - shown.length;
+	const text = (message: string, buttons: readonly string[]) => ({
 		title: `Allow ${what}?`,
-		message: cut(`${view.app} wants to run ${view.tool}: ${about}`, 300),
+		message,
 		contextMessage: "Overmark · close it to not allow",
-	};
+		buttons,
+	});
+	if (args.length <= MAX_ARGS_NOTIFICATION && head.length < room)
+		return text(
+			`${cut(`${head}${about}`, room)}${shown}`,
+			NOTIFICATION_BUTTONS,
+		);
+	const note = `Its arguments (${characters(args.length)}) do not fit here: open Overmark's side panel to read all of them and answer there.`;
+	return text(
+		`${cut(`${head}${about}`, MAX_NOTIFICATION_MESSAGE - note.length - 1)} ${note}`,
+		REFUSE_ONLY,
+	);
 }
 
 interface Pending {
 	view: QuestionView;
 	/** The AI app that asked. */
 	grantId: string;
-	summary: string;
+	/** The arguments in one line, for a notification. */
+	args: string;
 	windowId: number | undefined;
 	/** The notification showing it, if one does, and its creation. */
 	notification?: string;
+	/** Its buttons allow (the arguments fit in it); else its one button refuses. */
+	canAllow?: boolean;
 	created?: Promise<void>;
 	shownAt: number;
 	settle(answer: Answer | "timeout"): void;
@@ -145,12 +180,10 @@ export class Questions {
 			tool: request.tool.name,
 			...(request.tool.title ? { title: visible(request.tool.title) } : {}),
 			lines: lines.map(visible),
-			args: cut(json, MAX_ARGS),
+			// All of it: the user allows what they were shown (CR-03).
+			args: json,
 		};
-		const summary = cut(
-			visible(JSON.stringify(request.arguments) ?? "{}"),
-			MAX_ARGS_NOTIFICATION,
-		);
+		const args = visible(JSON.stringify(request.arguments) ?? "{}");
 		return new Promise((resolve) => {
 			if (request.signal.aborted) {
 				resolve("deny");
@@ -161,7 +194,7 @@ export class Questions {
 			const pending: Pending = {
 				view,
 				grantId: client.grantId,
-				summary,
+				args,
 				windowId: undefined,
 				shownAt: 0,
 				settle: (answer) => {
@@ -204,12 +237,12 @@ export class Questions {
 		const id = `${pending.view.id}:${++this.#shown}`;
 		pending.notification = id;
 		pending.shownAt = this.#host.now();
-		pending.created = this.#host
-			.notify(id, notificationText(pending.view, pending.summary))
-			.catch((error: unknown) =>
-				// Notifications off for Chrome: the badge and the panel remain.
-				console.warn("Overmark: notification", error),
-			);
+		const text = notificationText(pending.view, pending.args);
+		pending.canAllow = text.buttons === NOTIFICATION_BUTTONS;
+		pending.created = this.#host.notify(id, text).catch((error: unknown) =>
+			// Notifications off for Chrome: the badge and the panel remain.
+			console.warn("Overmark: notification", error),
+		);
 	}
 
 	/**
@@ -245,6 +278,11 @@ export class Questions {
 	notificationButton(id: string, index: number): void {
 		const pending = this.#byNotification(id);
 		if (pending === undefined) return; // settled, or an older notification
+		if (!pending.canAllow) {
+			// Its one button is Don't allow.
+			if (index === 0) pending.settle("deny");
+			return;
+		}
 		const answer: Answer | undefined =
 			index === 0 ? "allow" : index === 1 ? "always" : undefined;
 		if (answer === undefined) return;

@@ -97,7 +97,10 @@ Only in three cases, all started by you:
    query string, fragment, user name and password; of a mail, phone or other address
    that is not a web address only its kind stays (`mailto:`). The page's head (with its
    meta tags), comments, the content of scripts, styles and embedded documents, and the
-   values of attributes named like a token or secret are never sent.
+   values of attributes named like a token or secret are never sent. The HTML and the
+   CSS rules never carry what was typed or chosen; the computed styles and the position
+   of an element can reflect a field's state where the page's own CSS styles it by state
+   (a ticked checkbox's colour, an autofilled field's background), as a screenshot does.
    They travel
    through a tab-mcp relay and on to the AI app you paired with a code. Unless you enter
    another relay in the side panel, that is `tab-mcp.ractive.ch`, run by Overmark's
