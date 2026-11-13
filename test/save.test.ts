@@ -3,6 +3,7 @@ import { lastMark } from "../src/content/annotator.ts";
 import {
 	type Case,
 	MAX_SHOTS,
+	nextNumbers,
 	pendingImage,
 	type Shot,
 	validateCase,
@@ -12,6 +13,7 @@ import {
 	type AnnotationDraft,
 	type Crop,
 	fromPage,
+	MAX_NUMBER_GAP,
 	numberFree,
 	type SaveRequest,
 	saveCase,
@@ -373,6 +375,61 @@ describe("saveCase", () => {
 			"user",
 			"ai",
 		]);
+	});
+
+	test("a save from the page cannot choose a number far above the case's next (review of PR 45)", async () => {
+		const store = new MemoryStore();
+		await newCase(store); // marks 1 and 2
+		for (const n of [99_999, 2 + 1 + MAX_NUMBER_GAP + 1]) {
+			await captured(store, "c_1", "p_b");
+			await expect(
+				saveCase(
+					store,
+					fromPage(request("c_1", false, [shot("p_b")], [draft(n, "p_b")])),
+					crop,
+				),
+			).rejects.toThrow(`mark ${n} is far above the case's next number, 3`);
+		}
+		expect(nextNumbers(await store.getCase("c_1")).annotation).toBe(3);
+		// Gaps a toolbar leaves (drafts taken out before they were added) are fine.
+		await captured(store, "c_1", "p_b");
+		const gap = await saveCase(
+			store,
+			fromPage(
+				request(
+					"c_1",
+					false,
+					[shot("p_b")],
+					[draft(3 + MAX_NUMBER_GAP, "p_b")],
+				),
+			),
+			crop,
+		);
+		expect(gap.annotations.at(-1)?.number).toBe(3 + MAX_NUMBER_GAP);
+		// Several marks in one save: each may be one more.
+		await captured(store, "c_2", "p_a");
+		const many = Array.from({ length: 5 }, (_, i) =>
+			draft(i + 1 + MAX_NUMBER_GAP, "p_a"),
+		);
+		const saved = await saveCase(
+			store,
+			fromPage(request("c_2", true, [shot("p_a")], many)),
+			crop,
+		);
+		expect(saved.annotations).toHaveLength(5);
+		// The worker's own add (an AI app's mark) is not bound by it.
+		await captured(store, "c_1", "p_c");
+		const ai = await saveCase(
+			store,
+			request(
+				"c_1",
+				false,
+				[shot("p_c")],
+				[{ ...draft(5000, "p_c"), author: "ai" }],
+			),
+			crop,
+		);
+		expect(ai.annotations.at(-1)?.number).toBe(5000);
 	});
 
 	test("a missing screenshot fails the save", async () => {
