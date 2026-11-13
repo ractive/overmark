@@ -1416,9 +1416,16 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					await panel.waitFor(
 						`!${id("settings")}.hidden && ${id("case-view")}.hidden && ${back}.textContent === "← Back"`,
 					);
-					// A real click in the AI app card reaches it now.
-					await panel.click(id("relay"));
-					await panel.waitFor(`document.activeElement === ${id("relay")}`);
+					// A real click in the AI app card reaches it now. The card
+					// grows while AI access comes on (the pairing box, above the
+					// field), so a click aimed just before lands beside the field:
+					// click until it is the field that has the focus.
+					await until(async () => {
+						await panel.click(id("relay"));
+						return panel.eval<boolean>(
+							`document.activeElement === ${id("relay")}`,
+						);
+					}, "a real click to reach the relay field");
 					expect(await pageCase(tabId)).toBe(caseId);
 					const toolbar = await toolbarOf();
 					expect(toolbar.visible).toBe(true);
