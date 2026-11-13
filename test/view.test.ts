@@ -1,4 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	setSystemTime,
+	test,
+} from "bun:test";
 import { Window } from "happy-dom";
 import type { Annotation, Case } from "../src/lib/case.ts";
 import { summarize } from "../src/lib/element.ts";
@@ -193,19 +200,21 @@ describe("a mark's status and actions", () => {
 		row(id).querySelector(
 			`[data-mark-action="${name}"]`,
 		) as unknown as HTMLButtonElement;
+	const chips = () =>
+		[...window.document.querySelectorAll("#case-status .chip")].map((b) =>
+			(b.textContent ?? "").trim(),
+		);
 
-	test("a resolved mark says how, with its note, and the counts sum up", () => {
+	test("a resolved mark says how, with its note, and the chips sum up", () => {
 		render(caseState(twoMarks()), noActions);
 		expect(row("a2").dataset["resolved"]).toBe("wontfix");
-		expect(row("a2").querySelector(".resolution")?.textContent).toBe(
-			"Won't fixLegal wants it",
+		expect(row("a2").querySelector(".history")?.textContent).toMatch(
+			/^Won't fix .+ · Legal wants it$/,
 		);
-		expect(row("a1").querySelector(".resolution")).toBeNull();
-		expect(window.document.querySelector(".mark-counts")?.textContent).toBe(
-			"1 open, 1 won't fix",
-		);
+		expect(row("a1").querySelector(".history")).toBeNull();
+		expect(chips()).toEqual(["● Open 1", "– Closed 1"]);
 		expect(action("a1", "resolve").textContent).toBe("Resolve…");
-		expect(action("a2", "reopen").textContent).toBe("Reopen");
+		expect(action("a2", "reopen").textContent).toBe("Reopen…");
 	});
 
 	test("Resolve opens its form; the choice and note go to resolveMark", () => {
@@ -542,20 +551,482 @@ describe("a mark's status and actions", () => {
 			noActions,
 		);
 		const state = (id: string) =>
-			row(id).querySelector(".mark-toggle .state")?.textContent;
-		expect(state("a1")).toBe("Not found");
-		expect(state("a2")).toBe("Won't fix");
+			row(id).querySelector(".mark-sub .state")?.textContent;
+		const pill = (id: string) =>
+			row(id).querySelector(".mark-sub .pill")?.textContent;
+		expect(state("a1")).toBe("Not found on this page");
+		expect(pill("a1")).toBeUndefined();
+		expect(pill("a2")).toBe("Won't fix");
 		expect(window.document.getElementById("marks-heading")?.textContent).toBe(
 			"Marks 2",
 		);
-		// The bar: one open, one won't fix, each its share; above the actions.
+		// The bar: one open, one closed, each its share; above the actions.
 		const bar = [
 			...window.document.querySelectorAll("#case-status .progress > span"),
 		].map((s) => [s.getAttribute("data-kind"), s.getAttribute("style")]);
 		expect(bar).toEqual([
 			["open", "flex-grow: 1"],
-			["wontfix", "flex-grow: 1"],
+			["closed", "flex-grow: 1"],
 		]);
+	});
+});
+
+describe("Verify (DEC-023)", () => {
+	const CLAUDE = {
+		id: "https://claude.ai/oauth",
+		name: "Claude",
+		host: "claude.ai",
+	};
+	const mark = (n: number, more: Partial<Annotation> = {}): Annotation => ({
+		id: `a${n}`,
+		number: n,
+		shot: "s1",
+		comment: `Comment ${n}`,
+		author: "user",
+		shape: { kind: "note", at: { x: 1, y: 1 } },
+		crop: `crops/a${n}.webp`,
+		element: null,
+		...more,
+	});
+	let n = 0;
+	/** Open, to verify, verified, won't fix; mark 1 reopened once. */
+	const fourMarks = (): Case => ({
+		...sampleCase(`c_verify${++n}`),
+		annotations: [
+			mark(1, {
+				reopens: [
+					{
+						note: "Still pale on hover\nand on focus",
+						at: "2026-11-13T16:00:00Z",
+						was: {
+							kind: "fixed",
+							note: "Darker text, 7:1 now",
+							at: "2026-11-13T11:00:00Z",
+						},
+					},
+				],
+			}),
+			mark(2, {
+				resolution: {
+					kind: "fixed",
+					note: "Hover state too",
+					at: "2026-11-14T09:00:00Z",
+					app: CLAUDE,
+				},
+			}),
+			mark(3, {
+				resolution: {
+					kind: "fixed",
+					at: "2026-11-14T09:00:00Z",
+					verified: { at: "2026-11-14T15:00:00Z" },
+				},
+			}),
+			mark(4, { resolution: { kind: "wontfix", at: "2026-11-14T09:00:00Z" } }),
+		],
+	});
+	const row = (id: string) =>
+		window.document.querySelector(
+			`[data-annotation="${id}"]`,
+		) as unknown as HTMLElement;
+	const actionsOf = (id: string) =>
+		[...row(id).querySelectorAll(".mark-actions [data-mark-action]")].map(
+			(b) => b.textContent,
+		);
+	const rows = () =>
+		[...window.document.querySelectorAll("li.annotation")].map((li) =>
+			li.getAttribute("data-annotation"),
+		);
+
+	test("the status block: a bar and the chips in order, counts above zero", () => {
+		render(caseState(fourMarks()), noActions);
+		const bar = [
+			...window.document.querySelectorAll("#case-status .progress > span"),
+		].map((s) => s.getAttribute("data-kind"));
+		expect(bar).toEqual(["open", "toVerify", "verified", "closed"]);
+		expect(
+			[...window.document.querySelectorAll("#case-status .chip")].map((b) =>
+				(b.textContent ?? "").trim(),
+			),
+		).toEqual(["● Open 1", "◐ To verify 1", "✓ Verified 1", "– Closed 1"]);
+		expect(window.document.querySelector(".all-done")).toBeNull();
+	});
+
+	test("a chip filters the list, a second click or Show all shows all", () => {
+		const c = fourMarks();
+		const filters: unknown[] = [];
+		const actions = actionsWith({
+			filterMarks: (id, group) => void filters.push([id, group]),
+		});
+		render(caseState(c), actions);
+		(
+			window.document.querySelector(
+				'#case-status .chip[data-group="toVerify"]',
+			) as unknown as HTMLElement
+		).click();
+		const filtered = caseState(c, (s) => {
+			s.markFilter = { caseId: c.id, group: "toVerify", upTo: 4 };
+		});
+		render(filtered, actions);
+		expect(rows()).toEqual(["a2"]);
+		expect(
+			window.document
+				.querySelector('.chip[data-group="toVerify"]')
+				?.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(el("marks-filtered").textContent).toBe(
+			"Showing 1 of 4 marks. Show all",
+		);
+		(
+			window.document.querySelector(
+				'.chip[data-group="toVerify"]',
+			) as unknown as HTMLElement
+		).click();
+		(
+			window.document.querySelector(
+				'[data-action="show-all"]',
+			) as unknown as HTMLElement
+		).click();
+		expect(filters).toEqual([
+			[c.id, "toVerify"],
+			[c.id, undefined],
+			[c.id, undefined],
+		]);
+		// Another case's filter is not this one's.
+		render(
+			caseState(c, (s) => {
+				s.markFilter = { caseId: "c_other", group: "toVerify", upTo: 4 };
+			}),
+			actions,
+		);
+		expect(rows()).toEqual(["a1", "a2", "a3", "a4"]);
+		expect(el("marks-filtered")).toBeNull();
+	});
+
+	test("the filter ends when its marks are gone, or a mark is added", () => {
+		const c = fourMarks();
+		const filtered = (k: Case) =>
+			caseState(k, (s) => {
+				s.markFilter = { caseId: c.id, group: "toVerify", upTo: 4 };
+			});
+		// The last mark to verify verified: all marks again, no empty list.
+		const none: Case = {
+			...c,
+			updatedAt: "2026-11-15T10:00:00Z",
+			annotations: c.annotations.filter((a) => a.id !== "a2"),
+		};
+		render(filtered(none), noActions);
+		expect(rows()).toEqual(["a1", "a3", "a4"]);
+		expect(el("marks-filtered")).toBeNull();
+		// A mark drawn while filtered shows, whatever its status.
+		const added: Case = {
+			...c,
+			updatedAt: "2026-11-15T11:00:00Z",
+			annotations: [...c.annotations, mark(5)],
+		};
+		render(filtered(added), noActions);
+		expect(rows()).toEqual(["a1", "a2", "a3", "a4", "a5"]);
+		expect(
+			window.document
+				.querySelector('.chip[data-group="toVerify"]')
+				?.getAttribute("aria-pressed"),
+		).toBe("false");
+	});
+
+	test("nothing open or to verify: a line says so", () => {
+		const c = fourMarks();
+		c.annotations = c.annotations.slice(2);
+		render(caseState(c), noActions);
+		expect(
+			window.document.querySelector("#case-status .all-done")?.textContent,
+		).toBe("✓ All marks are verified or closed.");
+	});
+
+	test("each status: its pill, its strong button and the others", () => {
+		render(caseState(fourMarks()), noActions);
+		const pill = (id: string) =>
+			row(id).querySelector(".mark-sub .pill")?.textContent;
+		expect([pill("a1"), pill("a2"), pill("a3"), pill("a4")]).toEqual([
+			undefined,
+			"To verify",
+			"Verified",
+			"Won't fix",
+		]);
+		expect(actionsOf("a1")).toEqual(["Resolve…", "Edit comment", "Delete"]);
+		expect(actionsOf("a2")).toEqual([
+			"Verified",
+			"Reopen…",
+			"Change…",
+			"Edit comment",
+			"Delete",
+		]);
+		for (const id of ["a3", "a4"])
+			expect(actionsOf(id)).toEqual([
+				"Reopen…",
+				"Change…",
+				"Edit comment",
+				"Delete",
+			]);
+		const strong = (id: string) =>
+			[...row(id).querySelectorAll(".mark-actions .strong")].map(
+				(b) => b.textContent,
+			);
+		expect([strong("a1"), strong("a2"), strong("a3")]).toEqual([
+			["Resolve…"],
+			["Verified"],
+			[],
+		]);
+		// To verify: Verified and Reopen… in the collapsed head too.
+		expect(
+			[...row("a2").querySelectorAll(".mark-sub button")].map(
+				(b) => b.textContent,
+			),
+		).toEqual(["Verified", "Reopen…"]);
+		expect(row("a3").querySelector(".mark-sub button")).toBeNull();
+		expect(
+			row("a2")
+				.querySelector('.mark-sub [data-mark-action="verify"]')
+				?.getAttribute("title"),
+		).toBe("The fix holds on the page you checked");
+		// A mark to verify is drawn in full; verified and closed step back.
+		expect(row("a2").hasAttribute("data-resolved")).toBe(false);
+		expect(row("a2").dataset["status"]).toBe("fixed");
+		expect(row("a3").dataset["resolved"]).toBe("fixed");
+	});
+
+	test("Verified and Reopen… in the head call their actions", () => {
+		const c = fourMarks();
+		const calls: unknown[] = [];
+		render(
+			caseState(c),
+			actionsWith({
+				verifyMark: (_c, a) => void calls.push(["verify", a.id]),
+				editMark: (_c, a, mode) => void calls.push(["edit", a.id, mode]),
+			}),
+		);
+		for (const name of ["verify", "reopen"])
+			(
+				row("a2").querySelector(
+					`.mark-sub [data-mark-action="${name}"]`,
+				) as unknown as HTMLElement
+			).click();
+		expect(calls).toEqual([
+			["verify", "a2"],
+			["edit", "a2", "reopen"],
+		]);
+	});
+
+	test("a reopened mark: its note's first line in the head, the history in order", () => {
+		const c = fourMarks();
+		const verified: Case = {
+			...c,
+			updatedAt: "2026-11-14T15:00:00Z",
+			annotations: [
+				{
+					...(c.annotations[0] as Annotation),
+					resolution: {
+						kind: "fixed",
+						note: "Hover state too",
+						at: "2026-11-14T09:00:00Z",
+						app: CLAUDE,
+						verified: { at: "2026-11-14T15:00:00Z" },
+					},
+				},
+			],
+		};
+		render(caseState(c), noActions);
+		expect(row("a1").querySelector(".mark-sub .reopened")?.textContent).toBe(
+			"Reopened: Still pale on hover",
+		);
+		render(caseState(verified), noActions);
+		const lines = [...row("a1").querySelectorAll(".history li")].map((li) => [
+			li.getAttribute("data-kind"),
+			li.textContent,
+		]);
+		expect(lines.map(([kind]) => kind)).toEqual([
+			"fixed",
+			"reopened",
+			"fixed",
+			"verified",
+		]);
+		expect(lines[0]?.[1]).toMatch(/^Fixed .+ · Darker text, 7:1 now$/);
+		expect(lines[1]?.[1]).toMatch(/^Reopened .+ · Still pale on hover/);
+		expect(lines[2]?.[1]).toMatch(
+			/^Fixed .+ by Claude \(claude\.ai\) · Hover state too$/,
+		);
+		expect(lines[3]?.[1]).toMatch(/^Verified /);
+		// Not reopened any more: no reopen line in the head.
+		expect(row("a1").querySelector(".mark-sub .reopened")).toBeNull();
+	});
+
+	test("a status from a file says so in the history", () => {
+		const c = fourMarks();
+		const fromFile: Case = {
+			...c,
+			updatedAt: "2026-11-15T10:00:00Z",
+			importedAt: "2026-11-15T10:00:00Z",
+			annotations: [
+				{
+					...(c.annotations[1] as Annotation),
+					resolution: {
+						kind: "fixed",
+						at: "2026-11-14T09:00:00Z",
+						app: CLAUDE,
+						imported: true,
+						verified: { at: "2026-11-14T15:00:00Z", imported: true },
+					},
+				},
+			],
+		};
+		render(caseState(fromFile), noActions);
+		const lines = [...row("a2").querySelectorAll(".history li")].map(
+			(li) => li.textContent,
+		);
+		expect(lines[0]).toMatch(
+			/^Fixed .+ by Claude \(claude\.ai\), as the file says$/,
+		);
+		expect(lines[1]).toMatch(/^Verified .+, as the file says$/);
+	});
+
+	test("the crop of a verified or closed mark is not greyed", async () => {
+		const css = await Bun.file(
+			new URL("../src/sidepanel/style.css", import.meta.url),
+		).text();
+		expect(css).not.toMatch(/\[data-resolved\][^{]*img/);
+	});
+
+	test("Resolve…: four choices, the note, and the choice to resolveMark", () => {
+		const c = fourMarks();
+		const calls: unknown[] = [];
+		const actions = actionsWith({
+			resolveMark: (_c, a, kind, note) => void calls.push([a.id, kind, note]),
+		});
+		render(
+			caseState(c, (s) => {
+				s.markEdit = {
+					annotationId: "a1",
+					mode: "resolve",
+					kind: "fixed",
+					text: "",
+				};
+			}),
+			actions,
+		);
+		const form = row("a1").querySelector(
+			"[data-form=resolve]",
+		) as unknown as HTMLElement;
+		expect(form.querySelector("legend")?.textContent).toBe("Mark 1 is");
+		expect(
+			[...form.querySelectorAll("label.choice")].map((l) => l.textContent),
+		).toEqual([
+			"Fixed, to verify",
+			"Fixed and verified",
+			"Won't fix",
+			"Can't reproduce",
+		]);
+		expect(
+			(form.querySelector("input.note") as unknown as HTMLInputElement)
+				.placeholder,
+		).toBe("Note (optional): what was done, or why");
+		(
+			form.querySelector(
+				'input[value="verified"]',
+			) as unknown as HTMLInputElement
+		).checked = true;
+		const done = form.querySelector(
+			'[data-mark-action="resolve-done"]',
+		) as unknown as HTMLElement;
+		expect(done.textContent).toBe("Save");
+		done.click();
+		expect(calls).toEqual([["a1", "verified", ""]]);
+	});
+
+	test("Reopen…: the note is required, then goes to reopenMark", () => {
+		const c = fourMarks();
+		const calls: unknown[] = [];
+		const actions = actionsWith({
+			reopenMark: (_c, a, note) => void calls.push([a.id, note]),
+		});
+		render(
+			caseState(c, (s) => {
+				s.markEdit = {
+					annotationId: "a2",
+					mode: "reopen",
+					kind: "fixed",
+					text: "",
+				};
+			}),
+			actions,
+		);
+		const form = row("a2").querySelector(
+			"[data-form=reopen]",
+		) as unknown as HTMLElement;
+		expect(form.querySelector("legend")?.textContent).toBe("Reopen mark 2");
+		const field = form.querySelector(
+			"textarea",
+		) as unknown as HTMLTextAreaElement;
+		expect(field.placeholder).toBe(
+			"What is still wrong? The developer reads this first.",
+		);
+		const done = form.querySelector(
+			'[data-mark-action="reopen-done"]',
+		) as unknown as HTMLButtonElement;
+		expect(done.textContent).toBe("Reopen");
+		expect(done.disabled).toBe(true);
+		field.value = "   ";
+		field.dispatchEvent(new window.Event("input") as unknown as Event);
+		expect(done.disabled).toBe(true);
+		field.value = "Still pale";
+		field.dispatchEvent(new window.Event("input") as unknown as Event);
+		expect(done.disabled).toBe(false);
+		done.click();
+		expect(calls).toEqual([["a2", "Still pale"]]);
+		// The head's buttons wait while a form is open.
+		expect(row("a2").querySelector(".mark-sub button")).toBeNull();
+	});
+
+	test("the case list counts by status, with the bar", () => {
+		const c = fourMarks();
+		const home = initialState();
+		home.cases = [c];
+		render(home, noActions);
+		const item = window.document.querySelector(
+			`[data-case="${c.id}"]`,
+		) as unknown as HTMLElement;
+		expect(item.textContent).toContain(
+			"4 marks (1 open, 1 to verify, 1 verified, 1 closed)",
+		);
+		expect(
+			[...item.querySelectorAll(".progress > span")].map((s) =>
+				s.getAttribute("data-kind"),
+			),
+		).toEqual(["open", "toVerify", "verified", "closed"]);
+	});
+
+	test("the import prompt says what differs: the counts of both copies", () => {
+		const here = {
+			...sampleCase("c_back"),
+			annotations: [mark(1), mark(2), mark(3)],
+		};
+		const file: Case = {
+			...here,
+			updatedAt: "2026-11-14T10:00:00Z",
+			annotations: [
+				mark(1),
+				mark(2, { resolution: { kind: "fixed", at: "2026-11-14T09:00:00Z" } }),
+				mark(3, { resolution: { kind: "fixed", at: "2026-11-14T09:00:00Z" } }),
+			],
+		};
+		const state = initialState();
+		state.importing = {
+			parsed: { case: file, images: async () => new Map() },
+			existing: here,
+		};
+		render(state, noActions);
+		expect(
+			window.document.querySelector('[data-role="import-counts"]')?.textContent,
+		).toBe("Here: 3 open. In the file: 1 open, 2 to verify.");
+		state.importing = undefined;
+		render(state, noActions);
 	});
 });
 
@@ -669,6 +1140,8 @@ describe("a case on a tab Overmark may not run on", () => {
 		expect(el("load-case").hidden).toBe(true);
 		expect(el<HTMLButtonElement>("add-marks").disabled).toBe(true);
 		expect(el("add-marks").title).toContain("see the notice");
+		// The notice is below the actions in a case, above the button on Home.
+		expect(el("add-marks").title).not.toContain("above");
 		const show = window.document.querySelector(
 			'[data-action="show"]',
 		) as unknown as HTMLButtonElement;
@@ -1046,6 +1519,10 @@ describe("an imported case", () => {
 		render(caseState(c), noActions);
 		expect(el("case-origin").hidden).toBe(false);
 		expect(el("case-origin").textContent).toContain("Imported from a file");
+		// What came in with it is the file's: statuses and reopen notes too.
+		expect(el("case-origin").textContent).toContain(
+			"statuses and reopen notes, summary and findings are as the file says",
+		);
 		render(caseState(sampleCase("c_j")), noActions);
 		expect(el("case-origin").hidden).toBe(true);
 	});
@@ -1315,6 +1792,42 @@ describe("the top bar and Settings (DEC-023)", () => {
 		expect(el("back").nextElementSibling).toBe(el("ai-button"));
 		el("back").click();
 		expect(called).toEqual(["close"]);
+	});
+
+	test("a double click on the back button is one click: it changed its meaning under the pointer", () => {
+		const called: string[] = [];
+		const actions = actionsWith({
+			closeSettings: () => void called.push("settings"),
+			closeCase: () => void called.push("case"),
+		});
+		const c = sampleCase("c_double");
+		try {
+			setSystemTime(new Date("2020-01-01T10:00:00Z"));
+			render(
+				caseState(c, (s) => (s.settings = true)),
+				actions,
+			);
+			setSystemTime(new Date("2020-01-01T10:00:05Z"));
+			el("back").click();
+			// Settings closes: the same button is "← All cases" now.
+			render(caseState(c), actions);
+			setSystemTime(new Date("2020-01-01T10:00:05.200Z"));
+			el("back").click();
+			expect(called).toEqual(["settings"]);
+			setSystemTime(new Date("2020-01-01T10:00:06Z"));
+			el("back").click();
+			expect(called).toEqual(["settings", "case"]);
+			// Blocked a moment after the first click: the second is no decision.
+			render(
+				caseState(c, (s) => (s.leaving = { phase: "blocked", left: 1 })),
+				actions,
+			);
+			setSystemTime(new Date("2020-01-01T10:00:06.100Z"));
+			el("back").click();
+			expect(called).toEqual(["settings", "case"]);
+		} finally {
+			setSystemTime();
+		}
 	});
 
 	test("while the toolbar finishes, the back button waits and the case says so", () => {
@@ -1756,90 +2269,224 @@ describe("one import at a time", () => {
 	});
 });
 
-describe("the sync to a folder (DEC-021)", () => {
-	const sync = (
+describe("the sync (DEC-021, DEC-025)", () => {
+	const draw = (
 		change: (s: PanelState["sync"]) => void,
 		actions = noActions,
+		view?: Case,
 	) => {
-		const state = initialState();
+		const state = view === undefined ? initialState() : caseState(view);
 		change(state.sync);
 		render(state, actions);
 		return el<HTMLDivElement>("sync");
 	};
+	const sync = draw;
 	const buttons = (box: HTMLElement) =>
 		[...box.querySelectorAll("button")].map((b) => [
 			b.textContent,
 			b.title !== "",
 		]);
+	const labels = (box: HTMLElement) => buttons(box).map(([label]) => label);
+	const synced = (s: PanelState["sync"]) => {
+		s.target = "downloads";
+		s.targetId = "downloads";
+		s.status = {
+			folderId: "downloads",
+			state: "synced",
+			lastSyncedAt: "2026-11-12T09:30:00Z",
+		};
+	};
+	const pausedFolder = (s: PanelState["sync"]) => {
+		s.target = "folder";
+		s.targetId = "f";
+		s.folder = "iCloud cases";
+		s.status = { folderId: "f", state: "paused", reason: "access" };
+	};
+	const banner = () => el<HTMLDivElement>("sync-banner");
 
-	test("not syncing: one button that says what it does", () => {
+	test("off: what it does, Sync to Downloads first, Choose a folder…, and the note", () => {
 		const box = sync(() => {});
-		expect(buttons(box)).toEqual([["Sync to a folder…", true]]);
-		expect(box.querySelector("button")?.title).toContain(
-			"A deleted case keeps its file",
+		expect(box.querySelector(".sync-state")?.textContent).toBe("Sync is off.");
+		expect(buttons(box)).toEqual([
+			["Sync to Downloads", true],
+			["Choose a folder…", true],
+		]);
+		// Ink, not amber: amber is Home's Annotate this page alone (DEC-024).
+		expect(box.querySelector('[data-action="sync-downloads"]')?.className).toBe(
+			"strong",
 		);
+		expect(box.querySelector(".sync-note")?.textContent).toContain(
+			"works with this panel closed",
+		);
+		expect(
+			(box.querySelector('[data-action="sync-choose"]') as HTMLElement).title,
+		).toContain("A deleted case keeps its file");
 	});
 
-	test("syncing: the folder, when it was last synced, Change folder and Stop syncing", () => {
+	test("asking for downloads: what Chrome asks, no buttons", () => {
 		const box = sync((s) => {
-			s.folder = "Overmark";
-			s.status = {
-				folderId: "f",
-				state: "synced",
-				lastSyncedAt: "2026-11-12T09:30:00Z",
-			};
+			s.asking = true;
 		});
+		expect(box.textContent).toContain(
+			"Chrome asks whether Overmark may manage your downloads.",
+		);
+		expect(labels(box)).toEqual([]);
+	});
+
+	test("synced to Downloads: where, when, Show in folder · Change… · Stop syncing", () => {
+		let shown = 0;
+		const box = sync(synced, actionsWith({ syncShow: () => shown++ }));
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to Overmark",
+			"Syncing to Downloads/Overmark",
 		);
 		expect(box.querySelector(".sync-line")?.textContent).toStartWith(
 			"Last synced ",
 		);
 		expect(buttons(box)).toEqual([
-			["Change folder…", true],
+			["Show in folder", true],
+			["Change…", true],
 			["Stop syncing", true],
 		]);
+		(box.querySelector('[data-action="sync-show"]') as HTMLElement).click();
+		expect(shown).toBe(1);
+		expect(banner().hidden).toBe(true);
 	});
 
-	test("writing: how many cases are left", () => {
+	test("syncing to a folder: its name, how many cases are left", () => {
 		const box = sync((s) => {
+			s.target = "folder";
+			s.targetId = "f";
 			s.folder = "Overmark";
 			s.status = { folderId: "f", state: "syncing", left: 3 };
 		});
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Syncing to “Overmark”",
+		);
 		expect(box.querySelector(".sync-line")?.textContent).toBe(
 			"Writing 3 cases…",
 		);
+		expect(labels(box)).toEqual(["Change…", "Stop syncing"]);
 	});
 
-	test("paused: says so, with Allow access first", () => {
+	test("Change…: the Off state's buttons with Cancel, the target still shown", () => {
+		const box = sync((s) => {
+			synced(s);
+			s.changing = true;
+		});
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Syncing to Downloads/Overmark",
+		);
+		expect(labels(box)).toEqual([
+			"Sync to Downloads",
+			"Choose a folder…",
+			"Cancel",
+		]);
+	});
+
+	test("paused, the folder: the section says so, with the banner's buttons", () => {
 		let allowed = 0;
+		let downloads = 0;
 		const box = sync(
-			(s) => {
-				s.folder = "Overmark";
-				s.status = {
-					folderId: "f",
-					state: "paused",
-					lastSyncedAt: "2026-11-12T09:30:00Z",
-				};
-			},
-			actionsWith({ syncAllow: () => allowed++ }),
+			pausedFolder,
+			actionsWith({
+				syncAllow: () => allowed++,
+				syncDownloads: () => downloads++,
+			}),
 		);
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Sync paused: allow access again",
+			"Paused: Chrome wants your OK for “iCloud cases” again.",
 		);
-		expect(buttons(box).map(([label]) => label)).toEqual([
+		expect(labels(box)).toEqual([
 			"Allow access",
-			"Change folder…",
+			"Use Downloads instead",
+			"Change…",
 			"Stop syncing",
 		]);
+		(box.querySelector('[data-action="sync-allow"]') as HTMLElement).click();
 		(
-			box.querySelector('[data-action="sync-allow"]') as HTMLButtonElement
+			box.querySelector('[data-action="sync-use-downloads"]') as HTMLElement
 		).click();
-		expect(allowed).toBe(1);
+		expect([allowed, downloads]).toEqual([1, 1]);
 	});
 
-	test("failed: what went wrong and Try again", () => {
+	test("paused: the banner, on Home and in a case, that cannot be dismissed", () => {
+		let allowed = 0;
+		for (const view of [undefined, sampleCase("c_1")]) {
+			draw(pausedFolder, actionsWith({ syncAllow: () => allowed++ }), view);
+			const b = banner();
+			expect(b.hidden).toBe(false);
+			expect(b.getAttribute("role")).toBe("status");
+			expect(b.dataset["sync"]).toBe("paused");
+			expect(b.querySelector("p")?.textContent).toBe(
+				"Sync is paused. Chrome needs your OK to write to “iCloud cases” again.",
+			);
+			expect(b.querySelector("strong")?.textContent).toBe("Sync is paused.");
+			expect(labels(b)).toEqual(["Allow access", "Use Downloads instead"]);
+			(b.querySelector('[data-action="sync-allow"]') as HTMLElement).click();
+		}
+		expect(allowed).toBe(2);
+		expect(el("case-view").hidden).toBe(false);
+	});
+
+	test("a no to Allow access: said under the banner's text", () => {
+		draw((s) => {
+			pausedFolder(s);
+			s.refused = true;
+		});
+		expect(banner().textContent).toContain(
+			"Chrome did not allow it. Click Allow access to ask again, or use Downloads instead.",
+		);
+	});
+
+	test("what a banner button could not do is said in the banner, in a case too", () => {
+		const box = draw(
+			(s) => {
+				pausedFolder(s);
+				s.problem = "Chrome did not allow Overmark to save to your downloads.";
+			},
+			noActions,
+			sampleCase("c_1"),
+		);
+		expect(banner().querySelector("[role=alert]")?.textContent).toBe(
+			"Chrome did not allow Overmark to save to your downloads.",
+		);
+		// Once is enough: not again in the section.
+		expect(box.querySelector("[role=alert]")).toBeNull();
+	});
+
+	test("paused, the downloads permission gone: Allow downloads", () => {
+		let asked = 0;
+		const box = draw(
+			(s) => {
+				s.target = "downloads";
+				s.targetId = "downloads";
+				s.status = {
+					folderId: "downloads",
+					state: "paused",
+					reason: "downloads",
+				};
+			},
+			actionsWith({ syncAllowDownloads: () => asked++ }),
+		);
+		expect(box.querySelector(".sync-state")?.textContent).toBe(
+			"Paused: Overmark may no longer save to your downloads.",
+		);
+		expect(banner().querySelector("p")?.textContent).toBe(
+			"Sync is paused. Overmark may no longer save to your downloads.",
+		);
+		expect(labels(banner())).toEqual(["Allow downloads"]);
+		(
+			banner().querySelector(
+				'[data-action="sync-allow-downloads"]',
+			) as HTMLElement
+		).click();
+		expect(asked).toBe(1);
+	});
+
+	test("failed: the problem and Try again, in the section and the banner", () => {
 		const box = sync((s) => {
+			s.target = "folder";
+			s.targetId = "f";
 			s.folder = "Overmark";
 			s.status = {
 				folderId: "f",
@@ -1850,26 +2497,29 @@ describe("the sync to a folder (DEC-021)", () => {
 		expect(box.querySelector("[role=alert]")?.textContent).toBe(
 			"The folder “Overmark” is no longer there.",
 		);
-		expect(buttons(box).map(([label]) => label)).toContain("Try again");
+		expect(labels(box)).toContain("Try again");
+		expect(banner().dataset["sync"]).toBe("failed");
+		expect(banner().querySelector("p")?.textContent).toBe(
+			"Sync failed. The folder “Overmark” is no longer there.",
+		);
+		expect(labels(banner())).toEqual(["Try again"]);
+	});
+
+	test("the banner goes with the state", () => {
+		draw(pausedFolder);
+		expect(banner().hidden).toBe(false);
+		draw(synced);
+		expect(banner().hidden).toBe(true);
+		expect(banner().childElementCount).toBe(0);
 	});
 
 	test("drawn again only when it shows something else", () => {
-		const first = sync((s) => {
-			s.folder = "Overmark";
-			s.status = {
-				folderId: "f",
-				state: "synced",
-				lastSyncedAt: "2026-11-12T09:30:00Z",
-			};
-		}).querySelector("button");
-		const again = sync((s) => {
-			s.folder = "Overmark";
-			s.status = {
-				folderId: "f",
-				state: "synced",
-				lastSyncedAt: "2026-11-12T09:30:00Z",
-			};
-		}).querySelector("button");
+		const first = sync(synced).querySelector("button");
+		const again = sync(synced).querySelector("button");
 		expect(again).toBe(first);
+		draw(pausedFolder);
+		const bannerButton = banner().querySelector("button");
+		draw(pausedFolder);
+		expect(banner().querySelector("button")).toBe(bannerButton);
 	});
 });

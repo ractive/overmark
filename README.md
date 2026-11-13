@@ -81,9 +81,18 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    container changed its size. A mark without an element goes where it was, dashed.
    Show scrolls to a mark; Next candidate tries the next best element. The screenshots
    stay the record, so a mark makes sense even when its element is not found.
-5. Each mark in the side panel can be resolved (Fixed, Won't fix or Can't reproduce, with
-   an optional note), opened again, have its comment edited, or be deleted. A resolved
-   mark is drawn grey on a loaded page and no longer counted as open. A deleted mark's
+5. Each mark in the side panel has a status: open, fixed and to verify, verified, won't
+   fix or can't reproduce. Resolve… sets it (Fixed, to verify; Fixed and verified; Won't
+   fix; Can't reproduce; with an optional note). The tester on the new build then
+   clicks Verified on a fix that holds, or Reopen… with a note on what is still wrong;
+   the claimed fix and its note stay in the mark's history. The status chips under the
+   case's bar (Open, To verify, Verified, Closed) count the marks and filter the list:
+   the developer works through Open, the tester through To verify. On a loaded page a
+   mark to verify is drawn in full in violet; a verified or closed one is drawn grey and
+   faded, and no longer counted. Both sides should run this version: an older one
+   reading the file shows a verified mark as Fixed and a reopened one as open without
+   its note (`case.md` in the file still has them). A mark can also have its comment
+   edited, or be deleted. A deleted mark's
    number is not given again, and its pin stays on screenshots that other marks share.
    Under the comment a mark shows its AI findings: what a connected AI app found out
    about it, each with the app's name and when it was written. An AI app never changes
@@ -101,18 +110,34 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    Overmark may manage your downloads (an optional permission): with a yes the side
    panel shows where the file went, with Copy (its full path) and Show in folder; with
    a no the file is saved as before and Chrome asks again only at the next Export.
-8. "Sync to a folder…", under the case list, writes every case to a folder you choose
-   once (one in iCloud Drive or Dropbox, say): each case as its own file, the same
-   `<title>.overmark.zip` as Export writes, and again whenever the case changes, also
-   when an AI app changed it. The folder is a mirror: Overmark never reads from it, and
-   a deleted case keeps its file there, so "Import a case…" can bring it back. A case
-   whose title changed gets a file of the new name and its old file goes; two cases of
-   the same title get `-2`, `-3`, and a file Overmark did not write is never
-   overwritten. The side panel shows "Syncing to <folder>" with when it last synced,
-   "Change folder…" and "Stop syncing" (the files stay). Chrome lets Overmark write to
-   the folder only while its side panel is open, and asks for the folder again after
-   the side panel was closed or the browser restarted: the panel then says "Sync paused:
-   allow access again", and "Allow access" writes what changed meanwhile.
+8. Sync, under the case list, keeps a copy of every case as a file: each case as its own
+   file, the same `<title>.overmark.zip` as Export writes, and again whenever the case
+   changes, also when an AI app changed it. The files are a mirror: Overmark never reads
+   them, and a deleted case keeps its file, so "Import a case…" can bring it back. Two
+   cases of the same title get `-2`, `-3`. Where to:
+   - **Sync to Downloads** (the default) writes to a folder `Overmark` in Chrome's
+     downloads folder. Chrome asks once whether Overmark may manage your downloads; then
+     it writes with the side panel closed too, also after a browser restart. Each write
+     shows in Chrome's download list; Overmark keeps only its newest entry there, for
+     "Show in folder". A case whose title changed gets a file of the new name and the old
+     one stays. Files deleted there are written again at their case's next change, or
+     all at once with Change… and Sync to Downloads. The folder is one for every Chrome
+     profile and browser on the computer: two of them syncing to Downloads write into the
+     same `Overmark` folder, and a case of the same title in each overwrites the other's
+     file; give each its own folder with Choose a folder…. With Chrome's "Ask where to save each file before downloading" on, Chrome
+     would ask at every write: the sync then says so and fails until it is off.
+   - **Choose a folder…** writes to any folder (one in iCloud Drive or Dropbox, say). A
+     renamed case's old file goes there, and a file Overmark did not write is never
+     overwritten. Chrome lets Overmark write to it only while its side panel is open, and
+     asks for the folder again after the side panel was closed or the browser restarted.
+   The side panel shows where it syncs with when it last synced, "Change…" and "Stop
+   syncing" (the files stay). When the sync is paused (the folder needs your OK again, or
+   the downloads permission was taken back) or has failed, a banner above every view of
+   the side panel says so with the button that helps (Allow access, Allow downloads, Try
+   again; for a folder also "Use Downloads instead"), and the toolbar icon shows "!"
+   (amber paused, red failed), also before the side panel is opened. Permissions for
+   this: the optional `downloads`, and `offscreen` (no install warning), as a service
+   worker cannot make the file's URL for a download itself.
 
 ## With an AI app
 
@@ -128,8 +153,8 @@ The tools:
 
 | Tool | What it does |
 |---|---|
-| `list_cases` | The saved cases |
-| `get_case` | A case's summary for the developer and its marks with their comments, AI findings, element details and crops |
+| `list_cases` | The saved cases, with their marks by status |
+| `get_case` | A case's summary for the developer and its marks with their comments, statuses, reopens, AI findings, element details and crops |
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
@@ -137,7 +162,7 @@ The tools:
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |
 | `set_summary` | Records the summary for the developer: what should change overall, as agreed; asks first |
-| `set_mark_status` | Resolves a mark or opens it again; asks first |
+| `set_mark_status` | Sets a mark fixed, verified (a fixed one, when you say so), won't fix or can't reproduce, or reopens it with a note; asks first |
 | `add_finding` | Adds a finding of the AI app to a mark, apart from your comment; asks first |
 | `edit_finding` | Changes one of the app's own findings; asks first |
 | `delete_finding` | Deletes one of the app's own findings; asks first |

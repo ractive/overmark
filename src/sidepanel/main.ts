@@ -7,12 +7,15 @@
 import {
 	type Annotation,
 	type Case,
+	markStatus,
 	nextNumbers,
 	validateCase,
+	withChoice,
 	withComment,
 	withoutAnnotation,
 	withoutFinding,
-	withResolution,
+	withReopen,
+	withVerified,
 } from "../lib/case.ts";
 import {
 	type CheckedExport,
@@ -55,7 +58,7 @@ import {
 	Panel,
 	type PanelState,
 } from "./state.ts";
-import { startSync } from "./sync.ts";
+import { startSync, syncActions } from "./sync.ts";
 import { type Actions, NO_ACCESS, render } from "./view.ts";
 
 const store = new IdbStore();
@@ -316,12 +319,23 @@ async function loadOnLoaded(
 	try {
 		const waits = [0, 1000, 2000];
 		for (const [i, wait] of waits.entries()) {
+			let now = c;
 			if (wait > 0) {
 				await sleep(wait);
 				if (!work.current() || !showing(c.id) || hiddenOn.has(tabId)) return;
 				if ((await activeTab())?.id !== tabId) return;
+				// As stored now: a mark may have gone in meanwhile.
+				const stored = await store.getCase(c.id);
+				if (stored === undefined || !work.current()) return;
+				now = stored;
 			}
-			const result = await loadInto(c, tabId, hint, work, i < waits.length - 1);
+			const result = await loadInto(
+				now,
+				tabId,
+				hint,
+				work,
+				i < waits.length - 1,
+			);
 			if (result === undefined || result.found === result.total) return;
 		}
 	} finally {
@@ -488,8 +502,9 @@ let adopting: string | undefined;
 /**
  * On Home, a toolbar on the tab in front that adds to a stored case opens
  * that case (DEC-023): so "Save case…" opens the new case, and a panel
- * opened again is in the case the toolbar adds to. The page is asked once
- * more, so news older than "← All cases" opens nothing.
+ * opened again is in the case the toolbar adds to; one whose case is gone
+ * draws a new case. The page is asked once more, so news older than "← All
+ * cases" opens nothing.
  */
 async function adopt(): Promise<void> {
 	const tabId = state.tab?.id;
@@ -510,9 +525,11 @@ async function adopt(): Promise<void> {
 			store.getCase(caseId),
 			overlayState(tabId),
 		]);
-		if (c === undefined || !now?.visible || now.target?.caseId !== caseId)
-			return;
+		if (!now?.visible || now.target?.caseId !== caseId) return;
 		if (state.view.kind !== "home" || (await activeTab())?.id !== tabId) return;
+		// Its case was deleted meanwhile (elsewhere, the tab not in front): it
+		// draws a new case, its drafts kept, as clearDeleted does.
+		if (c === undefined) return await startAnnotating();
 		toolbarOn.add(tabId);
 		update((s) => {
 			if (s.tab?.id === tabId) s.overlay = now;
@@ -616,6 +633,7 @@ function openCase(id: string): void {
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
+		s.markFilter = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
 		s.leaving = undefined;
@@ -646,6 +664,14 @@ async function hideNewCase(tabId?: number): Promise<void> {
 }
 
 /**
+ * A tab's answer to `overlay:end` comes once its marks are in, or not: a mark
+ * may wait for an AI app's screenshot (10 s) and take its own (8 s at most).
+ * A tab that says nothing for longer (frozen by Chrome, a page in an
+ * `alert()`) counts as ended.
+ */
+const END_TIMEOUT_MS = 20_000;
+
+/**
  * End the toolbar adding to the case (`overlay:end`) on the tab in front and
  * wherever the panel put it up for the case; answers how many marks are
  * still not in the case where a toolbar stays up for it, and the state of
@@ -653,16 +679,19 @@ async function hideNewCase(tabId?: number): Promise<void> {
  */
 async function endToolbars(
 	caseId: string,
-	discard: boolean,
+	how: { discard?: boolean; retry?: boolean },
 ): Promise<{ left: number; front: OverlayState | undefined }> {
 	const front = (await activeTab())?.id;
 	const tabs = new Set(toolbarOn);
 	if (front !== undefined) tabs.add(front);
 	const answers = await Promise.all(
 		[...tabs].map(async (tabId) => {
-			const answer = (await chrome.tabs
-				.sendMessage(tabId, { type: "overlay:end", caseId, discard })
-				.catch(() => undefined)) as OverlayState | undefined;
+			const answer = (await Promise.race([
+				chrome.tabs
+					.sendMessage(tabId, { type: "overlay:end", caseId, ...how })
+					.catch(() => undefined),
+				sleep(END_TIMEOUT_MS),
+			])) as OverlayState | undefined;
 			return { tabId, answer };
 		}),
 	);
@@ -699,28 +728,39 @@ const leavingNow = (): PanelState["leaving"] => state.leaving;
  * "← All cases" (DEC-023): the toolbar adding to the case finishes as its
  * Done does and adds to no case any more, then the case closes and its marks
  * leave the tab in front. A mark that could not be added keeps the toolbar
- * up and the panel in the case, which says so. The next click ends it again,
- * and the page decides: a mark its last Done left out goes then, as with its
- * own Done again; one drawn or tried since is tried once more (DEC-014).
+ * up and the panel in the case, which says so: the first click is no Done
+ * again, so a mark an earlier Done left out is tried once more. The next
+ * click ends it again, and the page decides: a mark its last Done left out
+ * goes then, as with its own Done again; one drawn or tried since is tried
+ * once more (DEC-014).
  */
 async function leaveCase(): Promise<void> {
 	if (state.view.kind !== "case" || state.leaving?.phase === "finishing")
 		return;
 	const caseId = state.view.id;
+	// The first click tries the marks an earlier Done left out once more;
+	// the second is the page's Done again.
+	const retry = state.leaving?.phase !== "blocked";
 	update((s) => (s.leaving = { phase: "finishing" }));
 	// A refresh read before the end would show the toolbar as it was.
 	tabWork.cancel();
-	const { left, front } = await endToolbars(caseId, false);
-	// Closed meanwhile (deleted elsewhere), or opened again.
-	if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
-	if (left > 0) {
-		update((s) => {
-			s.leaving = { phase: "blocked", left };
-			if (front !== undefined) s.overlay = front;
-		});
-		return;
+	try {
+		const { left, front } = await endToolbars(caseId, { retry });
+		// Closed meanwhile (deleted elsewhere), or opened again.
+		if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
+		if (left > 0) {
+			update((s) => {
+				s.leaving = { phase: "blocked", left };
+				if (front !== undefined) s.overlay = front;
+			});
+			return;
+		}
+		closeCase();
+	} finally {
+		// Not left for good when something above failed.
+		if (leavingNow()?.phase === "finishing")
+			update((s) => (s.leaving = undefined));
 	}
-	closeCase();
 }
 
 /**
@@ -825,6 +865,12 @@ function announce(caseId: string): void {
  * a new one ("Annotate this page" never continues a case, DEC-023).
  */
 async function startAnnotating(target?: Case): Promise<void> {
+	// On Home its outcome goes under This page; in a case under the case's
+	// buttons, and only where there is one (what a draw found stays).
+	const say = (text: string | undefined) => {
+		if (target === undefined) update((s) => (s.hint = text));
+		else if (text !== undefined) caseHintWriter()(text);
+	};
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
 	tabWork.cancel(); // a refresh still running must not overwrite this
@@ -844,14 +890,14 @@ async function startAnnotating(target?: Case): Promise<void> {
 				: {}),
 		});
 		if (target !== undefined) toolbarOn.add(tab.id);
-		update((s) => {
-			s.overlay = overlay;
-			s.hint = overlay.saving
+		update((s) => (s.overlay = overlay));
+		say(
+			overlay.saving
 				? "Overmark is still saving the last marks on this page; the toolbar switches once that is done."
-				: undefined;
-		});
+				: undefined,
+		);
 	} catch (error) {
-		update((s) => (s.hint = describeError(error)));
+		say(describeError(error));
 	}
 }
 
@@ -901,8 +947,14 @@ async function finishImport(
 			batch.stored++;
 			return await importRest(batch);
 		}
-		// Its marks are drawn on the tab in front, as for any case opened.
-		openCase(c.id);
+		// Its marks are drawn on the tab in front, as for any case opened;
+		// but not over a case opened meanwhile, whose toolbar may be up
+		// (DEC-023): the list shows it.
+		if (state.view.kind === "home") openCase(c.id);
+		else {
+			update((s) => (s.importDone = `Imported “${c.title}”.`));
+			void refreshCases();
+		}
 	} catch (error) {
 		update(
 			(s) =>
@@ -1162,7 +1214,11 @@ const actions: Actions = {
 		})();
 	},
 
-	addMarks: (c) => void startAnnotating(c),
+	addMarks: (c) => {
+		// The marks drawn now show, whatever the list was filtered by.
+		update((s) => (s.markFilter = undefined));
+		void startAnnotating(c);
+	},
 
 	doneAdding(c) {
 		const hint = caseHintWriter();
@@ -1232,7 +1288,7 @@ const actions: Actions = {
 		const hint = caseHintWriter();
 		void (async () => {
 			// The toolbar adding to it goes first, with the marks not in it yet.
-			await endToolbars(c.id, true);
+			await endToolbars(c.id, { discard: true });
 			await store.deleteCase(c.id);
 			closeCase();
 			void clearDeleted(c.id);
@@ -1241,13 +1297,19 @@ const actions: Actions = {
 	},
 
 	editMark(_c, a, mode) {
+		const status = markStatus(a);
 		update((s) => {
 			s.markDeleteArmed = undefined;
 			s.markEdit = {
 				annotationId: a.id,
 				mode,
-				kind: a.resolution?.kind ?? "fixed",
-				text: mode === "comment" ? a.comment : (a.resolution?.note ?? ""),
+				kind: status === "open" ? "fixed" : status,
+				text:
+					mode === "comment"
+						? a.comment
+						: mode === "resolve"
+							? (a.resolution?.note ?? "")
+							: "",
 			};
 		});
 	},
@@ -1265,15 +1327,36 @@ const actions: Actions = {
 	resolveMark(c, a, kind, note) {
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withResolution(current, a.id, { kind, note }, now),
+			value: withChoice(current, a.id, kind, note, now),
 		}));
 	},
 
-	reopenMark(c, a) {
+	verifyMark(c, a) {
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withResolution(current, a.id, null, now),
+			value: withVerified(current, a.id, undefined, now),
 		}));
+	},
+
+	reopenMark(c, a, note) {
+		// The developer reads it first: in the panel, a reopen says why.
+		if (note.trim() === "") return;
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) => ({
+			// Opened meanwhile: the form stays, and says why.
+			value: withReopen(current, a.id, { note, refuseOpen: true }, now),
+		}));
+	},
+
+	filterMarks(caseId, group) {
+		update((s) => {
+			const highest = Math.max(
+				0,
+				...(s.current?.annotations.map((a) => a.number) ?? []),
+			);
+			s.markFilter =
+				group === undefined ? undefined : { caseId, group, upTo: highest };
+		});
 	},
 
 	saveComment(c, a, text) {
@@ -1453,13 +1536,10 @@ const actions: Actions = {
 		}
 	},
 
-	syncChoose: () => panelSync.choose(),
-	syncStop: () => panelSync.stop(),
-	syncAllow: () => panelSync.allow(),
-	syncRetry: () => panelSync.retry(),
+	...syncActions(() => panelSync),
 };
 
-/** The sync to a folder (DEC-021): the worker writes, the panel chooses. */
+/** The sync to Downloads or a folder (DEC-021, DEC-025): the worker writes, the panel chooses. */
 const panelSync = startSync(update);
 
 // --- settings and import -------------------------------------------------------------

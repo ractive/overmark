@@ -744,6 +744,70 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	white-space: pre-line;
 }
 
+/* --- what the sync needs of the user, above every view (DEC-025) ------------- */
+
+/*
+ * From edge to edge, not dismissable: a warning while the sync is paused, red
+ * when it failed; the first sentence says which, the button helps.
+ */
+.sync-banner {
+	display: grid;
+	grid-template-columns: 16px minmax(0, 1fr);
+	gap: 6px var(--s2);
+	padding: 10px var(--s4) var(--s3);
+	border-bottom: 1px solid var(--warn-edge);
+	background: var(--warn-bg);
+	color: var(--ink);
+}
+
+/* The warning sign, in the banner's colour. */
+.sync-banner::before {
+	content: "";
+	width: 16px;
+	height: 16px;
+	margin-top: 1px;
+	background: var(--warn);
+	mask:
+		url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5 15 14H1z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M8 6v3.5' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='8' cy='11.75' r='.95'/%3E%3C/svg%3E")
+		center / contain no-repeat;
+}
+
+.sync-banner[data-sync="failed"] {
+	border-bottom-color: var(--danger);
+	background: var(--danger-bg);
+}
+
+.sync-banner[data-sync="failed"]::before {
+	background: var(--danger);
+}
+
+.sync-banner > * {
+	grid-column: 2;
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.sync-banner strong {
+	font-weight: 600;
+}
+
+.sync-banner-problem {
+	color: var(--danger);
+}
+
+/* With room, its one button stands right of the text. */
+@media (min-width: 400px) {
+	.sync-banner:has(> .row > button:only-child) {
+		grid-template-columns: 16px minmax(0, 1fr) auto;
+	}
+
+	.sync-banner > .row:has(> button:only-child) {
+		grid-column: 3;
+		grid-row: 1 / span 3;
+		align-self: center;
+	}
+}
+
 /* --- the views ---------------------------------------------------------------- */
 
 main {
@@ -882,41 +946,31 @@ ul.cases .title {
 	overflow-wrap: anywhere;
 }
 
-/* The sync to a folder (DEC-021). */
+/* The sync to Downloads or a folder (DEC-021, DEC-025). */
 .sync {
-	margin-top: var(--s2);
+	margin-top: var(--s4);
 }
 
 #sync p {
 	margin: 0 0 6px;
 }
 
-.sync .sync-state {
+#sync .row {
+	margin: var(--s2) 0;
+}
+
+.sync-state {
 	overflow-wrap: anywhere;
 }
 
-.sync[data-sync="paused"] .sync-state {
+#sync[data-sync="paused"] .sync-state {
 	color: var(--warn);
 	font-weight: 600;
 }
 
-/* Amber is the view's one action that starts drawing: these are ink. */
-.sync button.primary,
-.mark-form button.primary {
-	min-height: 30px;
-	border-color: var(--strong);
-	background: var(--strong);
-	color: var(--on-strong);
-}
-
-.mark-form button.primary.small {
-	min-height: 26px;
-}
-
-.sync button.primary:hover:not(:disabled),
-.mark-form button.primary:hover:not(:disabled) {
-	border-color: color-mix(in srgb, var(--strong) 84%, var(--paper));
-	background: color-mix(in srgb, var(--strong) 84%, var(--paper));
+#sync[data-sync="failed"] .sync-state {
+	color: var(--danger);
+	font-weight: 600;
 }
 
 /* --- the open case ------------------------------------------------------------ */
@@ -961,18 +1015,40 @@ ul.cases .title {
 	min-height: 0;
 }
 
-/* The case's counts and bar, where its status block goes. */
-.case-status:empty {
-	display: none;
+/*
+ * The case's summary (DEC-023): the bar, then a chip per status with marks,
+ * which is the bar's legend and the list's filter.
+ */
+.status-block {
+	display: grid;
+	gap: var(--s2);
 }
 
-.mark-counts {
-	flex-basis: 100%;
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.chip .sign {
+	font-size: 11px;
+}
+
+/* Its count: a numeral in the chip's colour, no pill in a pill. */
+.chip .count {
+	margin: 0;
+	padding: 0;
+	background: none;
+	color: inherit;
+}
+
+.status-block .all-done {
 	margin: 0;
 }
 
-.case-status .mark-counts {
-	margin: 0 0 6px;
+.all-done .sign {
+	color: var(--st-verified);
+	font-weight: 700;
 }
 
 /* Add marks (or Done adding), as wide as there is room, and Export. */
@@ -1081,7 +1157,7 @@ ul.cases .title {
 .marks-bar {
 	position: sticky;
 	top: var(--bar);
-	z-index: 1;
+	z-index: 2;
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -1096,9 +1172,22 @@ ul.cases .title {
 	margin: 0;
 }
 
+/* "Showing 2 of 5 marks. Show all": the filter of a chip is on. */
+.marks > .filtered {
+	margin: 0;
+	padding: var(--s2) var(--s4);
+	border-bottom: 1px solid var(--rule);
+}
+
+.filtered button.link {
+	min-height: 0;
+	font-size: 12px;
+	line-height: 17px;
+}
+
 /*
  * The counts as a picture: a segment per status, paper between them. The
- * words beside it say the same.
+ * chips or the words beside it say the same.
  */
 .progress {
 	display: flex;
@@ -1125,39 +1214,72 @@ ul.cases .progress {
 	background: var(--st-open);
 }
 
-.progress [data-kind="fixed"] {
-	background: var(--st-verified);
+.progress [data-kind="toVerify"] {
+	background: var(--st-verify);
 }
 
-/* Striped: told apart from Won't fix without a paler, fainter grey. */
-.progress [data-kind="cantreproduce"] {
-	background: repeating-linear-gradient(
-		-45deg,
-		var(--st-closed) 0 3px,
-		transparent 3px 5px
-	);
+.progress [data-kind="verified"] {
+	background: var(--st-verified);
 }
 
 .marks > .empty {
 	padding: var(--s3) var(--s4);
 }
 
+/*
+ * The list, as a proofreader's sheet (DEC-024): a margin on the left with
+ * each mark's pin on a rail from the first pin to the last, the marks right
+ * of it. Scanning the rail says what is left.
+ */
 ol.annotations {
+	--margin: 52px;
 	list-style: none;
 	margin: 0;
 	padding: 0;
 }
 
-/* A mark's colour is its status: open until it is settled. */
+/* A mark: a row of the list, no box; its status gives `--tone` and `--tint`. */
 .annotation {
-	--tone: var(--st-open);
-	--tint: var(--st-open-bg);
-	border-bottom: 1px solid var(--rule);
+	position: relative;
 }
 
-.annotation[data-resolved] {
-	--tone: var(--st-closed);
-	--tint: var(--st-closed-bg);
+/* The rail, behind the pin: from the first pin's middle to the last one's. */
+.annotation::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 27px;
+	width: 2px;
+	background: color-mix(in srgb, var(--edge) 40%, var(--paper));
+}
+
+.annotation:first-child::before {
+	top: 22px;
+}
+
+.annotation:last-child::before {
+	bottom: auto;
+	height: 22px;
+}
+
+.annotation:only-child::before {
+	display: none;
+}
+
+/* The line between two marks stays out of the margin. */
+.annotation::after {
+	content: "";
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	left: var(--margin);
+	height: 1px;
+	background: var(--rule);
+}
+
+.annotation:last-child::after {
+	left: 0;
 }
 
 .mark-head {
@@ -1167,18 +1289,15 @@ ol.annotations {
 	padding-right: var(--s4);
 }
 
-.mark-head:hover {
-	background: var(--wash);
-}
-
 /* The whole head opens and closes the mark; Show sits beside it. */
 .mark-toggle {
 	flex: 1;
 	min-width: 0;
 	display: grid;
-	grid-template-columns: 10px auto minmax(0, 1fr) auto auto;
+	/* The pin in the margin, the comment, who wrote it, the chevron. */
+	grid-template-columns: 24px minmax(0, 1fr) auto 10px;
 	align-items: start;
-	gap: var(--s2);
+	gap: var(--s2) var(--s3);
 	padding: 10px 0 10px var(--s4);
 	border: 0;
 	border-radius: 0;
@@ -1191,15 +1310,22 @@ ol.annotations {
 	background: none;
 }
 
+.mark-toggle:hover .comment {
+	text-decoration: underline;
+	text-decoration-color: var(--edge);
+	text-underline-offset: 3px;
+}
+
 .mark-toggle:focus-visible {
 	outline-offset: -2px;
 }
 
 .chevron {
-	align-self: center;
+	order: 1;
+	justify-self: end;
 	width: 7px;
 	height: 7px;
-	margin-left: 1px;
+	margin-top: 7px;
 	border-right: 1.75px solid var(--ink-2);
 	border-bottom: 1.75px solid var(--ink-2);
 	transform: rotate(-45deg);
@@ -1207,35 +1333,42 @@ ol.annotations {
 }
 
 .annotation[data-open] .chevron {
+	margin-top: 5px;
 	transform: rotate(45deg);
 }
 
 /*
  * The pin: its colour is the mark's status, its fill the match. Found (or
  * not looked for): filled. Unsure: a dashed ring around it. Not found: hollow.
+ * A ring of paper keeps it apart from the rail.
  */
 .number {
+	position: relative;
+	z-index: 1;
 	display: inline-grid;
 	place-items: center;
 	min-width: 24px;
 	height: 24px;
 	padding-inline: 5px;
 	border-radius: 12px;
-	background: var(--tone);
+	background: var(--tone, var(--st-open));
+	box-shadow: 0 0 0 2px var(--paper);
 	color: var(--on-pin);
 	font: 700 12px / 1 var(--font-num);
 	font-variant-numeric: tabular-nums;
 }
 
 .annotation[data-colour="unsure"] .number {
-	outline: 1.5px dashed var(--tone);
+	outline: 1.5px dashed var(--tone, var(--st-open));
 	outline-offset: 2px;
 }
 
 .annotation[data-colour="lost"] .number {
-	background: none;
-	box-shadow: inset 0 0 0 2px var(--tone);
-	color: var(--tone);
+	background: var(--paper);
+	box-shadow:
+		inset 0 0 0 2px var(--tone, var(--st-open)),
+		0 0 0 2px var(--paper);
+	color: var(--tone, var(--st-open));
 }
 
 .comment {
@@ -1247,7 +1380,7 @@ ol.annotations {
 	color: var(--ink-2);
 }
 
-/* A settled mark steps back; its crop stays as it is, to compare. */
+/* A verified or closed mark steps back; its crop stays as it is, to compare. */
 .annotation[data-resolved] .comment {
 	color: var(--ink-2);
 }
@@ -1265,11 +1398,9 @@ ol.annotations {
 	display: block;
 }
 
-/* Beside the comment: who wrote it, how many findings, the state in a word. */
-.tag,
-.mark-toggle .state {
+/* Who wrote it, how many findings: a word on a wash. */
+.tag {
 	flex: none;
-	margin-top: 2px;
 	padding: 2px var(--s2);
 	border-radius: var(--r-pill);
 	background: var(--wash);
@@ -1280,18 +1411,8 @@ ol.annotations {
 	white-space: nowrap;
 }
 
-.annotation[data-resolved] .state {
-	background: var(--tint);
-	color: var(--tone);
-}
-
-.annotation[data-colour="lost"]:not([data-resolved]) .state {
-	color: var(--danger);
-}
-
-/* Focus moving up the list stops below the bars, not under them. */
-.annotation :is(button, input, textarea) {
-	scroll-margin-top: calc(var(--bar) + 48px);
+.mark-toggle .tag {
+	margin-top: 2px;
 }
 
 .mark-head .show {
@@ -1299,13 +1420,76 @@ ol.annotations {
 	margin-top: 9px;
 }
 
-/* Open: the rest of the mark on a sheet, under its comment. */
+/*
+ * A mark's second row (DEC-023), under its comment: the status pill, why a
+ * reopened mark came back, where it is on the tab in front, its findings;
+ * for a mark to verify, Verified and Reopen… without opening it.
+ */
+.mark-sub {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px var(--s2);
+	margin-top: -2px;
+	padding: 0 var(--s4) 10px var(--margin);
+	font-size: 12px;
+	line-height: 16px;
+}
+
+/* A sign before the word: the status is told without its colour too. */
+.pill[data-status="fixed"]::before {
+	content: "◐" / "";
+}
+
+.pill[data-status="verified"]::before {
+	content: "✓" / "";
+}
+
+.pill:is([data-status="wontfix"], [data-status="cantreproduce"])::before {
+	content: "–" / "";
+}
+
+.pill::before {
+	font-size: 11px;
+}
+
+/* Why a reopened mark came back, in the open colour. */
+.mark-sub .reopened {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--st-open);
+	font-weight: 600;
+}
+
+/* Where the mark is on the tab in front; the pin's fill alone is not enough. */
+.mark-sub .state {
+	color: var(--ink-2);
+}
+
+.annotation[data-colour="lost"] .mark-sub .state {
+	color: var(--danger);
+	font-weight: 600;
+}
+
+.mark-sub .head-actions {
+	display: inline-flex;
+	gap: 6px;
+	margin-left: auto;
+}
+
+/* Focus moving up the list stops below the bars, not under them. */
+.annotation :is(button, input, textarea) {
+	scroll-margin-top: calc(var(--bar) + 48px);
+}
+
+/* Open: the rest of the mark on a sheet, right of the margin. */
 .annotation .body {
 	display: grid;
 	gap: var(--s2);
 	min-width: 0;
-	/* Its text under the comment's: 16 + chevron 10 + 8 + pin 24 + 8. */
-	margin: 0 var(--s4) var(--s3) 54px;
+	margin: 0 var(--s4) var(--s3) var(--margin);
 	padding: var(--s3);
 	border: 1px solid var(--rule);
 	border-radius: var(--r-card);
@@ -1328,7 +1512,7 @@ ol.annotations {
 	border-radius: var(--r-control);
 }
 
-/* A mark's crop: small, so the list stays a list; a click shows it large. */
+/* A mark's crop: small, so the list stays a list; a click shows it large. Never greyed. */
 button.crop {
 	display: block;
 	justify-self: start;
@@ -1362,30 +1546,41 @@ button.crop:hover img {
 	border-color: var(--ink);
 }
 
-/* How it was settled, and the note with it. */
-.resolution {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--s1) var(--s2);
-	align-items: baseline;
+/*
+ * What became of the mark, oldest first: the verb in its status colour, the
+ * rest quiet; what a reopen says is still wrong, in ink.
+ */
+.history {
+	display: grid;
+	gap: 2px;
 	margin: 0;
+	padding: 0;
+	list-style: none;
+	color: var(--ink-2);
 	font-size: 12px;
 	line-height: 17px;
+	overflow-wrap: anywhere;
 }
 
-.resolution .kind {
-	flex: none;
-	font-weight: 600;
+.history .kind {
 	color: var(--st-closed);
+	font-weight: 600;
 }
 
-.resolution[data-kind="fixed"] .kind {
+.history [data-kind="fixed"] .kind {
+	color: var(--st-verify);
+}
+
+.history [data-kind="verified"] .kind {
 	color: var(--st-verified);
 }
 
-.resolution .note {
-	color: var(--ink-2);
-	overflow-wrap: anywhere;
+.history [data-kind="reopened"] .kind {
+	color: var(--st-open);
+}
+
+.history [data-kind="reopened"] .note {
+	color: var(--ink);
 }
 
 /* An AI app's findings: apart from the user's comment, with a rule beside them. */
@@ -1462,7 +1657,7 @@ button.crop:hover img {
 	gap: 6px;
 }
 
-/* Resolving a mark, or its comment being edited. */
+/* Resolving or reopening a mark, or its comment being edited. */
 .mark-form {
 	display: grid;
 	gap: var(--s2);
@@ -1500,6 +1695,7 @@ button.crop:hover img {
 }
 
 .mark-form .note {
+	width: 100%;
 	padding: 4px var(--s2);
 	border: 1px solid var(--edge);
 	border-radius: var(--r-control);

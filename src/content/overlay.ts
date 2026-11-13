@@ -6,7 +6,13 @@
  * block, and neither leak in nor out.
  */
 
-import type { Rect, Shape } from "../lib/case.ts";
+import {
+	GROUP_OF,
+	type MarkStatus,
+	type Rect,
+	type Shape,
+	type StatusGroup,
+} from "../lib/case.ts";
 import {
 	arrowHead,
 	badgePosition,
@@ -44,16 +50,18 @@ export const PAGE_LOOK = {
 	amberEdge: "#a06c00",
 } as const;
 /**
- * A loaded mark's colour is its status. Open is the colour of the mark on its
- * screenshot; each carries the pin's white number.
+ * A loaded mark's colour is its status, by the group it counts in. Open is
+ * the colour of the mark on its screenshot; each carries the pin's white number.
  */
-export const STATUS_COLOUR = {
+export const STATUS_COLOUR: Record<StatusGroup, string> = {
 	open: MARK_COLOUR,
-	verify: "#4f53e0",
+	toVerify: "#4f53e0",
 	verified: "#1a7f37",
 	closed: "#667085",
-} as const;
-/** How much of a settled mark's shape shows; its pin stays solid to be found. */
+};
+/** A mark fixed and waiting to be verified: drawn in full, to be checked (DEC-023). */
+export const TO_VERIFY_COLOUR = STATUS_COLOUR.toVerify;
+/** How much of a verified or closed mark's shape shows; its pin stays solid to be found. */
 export const RESOLVED_OPACITY = 0.35;
 /** How much wider than its stroke a shape's casing is. */
 export const CASING_EXTRA = 3;
@@ -195,6 +203,7 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 /* The count says what the bar is for: a long title gives way. */
 .reviewbar .text { display: flex; gap: 8px; min-width: 0; }
 .reviewbar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${L.barMuted}; }
+.reviewbar .sep { flex: none; color: ${L.barMuted}; }
 .reviewbar .count { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
 .reviewbar button {
 	all: unset; box-sizing: border-box; flex: none; cursor: pointer;
@@ -299,13 +308,17 @@ export interface ReviewItem {
 	/** The shown candidate is a confident, unambiguous match. */
 	found: boolean;
 	focused: boolean;
-	/** Settled: drawn faded, so the open marks stand out. */
-	resolved: boolean;
+	/** Its status: a verified or closed mark is drawn faded, so the others stand out. */
+	status: MarkStatus;
 }
 
-/** A loaded mark's colour: its status. */
-export function reviewColour(item: Pick<ReviewItem, "resolved">): string {
-	return item.resolved ? STATUS_COLOUR.closed : STATUS_COLOUR.open;
+/** Drawn faded: nothing more to do about it. */
+export const isSettled = (status: MarkStatus): boolean =>
+	status === "verified" || status === "wontfix" || status === "cantreproduce";
+
+/** A loaded mark's colour: its status (open, to verify, verified, closed). */
+export function reviewColour(item: Pick<ReviewItem, "status">): string {
+	return STATUS_COLOUR[GROUP_OF[item.status]];
 }
 
 /** A loaded mark's stroke: solid when its element is found, dashed when unsure. */
@@ -573,11 +586,13 @@ export class Overlay {
 	renderReview(items: readonly ReviewItem[]): void {
 		const doc = this.doc;
 		const groups = items.map((item) => {
+			const settled = isSettled(item.status);
 			const colour = reviewColour(item);
 			const look = reviewStroke(item);
 			const group = svg(doc, "g", {
 				"data-review": item.number,
-				...(item.resolved ? { "data-resolved": "" } : {}),
+				"data-status": item.status,
+				...(settled ? { "data-resolved": "" } : {}),
 			});
 			if (item.focused && item.rect !== null) {
 				const box = {
@@ -606,7 +621,7 @@ export class Overlay {
 			}
 			const shape = this.#shape(item.shape, colour, look);
 			// A focused one is looked for: it shows fully.
-			if (item.resolved && !item.focused) {
+			if (settled && !item.focused) {
 				const faded = svg(doc, "g", {
 					"data-faded": "",
 					opacity: RESOLVED_OPACITY,

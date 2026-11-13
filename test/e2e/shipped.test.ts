@@ -71,6 +71,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 			"activeTab",
 			"alarms",
 			"notifications",
+			"offscreen",
 			"scripting",
 			"sidePanel",
 			"storage",
@@ -85,7 +86,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		expect(start).toBe("(()=>{"); // a test build has spaces and line breaks here
 	});
 
-	test("only notifications adds an install warning; storage, unlimitedStorage and alarms none", async () => {
+	test("only notifications adds an install warning; storage, unlimitedStorage, alarms and offscreen none", async () => {
 		const warnings = (manifest: object) =>
 			h.control.eval<string[]>(
 				`chrome.management.getPermissionWarningsByManifest(${JSON.stringify(JSON.stringify(manifest))})`,
@@ -93,6 +94,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		const all = h.manifest["permissions"] as string[];
 		expect(all).toContain("unlimitedStorage");
 		expect(all).toContain("alarms");
+		expect(all).toContain("offscreen");
 		// "Display notifications", in the browser's language.
 		expect(await warnings(h.manifest)).toHaveLength(1);
 		const permissions = all.filter((p) => p !== "notifications");

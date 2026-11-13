@@ -71,7 +71,7 @@ const item = (
 	rect: null,
 	found: true,
 	focused: false,
-	resolved: false,
+	status: "open" as const,
 	...change,
 });
 
@@ -124,19 +124,40 @@ describe("a mark on the page", () => {
 		expect(group.querySelector("[data-number]")).not.toBeNull();
 	});
 
-	test("the colour is the status: open as on the screenshot, settled grey", () => {
-		expect(o.reviewColour({ resolved: false })).toBe(MARK_COLOUR);
-		expect(o.reviewColour({ resolved: true })).toBe(o.STATUS_COLOUR.closed);
-		overlay.renderReview([
-			item(1, SHAPES[0] as Shape),
-			item(2, SHAPES[0] as Shape, { resolved: true }),
-		]);
-		const colour = (n: number) =>
-			parts(overlay.marks.querySelector(`[data-review="${n}"]`) as Element)
-				.filter((p) => !p.casing)
-				.map((p) => p.stroke);
-		expect(colour(1)).toEqual([MARK_COLOUR]);
-		expect(colour(2)).toEqual([o.STATUS_COLOUR.closed]);
+	test("the colour is the status: open as on the screenshot, to verify indigo, verified green, closed grey", () => {
+		const want = {
+			open: MARK_COLOUR,
+			fixed: o.STATUS_COLOUR.toVerify,
+			verified: o.STATUS_COLOUR.verified,
+			wontfix: o.STATUS_COLOUR.closed,
+			cantreproduce: o.STATUS_COLOUR.closed,
+		} as const;
+		expect(o.STATUS_COLOUR).toEqual({
+			open: "#e5195f",
+			toVerify: "#4f53e0",
+			verified: "#1a7f37",
+			closed: "#667085",
+		});
+		const statuses = Object.keys(want) as (keyof typeof want)[];
+		overlay.renderReview(
+			statuses.map((status, i) => item(i + 1, SHAPES[0] as Shape, { status })),
+		);
+		for (const [i, status] of statuses.entries()) {
+			expect(o.reviewColour({ status })).toBe(want[status]);
+			const group = overlay.marks.querySelector(
+				`[data-review="${i + 1}"]`,
+			) as Element;
+			expect(group.getAttribute("data-status")).toBe(status);
+			expect(
+				parts(group)
+					.filter((p) => !p.casing)
+					.map((p) => p.stroke),
+			).toEqual([want[status]]);
+			// The pin is the status's colour too.
+			expect(
+				group.querySelector("[data-number] circle")?.getAttribute("fill"),
+			).toBe(want[status]);
+		}
 	});
 
 	test("the dash is the match: solid when found, dashed when unsure, whatever the status", () => {
@@ -151,7 +172,7 @@ describe("a mark on the page", () => {
 		overlay.renderReview([
 			item(1, SHAPES[0] as Shape),
 			item(2, SHAPES[0] as Shape, { found: false }),
-			item(3, SHAPES[0] as Shape, { found: false, resolved: true }),
+			item(3, SHAPES[0] as Shape, { found: false, status: "verified" }),
 		]);
 		const dash = (n: number) =>
 			parts(overlay.marks.querySelector(`[data-review="${n}"]`) as Element).map(
@@ -169,22 +190,36 @@ describe("a mark on the page", () => {
 		expect(dash(3)).toEqual(dash(2));
 	});
 
-	test("a settled mark's shape is faded with its casing, its pin solid; focused, it shows fully", () => {
-		overlay.renderReview([
-			item(1, SHAPES[0] as Shape, { resolved: true }),
-			item(2, SHAPES[0] as Shape, { resolved: true, focused: true, rect }),
-		]);
-		const one = overlay.marks.querySelector('[data-review="1"]') as Element;
-		const faded = one.querySelector("[data-faded]") as Element;
-		expect(faded.getAttribute("opacity")).toBe(String(o.RESOLVED_OPACITY));
+	test("verified and closed marks are faded with their casing, the pin solid; open and to verify show fully; focused, any does", () => {
 		expect(o.RESOLVED_OPACITY).toBe(0.35);
+		const statuses = [
+			"open",
+			"fixed",
+			"verified",
+			"wontfix",
+			"cantreproduce",
+		] as const;
+		overlay.renderReview([
+			...statuses.map((status, i) =>
+				item(i + 1, SHAPES[0] as Shape, { status }),
+			),
+			item(6, SHAPES[0] as Shape, { status: "verified", focused: true, rect }),
+		]);
+		const group = (n: number) =>
+			overlay.marks.querySelector(`[data-review="${n}"]`) as Element;
+		expect(
+			statuses.map(
+				(_, i) => group(i + 1).querySelector("[data-faded]") !== null,
+			),
+		).toEqual([false, false, true, true, true]);
+		const faded = group(3).querySelector("[data-faded]") as Element;
+		expect(faded.getAttribute("opacity")).toBe(String(o.RESOLVED_OPACITY));
 		expect(faded.querySelectorAll("rect").length).toBe(2);
 		expect(faded.querySelector("[data-number]")).toBeNull();
-		expect(one.querySelector("[data-number]")).not.toBeNull();
-		const two = overlay.marks.querySelector('[data-review="2"]') as Element;
-		expect(two.querySelector("[data-faded]")).toBeNull();
+		expect(group(3).querySelector("[data-number]")).not.toBeNull();
+		expect(group(6).querySelector("[data-faded]")).toBeNull();
 		// Its element's outline has a casing as well.
-		const outline = two.querySelector("[data-element]") as Element;
+		const outline = group(6).querySelector("[data-element]") as Element;
 		expect(outline.previousElementSibling?.hasAttribute("data-casing")).toBe(
 			true,
 		);

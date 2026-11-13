@@ -153,8 +153,36 @@ inside it: a page-wide lookup would let the AI app read anything on whatever tab
 front, hidden content included. For a mark without an element (box, arrow, pen, note)
 there is nothing to start from, so the selector is looked for on the whole page, and only
 when the tab in front shows the case's page (`isPageUrl`). Selectors that name only `*`
-or use `:has()` more than once are refused; the whole page is queried only for such a
-mark, and the first visible match wins.
+are refused; the whole page is queried only for such a mark, and the first visible match
+wins.
+
+Whether a selector matches is itself an answer, so a selector may name only what the
+markup shows (`src/lib/selector.ts`, from the November 2026 code review, CR-01): an
+allow-list of tags, classes, ids, attributes that hold no field value (`id`, `class`,
+`role`, `name`, `type`, `aria-label`, the test ids and the other markup attributes a
+field keeps, but not `style` or `title`), the structural pseudo-classes and `:is()`,
+`:where()`, `:not()`, the markup ones (`:required`, `:optional`, `:disabled`,
+`:enabled`, `:read-only`, `:read-write`) and the combinators. Refused: pseudo-classes of
+form or page state (`:checked`, `:placeholder-shown`, `:autofill`, `:valid`, `:focus`,
+`:target`, `:visited`, …), `:has()` and `:empty`, which look inside an element and so
+into fields and editors, `[value]`, `[checked]`, `[selected]`, `aria-value*`, `href`,
+`src` and other `data-*` than a test id, pseudo-elements, namespaces and comments. The
+selector is read as CSS tokenizes it (escapes decoded, any case). A match inside a
+select, a text area or an editor counts as none, and an `option` keeps neither `value`
+nor `selected`. The same rules hold for `add_annotation`'s selector.
+
+The answer follows the same line (the review of PR 45): a page's own style rule whose
+selector says a state (`:checked`, `:hover`, `:has()`, `:empty`, `[checked]`, …) is
+never listed among the matching rules, matched or not, and not counted; the tool's
+description says so. An editor, a select or a text area is read without its children,
+and its markup always carries the left-out note, empty or not; an element inside a
+hidden one is not named by a selector, substring operators (`^=`, `$=`, `*=`) only test
+`id`, `class` and the test ids, and the ancestors listed for an element inside an editor
+start at the editor. The markup and the rules never carry what was typed or chosen; the
+computed styles and the position of an element can reflect a field's state where the
+page's own CSS styles it by state (a ticked checkbox's colour, an autofilled field's
+background), as a screenshot does. Closing that would leave the tool without the styles
+it is for.
 
 Nothing of it is stored, so DEC-009's allow-list of recorded details does not apply, but
 its reasons do: the HTML is written by Overmark's own serializer (`src/lib/inspect.ts`),
@@ -390,7 +418,12 @@ that on knowingly, for one app and one tool at a time, or for all of one app's c
   <app>, until you disconnect it." Always allow arms with Allow (the panel visible and
   focused for 750 ms). A notification has "Allow" and "Always allow" (Chrome allows two
   buttons); closing it or a click on its body is Don't allow, and either button within
-  500 ms of showing does not count, as before. The app is the grant (one pairing), not
+  500 ms of showing does not count, as before. The exception (the review of PR 45): a
+  notification shows the case and the arguments whole, and where the arguments do not
+  fit (over 150 characters, or the message over 300), it offers only "Don't allow" and
+  says to open Overmark's side panel to read all of them and answer there, since the
+  user would otherwise allow text they were not shown. Nobody answering ends as
+  unanswered, as before; the notification does not open the side panel. The app is the grant (one pairing), not
   its name: an app paired again, or another app with the same name, is asked again.
   Unlike the tab-mcp extension's Always allow, it is not tied to the page: Overmark's
   tools are fixed and act on cases, not on a page's own tools.
@@ -769,6 +802,13 @@ fixed, to verify / verified. The details are the
   fixed and, as its description says, only when the user says so, never for its own
   fix; `open` on a resolved mark records a reopen, its note optional so that existing
   calls keep working. An Always allow for `set_mark_status` covers `verified` too.
+  For an AI app a verified mark changes only by a reopen (decided in the review of
+  pull request 47): `open` records the reopen with the verified fix as `was`;
+  `fixed`, `wontfix`, `cantreproduce` and `verified` on a verified mark change
+  nothing and say so (`fixed`: "add a finding" to say more). This departs from the
+  UX review's "`fixed` on a verified mark changes only the note", which let an AI
+  app's text stand as the user's note. In the panel, the user's Change… still
+  changes a verified mark.
 - **No role switch.** One panel for tester and developer: each mark offers the action
   its status calls for, and the case's status chips (Open, To verify, Verified, Closed)
   are legend and filter in one. The case list, `get_case`, `list_cases` and `case.md`
@@ -827,7 +867,66 @@ cannot be missed.
   access, Allow downloads, Try again), and the toolbar icon shows "!" (amber paused,
   red failed) with a title that says why. The worker runs the sync when it starts, so
   the "!" is there after a browser restart before the panel is opened.
-- **How the worker downloads** is settled in the sync's PR by a spike first, as DEC-021
-  was: a service worker has no `URL.createObjectURL`, so the plan is an offscreen
-  document (the `offscreen` permission) that makes the blob URL; the fallback is in the
-  review.
+- **How the worker downloads, tried in Chrome for Testing 151 (headless) before it was
+  built on.** The worker has no `URL.createObjectURL` (`undefined` there). An offscreen
+  document (`chrome.offscreen.createDocument`, reason `BLOBS`, the `offscreen`
+  permission, which adds no install warning) made a blob URL and answered with it over
+  `runtime.sendMessage`; the worker downloaded it with
+  `chrome.downloads.download({ url, filename: "Overmark/<name>", conflictAction:
+  "overwrite", saveAs: false })` into `Overmark/` under the profile's downloads folder.
+  A second write of the same name replaced the file: no `(1)` copy, no dialog. It worked
+  with no extension page open but the offscreen document (the only other page was the
+  browser's `about:blank` tab), also for a 5 MB file, and again after the document was
+  closed and opened anew. Erasing the earlier entry (`downloads.erase`) left the file and
+  the newer entry. So the fallback (the panel making the URL, data URLs for small cases)
+  is not built. The offscreen document builds the case's export itself from the
+  extension's database, as a message carries JSON only; it answers only the worker's
+  messages. One run opens it at its first file and closes it at its end; each download
+  is waited for (`downloads.onChanged`, 60 s, then cancelled), its URL revoked, and the
+  entry written before it erased. **With Chrome's "Ask where to save each file before
+  downloading" on, `saveAs: false` does not stop the dialog**: headless, the download
+  ended `interrupted` with `USER_CANCELED`. The sync then fails with what to do (turn
+  the setting off, or choose a folder), and also when Chrome saved the file somewhere
+  other than `Overmark/<name>` (the user answered that dialog, or another extension
+  moved it). Such a failure only the user can end is kept until Try again or a new
+  choice, so no run downloads (and asks) again by itself. **Not shown: the store
+  build's way to the permission**, where the worker starts without `downloads` and the
+  user's yes in the panel must make `chrome.downloads` appear in that running worker.
+  Tried headless with an optional `downloads`: `permissions.request` from a click in
+  an extension page neither resolved nor rejected within 10 s (Chrome's prompt cannot
+  be answered there), so whether the API appears without a worker restart is not
+  known, and is on the owner's list to try by hand. If it does not, the worker sees the
+  permission (`permissions.contains`) without the API: the sync fails saying so, that
+  it starts once Chrome restarts Overmark's background part (by itself after a while
+  without use), and how to do it now (Overmark off and on in chrome://extensions); every
+  change and start tries again. The e2e tests run with `downloads` at install. Not tried either: a headed
+  Chrome's download bubble on each write (changes in a row now wait 2 s of quiet, so a
+  burst is one download per case), and Edge.
+- **After the review of PR 48.** A title Windows reserves (`con`, `nul`, `com1`…) is
+  written as `_con.overmark.zip`, and a name Chrome refuses is that case's problem, not
+  the run's. Choosing Downloads writes every case again into its own file (nothing is
+  read back, so this brings deleted files back). The offscreen document failing stops
+  the run; a run names at most three failing cases. The worker calls an extension API
+  every 20 s while it waits for a download, so Chrome does not stop it; should it stop
+  all the same, the download under way is in `downloads:pending` (its id, case,
+  version and name), a top-level `downloads.onChanged` wakes a new worker at its end,
+  and the next run settles it from Chrome's list (complete in `Overmark/`: written;
+  otherwise its entry goes and the case is written again; still under way: waited for)
+  before it closes a document left open. A failure only the user can end (a Save
+  dialog cancelled, the file saved elsewhere) is not tried again until Try again or a
+  new choice. Changes in a row wait 2 s of quiet before a run to Downloads; a folder is
+  written at once. Only an entry this extension wrote into `Overmark/` is erased or
+  shown; Stop syncing forgets its id, and gives the permission back when "Sync to
+  Downloads" asked for it (not when Export had it). Choosing Downloads (again) writes
+  every case into its file, which is the way to bring back files deleted there.
+  **Limit:** `Overmark/` is shared by every profile and browser syncing to Downloads,
+  and nothing there can be looked at, so one install overwrites another's file of the
+  same name: one profile per downloads folder, or choose a folder (the README says so).
+- **The badge, built.** One decision for the icon (`src/worker/badge.ts`): an AI app's
+  question "?" first (it waits for an answer now), then the sync's "!" (amber `#ffb000`
+  with `#1b2130` paused, red `#b3261e` with white failed, its title saying why and, with
+  AI access on, that too), then "…" while connecting. The spark stays in the icon beside
+  the "!" while AI access is on. The worker reruns the sync when the `downloads`
+  permission is taken back or given (`permissions.onRemoved` / `onAdded`), so a
+  permission taken back in Chrome's settings shows as "paused" at once. Stop syncing
+  clears the status and the "!".

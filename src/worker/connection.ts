@@ -25,8 +25,8 @@ import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
 import { AlwaysAllowed } from "./always.ts";
+import { badge } from "./badge.ts";
 import { decide } from "./decide.ts";
-import { showSpark } from "./icon.ts";
 import { KeepOn } from "./keep-on.ts";
 import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
@@ -37,12 +37,7 @@ import {
 	SERVER_NAME,
 	type WorkerMessage,
 } from "./protocol.ts";
-import {
-	appName,
-	NOTIFICATION_BUTTONS,
-	Questions,
-	type QuestionsHost,
-} from "./questions.ts";
+import { appName, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
@@ -51,6 +46,7 @@ import {
 	type Replaced,
 	relayProblem,
 	SESSION_ON,
+	SESSION_STOPPED,
 	type Settings,
 	saveReplaced,
 } from "./settings.ts";
@@ -130,6 +126,43 @@ async function broadcast(news: Broadcast): Promise<void> {
 	} catch {
 		// No side panel open.
 	}
+}
+
+/** The writes of "Stop AI access": the session's stop, Keep AI access on, the session's on. */
+type StopWrite = "stopped" | "keepOn" | "session";
+
+/**
+ * "Stop AI access": `disconnect` first, whatever the writes after it do
+ * (CR-08). Every write is tried; the errors of those that failed come back.
+ */
+export async function stopFirst(
+	disconnect: () => void,
+	writes: Partial<Record<StopWrite, () => Promise<unknown>>>,
+): Promise<Partial<Record<StopWrite, unknown>>> {
+	disconnect();
+	const failed: Partial<Record<StopWrite, unknown>> = {};
+	for (const [name, write] of Object.entries(writes))
+		try {
+			await write();
+		} catch (error) {
+			failed[name as StopWrite] = error;
+		}
+	return failed;
+}
+
+/** What the panel says after a Stop whose writes `failed`; `undefined` when none did. */
+export function stopProblem(
+	failed: Partial<Record<StopWrite, unknown>>,
+): string | undefined {
+	const errors = Object.values(failed);
+	if (errors.length === 0) return undefined;
+	const said = `AI access is off now, but a setting could not be saved (${message(errors[0])}).`;
+	// The session's stop holds over the rest until the browser closes.
+	if ("stopped" in failed && ("keepOn" in failed || "session" in failed))
+		return `${said} It may come on again the next time Chrome starts Overmark in the background.`;
+	if ("keepOn" in failed)
+		return `${said} Keep AI access on is still saved as on: AI access comes on again when Chrome restarts.`;
+	return said;
 }
 
 export class Connection {
@@ -215,15 +248,17 @@ export class Connection {
 		const [storage, settings, session, always] = await Promise.all([
 			CachedSecretStorage.load(kv),
 			loadSettings(kv),
-			chrome.storage.session.get(SESSION_ON),
+			chrome.storage.session.get([SESSION_ON, SESSION_STOPPED]),
 			AlwaysAllowed.load(kv),
 		]);
+		// A Stop in this browser session holds, whatever was stored before it.
+		const stopped = session[SESSION_STOPPED] === true;
 		const connection = new Connection(
 			deps,
 			kv,
 			storage,
-			settings,
-			session[SESSION_ON] === true,
+			stopped ? { ...settings, keepOn: false } : settings,
+			!stopped && session[SESSION_ON] === true,
 			always,
 		);
 		connection.#showBadge();
@@ -407,6 +442,11 @@ export class Connection {
 		await this.#syncAlarm();
 	}
 
+	/** "Stop AI access" in this browser session: over a stored Keep AI access on. */
+	async #setStopped(on: boolean): Promise<void> {
+		await chrome.storage.session.set({ [SESSION_STOPPED]: on });
+	}
+
 	async #setSessionOn(on: boolean): Promise<void> {
 		this.#sessionOn = on;
 		await chrome.storage.session.set({ [SESSION_ON]: on });
@@ -552,20 +592,39 @@ export class Connection {
 				// The user's click takes the address back after a takeover. AI
 				// access is on for the session once connected ("connected").
 				await this.#setReplaced(undefined);
+				await this.#setStopped(false);
 				this.#connect();
 				this.#changed();
 				return;
-			case "stop":
+			case "stop": {
 				// Ends the session, not the pairing: the AI app works again after
-				// the next connect. "Keep AI access on" would undo that.
-				await this.#setKeepOn(false);
-				await this.#setSessionOn(false);
-				this.#keep.stop();
-				this.#mcp.disconnect();
+				// the next connect. "Keep AI access on" would undo that, so it is
+				// off in memory at once, before the store has it, and the session
+				// remembers the stop over it, so a new worker keeps it too (CR-08).
+				const wasOn = this.#settings.keepOn;
+				this.#settings = { ...this.#settings, keepOn: false };
+				const failed = await stopFirst(
+					() => {
+						this.#keep.stop();
+						this.#mcp.disconnect();
+					},
+					{
+						stopped: () => this.#setStopped(true),
+						...(wasOn
+							? { keepOn: () => this.#kv.set({ [KEYS.keepOn]: false }) }
+							: {}),
+						session: () => this.#setSessionOn(false),
+					},
+				);
+				await this.#syncAlarm();
 				this.#changed();
+				const problem = stopProblem(failed);
+				if (problem !== undefined) throw new Error(problem);
 				return;
+			}
 			case "keep-on":
 				await this.#setKeepOn(command.on);
+				if (command.on) await this.#setStopped(false);
 				if (command.on) this.#keep.connect();
 				else this.#keep.stop();
 				this.#changed();
@@ -718,7 +777,7 @@ export class Connection {
 					type: "basic",
 					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
 					...text,
-					buttons: NOTIFICATION_BUTTONS.map((title) => ({ title })),
+					buttons: text.buttons.map((title) => ({ title })),
 					requireInteraction: true,
 					priority: 2,
 				});
@@ -794,28 +853,18 @@ export class Connection {
 	/**
 	 * The icon says what is going on with no panel open: a question waits
 	 * ("?"), it is connecting or retrying ("…"), or AI access is on (a green
-	 * spark in the icon, no badge).
+	 * spark in the icon, no badge); the sync's "!" comes in between (badge.ts).
 	 */
 	#showBadge(): void {
-		const questions = this.#questions.list.length;
 		const mcp = this.#mcp;
-		// One decision for the badge, the title and the spark.
-		const [text, color, title, spark] =
-			questions > 0
-				? [
-						"?",
-						"#b45309",
-						`Overmark: ${questions === 1 ? "an AI app asks" : `${questions} questions wait`} for your answer. Open the side panel to answer.`,
-						false,
-					]
-				: mcp.state === "connected"
-					? ["", "#15803d", "Overmark: AI access is on", true]
+		badge.ai({
+			questions: this.#questions.list.length,
+			ai:
+				mcp.state === "connected"
+					? "connected"
 					: mcp.state === "connecting" || mcp.reconnecting
-						? ["…", "#6b7280", "Overmark: connecting to the AI app", false]
-						: ["", "#6b7280", "Overmark", false];
-		void showSpark(spark);
-		void chrome.action.setBadgeText({ text }).catch(() => {});
-		void chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
-		void chrome.action.setTitle({ title }).catch(() => {});
+						? "connecting"
+						: "off",
+		});
 	}
 }

@@ -616,9 +616,9 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await h.control.waitFor(`${row("a2")}?.dataset.resolved === "wontfix"`);
 		expect(
 			await h.control.eval<string>(
-				`${row("a2")}.querySelector(".resolution").textContent`,
+				`${row("a2")}.querySelector(".history").textContent`,
 			),
-		).toBe("Won't fixLegal wants it");
+		).toMatch(/^Won't fix .+ · Legal wants it$/);
 		await v1.page.waitFor(`${review(2)}?.hasAttribute("data-resolved")`);
 		// Its outline fades; its pin stays solid, to be found.
 		expect(
@@ -638,9 +638,8 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		await v1.page.waitFor(
 			`${review(2)}?.hasAttribute("data-resolved") && ${review(2)}.querySelector("[data-faded]") === null`,
 		);
-		expect(await v1.page.eval<string>(bar)).toBe(
-			"2 of 2 open found, 1 resolved",
-		);
+		// Closed marks are drawn, faded, but not counted.
+		expect(await v1.page.eval<string>(bar)).toBe("2 of 2 found");
 		// The panel's results stay: the page kept its matches.
 		expect(
 			await h.control.eval<number>(
@@ -681,9 +680,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			),
 		).not.toContain("Not saved");
 		await v1.page.waitFor(`${review(3)} === null`);
-		expect(await v1.page.eval<string>(bar)).toBe(
-			"1 of 1 open found, 1 resolved",
-		);
+		expect(await v1.page.eval<string>(bar)).toBe("1 of 1 found");
 		const db = await h.control.eval<Db>(READ_DB);
 		const saved = db.cases.find((c) => c.title === "Settled marks");
 		expect(saved?.annotations.map((a) => a.id)).toEqual(["a1", "a2"]);
@@ -691,8 +688,17 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		expect(saved?.annotations[0]?.comment).toBe("One, shorter");
 		expect(imagesOf(db, saved?.id ?? "")).not.toContain("crops/a3.webp");
 
-		// Open again.
+		// Open again, saying why.
 		await h.control.eval(`${act("a2", "reopen")}.click()`);
+		await h.control.waitFor(
+			`${row("a2")}.querySelector("[data-form=reopen] textarea")`,
+		);
+		await h.control.eval(`(() => {
+			const field = ${row("a2")}.querySelector("[data-form=reopen] textarea");
+			field.value = "Legal changed its mind";
+			field.dispatchEvent(new Event("input"));
+			${row("a2")}.querySelector('[data-mark-action="reopen-done"]').click();
+		})()`);
 		await v1.page.waitFor(`!${review(2)}?.hasAttribute("data-resolved")`);
 		expect(await v1.page.eval<string>(bar)).toBe("2 of 2 found");
 		await v1.page.send("Page.close");
@@ -1142,7 +1148,7 @@ describe.skipIf(browserBinary === undefined)(
 				ok: boolean;
 				details: { tag: string };
 			}>(
-				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "[data-truth=submit]", number: 9, blurForms: true })`,
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "button[type=submit]", number: 9, blurForms: true })`,
 			);
 			expect(described.ok).toBe(true);
 			expect(described.details.tag).toBe("button");

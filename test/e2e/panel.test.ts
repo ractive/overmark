@@ -1098,16 +1098,28 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`!${id("case-view")}.hidden && ${id("verdict")}?.dataset.case === "${caseId}"`,
 					10_000,
 				);
-				// The case's marks are the panel's again: "← All cases" takes them off.
 				await h.control.waitFor(
 					`${id("load-case")}.textContent === "Hide marks"`,
+				);
+				// The case's marks are the panel's again: they follow the case to
+				// the next tab and leave this one.
+				const other = await h.open("v2");
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === caseId,
+					"the marks on the next tab",
+				);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to leave the first tab",
 				);
 				await h.control.eval(`${back}.click()`);
 				await h.control.waitFor(`!${id("home")}.hidden`);
 				await until(
-					async () => (await pageCase(tabId)) === null,
+					async () => (await pageCase(other.tabId)) === null,
 					"the marks to go",
 				);
+				await other.page.send("Page.close");
 				await page.send("Page.close");
 			},
 		);
@@ -1145,6 +1157,137 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				await h.control.eval(`${back}.click()`);
 				await h.control.waitFor(`!${id("home")}.hidden`);
 				await until(async () => !(await toolbarUp(tabId)), "the toolbar to go");
+				await other.page.send("Page.close");
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"a tab that does not answer the end does not hold the panel in the case",
+			async () => {
+				const { page, tabId } = await inCaseWithMarks("A silent tab");
+				// Frozen by Chrome, or a page in an alert(): no answer, ever.
+				await wrapSend(`(tabId, message, send) =>
+					message.type === "overlay:end" ? new Promise(() => {}) : send(tabId, message)`);
+				await h.control.eval(`${back}.click()`);
+				await h.control.waitFor(
+					`${id("leave-hint")}.textContent === "Finishing the marks…"`,
+				);
+				await h.control.waitFor(`!${id("home")}.hidden`, 30_000);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to go",
+				);
+				await openPanel();
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"an import that ends while another case is open leaves that case open",
+			async () => {
+				const { page, caseId } = await inCaseWithMarks("Open while importing");
+				await importFile(
+					"other.overmark.zip",
+					await zipOf(sampleCase("c_imported_meanwhile")),
+				);
+				await until(
+					async () => (await storedCase("c_imported_meanwhile")) !== undefined,
+					"the import",
+				);
+				await Bun.sleep(500);
+				expect(
+					await h.control.eval<string | undefined>(
+						`${id("verdict")}?.dataset.case`,
+					),
+				).toBe(caseId);
+				await h.control.eval(`${back}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await h.control.waitFor(
+					`${id("import-done")}.textContent.includes("Imported")`,
+				);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"Add marks says in the case why it could not show the toolbar",
+			async () => {
+				const { page } = await inCaseWithMarks("Add marks fails");
+				await wrapSend(`(tabId, message, send) =>
+					message.type === "overlay:show" ? Promise.reject(new Error("gone")) : send(tabId, message)`);
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await h.control.waitFor(
+					`${id("case-hint")}.textContent.startsWith("Could not reach the page")`,
+				);
+				await openPanel();
+				await page.send("Page.close");
+			},
+		);
+
+		/** Delete the case as another window's panel (or an AI app) does. */
+		async function deleteElsewhere(caseId: string, back: Page): Promise<void> {
+			const elsewhere = await h.browser.newPage(panelUrl());
+			await back.activate();
+			await elsewhere.eval(`new Promise((resolve) => {
+				const open = indexedDB.open("overmark");
+				open.onsuccess = () => {
+					const tx = open.result.transaction("cases", "readwrite");
+					tx.objectStore("cases").delete(${JSON.stringify(caseId)});
+					tx.oncomplete = () => { open.result.close(); resolve(); };
+				};
+			})`);
+			await elsewhere.eval(
+				`chrome.runtime.sendMessage({ type: "cases:changed", caseId: ${JSON.stringify(caseId)} })`,
+			);
+			await elsewhere.send("Page.close");
+		}
+		const toolbarSays = (page: Page) =>
+			page.eval<string | undefined>(
+				`${shadow('[data-role="status"]')}?.textContent`,
+			);
+
+		slowTest(
+			"the case deleted elsewhere under its toolbar: the toolbar draws a new case, its drafts kept",
+			async () => {
+				const { page, tabId, caseId } =
+					await inCaseWithMarks("Deleted elsewhere");
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(() => toolbarUp(tabId), "the toolbar");
+				await deleteElsewhere(caseId, page);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await page.waitFor(
+					`${shadow('[data-role="status"]')}?.textContent === "New case: choose a tool"`,
+				);
+				expect(await toolbarUp(tabId)).toBe(true);
+				await page.click(shadow('[data-action="close"]'));
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"a toolbar on another tab whose case was deleted meanwhile draws a new case when it comes to the front",
+			async () => {
+				const { page, tabId, caseId } = await inCaseWithMarks("Deleted behind");
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(() => toolbarUp(tabId), "the toolbar");
+				const other = await h.open("v2");
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === caseId,
+					"the marks on the next tab",
+				);
+				await deleteElsewhere(caseId, other.page);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				expect(await toolbarSays(page)).toBe("Adding to “Deleted behind”");
+				await page.activate();
+				await page.waitFor(
+					`${shadow('[data-role="status"]')}?.textContent === "New case: choose a tool"`,
+				);
+				await h.control.waitFor(
+					`${id("annotate")}.textContent === "Stop annotating" && ${id("annotate-hint")}.textContent === "Draw on the page with the toolbar at its bottom."`,
+				);
+				await page.click(shadow('[data-action="close"]'));
 				await other.page.send("Page.close");
 				await page.send("Page.close");
 			},
@@ -1288,6 +1431,8 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					expect(
 						await panel.eval<string>(`${id("add-marks")}.textContent`),
 					).toBe("Done adding");
+					// Not a double click's second: that would do nothing.
+					await Bun.sleep(600);
 					await panel.eval(`${back}.click()`);
 					await panel.waitFor(`!${id("home")}.hidden`);
 					await until(

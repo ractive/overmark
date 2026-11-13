@@ -29,9 +29,11 @@ export type ContentRequest =
 	 * The side panel closes the case (DEC-023): a toolbar adding to it
 	 * finishes as its Done does and, once hidden, adds to no case any more
 	 * (`OverlayState`). A mark that could not be added keeps the toolbar up
-	 * and the case its target, unless `discard`: then such marks go.
+	 * and the case its target, unless `discard`: then such marks go. Without
+	 * `retry` it is a Done again where an earlier Done left marks out; with
+	 * it ("← All cases" at first) they are tried once more.
 	 */
-	| { type: "overlay:end"; caseId: string; discard?: boolean }
+	| { type: "overlay:end"; caseId: string; discard?: boolean; retry?: boolean }
 	| { type: "overlay:state" }
 	/** The side panel's "Blur form fields" changed (`OverlayState`). */
 	| { type: "overlay:settings"; blurForms: boolean }
@@ -256,8 +258,11 @@ export type Broadcast =
 	| { type: "overlay:changed"; state: OverlayState }
 	/** The worker's sync status changed (DEC-021). */
 	| { type: "sync:changed" }
-	/** From the side panel: bring the sync folder up to date now. */
-	| { type: "sync:run" };
+	/**
+	 * From the side panel: bring the sync up to date now; `force` (Try again,
+	 * a new choice) also after a failure only the user can end.
+	 */
+	| { type: "sync:run"; force?: boolean };
 
 /** The content script's file, as the build writes it. */
 export const CONTENT_SCRIPT = "content.js";

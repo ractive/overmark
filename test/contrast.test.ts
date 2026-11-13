@@ -157,7 +157,7 @@ describe("the page's fixed colours", () => {
 	const BLACK = "#000000";
 	const strokes = [
 		STATUS_COLOUR.open,
-		STATUS_COLOUR.verify,
+		STATUS_COLOUR.toVerify,
 		STATUS_COLOUR.verified,
 		STATUS_COLOUR.closed,
 	];

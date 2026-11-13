@@ -424,9 +424,14 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.send("Page.close");
 	}, 90_000);
 
-	/** "← All cases" in the panel. */
-	const allCases = (panel: Page) =>
-		panel.eval(`document.getElementById("back").click()`);
+	/**
+	 * "← All cases" in the panel, as a person clicks it: a click within half
+	 * a second of one it did something else for counts as that double click.
+	 */
+	const allCases = async (panel: Page) => {
+		await Bun.sleep(600);
+		await panel.eval(`document.getElementById("back").click()`);
+	};
 	const home = (panel: Page) =>
 		panel.waitFor(`!document.getElementById("home").hidden`, 10_000);
 
