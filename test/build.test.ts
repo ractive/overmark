@@ -105,7 +105,7 @@ describe("build", () => {
 		expect(isWrappedScript(content)).toBe(true);
 	});
 
-	test("no bundle loads code later: no dynamic import(), no WebMCP chunk", async () => {
+	test("no bundle loads code later: no dynamic import(), one script per page", async () => {
 		const outdir = tempDir();
 		await build({ outdir });
 		// A service worker refuses import(); the content script is a plain
@@ -114,17 +114,17 @@ describe("build", () => {
 			expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
 				/\bimport\s*\(/,
 			);
-		// The pages are split into chunks, but none is loaded later, and the
-		// client's WebMCP mirror (a chunk of its own since 0.16.1, for
-		// `webmcp: true`, which Overmark leaves off) is in none of them.
-		const files = [...new Bun.Glob("**/*").scanSync({ cwd: outdir })];
-		expect(files.filter((f) => /webmcp/i.test(f))).toEqual([]);
-		for (const file of files.filter(
-			(f) => /^(sidepanel|offscreen)\//.test(f) && f.endsWith(".js"),
-		))
-			expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
-				/\bimport\s*\(/,
-			);
+		// The pages are split, which names every chunk chunk-<hash>.js: a
+		// lazy one (the client's WebMCP mirror since 0.16.1, say, for
+		// `webmcp: true`, which Overmark leaves off) would be one more script.
+		for (const page of ["sidepanel", "offscreen"]) {
+			const scripts = [
+				...new Bun.Glob(`${page}/**/*.js`).scanSync({ cwd: outdir }),
+			];
+			expect(scripts).toHaveLength(1);
+			const code = await Bun.file(join(outdir, scripts[0] as string)).text();
+			expect(code).not.toMatch(/\bimport\s*\(/);
+		}
 	});
 
 	test("the content script's check tells a module from a wrapped script", async () => {
