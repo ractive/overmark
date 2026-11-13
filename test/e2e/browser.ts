@@ -241,7 +241,13 @@ const hitTest = (expression: string, { x, y }: { x: number; y: number }) =>
 			hit = inner;
 		}
 		const name = (e) => e === null ? "nothing" : e.tagName.toLowerCase() + (e.dataset?.action ? "[data-action=" + e.dataset.action + "]" : e.className && typeof e.className === "string" ? "." + e.className.split(" ").join(".") : "");
-		return { ok: hit !== null && (hit === target || target.contains(hit)), at: name(hit) };
+		const box = target.getBoundingClientRect();
+		// Not laid out yet (hidden, not drawn): nothing to press.
+		if (box.width === 0 && box.height === 0) return { ok: false, at: "the element without a box yet" };
+		// A page element under Overmark's layer, which a tool puts over the
+		// page on purpose: the press is for the layer.
+		const through = target.getRootNode() === document && hit !== null && hit.getRootNode() !== document;
+		return { ok: hit !== null && (hit === target || target.contains(hit) || through), at: name(hit) };
 	})()`;
 
 export class Browser {

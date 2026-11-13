@@ -14,6 +14,7 @@ import {
 import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
 import { RESOLVED_OPACITY } from "../../src/content/overlay.ts";
 import { webpSize } from "../../src/lib/export.ts";
+import { sampleCase } from "../fixtures.ts";
 import { answerInPanel, connectAi, mcpClient, openSidePanel } from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
@@ -27,6 +28,7 @@ import {
 	markElement,
 	marksIn,
 	nameCase,
+	PUT_CASE,
 	READ_DB,
 	resetPanel,
 	saveAs,
@@ -59,6 +61,9 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		);
 		await h.control.eval(inject);
 		await h.control.eval(inject);
+		// A stored case: the control page, a panel too, ends a toolbar whose
+		// case is gone (DEC-026).
+		await h.control.eval(PUT_CASE(sampleCase("c_shown")));
 		const state = await h.control.eval<{ visible: boolean; title: string }>(
 			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:show", target: { caseId: "c_shown", title: "Shown", nextAnnotation: 1 } })`,
 		);
@@ -87,6 +92,7 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		await page.eval(
 			`(() => { const old = document.createElement("div"); old.id = "overmark-root"; old.dataset.orphan = "true"; document.documentElement.append(old); })()`,
 		);
+		await h.control.eval(PUT_CASE(sampleCase("c_shown")));
 		const state = await h.control.eval<{ visible: boolean }>(
 			`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] }).then(() => chrome.tabs.sendMessage(${tabId}, { type: "overlay:show", target: { caseId: "c_shown", title: "Shown", nextAnnotation: 1 } }))`,
 		);
@@ -519,7 +525,6 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			expect(Math.abs(now.width - made.width)).toBeLessThanOrEqual(2);
 			expect(Math.abs(now.height - made.height)).toBeLessThanOrEqual(2);
 			await h.control.waitFor(`document.getElementById("case-size").hidden`);
-			await v1.page.click(shadow('[data-action="close"]'));
 			await v1.page.send("Page.close");
 			await panel();
 		});
