@@ -36,8 +36,10 @@ const KIND: Record<ShapeKind, string> = {
  * start a link, an image, an autolink, HTML, emphasis, strikethrough, a table
  * cell, math or a heading's end is escaped, and `&` where it would start a
  * named reference (`&lt;`; a numeric one loses its `#`), so the text shows as
- * written. `!` and `(` do nothing without a `[`; a bare URL may be linked by a
- * previewer, but as itself.
+ * written. `!` and `(` do nothing without a `[`. A bare URL is still linked
+ * by previewers that link URLs in text (linkify, GitHub), and the escapes
+ * end up in its text and address: `https://x.example/a_b` links to
+ * `https://x.example/a%5C_b`, a broken link to the same host, never another.
  */
 function inline(text: string): string {
 	return text
