@@ -96,7 +96,8 @@ function button(
 			"data-action": action,
 			title,
 			onclick,
-			...(primary ? { class: "primary" } : {}),
+			// Ink, not amber: amber is the view's one action that starts drawing.
+			...(primary ? { class: "strong" } : {}),
 		},
 		label,
 	);

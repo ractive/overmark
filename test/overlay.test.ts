@@ -1,0 +1,386 @@
+/**
+ * How the overlay draws on the page (DEC-024): every stroke with a white
+ * casing under it, a loaded mark's colour its status and its dash the match.
+ */
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { Window } from "happy-dom";
+import type { Shape } from "../src/lib/case.ts";
+import { MARK_COLOUR } from "../src/lib/marks.ts";
+
+const window = new Window({ url: "https://www.example.com/kk" });
+const globals = globalThis as unknown as Record<string, unknown>;
+const before = {
+	document: globals["document"],
+	CSSStyleSheet: globals["CSSStyleSheet"],
+};
+let o: typeof import("../src/content/overlay.ts");
+let overlay: InstanceType<
+	typeof import("../src/content/overlay.ts")["Overlay"]
+>;
+
+beforeAll(async () => {
+	globals["document"] = window.document;
+	globals["CSSStyleSheet"] = window.CSSStyleSheet;
+	o = await import("../src/content/overlay.ts");
+	overlay = new o.Overlay(window.document as unknown as Document);
+});
+
+afterAll(() => {
+	overlay.setReviewing(false);
+	overlay.setAnnotating(false);
+	globals["document"] = before.document;
+	globals["CSSStyleSheet"] = before.CSSStyleSheet;
+});
+
+const rect = { x: 10, y: 20, width: 100, height: 40 };
+const SHAPES: Shape[] = [
+	{ kind: "element", rect },
+	{ kind: "box", rect },
+	{ kind: "arrow", from: { x: 0, y: 0 }, to: { x: 50, y: 50 } },
+	{
+		kind: "pen",
+		points: [
+			{ x: 0, y: 0 },
+			{ x: 5, y: 9 },
+			{ x: 12, y: 4 },
+		],
+	},
+];
+
+/** A shape's parts in a group, without its pin: [tag, casing?, stroke, width, dash]. */
+const parts = (group: Element) =>
+	[...group.querySelectorAll("rect, line, polygon, polyline")]
+		.filter((e) => !e.hasAttribute("data-element"))
+		.map((e) => ({
+			tag: e.tagName.toLowerCase(),
+			casing: e.hasAttribute("data-casing"),
+			stroke: e.getAttribute("stroke"),
+			fill: e.getAttribute("fill"),
+			width: Number(e.getAttribute("stroke-width")),
+			dash: e.getAttribute("stroke-dasharray"),
+		}));
+
+const item = (
+	number: number,
+	shape: Shape,
+	change: Partial<import("../src/content/overlay.ts").ReviewItem> = {},
+) => ({
+	number,
+	shape,
+	rect: null,
+	found: true,
+	focused: false,
+	status: "open" as const,
+	...change,
+});
+
+describe("a mark on the page", () => {
+	test("each stroke is drawn twice: a white casing 3 px wider, then the colour", () => {
+		overlay.renderReview(SHAPES.map((shape, i) => item(i + 1, shape)));
+		for (const [i, shape] of SHAPES.entries()) {
+			const group = overlay.marks.querySelector(
+				`[data-review="${i + 1}"]`,
+			) as Element;
+			const drawn = parts(group);
+			const casings = drawn.filter((p) => p.casing);
+			const strokes = drawn.filter((p) => !p.casing);
+			expect(casings.length).toBe(strokes.length);
+			expect(casings.length).toBe(shape.kind === "arrow" ? 2 : 1);
+			// The casing lies under the colour.
+			expect(drawn.findLastIndex((p) => p.casing)).toBeLessThan(
+				drawn.findIndex((p) => !p.casing),
+			);
+			for (const c of casings) {
+				expect(c.stroke).toBe(o.PAGE_LOOK.casing);
+				expect(c.dash).toBeNull();
+			}
+			const line = strokes.find((p) => p.tag !== "polygon");
+			const under = casings.find((p) => p.tag === line?.tag);
+			expect(line?.stroke).toBe(MARK_COLOUR);
+			expect(under?.width).toBe((line?.width ?? 0) + o.CASING_EXTRA);
+			// The pin keeps its white ring.
+			const pin = group.querySelector("[data-number] circle");
+			expect(pin?.getAttribute("stroke")).toBe(o.PAGE_LOOK.casing);
+			expect(pin?.getAttribute("fill")).toBe(MARK_COLOUR);
+		}
+	});
+
+	test("an arrow's head has its casing too: white, with a white edge", () => {
+		overlay.renderReview([item(1, SHAPES[2] as Shape)]);
+		const heads = parts(
+			overlay.marks.querySelector('[data-review="1"]') as Element,
+		).filter((p) => p.tag === "polygon");
+		expect(heads.map((p) => [p.casing, p.fill])).toEqual([
+			[true, o.PAGE_LOOK.casing],
+			[false, MARK_COLOUR],
+		]);
+	});
+
+	test("a note is its pin alone", () => {
+		overlay.renderReview([item(1, { kind: "note", at: { x: 5, y: 5 } })]);
+		const group = overlay.marks.querySelector('[data-review="1"]') as Element;
+		expect(parts(group)).toEqual([]);
+		expect(group.querySelector("[data-number]")).not.toBeNull();
+	});
+
+	test("the colour is the status: open as on the screenshot, to verify indigo, verified green, closed grey", () => {
+		const want = {
+			open: MARK_COLOUR,
+			fixed: o.STATUS_COLOUR.toVerify,
+			verified: o.STATUS_COLOUR.verified,
+			wontfix: o.STATUS_COLOUR.closed,
+			cantreproduce: o.STATUS_COLOUR.closed,
+		} as const;
+		expect(o.STATUS_COLOUR).toEqual({
+			open: "#e5195f",
+			toVerify: "#4f53e0",
+			verified: "#1a7f37",
+			closed: "#667085",
+		});
+		const statuses = Object.keys(want) as (keyof typeof want)[];
+		overlay.renderReview(
+			statuses.map((status, i) => item(i + 1, SHAPES[0] as Shape, { status })),
+		);
+		for (const [i, status] of statuses.entries()) {
+			expect(o.reviewColour({ status })).toBe(want[status]);
+			const group = overlay.marks.querySelector(
+				`[data-review="${i + 1}"]`,
+			) as Element;
+			expect(group.getAttribute("data-status")).toBe(status);
+			expect(
+				parts(group)
+					.filter((p) => !p.casing)
+					.map((p) => p.stroke),
+			).toEqual([want[status]]);
+			// The pin is the status's colour too.
+			expect(
+				group.querySelector("[data-number] circle")?.getAttribute("fill"),
+			).toBe(want[status]);
+		}
+	});
+
+	test("the dash is the match: solid when found, dashed when unsure, whatever the status", () => {
+		expect(o.reviewStroke({ found: true, focused: false })).toEqual({
+			"stroke-width": 3,
+		});
+		expect(o.reviewStroke({ found: false, focused: true })).toEqual({
+			"stroke-width": 4,
+			"stroke-dasharray": "8 5",
+			"stroke-linecap": "butt",
+		});
+		overlay.renderReview([
+			item(1, SHAPES[0] as Shape),
+			item(2, SHAPES[0] as Shape, { found: false }),
+			item(3, SHAPES[0] as Shape, { found: false, status: "verified" }),
+		]);
+		const dash = (n: number) =>
+			parts(overlay.marks.querySelector(`[data-review="${n}"]`) as Element).map(
+				(p) => [p.casing, p.dash],
+			);
+		expect(dash(1)).toEqual([
+			[true, null],
+			[false, null],
+		]);
+		// The casing stays whole under the dashes.
+		expect(dash(2)).toEqual([
+			[true, null],
+			[false, "8 5"],
+		]);
+		expect(dash(3)).toEqual(dash(2));
+	});
+
+	test("verified and closed marks are faded with their casing, the pin solid; open and to verify show fully; focused, any does", () => {
+		expect(o.RESOLVED_OPACITY).toBe(0.35);
+		const statuses = [
+			"open",
+			"fixed",
+			"verified",
+			"wontfix",
+			"cantreproduce",
+		] as const;
+		overlay.renderReview([
+			...statuses.map((status, i) =>
+				item(i + 1, SHAPES[0] as Shape, { status }),
+			),
+			item(6, SHAPES[0] as Shape, { status: "verified", focused: true, rect }),
+		]);
+		const group = (n: number) =>
+			overlay.marks.querySelector(`[data-review="${n}"]`) as Element;
+		expect(
+			statuses.map(
+				(_, i) => group(i + 1).querySelector("[data-faded]") !== null,
+			),
+		).toEqual([false, false, true, true, true]);
+		const faded = group(3).querySelector("[data-faded]") as Element;
+		expect(faded.getAttribute("opacity")).toBe(String(o.RESOLVED_OPACITY));
+		expect(faded.querySelectorAll("rect").length).toBe(2);
+		expect(faded.querySelector("[data-number]")).toBeNull();
+		expect(group(3).querySelector("[data-number]")).not.toBeNull();
+		expect(group(6).querySelector("[data-faded]")).toBeNull();
+		// Its element's outline has a casing as well.
+		const outline = group(6).querySelector("[data-element]") as Element;
+		expect(outline.previousElementSibling?.hasAttribute("data-casing")).toBe(
+			true,
+		);
+	});
+
+	test("drafts and the hover outline are cased too", () => {
+		overlay.render(
+			[{ number: 1, shape: SHAPES[1] as Shape }],
+			SHAPES[3] as Shape,
+			rect,
+		);
+		const drafts = overlay.marks.querySelector(".drafts") as Element;
+		const hover = [...drafts.querySelectorAll("rect.hover")];
+		expect(hover.map((e) => e.hasAttribute("data-casing"))).toEqual([
+			true,
+			false,
+		]);
+		expect(hover[1]?.getAttribute("stroke")).toBe(o.HOVER_COLOUR);
+		const rest = parts(drafts).filter((p) => p.stroke !== o.HOVER_COLOUR);
+		// The hover's casing, the box twice, the pen being drawn twice.
+		expect(rest.map((p) => [p.tag, p.casing])).toEqual([
+			["rect", true],
+			["rect", true],
+			["rect", false],
+			["polyline", true],
+			["polyline", false],
+		]);
+	});
+});
+
+describe("the overlay's style", () => {
+	test("one fixed look: the bars' ring, a light popover, two rows on purpose, forced colours", async () => {
+		const source = await Bun.file(
+			new URL("../src/content/overlay.ts", import.meta.url),
+		).text();
+		// A white ring before the drop shadow, on the three of them.
+		expect(source).toContain(
+			'const RING = "0 0 0 1px rgba(255, 255, 255, 0.75)";',
+		);
+		expect(source.match(/box-shadow: \$\{SHADOW\};/g)?.length).toBe(3);
+		expect(source).toContain("color-scheme: light;");
+		expect(source).toContain("@media (forced-colors: active)");
+		expect(source).toContain("background: Highlight;");
+		// In forced colours no state of an amber button brings amber back: its
+		// hover and focus rules outside the block are more specific than a
+		// plain selector inside it, so the block names them too.
+		const forced = source.slice(
+			source.indexOf("@media (forced-colors: active)"),
+		);
+		const highlight = forced.slice(0, forced.indexOf("background: Highlight;"));
+		const rule = highlight.slice(highlight.lastIndexOf("}") + 1);
+		for (const selector of [
+			'.toolbar button[aria-pressed="true"]:hover',
+			".toolbar button.primary:hover",
+			".toolbar button.primary:focus-visible",
+			".popover button.primary:hover",
+		])
+			expect(rule).toContain(selector);
+		const amber = [
+			...source.matchAll(/^(.*)\{[^}]*background: \$\{L\.amber(Hover)?\}/gm),
+		]
+			.flatMap((m) => (m[1] as string).split(","))
+			.map((selector) => selector.trim())
+			.filter((selector) => selector !== "");
+		expect(amber.length).toBeGreaterThanOrEqual(5);
+		for (const selector of amber) expect(rule).toContain(selector);
+		// No page width decides the toolbar's layout: it is measured.
+		expect(source).not.toMatch(/@media \((max|min)-width/);
+	});
+});
+
+describe("the toolbar's layout is measured, not guessed from the page's width", () => {
+	const button = (top: () => number) => {
+		const b = window.document.createElement("button");
+		Object.defineProperty(b, "offsetTop", { get: top });
+		return b as unknown as HTMLElement;
+	};
+	/** A toolbar whose row overflows, or whose last button wraps, in these fits. */
+	const withRoomFrom = (first: string) => {
+		const bar = overlay.toolbar;
+		const tight = () => o.TOOLBAR_FITS.indexOf(bar.dataset["fit"] as never);
+		const fits = () => tight() >= o.TOOLBAR_FITS.indexOf(first as never);
+		Object.defineProperty(bar, "clientWidth", {
+			configurable: true,
+			get: () => 600,
+		});
+		Object.defineProperty(bar, "scrollWidth", {
+			configurable: true,
+			get: () => (fits() ? 600 : 700),
+		});
+		bar.replaceChildren(
+			button(() => 5),
+			button(() => (fits() ? 5 : 35)),
+		);
+	};
+
+	test("the first layout that fits: the status beside the tools, then under them, then icons, then closer", () => {
+		overlay.setAnnotating(true);
+		for (const fit of o.TOOLBAR_FITS) {
+			withRoomFrom(fit);
+			overlay.fitToolbar();
+			expect<string | undefined>(overlay.toolbar.dataset["fit"]).toBe(fit);
+		}
+		// Each step keeps what the one before did.
+		expect(o.TOOLBAR_FITS).toEqual([
+			"",
+			"rows",
+			"rows icons",
+			"rows icons all",
+			"rows icons all tight",
+		]);
+	});
+
+	test("nothing fits: the tightest stays; hidden, it is left as it is", () => {
+		const bar = overlay.toolbar;
+		Object.defineProperty(bar, "scrollWidth", {
+			configurable: true,
+			get: () => 900,
+		});
+		bar.replaceChildren(
+			button(() => 5),
+			button(() => 35),
+		);
+		overlay.fitToolbar();
+		expect<string | undefined>(bar.dataset["fit"]).toBe("rows icons all tight");
+		overlay.setAnnotating(false);
+		bar.dataset["fit"] = "rows";
+		overlay.fitToolbar();
+		expect<string | undefined>(bar.dataset["fit"]).toBe("rows");
+	});
+
+	test("the review bar's place under a toolbar at the top follows the toolbar's height", () => {
+		overlay.setAnnotating(true);
+		withRoomFrom("");
+		const bar = overlay.toolbar;
+		let height = 40;
+		Object.defineProperty(bar, "offsetHeight", {
+			configurable: true,
+			get: () => height,
+		});
+		overlay.fitToolbar();
+		const under = () => overlay.layer.style.getPropertyValue("--under-toolbar");
+		// One row: where it was, 16 + 40 + 8.
+		expect(under()).toBe("64px");
+		// The status on a row of its own: the bar starts below that row too.
+		height = 63;
+		overlay.fitToolbar();
+		expect(under()).toBe("87px");
+		overlay.setAnnotating(false);
+	});
+
+	test("a wider page lays it out again", () => {
+		overlay.setAnnotating(true);
+		withRoomFrom("rows icons");
+		overlay.fitToolbar();
+		expect<string | undefined>(overlay.toolbar.dataset["fit"]).toBe(
+			"rows icons",
+		);
+		withRoomFrom("");
+		window.dispatchEvent(new window.Event("resize"));
+		expect<string | undefined>(overlay.toolbar.dataset["fit"]).toBe("");
+		overlay.setAnnotating(false);
+	});
+});

@@ -727,7 +727,13 @@ export class Annotator {
 		const b = doc.createElement("button");
 		b.type = "button";
 		if (image !== undefined) b.append(icon(doc, image));
-		b.append(label);
+		// Its own element: on a narrow page only the icon shows (overlay.ts).
+		if (label !== "") {
+			const word = doc.createElement("span");
+			word.className = "word";
+			word.textContent = label;
+			b.append(word);
+		}
 		b.dataset["action"] = action;
 		b.addEventListener("click", onClick);
 		return b;
@@ -970,7 +976,10 @@ export class Annotator {
 			target === undefined
 				? this.#button("Close", "close", () => this.hide(), "close")
 				: this.#button("Done", "close", () => void this.#finish(), "close");
-		if (target !== undefined) {
+		// As an icon on a narrow page it needs its tooltip, as every other one.
+		if (target === undefined)
+			close.title = "Close the toolbar; the marks stay on this page";
+		else {
 			close.title =
 				this.#leftOut === undefined
 					? "Stop adding marks"
@@ -1010,6 +1019,8 @@ export class Annotator {
 		alertEl.hidden = alert === "";
 		statusEl.before(...before);
 		alertEl.after(...after);
+		// Other parts, other widths: laid out for the room there is.
+		this.overlay.fitToolbar();
 		if (action !== undefined)
 			bar
 				.querySelector<HTMLElement>(`[data-action="${CSS.escape(action)}"]`)

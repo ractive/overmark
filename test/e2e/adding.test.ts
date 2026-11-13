@@ -538,7 +538,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 
 		await allCases(panel);
 		await panel.waitFor(
-			`document.getElementById("leave-hint")?.textContent === "1 mark is not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without it."`,
+			`document.getElementById("leave-hint")?.textContent === "1 mark is not in the case yet; the toolbar on the page says why. Click All cases again to leave without it."`,
 			20_000,
 		);
 		expect(

@@ -76,6 +76,8 @@ export interface AiCall {
 	at: number;
 }
 
+export type AiProblem = "tab" | "updated" | "unavailable" | "connection";
+
 export interface PanelState {
 	tab: TabInfo | undefined;
 	overlay: OverlayState | undefined;
@@ -190,8 +192,19 @@ export interface PanelState {
 	ai: {
 		status: string;
 		connected: boolean;
+		/** How many AI apps are paired, while connected. */
+		apps: number;
 		/** Connected, or on the way there: something "Stop AI access" can end. */
 		active: boolean;
+		/**
+		 * `status` says that something is wrong or what the user has to do
+		 * (DEC-024): the pill says so in red and the sentence shows under the
+		 * top bar. `tab`: this page is no side panel; `updated`: the panel
+		 * belongs to the version before; `unavailable`: the worker's
+		 * connection could not start; `connection`: it failed, was lost or was
+		 * taken over.
+		 */
+		problem: AiProblem | undefined;
 		/** "Keep AI access on". */
 		keepOn: boolean;
 		lastCall: AiCall | undefined;
@@ -242,7 +255,9 @@ export const initialState = (): PanelState => ({
 	ai: {
 		status: "Not connected",
 		connected: false,
+		apps: 0,
 		active: false,
+		problem: undefined,
 		keepOn: false,
 		lastCall: undefined,
 	},

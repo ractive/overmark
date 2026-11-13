@@ -838,6 +838,25 @@ shape.
   rail: its colour the status, its fill the match.
 - System fonts only; the extension loads nothing.
 
+As built (PR d), where the review's figures did not hold on the real toolbar: no page
+width decides its layout (the review said 720 px; on macOS the tools with their words
+measure about 740 px, another system's font gives another width, and a classic
+scrollbar takes 15 px of the page). The toolbar
+measures itself when its parts change, when it shows and when the page is resized, and
+takes the first layout that fits: the status beside the tools; the status on a second
+row; the tools as icons; Undo and Close as icons too; the buttons closer. Their words
+stay as accessible names. The side panel holds at 345 px of content (Chrome's 360 px
+less a classic scrollbar): there the AI pill's words give way first. The found line keeps "3 of 4
+marks found on …" and adds "Dashed: unsure." only when a dashed mark is drawn. The AI
+pill also says "AI connecting…". A problem (the panel's page in a tab, an update under
+an open panel, a connection that cannot start, failed, was lost or taken over) is said
+without hovering: the pill's dot is red and it names the problem in two or three
+words, and the sentence shows under the top bar on every view. The whole status stays
+in the pill's name and tooltip. The rail is a
+mix of `--edge` and `--paper` (decoration, between a rule and an edge); the banner's
+button stands right of the text only where it is the only one and the panel is at
+least 400 px wide.
+
 ## DEC-025: Sync to Downloads by default, to any folder as an option, and an Allow that cannot be missed (owner)
 
 The owner, 2026-11-12, on the sync's "Allow access" (DEC-021): "It was not obvious",
