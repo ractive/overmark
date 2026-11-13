@@ -864,12 +864,46 @@ describe("tools", () => {
 			expect(await status(2, "fixed")).toBe(
 				"Mark 2 is verified already; to add something, add a finding.",
 			);
+			// Closing it is asked for and not done: an error, not a result
+			// an AI app could take for done.
 			for (const s of ["wontfix", "cantreproduce"])
-				expect(await status(2, s)).toBe(
+				await expect(status(2, s)).rejects.toThrow(
 					"Mark 2 is verified: reopen it first (status open, with a note) if it is wrong.",
 				);
 			expect(await status(2, "verified")).toBe("Mark 2 is verified already.");
 			expect(await store.getCase("c_1")).toEqual(before as Case);
+			// The question says beforehand what the call will come to.
+			const asks = async (status: string, note?: string) =>
+				(
+					await confirmLines(store, tab, {
+						tool: { name: "set_mark_status", description: "Does it." },
+						arguments: {
+							caseId: "c_1",
+							mark: 2,
+							status,
+							...(note === undefined ? {} : { note }),
+						},
+						client: { kind: "relay", grantId: "g", id: "i", host: "claude.ai" },
+						signal: new AbortController().signal,
+					})
+				).join("\n");
+			expect(await asks("fixed")).toContain(
+				"This will change nothing: Mark 2 is verified already; to add something, add a finding.",
+			);
+			expect(await asks("verified")).toContain(
+				"This will change nothing: Mark 2 is verified already.",
+			);
+			expect(await asks("wontfix")).toContain(
+				"Overmark will refuse this whatever you answer: Mark 2 is verified: reopen it first",
+			);
+			expect(await asks("verified", "a note")).toContain(
+				"Overmark will refuse this whatever you answer: verified takes no note",
+			);
+			// A call that changes the mark gets neither line.
+			const reopen = await asks("open", "Not fixed after all");
+			expect(reopen).toContain("Mark 2:");
+			expect(reopen).not.toContain("change nothing");
+			expect(reopen).not.toContain("will refuse");
 			// A reopen keeps the verified fix; then the mark may be closed.
 			const verified = (await stored())?.resolution;
 			await status(2, "open", "Not fixed after all");
