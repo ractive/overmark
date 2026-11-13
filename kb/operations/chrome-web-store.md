@@ -103,8 +103,8 @@ PRs (`.github/dependabot.yml`).
 > them, and records each marked element's details.
 >
 > Open the same page on another build, such as localhost or a test environment, and
-> load the case: Overmark finds each mark's element and outlines it, green when found,
-> amber when only probable. The screenshots stay the record, so every mark makes sense
+> load the case: Overmark finds each mark's element and outlines it, solid when found,
+> dashed when only probable. The screenshots stay the record, so every mark makes sense
 > even when the page has changed.
 >
 > Export a case, or all of them, as a zip with a Markdown summary and the images, keep
@@ -161,7 +161,8 @@ data only, and no tool runs code an AI app sends.
   creditworthiness.
 
 **Screenshots for the listing (1280×800):** the toolbar with marks on a page; the side
-panel with a case; a case loaded onto another build with green and amber outlines.
+panel with a case; a case loaded onto another build with its marks outlined, solid
+and dashed.
 
 # Citations
 

@@ -798,6 +798,14 @@ shape.
   rail: its colour the status, its fill the match.
 - System fonts only; the extension loads nothing.
 
+As built (PR d), where the review's figures did not hold on the real toolbar: its tools
+with their words are about 740 px wide, so the status moves to a second row under 960 px
+of page width (the review said 720), and the tools become icons under 820, Undo and
+Close under 620; their words stay as accessible names. The found line keeps "3 of 4
+marks found on …" and adds "Dashed: unsure." only when a dashed mark is drawn. The AI
+pill also says "AI connecting…", and shows a red dot when AI access is off with a
+problem to tell; the whole status stays in the pill's name and tooltip.
+
 ## DEC-025: Sync to Downloads by default, to any folder as an option, and an Allow that cannot be missed (owner)
 
 The owner, 2026-11-12, on the sync's "Allow access" (DEC-021): "It was not obvious",

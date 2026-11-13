@@ -74,9 +74,11 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    for again for a few seconds), and when the
    tab's size is not the one the marks were made at, Match size resizes the window to it
    (as far as the screen allows; page zoom is counted). Overmark looks for each mark's element and draws the mark on it again,
-   moved and scaled with the element: green when found, amber and dashed when probable
-   or unsure. A mark drawn on a large container can land a little off when that
-   container changed its size. A mark without an element goes where it was, in amber.
+   moved and scaled with the element: solid when found, dashed when probable or unsure.
+   Its colour is its status: the pink of the screenshot while it is open, grey and faded
+   once it is resolved; a white edge under every stroke keeps it visible on any page.
+   A mark drawn on a large container can land a little off when that
+   container changed its size. A mark without an element goes where it was, dashed.
    Show scrolls to a mark; Next candidate tries the next best element. The screenshots
    stay the record, so a mark makes sense even when its element is not found.
 5. Each mark in the side panel can be resolved (Fixed, Won't fix or Can't reproduce, with
