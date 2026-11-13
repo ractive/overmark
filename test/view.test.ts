@@ -689,6 +689,8 @@ describe("a case on a tab Overmark may not run on", () => {
 		expect(el("load-case").hidden).toBe(true);
 		expect(el<HTMLButtonElement>("add-marks").disabled).toBe(true);
 		expect(el("add-marks").title).toContain("see the notice");
+		// The notice is below the actions in a case, above the button on Home.
+		expect(el("add-marks").title).not.toContain("above");
 		const show = window.document.querySelector(
 			'[data-action="show"]',
 		) as unknown as HTMLButtonElement;

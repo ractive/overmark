@@ -129,7 +129,7 @@ export const CANNOT_RUN_FILES =
 
 /** The title of a button that needs the page, while Overmark may not run there. */
 export const NEEDS_ACCESS =
-	"Overmark may not run on this tab yet: see the notice above.";
+	"Overmark may not run on this tab yet: see the notice.";
 
 /**
  * Whether Overmark may run on the tab in front, as far as the panel knows:

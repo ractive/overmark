@@ -857,6 +857,12 @@ function announce(caseId: string): void {
  * a new one ("Annotate this page" never continues a case, DEC-023).
  */
 async function startAnnotating(target?: Case): Promise<void> {
+	// On Home its outcome goes under This page; in a case under the case's
+	// buttons, and only where there is one (what a draw found stays).
+	const say = (text: string | undefined) => {
+		if (target === undefined) update((s) => (s.hint = text));
+		else if (text !== undefined) caseHintWriter()(text);
+	};
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
 	tabWork.cancel(); // a refresh still running must not overwrite this
@@ -876,14 +882,14 @@ async function startAnnotating(target?: Case): Promise<void> {
 				: {}),
 		});
 		if (target !== undefined) toolbarOn.add(tab.id);
-		update((s) => {
-			s.overlay = overlay;
-			s.hint = overlay.saving
+		update((s) => (s.overlay = overlay));
+		say(
+			overlay.saving
 				? "Overmark is still saving the last marks on this page; the toolbar switches once that is done."
-				: undefined;
-		});
+				: undefined,
+		);
 	} catch (error) {
-		update((s) => (s.hint = describeError(error)));
+		say(describeError(error));
 	}
 }
 

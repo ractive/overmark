@@ -1198,6 +1198,21 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			},
 		);
 
+		slowTest(
+			"Add marks says in the case why it could not show the toolbar",
+			async () => {
+				const { page } = await inCaseWithMarks("Add marks fails");
+				await wrapSend(`(tabId, message, send) =>
+					message.type === "overlay:show" ? Promise.reject(new Error("gone")) : send(tabId, message)`);
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await h.control.waitFor(
+					`${id("case-hint")}.textContent.startsWith("Could not reach the page")`,
+				);
+				await openPanel();
+				await page.send("Page.close");
+			},
+		);
+
 		slowTest("Hide holds through a reload of that tab", async () => {
 			const { page, tabId } = await inCaseWithMarks("Hidden through a reload");
 			await h.control.waitFor(
