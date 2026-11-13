@@ -23,7 +23,7 @@ import type {
 	Released,
 } from "../lib/messages.ts";
 import { PageActivity } from "./activity.ts";
-import { Annotator } from "./annotator.ts";
+import { Annotator, pageInfo } from "./annotator.ts";
 import { PageBlur } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
 import { LoadReplaced, Reviewer } from "./review.ts";
@@ -218,6 +218,13 @@ function start(): void {
 					return true; // answers asynchronously
 				case "overlay:state":
 					sendResponse(state());
+					break;
+				case "overlay:title":
+					annotator.setTitle(message.caseId, message.title);
+					sendResponse(state());
+					break;
+				case "page:info":
+					sendResponse(pageInfo(document));
 					break;
 				case "overlay:settings":
 					annotator.setBlurForms(message.blurForms);

@@ -301,3 +301,38 @@ test("every button of the toolbar that can be an icon alone has a tooltip, Close
 	a.show({ target });
 	expect(bare()).toEqual([]);
 });
+
+test("a rename reaches the toolbar adding to the case, and only that one (DEC-026)", async () => {
+	const { a, overlay } = annotator();
+	a.show({ target });
+	const status = () =>
+		overlay.toolbar.querySelector('[data-role="status"]')?.textContent;
+	expect(status()).toBe("Adding to “Open case”");
+	a.setTitle("c_other", "Not this one");
+	expect(status()).toBe("Adding to “Open case”");
+	a.setTitle("c_open", "Login button");
+	expect(status()).toBe("Adding to “Login button”");
+	expect(a.state().target).toEqual({ ...target, title: "Login button" });
+	// The next mark goes into the case under its new title.
+	note(overlay, a);
+	await settle(a, () => asked.some((r) => r.type === "case:save"));
+	const save = asked.find((r) => r.type === "case:save");
+	expect(save?.type === "case:save" && save.request.title).toBe("Login button");
+});
+
+test("what a new case records of the page: address, title, language, window", async () => {
+	const { pageInfo } = await import("../src/content/annotator.ts");
+	const doc = window.document as unknown as Document;
+	doc.title = "Cart";
+	doc.documentElement.lang = "de-CH";
+	expect(pageInfo(doc)).toEqual({
+		url: "https://shop.example/cart",
+		title: "Cart",
+		lang: "de-CH",
+		viewport: { width: 1024, height: 768, dpr: 1 },
+		userAgent: navigator.userAgent,
+	});
+	// A language tag the format refuses is no language.
+	doc.documentElement.lang = "not a tag!";
+	expect(pageInfo(doc).lang).toBe("");
+});

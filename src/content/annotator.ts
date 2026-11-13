@@ -770,6 +770,18 @@ export class Annotator {
 	}
 
 	/**
+	 * The case the toolbar adds to was renamed (DEC-026): "Adding to “<title>”"
+	 * and the marks still on their way say its new title.
+	 */
+	setTitle(caseId: string, title: string): void {
+		if (this.#target?.caseId !== caseId) return;
+		this.#target = { ...this.#target, title };
+		for (const d of this.#drafts)
+			if (d.queuedFor?.caseId === caseId) d.queuedFor = { caseId, title };
+		this.#renderToolbar();
+	}
+
+	/**
 	 * The side panel closes the case (DEC-023): finish as Done does and, once
 	 * the toolbar is hidden, add to no case any more, so the next show starts
 	 * a new one. A mark that could not be added keeps the toolbar up, adding
@@ -1257,15 +1269,7 @@ export class Annotator {
 				capturedAt: new Date().toISOString(),
 				url: location.href,
 			},
-			page: {
-				url: location.href,
-				title: doc.title.slice(0, MAX_PAGE_TITLE),
-				lang: LANGUAGE.test(doc.documentElement.lang)
-					? doc.documentElement.lang
-					: "",
-				viewport,
-				userAgent: navigator.userAgent,
-			},
+			page: pageInfo(doc, viewport),
 			marks: [],
 		};
 	}
@@ -1706,6 +1710,31 @@ export class Annotator {
 				: `${remaining.length} marks are not in the case yet: Add ${remaining.length} marks, or Done again to discard them.`;
 		this.#renderToolbar();
 	}
+}
+
+/**
+ * What a case records of the page (`viewport`: the window's now when not
+ * given): a new case has it from the start (DEC-026), a mark's screenshot
+ * from when it was taken.
+ */
+export function pageInfo(
+	doc: Document,
+	viewport?: PageInfo["viewport"],
+): PageInfo {
+	const win = doc.defaultView;
+	return {
+		url: location.href,
+		title: doc.title.slice(0, MAX_PAGE_TITLE),
+		lang: LANGUAGE.test(doc.documentElement.lang)
+			? doc.documentElement.lang
+			: "",
+		viewport: viewport ?? {
+			width: win?.innerWidth ?? 0,
+			height: win?.innerHeight ?? 0,
+			dpr: win?.devicePixelRatio || 1,
+		},
+		userAgent: navigator.userAgent,
+	};
 }
 
 /** The mark Undo takes: the one with the highest number. */

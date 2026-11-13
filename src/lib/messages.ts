@@ -35,6 +35,13 @@ export type ContentRequest =
 	 */
 	| { type: "overlay:end"; caseId: string; discard?: boolean; retry?: boolean }
 	| { type: "overlay:state" }
+	/**
+	 * The case was renamed (DEC-026): a toolbar adding to it says its new
+	 * title (`OverlayState`).
+	 */
+	| { type: "overlay:title"; caseId: string; title: string }
+	/** What a new case records of this page (`PageInfo`, DEC-026). */
+	| { type: "page:info" }
 	/** The side panel's "Blur form fields" changed (`OverlayState`). */
 	| { type: "overlay:settings"; blurForms: boolean }
 	/**
