@@ -219,12 +219,31 @@ export async function markElement(
 	const pressed = await page.eval<string>(
 		`${shadow('[data-action="tool-element"]')}.getAttribute("aria-pressed")`,
 	);
-	if (pressed !== "true")
-		await page.click(shadow('[data-action="tool-element"]'));
+	const tool = shadow('[data-action="tool-element"]');
+	if (pressed !== "true") {
+		// What the toolbar heard, said if the tool does not come on: the
+		// clicks inside it and the tool's aria-pressed as it changed.
+		await page.eval(`(() => {
+			const root = ${HOST}.shadowRoot;
+			globalThis.overmarkHeard = [];
+			const heard = (what) => globalThis.overmarkHeard.push(Math.round(performance.now()) + " " + what);
+			root.addEventListener("click", (e) => heard("click " + (e.target.closest?.("[data-action]")?.dataset.action ?? e.target.tagName)), true);
+			new MutationObserver((list) => list.forEach((m) => heard("pressed " + m.target.dataset.action + "=" + m.target.getAttribute("aria-pressed")))).observe(${shadow(".toolbar")}, { subtree: true, attributes: true, attributeFilter: ["aria-pressed"] });
+		})()`);
+		await page.click(tool);
+	}
 	// Without the tool, the click below would go to the page itself.
-	await page.waitFor(
-		`${shadow('[data-action="tool-element"]')}.getAttribute("aria-pressed") === "true"`,
-	);
+	await page
+		.waitFor(`${tool}.getAttribute("aria-pressed") === "true"`)
+		.catch(async (error: unknown) => {
+			const heard = await page
+				.eval<string[]>("globalThis.overmarkHeard ?? []")
+				.catch(() => []);
+			throw new Error(
+				`the element tool did not come on; the toolbar heard: ${heard.join("; ") || "nothing"}`,
+				{ cause: error },
+			);
+		});
 	// Near the left edge: the toolbar sits in the middle at the bottom.
 	const at = await page.eval<{ x: number; y: number }>(
 		`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + Math.min(12, r.width / 2), y: r.y + r.height / 2 }; })()`,
