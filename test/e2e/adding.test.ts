@@ -593,19 +593,38 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await h.control.eval(
 			`chrome.scripting.executeScript({ target: { tabId: ${a.tabId} }, files: ["content.js"] })`,
 		);
-		// The page answers only once the user is on the other tab (4 s at most,
-		// within the 5 s it has): what the question meets is that tab in front.
+		// The page answers when the test says so: once the other tab is in
+		// front. A hold the test never released ends far inside the 5 s the
+		// page has, and fails the test saying so.
 		await wrapSend(`async (tabId, message, send) => {
 			if (message.type === "page:info")
-				for (let i = 0; i < 80; i++) {
-					const [front] = await chrome.tabs.query({ active: true, currentWindow: true });
-					if (front?.id === ${b.tabId}) break;
-					await new Promise((r) => setTimeout(r, 50));
-				}
+				await new Promise((release) => {
+					globalThis.releaseInfo = release;
+					setTimeout(() => {
+						globalThis.heldTooLong = true;
+						release();
+					}, 3000);
+				});
 			return send(tabId, message);
 		}`);
 		const panel = await annotate(a.page);
+		await h.control.waitFor(`typeof globalThis.releaseInfo === "function"`);
 		await b.page.activate();
+		const windowId = await h.control.eval<number>(
+			`chrome.tabs.get(${a.tabId}).then((t) => t.windowId)`,
+		);
+		await until(
+			() =>
+				h.control.eval<number | undefined>(
+					`chrome.tabs.query({ active: true, windowId: ${windowId} }).then(([t]) => t?.id)`,
+				),
+			(front) => front === b.tabId,
+		);
+		await h.control.eval("globalThis.releaseInfo()");
+		if (await h.control.eval<boolean>("globalThis.heldTooLong === true"))
+			throw new Error(
+				"page:info was not released by the test within 3 s: the hold ended by itself",
+			);
 		// No content script on the tab yet: no toolbar either.
 		const upOn = (tabId: number) =>
 			h.control.eval<boolean>(
@@ -615,7 +634,15 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			() => upOn(a.tabId),
 			(up) => up,
 			10_000,
-		);
+		).catch(async (error: unknown) => {
+			const said = await panel.eval<string>(
+				`document.getElementById("hint").textContent + " | " + (document.getElementById("case-hint")?.textContent ?? "")`,
+			);
+			throw new Error(
+				`no toolbar on the tab clicked for; the panel says: ${said}`,
+				{ cause: error },
+			);
+		});
 		expect(await upOn(b.tabId)).toBe(false);
 		expect(
 			await panel.eval<string>(`document.getElementById("hint").textContent`),
