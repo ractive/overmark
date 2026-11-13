@@ -1035,7 +1035,8 @@ const actions: Actions = {
 		if (note.trim() === "") return;
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withReopen(current, a.id, { note }, now),
+			// Opened meanwhile: the form stays, and says why.
+			value: withReopen(current, a.id, { note, refuseOpen: true }, now),
 		}));
 	},
 

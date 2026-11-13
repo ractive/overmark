@@ -1102,11 +1102,22 @@ export function withVerified(
 export function withReopen(
 	c: Case,
 	annotationId: string,
-	reopen: { note?: string; app?: FindingApp },
+	reopen: {
+		note?: string;
+		app?: FindingApp;
+		/** The panel's: a note typed for a mark opened meanwhile is not lost unsaid. */
+		refuseOpen?: boolean;
+	},
 	now: string,
 ): Case {
 	const a = c.annotations.find((x) => x.id === annotationId);
-	if (a !== undefined && a.resolution === undefined) return c;
+	if (a !== undefined && a.resolution === undefined) {
+		if (reopen.refuseOpen)
+			throw new CaseError(
+				`Mark ${a.number} is open already; your note was not saved.`,
+			);
+		return c;
+	}
 	return changed(
 		c,
 		annotationId,

@@ -849,6 +849,15 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 		expect(withVerified(verified, "a1", undefined, T3)).toBe(verified);
 	});
 
+	test("the panel's reopen of a mark opened meanwhile says its note was not saved", () => {
+		const c = one();
+		expect(() =>
+			withReopen(c, "a1", { note: "Still pale", refuseOpen: true }, T1),
+		).toThrow("Mark 1 is open already; your note was not saved.");
+		// An AI app's call stays idempotent.
+		expect(withReopen(c, "a1", { note: "x" }, T1)).toBe(c);
+	});
+
 	test("only a fixed mark can be verified", () => {
 		const c = one();
 		expect(() => withVerified(c, "a1", undefined, T1)).toThrow(
