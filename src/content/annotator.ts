@@ -189,7 +189,7 @@ export class Annotator {
 	#saveCalled = false;
 	/** "Save case" is storing the drafts as a new case now. */
 	#savingCase = false;
-	/** Adding to a case: what changes it (adds, undos, New case) runs in order. */
+	/** Adding to a case: what changes it (adds, undos) runs in order. */
 	#ops: Promise<void> = Promise.resolve();
 	/** Drafts waiting to be added to the case, or being added now. */
 	#queued = new Set<Draft>();
@@ -201,6 +201,10 @@ export class Annotator {
 	#undoing = new Set<Draft>();
 	/** Done was clicked: the toolbar goes once the marks are in. */
 	#finishing = false;
+	/** Done (or the side panel's end) under way: a second one waits for it. */
+	#finishRun: Promise<void> | undefined;
+	/** What the side panel last heard: the drafts, the case, a save. */
+	#announced = "";
 	/** Done found these marks not in the case: Done again discards them. */
 	#leftOut: Set<Draft> | undefined;
 	/** A failure, said with role="alert" next to the status. */
@@ -748,26 +752,93 @@ export class Annotator {
 		this.#render();
 	}
 
-	/** Stop adding to the case: the next marks start another one. */
-	#newCase(): void {
-		// The marks already done go into the case first.
-		this.#queue(async () => {
-			this.#target = undefined;
-			this.#savedMarks = [];
-			this.#added = [];
-			// Those that could not be added are drafts of the new case now.
-			this.#failed.clear();
-			for (const d of this.#drafts) delete d.queuedFor;
-			this.#leftOut = undefined;
-			this.#alert = "";
-			this.#message = "";
-			this.#renumber();
-			this.#renderToolbar();
-			this.#render();
-		});
+	/**
+	 * The side panel closes the case (DEC-023): finish as Done does and, once
+	 * the toolbar is hidden, add to no case any more, so the next show starts
+	 * a new one. A mark that could not be added keeps the toolbar up, adding
+	 * to the case, unless `discard`: then the marks not in the case go.
+	 */
+	async end(caseId: string, discard = false): Promise<void> {
+		if (this.#target?.caseId !== caseId) return;
+		if (discard) await this.#discardLeft();
+		else await this.#finish();
+		// Shown for another case meanwhile, or a mark is still not in this one.
+		if (this.#target?.caseId !== caseId || this.overlay.annotating) return;
+		this.#forgetTarget();
+	}
+
+	/** Add to no case any more: the next marks are a new case's drafts. */
+	#forgetTarget(): void {
+		this.#target = undefined;
+		this.#savedMarks = [];
+		this.#added = [];
+		this.#failed.clear();
+		for (const d of this.#drafts) delete d.queuedFor;
+		this.#leftOut = undefined;
+		this.#alert = "";
+		this.#message = "";
+		this.#renumber();
+		this.#renderToolbar();
+		this.#render();
+	}
+
+	/**
+	 * Leave without the marks that are not in the case: the toolbar goes at
+	 * once its queue is empty (a mark being added goes in), a comment being
+	 * typed goes with its mark.
+	 */
+	async #discardLeft(): Promise<void> {
+		await this.#finishRun;
+		const editing = this.#editing;
+		if (editing !== null) {
+			this.#forget(editing);
+			this.#closeComment();
+		}
+		this.setTool(null);
+		this.#finishing = true;
+		this.#renderToolbar();
+		try {
+			await this.#settled();
+		} finally {
+			this.#finishing = false;
+		}
+		for (const d of [...this.#drafts]) {
+			this.#failed.delete(d);
+			this.#forget(d);
+		}
+		this.#leftOut = undefined;
+		this.#alert = "";
+		this.#message = "";
+		this.hide();
+		this.#renderToolbar();
+	}
+
+	/** Until the queue is empty, with what was queued meanwhile. */
+	async #settled(): Promise<void> {
+		for (let ops = this.#ops; ; ops = this.#ops) {
+			await ops;
+			if (ops === this.#ops) return;
+		}
+	}
+
+	/**
+	 * Tell the side panel when what it shows of the page changed (the drafts'
+	 * count, the case added to, a save under way): it opens a case that a
+	 * save made (DEC-023) and says how many marks are not saved yet.
+	 */
+	#announce(): void {
+		const now = JSON.stringify([
+			this.#drafts.length,
+			this.#target?.caseId,
+			this.#activity.saving,
+		]);
+		if (now === this.#announced) return;
+		this.#announced = now;
+		this.overlay.onChange?.();
 	}
 
 	#renderToolbar(): void {
+		this.#announce();
 		const doc = this.overlay.doc;
 		const bar = this.overlay.toolbar;
 		const brand = ring(doc);
@@ -857,9 +928,6 @@ export class Annotator {
 				again.title = `Try again to add to “${target.title}”`;
 				middle.push(again);
 			}
-			const fresh = this.#button("New case", "new-case", () => this.#newCase());
-			fresh.title = `Stop adding to “${target.title}”: the next marks start a new case`;
-			middle.push(fresh);
 		}
 		const top = bar.classList.contains("top");
 		const move = this.#button(
@@ -938,8 +1006,8 @@ export class Annotator {
 		const count = this.#drafts.length;
 		if (target === undefined)
 			return count === 0
-				? "Choose a tool"
-				: `${count} mark${count === 1 ? "" : "s"}`;
+				? "New case: choose a tool"
+				: `New case: ${count} mark${count === 1 ? "" : "s"}`;
 		const failed = [...this.#failed.keys()];
 		if (failed.length === 1)
 			return `Mark ${(failed[0] as Draft).number} is not in “${target.title}” yet`;
@@ -1423,7 +1491,7 @@ export class Annotator {
 		let added = false;
 		try {
 			// Nothing else changes the case from here meanwhile: a show waits for
-			// the save to end, New case and Undo wait in the queue.
+			// the save to end, Undo waits in the queue.
 			let target = this.#target;
 			if (target === undefined || this.#elsewhere(draft)) return;
 			this.#message = `Adding mark ${draft.number} to “${target.title}”…`;
@@ -1543,8 +1611,14 @@ export class Annotator {
 	 * goes. While a mark is still not in the case it stays up and says so; Done
 	 * again then discards those marks.
 	 */
-	async #finish(): Promise<void> {
-		if (this.#finishing) return;
+	#finish(): Promise<void> {
+		this.#finishRun ??= this.#finishNow().finally(() => {
+			this.#finishRun = undefined;
+		});
+		return this.#finishRun;
+	}
+
+	async #finishNow(): Promise<void> {
 		if (this.#editing !== null) this.#commitComment();
 		this.setTool(null);
 		const left = this.#leftOut;
@@ -1577,10 +1651,7 @@ export class Annotator {
 		this.#finishing = true;
 		this.#renderToolbar();
 		try {
-			for (let ops = this.#ops; ; ops = this.#ops) {
-				await ops;
-				if (ops === this.#ops) break;
-			}
+			await this.#settled();
 		} finally {
 			this.#finishing = false;
 		}
