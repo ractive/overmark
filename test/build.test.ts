@@ -105,6 +105,40 @@ describe("build", () => {
 		expect(isWrappedScript(content)).toBe(true);
 	});
 
+	test("no bundle loads code later: no dynamic import(), one script per page", async () => {
+		const outdir = tempDir();
+		await build({ outdir });
+		// A service worker refuses import(); the content script is a plain
+		// script. Both are bundled whole, the client's lazy chunks included.
+		for (const file of ["background.js", "content.js"])
+			expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
+				/\bimport\s*\(/,
+			);
+		// The pages are split, which names every chunk chunk-<hash>.js: a
+		// lazy one (the client's WebMCP mirror since 0.16.1, say, for
+		// `webmcp: true`, which Overmark leaves off) would be one more script.
+		// Each page's files, exactly: the html, one chunk with its map, and
+		// the side panel's stylesheet.
+		const pages = {
+			sidepanel: ["chunk-#.css", "chunk-#.js", "chunk-#.js.map", "index.html"],
+			offscreen: ["chunk-#.js", "chunk-#.js.map", "index.html"],
+		};
+		for (const [page, expected] of Object.entries(pages)) {
+			const files = [
+				...new Bun.Glob(`${page}/**/*`).scanSync({ cwd: outdir }),
+			].sort();
+			expect(
+				files.map((f) =>
+					f.slice(page.length + 1).replace(/-[a-z0-9]+\./, "-#."),
+				),
+			).toEqual(expected);
+			for (const file of files.filter((f) => f.endsWith(".js")))
+				expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
+					/\bimport\s*\(/,
+				);
+		}
+	});
+
 	test("the content script's check tells a module from a wrapped script", async () => {
 		for (const code of [
 			"export{a as b};",

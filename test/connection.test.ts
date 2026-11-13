@@ -13,6 +13,7 @@ import {
 	type RevokeSelector,
 } from "@ractive-ch/tab-mcp";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { type Kv, memoryKv } from "../src/lib/kv.ts";
 import type { CaseStore } from "../src/lib/store.ts";
 import { Connection } from "../src/worker/connection.ts";
@@ -117,6 +118,41 @@ async function until(ok: () => boolean, ms = 5000): Promise<void> {
 	}
 }
 
+/**
+ * A relay before 0.10.2, as the page hears it: its error frames name no
+ * request (no `for`, no `grantId`). Until `globals.WebSocket` is restored.
+ */
+function olderRelay(): void {
+	const Real = before.WebSocket as typeof WebSocket;
+	globals["WebSocket"] = class extends Real {
+		override addEventListener(
+			type: string,
+			listener: EventListenerOrEventListenerObject,
+			options?: boolean | AddEventListenerOptions,
+		): void {
+			if (type !== "message" || typeof listener !== "function") {
+				super.addEventListener(type, listener, options);
+				return;
+			}
+			super.addEventListener(
+				type,
+				(event) => {
+					const data = (event as MessageEvent).data;
+					const message =
+						typeof data === "string" ? JSON.parse(data) : undefined;
+					if (message?.type !== "error") return listener(event);
+					delete message.for;
+					delete message.grantId;
+					listener(
+						new MessageEvent("message", { data: JSON.stringify(message) }),
+					);
+				},
+				options,
+			);
+		}
+	};
+}
+
 interface Worker {
 	/** Every state the panel was sent. */
 	states: AiState[];
@@ -149,7 +185,9 @@ async function startWorker(kv: Kv): Promise<Worker> {
 
 describe("the worker's connection with client 0.16", () => {
 	const store = new SlowStore();
-	const relay = startTestRelay({ store });
+	// Workers of earlier tests stay connected: more than the 5 sessions a
+	// network may have by default.
+	const relay = startTestRelay({ store, maxSessionsPerIp: 50 });
 	const workers: Worker[] = [];
 	afterAll(async () => {
 		for (const w of workers) w.send({ type: "stop" });
@@ -164,6 +202,7 @@ describe("the worker's connection with client 0.16", () => {
 		store.failing = false;
 		store.slowMs = 0;
 		const kv = memoryKv({ relay: relay.url, panelHandedOver: true });
+		currentKv = kv;
 		const w = await startWorker(kv);
 		workers.push(w);
 		w.send({ type: "connect" });
@@ -192,18 +231,22 @@ describe("the worker's connection with client 0.16", () => {
 		return { w, kv, address, ids };
 	}
 
+	/** The settings database of the last worker `paired` started. */
+	let currentKv: Kv | undefined;
 	const grant = (w: Worker, name: string) =>
 		w.last().grants.find((g) => g.name === name);
 
-	test("Review of PR 58, 1: an answer for one Disconnect is not taken for another waiting", async () => {
+	/**
+	 * Two Disconnects in flight: One is gone at the relay (it was not told),
+	 * Two's revoke waits in the store when One's is asked for, and then
+	 * fails. The relay answers One at once: it knows no such grant.
+	 */
+	async function twoDisconnects() {
 		const { w, ids } = await paired(["One", "Two"]);
-		// One is gone at the relay, which does not tell the session.
 		await store.revoke(
 			{ grantId: ids["One"] as string },
 			{ now: Date.now(), keepUntil: Date.now() },
 		);
-		// Two's revoke waits in the store when One's is asked for, and then
-		// fails. The relay answers One at once: it knows no such grant.
 		const listed = w.last().grants.map((g) => g.name);
 		store.slowMs = 300;
 		store.failing = true;
@@ -211,32 +254,78 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "revoke", grantId: ids["Two"] });
 		await Bun.sleep(20);
 		w.send({ type: "revoke", grantId: ids["One"] });
-		await until(
-			() =>
-				grant(w, "Two")?.problem !== undefined &&
-				grant(w, "One")?.problem !== undefined,
-		);
+		await until(() => grant(w, "Two")?.problem !== undefined);
 		await Bun.sleep(50);
-		// One's revoke reached the relay only once Two's was answered.
-		expect(store.log).toEqual([
-			"listGrants",
-			"revoke",
-			"revoke answered",
-			"listGrants",
-		]);
+		const log = store.log;
 		store.log = undefined;
-		// Each app with its own answer: Two stays, in its place, with its
-		// Allow all changes.
-		expect(w.last().grants.map((g) => g.name)).toEqual(listed);
+		// Two stays, in its place, with its own answer and its Allow all changes.
 		expect(grant(w, "Two")?.problem).toBe(
 			"Two was not disconnected: the relay could not save this. Try again.",
 		);
 		expect(grant(w, "Two")?.allowAll).toBe(true);
-		expect(grant(w, "One")?.problem).toBe(
-			"The relay no longer knows One, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
+		return { w, ids, listed, log };
+	}
+
+	test("Review of PR 58, 1: with relay 0.10.2 each Disconnect gets its own answer, and an app the relay does not know leaves the list", async () => {
+		const { w, ids, listed } = await twoDisconnects();
+		// The relay names the grant its unknown_id is for: One leaves the
+		// list (client 0.16.1), with its Always allow, and nothing is said.
+		expect(w.last().grants.map((g) => g.name)).toEqual(
+			listed.filter((name) => name !== "One"),
 		);
-		expect(grant(w, "One")?.allowAll).toBe(false);
+		const kept = (await currentKv?.get("alwaysAllowed")) as object | undefined;
+		expect(Object.keys(kept ?? {})).toEqual([ids["Two"] as string]);
 	});
+
+	test("Review of PR 58, 1: with a relay before 0.10.2 (its errors name nothing) the Disconnects go one at a time", async () => {
+		olderRelay();
+		try {
+			const { w, listed, log } = await twoDisconnects();
+			// One's revoke reached the relay only once Two's was answered.
+			expect(log).toEqual([
+				"listGrants",
+				"revoke",
+				"revoke answered",
+				"listGrants",
+			]);
+			await until(() => grant(w, "One")?.problem !== undefined);
+			// The library cannot tell which grant it is: One stays listed.
+			expect(w.last().grants.map((g) => g.name)).toEqual(listed);
+			expect(grant(w, "One")?.problem).toBe(
+				"The relay no longer knows One, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
+			);
+			expect(grant(w, "One")?.allowAll).toBe(false);
+		} finally {
+			globals["WebSocket"] = before.WebSocket;
+		}
+	});
+
+	test("Review of PR 59, 1: with an older relay, an answer that comes after its revoke timed out is not taken for the next", async () => {
+		olderRelay();
+		try {
+			const { w, ids } = await paired(["One", "Two"]);
+			// One's store write takes longer than the library waits (15 s), and
+			// then fails; Two goes next in the queue.
+			store.slowMs = 16_000;
+			store.failing = true;
+			w.send({ type: "revoke", grantId: ids["One"] });
+			w.send({ type: "revoke", grantId: ids["Two"] });
+			await until(() => grant(w, "One")?.problem !== undefined, 16_000);
+			expect(grant(w, "One")?.problem).toBe(
+				"One was not disconnected: the relay did not answer. Try again.",
+			);
+			// One's late store_unavailable, naming nothing, rejects Two's.
+			await until(() => grant(w, "Two")?.problem !== undefined, 5000);
+			expect(grant(w, "Two")?.problem).toBe(
+				"Two was not disconnected: the relay's answer may be for an earlier Disconnect it was slow to answer. Try again.",
+			);
+			expect(grant(w, "Two")?.allowAll).toBe(true);
+		} finally {
+			globals["WebSocket"] = before.WebSocket;
+			store.slowMs = 0;
+			store.failing = false;
+		}
+	}, 30_000);
 
 	test("Review of PR 58, 2: a Disconnect sent and then cut off by Stop could not be confirmed", async () => {
 		const { w, ids } = await paired(["One"]);
@@ -331,5 +420,50 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "connect" });
 		await until(() => w.last().state === "connected");
 		expect(w.last().address).not.toBe(first.address);
+	});
+
+	test("New address after a takeover this worker saw: a rejection after the address changed clears the takeover", async () => {
+		const { w, kv, address } = await paired([]);
+		// A program with a copy of the address secret takes the address over.
+		const key = `tab-mcp:secret:${relay.url}:overmark`;
+		const secret = (await kv.get(key)) as string;
+		expect(typeof secret).toBe("string");
+		const other = new TabMcp({
+			relay: relay.url,
+			server: { name: "overmark", version: "0.0.0" },
+			storage: {
+				getItem: (k) => (k === key ? secret : null),
+				setItem() {},
+			},
+		});
+		await other.connect();
+		try {
+			await until(() => w.last().replaced !== undefined);
+			// The library takes the address back and connects with the new one
+			// itself (it saw the takeover); that connect cannot.
+			const Real = before.WebSocket as typeof WebSocket;
+			let sockets = 0;
+			globals["WebSocket"] = class extends Real {
+				constructor(url: string | URL, protocols?: string | string[]) {
+					sockets++;
+					super(sockets > 1 ? "ws://127.0.0.1:1/tab" : url, protocols);
+				}
+			};
+			try {
+				w.send({ type: "new-address" });
+				await until(() => w.last().problem !== undefined, 10_000);
+			} finally {
+				globals["WebSocket"] = before.WebSocket;
+			}
+			expect(sockets).toBe(2);
+			// The address is new all the same: no takeover notice for it.
+			expect(w.last().replaced).toBeUndefined();
+			expect(await kv.get("replaced")).toBeUndefined();
+			w.send({ type: "connect" });
+			await until(() => w.last().state === "connected");
+			expect(w.last().address).not.toBe(address);
+		} finally {
+			other.disconnect();
+		}
 	});
 });
