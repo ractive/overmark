@@ -1034,6 +1034,55 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		};
 
 		slowTest(
+			"the page's own Hide during a search again holds, also after a switch of tabs",
+			async () => {
+				await fresh([manyMarks("c_hide_again")]);
+				const { page, tabId } = await h.open("v1");
+				await page.activate();
+				// The first search draws; the clear lands right behind the next one.
+				await wrapSend(`async (tabId, message, send) => {
+					if (message.type !== "case:load") return send(tabId, message);
+					globalThis.loads = (globalThis.loads ?? 0) + 1;
+					if (globalThis.loads !== 2) return send(tabId, message);
+					const mine = send(tabId, message);
+					// As the Hide on the page's bar.
+					const cleared = send(tabId, { type: "case:clear" });
+					const answer = await mine;
+					await cleared;
+					globalThis.hidden = true;
+					return answer;
+				}`);
+				await openCase("c_hide_again");
+				const button = id("load-case");
+				await h.control.waitFor(
+					`globalThis.hidden && !${button}.hidden && ${button}.textContent === "Show marks" && ${id("tab-line")}.textContent === "Marks are hidden on this tab."`,
+					10_000,
+				);
+				expect(await pageCase(tabId)).toBeNull();
+				// Another tab: the case follows there; back: not drawn again.
+				const other = await h.open("v2");
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === "c_hide_again",
+					"the marks on the other tab",
+				);
+				await page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === null,
+					"the marks to leave the other tab",
+				);
+				await h.control.waitFor(
+					`!${button}.hidden && ${button}.textContent === "Show marks" && ${id("tab-line")}.textContent === "Marks are hidden on this tab."`,
+				);
+				expect(await pageCase(tabId)).toBeNull();
+				await h.control.eval(`${id("back")}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await other.page.send("Page.close");
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
 			"the case opened again while its searches again wait: it is drawn",
 			async () => {
 				await fresh([manyMarks("c_again")]);

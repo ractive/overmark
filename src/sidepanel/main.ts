@@ -242,8 +242,13 @@ async function loadInto(
 			case: c,
 		}).finally(() => loadsUnderWay--);
 		// Stopped by a clear (Hide, the case closed) or another case's load:
-		// nothing to say, and no marks of this load's are on the page.
-		if ("replaced" in result) return undefined;
+		// nothing to say, and no marks of this load's are on the page. Still
+		// the newest: what the page shows now decides (the Hide on its bar).
+		if ("replaced" in result) {
+			// What an earlier search found no longer holds either.
+			if (work.current() && !(await followPage(c.id, tabId))) hint(undefined);
+			return undefined;
+		}
 		if ("error" in result) {
 			// A stale load's failure is about a tab no longer in question.
 			if (work.current()) hint(result.error);
@@ -268,15 +273,8 @@ async function loadInto(
 		// Hide on its bar, an AI app, another window's panel) may have taken
 		// the marks off before this answer came, and its news came while the
 		// load was under way, when it says nothing (DEC-023).
-		const now = await overlayState(tabId);
-		if (now !== undefined && now.loadedCase !== c.id) {
-			if (sameDrawn(drawn, here)) drawn = undefined;
-			// Cleared: it holds as the page's own Hide does (DEC-022); another
-			// case there is an AI app's, left to it.
-			if (now.loadedCase === undefined) hiddenOn.add(tabId);
-			update((s) => {
-				if (s.tab?.id === tabId) s.overlay = now;
-			});
+		if (!(await followPage(c.id, tabId))) {
+			hint(undefined);
 			return undefined;
 		}
 		const found = result.matches.filter(isFound).length;
@@ -300,6 +298,30 @@ async function loadInto(
 		if (work.current()) hint(describeError(error));
 		return undefined;
 	}
+}
+
+/**
+ * After a draw of the case on the tab: what the page shows now decides
+ * (DEC-023), as its news would, which says nothing while a load is under
+ * way. Cleared (the Hide on its bar, an AI app, another window's panel): it
+ * holds as the page's own Hide does (DEC-022), and the searches again stop;
+ * another case there is an AI app's, left to it. Answers whether the page
+ * still shows the case (or cannot say: it has navigated).
+ */
+async function followPage(caseId: string, tabId: number): Promise<boolean> {
+	const now = await overlayState(tabId);
+	if (now === undefined || now.loadedCase === caseId) return true;
+	if (sameDrawn(drawn, { tabId, caseId })) drawn = undefined;
+	if (now.loadedCase === undefined) {
+		hiddenOn.add(tabId);
+		if (loadTarget?.tabId === tabId) stopLoads();
+	}
+	update((s) => {
+		if (s.tab?.id === tabId) s.overlay = now;
+		if (s.loaded?.tabId === tabId && s.loaded.caseId === caseId)
+			s.loaded = undefined;
+	});
+	return false;
 }
 
 /** What a draw found, under the case's buttons. */
