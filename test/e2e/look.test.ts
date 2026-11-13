@@ -99,7 +99,9 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		// A case with a long title and three marks, drawn on the page.
 		await panel.eval(`${id("annotate")}.click()`);
 		await page.waitFor(shadow('[data-action="tool-box"]'));
-		// The toolbar is up: Stop annotating is no amber button.
+		// The toolbar is up: Stop annotating is no amber button. The panel
+		// hears of the toolbar a moment after the page shows it.
+		await panel.waitFor(`${id("annotate")}.textContent === "Stop annotating"`);
 		await holds([]);
 		await markElement(
 			page,
