@@ -35,13 +35,20 @@ export const CLICK_LOAD_WAIT_MS = 30_000;
 export const CLICK_RETRY_MS = 250;
 
 /**
- * Resolves once the tab's new page is there: its address came (the page
- * committed; only with access is it told), or it has loaded. `false` if the
- * tab was closed first or neither came within `timeoutMs`. Best effort: the
- * listeners live in the worker, and a worker Chrome stops meanwhile takes
- * them along (then nothing is injected again, as before).
+ * Resolves once the tab's new page is there: it has loaded, or the address
+ * the tab was on its way to (`pendingUrl`, as the click saw it) has become
+ * its address, which Chrome says only while Overmark may see it: that page
+ * committed, and `executeScript` waits for it to be idle by itself. Another
+ * address (a redirect, the old page's own `pushState`) waits for the load.
+ * `false` if the tab was closed first or neither came within `timeoutMs`.
+ * Best effort: the listeners live in the worker, and a worker Chrome stops
+ * meanwhile takes them along (then nothing is injected again, as before).
  */
-function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
+function loaded(
+	tabId: number,
+	pendingUrl: string | undefined,
+	timeoutMs: number,
+): Promise<boolean> {
 	return new Promise((resolve) => {
 		const done = (ok: boolean) => {
 			clearTimeout(timer);
@@ -50,10 +57,10 @@ function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
 			resolve(ok);
 		};
 		const updated = (id: number, info: { status?: string; url?: string }) => {
-			// executeScript waits for the page to be idle by itself.
+			if (id !== tabId) return;
 			if (
-				id === tabId &&
-				(info.status === "complete" || info.url !== undefined)
+				info.status === "complete" ||
+				(pendingUrl !== undefined && info.url === pendingUrl)
 			)
 				done(true);
 		};
@@ -63,10 +70,14 @@ function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
 		const timer = setTimeout(() => done(false), timeoutMs);
 		chrome.tabs.onUpdated.addListener(updated);
 		chrome.tabs.onRemoved.addListener(removed);
-		// It may have loaded before the listeners were there.
+		// It may have come before the listeners were there.
 		chrome.tabs.get(tabId).then(
 			(tab) => {
-				if (tab.status === "complete") done(true);
+				if (
+					tab.status === "complete" ||
+					(pendingUrl !== undefined && tab.url === pendingUrl)
+				)
+					done(true);
 			},
 			() => done(false),
 		);
@@ -81,13 +92,15 @@ function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
  *   one on its way out, and the next one comes without it. The grant holds
  *   across a navigation within the origin (a reload, a link on the same
  *   scheme, host and port), so once the new page is there the script goes
- *   in again. A page of another origin (a new tab's first page, a redirect
- *   to www. or https) is not granted: the panel asks for the click again.
+ *   in again. A page of another origin is not granted, and is refused
+ *   quietly: a new tab's first page, or a redirect to another host of the
+ *   same site (example.com to www.example.com, http to https). The panel
+ *   then asks for the click again, and the user clicks again.
  * - Right after a click on a loaded page Chrome now and then refuses the
  *   script; a moment later it lets it in.
  */
 export async function injectOnClick(
-	tab: Pick<chrome.tabs.Tab, "id" | "status">,
+	tab: Pick<chrome.tabs.Tab, "id" | "status" | "pendingUrl">,
 	options: { loadWaitMs?: number; retryMs?: number } = {},
 ): Promise<void> {
 	const { loadWaitMs = CLICK_LOAD_WAIT_MS, retryMs = CLICK_RETRY_MS } = options;
@@ -98,7 +111,7 @@ export async function injectOnClick(
 			() => undefined,
 			(error: unknown) => error,
 		);
-		if (!(await loaded(id, loadWaitMs))) {
+		if (!(await loaded(id, tab.pendingUrl, loadWaitMs))) {
 			if (first !== undefined) throw first;
 			return;
 		}

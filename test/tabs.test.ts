@@ -32,11 +32,9 @@ function fakeChrome() {
 			onRemoved: event(listeners.removed),
 		},
 		/** The new page committed: its address comes, while it still loads. */
-		committed() {
+		committed(url = "https://example.com/next") {
 			for (const l of listeners.updated)
-				(l as (id: number, info: { url: string }) => void)(7, {
-					url: "https://example.com/next",
-				});
+				(l as (id: number, info: { url: string }) => void)(7, { url });
 		},
 		loaded() {
 			fake.status = "complete";
@@ -103,14 +101,32 @@ describe("the content script after a click on the icon", () => {
 		}
 	});
 
-	test("the new page has come but still loads (a slow resource): in at once", async () => {
+	const next = {
+		id: 7,
+		status: "loading" as const,
+		pendingUrl: "https://example.com/next",
+	};
+
+	test("the page it was on its way to has come but still loads (a slow resource): in at once", async () => {
 		chrome.answers = ["ok"];
-		const done = injectOnClick({ id: 7, status: "loading" }, fast);
+		const done = injectOnClick(next, fast);
 		await settle();
 		chrome.committed();
 		await done;
 		expect(chrome.calls).toBe(2);
 		expect(chrome.listening()).toBe(0);
+	});
+
+	test("another address meanwhile (the old page's pushState, a redirect): it waits for the load", async () => {
+		chrome.answers = ["ok"];
+		const done = injectOnClick(next, fast);
+		await settle();
+		chrome.committed("https://example.com/old#moved");
+		await settle();
+		expect(chrome.calls).toBe(1);
+		chrome.loaded();
+		await done;
+		expect(chrome.calls).toBe(2);
 	});
 
 	test("loaded before the listeners were there: again all the same", async () => {
