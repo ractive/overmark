@@ -27,6 +27,7 @@ import {
 	MAX_FINDING,
 	MAX_FINDINGS,
 	MAX_FINDINGS_TEXT,
+	MAX_REOPEN_NOTE,
 	MAX_VERDICT,
 	type MarkStatus,
 	markStatus,
@@ -40,6 +41,7 @@ import {
 	resolutionStatus,
 	type Shot,
 	STATUS_LABEL,
+	textLength,
 	withFinding,
 	withFindingText,
 	withoutFinding,
@@ -1064,7 +1066,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		name: "set_mark_status",
 		title: "Set a mark's status",
 		description:
-			"Set a mark's status. fixed: the change is in, and the mark waits for the tester to verify it. verified: the user checked the fix on the new build and it holds; set it only when the user says so, never for a fix of your own, and only on a mark that is fixed. wontfix: left as it is on purpose. cantreproduce: could not be seen. open: reopens a resolved mark; say in note what is still wrong. note is kept with the status. The user is asked first.",
+			"Set a mark's status. fixed: the change is in, and the mark waits for the tester to verify it. verified: the user checked the fix on the new build and it holds; set it only when the user says so, never for a fix of your own, and only on a mark that is fixed. wontfix: left as it is on purpose. cantreproduce: could not be seen. open: reopens a resolved mark; say in note what is still wrong, in at most 2,000 characters. note is kept with the status. The user is asked first.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -1096,7 +1098,10 @@ export function createTools(deps: ToolDeps): Tool[] {
 				switch (status) {
 					case "open":
 						return was === "open"
-							? set(c, `Mark ${mark} is open already.`)
+							? set(
+									c,
+									`Mark ${mark} is open already${note === undefined ? "" : "; the note was not kept"}.`,
+								)
 							: set(
 									withReopen(
 										c,
@@ -1107,7 +1112,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 										},
 										now,
 									),
-									`Mark ${mark} is open again (it was ${WAS_LABEL[was]}).`,
+									`Mark ${mark} is open again (it was ${WAS_LABEL[was]}).${note !== undefined && textLength(note.trim()) > MAX_REOPEN_NOTE ? ` The note was cut to ${MAX_REOPEN_NOTE.toLocaleString("en-US")} characters.` : ""}`,
 								);
 					case "verified":
 						if (was !== "fixed" && was !== "verified")
@@ -1116,7 +1121,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 							);
 						return set(
 							withVerified(c, a.id, app, now),
-							`Mark ${mark} is verified.`,
+							`Mark ${mark} is verified.${note === undefined ? "" : " A note is not kept with verified."}`,
 						);
 					case "fixed":
 						// Verified stays: only the note changes, and only the

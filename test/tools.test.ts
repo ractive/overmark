@@ -813,7 +813,7 @@ describe("tools", () => {
 		test("open on an open mark changes nothing; verified twice stays as it was", async () => {
 			await seed();
 			const before = await store.getCase("c_1");
-			expect(await status(2, "open", "x")).toBe("Mark 2 is open already.");
+			expect(await status(2, "open")).toBe("Mark 2 is open already.");
 			const after = await store.getCase("c_1");
 			expect(after).toEqual(before as Case);
 			expect(after?.annotations[1]?.reopens).toBeUndefined();
@@ -887,6 +887,25 @@ describe("tools", () => {
 			await status(2, "open", "Not fixed after all");
 			expect(await status(2, "wontfix")).toBe("Mark 2 is resolved: Won't fix.");
 			expect((await stored())?.reopens?.[0]?.was).toEqual(verified as never);
+		});
+
+		test("a note that is not kept, or kept cut, is said so", async () => {
+			await seed();
+			expect(await status(2, "open", "x")).toBe(
+				"Mark 2 is open already; the note was not kept.",
+			);
+			await status(2, "fixed");
+			expect(await status(2, "verified", "Checked on build 412")).toBe(
+				"Mark 2 is verified. A note is not kept with verified.",
+			);
+			expect((await stored())?.resolution?.note).toBeUndefined();
+			expect(await status(2, "open", "y".repeat(5000))).toBe(
+				"Mark 2 is open again (it was Verified). The note was cut to 2,000 characters.",
+			);
+			expect((await stored())?.reopens?.[0]?.note?.length).toBe(2000);
+			expect(tools.get("set_mark_status")?.description).toContain(
+				"say in note what is still wrong, in at most 2,000 characters.",
+			);
 		});
 
 		test("get_case: status, reopens with who, verified with who", async () => {
