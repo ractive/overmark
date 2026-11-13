@@ -499,6 +499,7 @@ function openCase(id: string): void {
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
+		s.markFilter = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
 	});
@@ -1042,7 +1043,12 @@ const actions: Actions = {
 
 	filterMarks(caseId, group) {
 		update((s) => {
-			s.markFilter = group === undefined ? undefined : { caseId, group };
+			const highest = Math.max(
+				0,
+				...(s.current?.annotations.map((a) => a.number) ?? []),
+			);
+			s.markFilter =
+				group === undefined ? undefined : { caseId, group, upTo: highest };
 		});
 	},
 

@@ -120,8 +120,12 @@ export interface PanelState {
 	deleteArmedAt: number | undefined;
 	/** A mark of the open case being resolved or its comment edited. */
 	markEdit: MarkEdit | undefined;
-	/** The status chip pressed: the open case's list shows only those marks. */
-	markFilter: { caseId: string; group: StatusGroup } | undefined;
+	/**
+	 * The status chip pressed: the open case's list shows only those marks,
+	 * while there are any and no mark above `upTo` (the highest number when
+	 * it was pressed) was added.
+	 */
+	markFilter: { caseId: string; group: StatusGroup; upTo: number } | undefined;
 	/** A mark's Delete, clicked once: the second click deletes. */
 	markDeleteArmed: { annotationId: string; at: number } | undefined;
 	/**

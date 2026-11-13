@@ -1577,8 +1577,15 @@ function renderCase(state: PanelState, actions: Actions): void {
 	if (edit === undefined) focusedForm = undefined;
 	const markArmed = state.markDeleteArmed?.annotationId;
 	const findingArmed = state.findingDeleteArmed;
+	// A filter ends once none of its marks are left (nothing to show), or a
+	// mark was added (it would not show, as if it was not saved).
+	const f = state.markFilter;
 	const filter =
-		state.markFilter?.caseId === c.id ? state.markFilter.group : undefined;
+		f?.caseId === c.id &&
+		caseCounts(c)[f.group] > 0 &&
+		c.annotations.every((a) => a.number <= f.upTo)
+			? f.group
+			: undefined;
 	const marksKey = JSON.stringify([
 		filter ?? null,
 		c.updatedAt,

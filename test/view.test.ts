@@ -672,7 +672,7 @@ describe("Verify (DEC-023)", () => {
 			) as unknown as HTMLElement
 		).click();
 		const filtered = caseState(c, (s) => {
-			s.markFilter = { caseId: c.id, group: "toVerify" };
+			s.markFilter = { caseId: c.id, group: "toVerify", upTo: 4 };
 		});
 		render(filtered, actions);
 		expect(rows()).toEqual(["a2"]);
@@ -702,12 +702,42 @@ describe("Verify (DEC-023)", () => {
 		// Another case's filter is not this one's.
 		render(
 			caseState(c, (s) => {
-				s.markFilter = { caseId: "c_other", group: "toVerify" };
+				s.markFilter = { caseId: "c_other", group: "toVerify", upTo: 4 };
 			}),
 			actions,
 		);
 		expect(rows()).toEqual(["a1", "a2", "a3", "a4"]);
 		expect(el("marks-filtered")).toBeNull();
+	});
+
+	test("the filter ends when its marks are gone, or a mark is added", () => {
+		const c = fourMarks();
+		const filtered = (k: Case) =>
+			caseState(k, (s) => {
+				s.markFilter = { caseId: c.id, group: "toVerify", upTo: 4 };
+			});
+		// The last mark to verify verified: all marks again, no empty list.
+		const none: Case = {
+			...c,
+			updatedAt: "2026-11-15T10:00:00Z",
+			annotations: c.annotations.filter((a) => a.id !== "a2"),
+		};
+		render(filtered(none), noActions);
+		expect(rows()).toEqual(["a1", "a3", "a4"]);
+		expect(el("marks-filtered")).toBeNull();
+		// A mark drawn while filtered shows, whatever its status.
+		const added: Case = {
+			...c,
+			updatedAt: "2026-11-15T11:00:00Z",
+			annotations: [...c.annotations, mark(5)],
+		};
+		render(filtered(added), noActions);
+		expect(rows()).toEqual(["a1", "a2", "a3", "a4", "a5"]);
+		expect(
+			window.document
+				.querySelector('.chip[data-group="toVerify"]')
+				?.getAttribute("aria-pressed"),
+		).toBe("false");
 	});
 
 	test("nothing open or to verify: a line says so", () => {
