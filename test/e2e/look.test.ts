@@ -99,9 +99,12 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		// A case with a long title and three marks, drawn on the page.
 		await panel.eval(`${id("annotate")}.click()`);
 		await page.waitFor(shadow('[data-action="tool-box"]'));
-		// The toolbar is up: Stop annotating is no amber button. The panel
-		// hears of the toolbar a moment after the page shows it.
-		await panel.waitFor(`${id("annotate")}.textContent === "Stop annotating"`);
+		// The case is made and open, the toolbar adding to it (DEC-026): Done
+		// adding is no amber button.
+		await panel.waitFor(
+			`!${id("case-view")}.hidden && ${id("add-marks")}?.textContent === "Done adding"`,
+			20_000,
+		);
 		await holds([]);
 		await markElement(
 			page,
@@ -114,7 +117,7 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 			page,
 			"Premium form: contrast, copy and a title that takes more than one line of the panel",
 		);
-		// The panel opens the case the toolbar saved (DEC-023), adding to it.
+		// Still the case, renamed, the toolbar adding to it.
 		await panel.waitFor(
 			`!${id("case-view")}.hidden && ${id("add-marks")}?.textContent === "Done adding"`,
 			20_000,
