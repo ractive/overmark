@@ -204,7 +204,13 @@ describe.skipIf(browserBinary === undefined)("Verify", () => {
 			{
 				note: "Still pale on hover",
 				at: expect.any(String),
-				was: { kind: "fixed", note: "Darker text", at: expect.any(String) },
+				// The developer's fix came in from the file.
+				was: {
+					kind: "fixed",
+					note: "Darker text",
+					at: expect.any(String),
+					imported: true,
+				},
 			},
 		]);
 		expect(stored?.annotations[0]?.resolution?.verified).toEqual({
