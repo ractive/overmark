@@ -50,12 +50,23 @@ timestamp: 2026-11-04T17:00:00+01:00
    the cause of most of the bugs the reviews found that night: the page's adding queue
    and the panel's follow variables are a second, untested state beside the one state
    object each side was given (DEC-010, DEC-011).
-9. **CI is flaky, about one run in four.** A `beforeAll` of the suites that pair an AI
-   app over the test relay sometimes hangs for its 60 s (seen on main before iteration
-   17 too; `mcpClient`'s connect has no time limit and is the likeliest place), and
-   `shipped.test.ts` sometimes times out at the icon's click. Fixed that night: the
-   review tests leaking a patched `getBoundingClientRect` into later files, and one
-   failing end-to-end test taking the next twenty with it. Still there: two tests of
-   `test/view.test.ts` fail when its tests run in another order (`--randomize`), and an
-   export test's sizes leave about 470 bytes of margin for a longer `case.md` preamble.
+9. **CI was flaky, about one run in three** (2026-11-13, `fix/e2e-flakes`).
+   `shipped.test.ts` timing out after the icon's click had three causes, reproduced in a
+   2-CPU Linux container with Chromium 156: a click while the page loads put the script
+   into the page on its way out, and Chrome refuses the script now and then right after
+   a click (both fixed in the worker: injected again after the load, tried again after
+   250 ms); the panel dropped the news that the click let Overmark onto the tab when it
+   came before the panel had noted that the case waits there (fixed); and the test
+   clicked a new tab before its first page had come (fixed in the test, which now
+   clicks once the page has loaded and waits for the panel's notice of that tab; the
+   early click, which Chrome grants nothing, has a test of its own: nothing goes in,
+   the panel asks on that tab, and the click again loads the case). **Still
+   open:** the `beforeAll` of the suites that pair an AI app over the test relay hanging
+   for its 60 s was not reproduced here (Mac and container, under load). Every setup
+   step is now logged on stderr with a time and has its own limit, so the next hang in
+   CI names its step (the last `[e2e …]` line without "done"); `putCases`, which could
+   wait for ever, no longer can, but there is no evidence it was the cause. Also still
+   there: two tests of `test/view.test.ts` fail when its tests run in another order
+   (`--randomize`), and an export test's sizes leave about 470 bytes of margin for a
+   longer `case.md` preamble.
 10. **Dependabot's Biome 2.6.6** pull request fails CI and was not looked at.

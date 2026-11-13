@@ -5,12 +5,12 @@
     "": {
       "name": "overmark",
       "dependencies": {
-        "@ractive-ch/tab-mcp-client": "0.16.0",
+        "@ractive-ch/tab-mcp-client": "0.16.1",
       },
       "devDependencies": {
         "@biomejs/biome": "2.6.5",
         "@modelcontextprotocol/client": "2.4.0",
-        "@ractive-ch/tab-mcp": "0.10.1",
+        "@ractive-ch/tab-mcp": "0.10.2",
         "@types/bun": "1.4.4",
         "@types/chrome": "0.3.7",
         "happy-dom": "21.0.4",
@@ -47,9 +47,9 @@
 
     "@modelcontextprotocol/core": ["@modelcontextprotocol/core@2.4.0", "", { "dependencies": { "zod": "^4.2.0" } }, "sha512-z8QBKqdfXLPzkLQuG4xp8hrVEMm1PZ1IgxMN2sMbJiFiAKOWXnAzogXn2W4aqIBlP1ea6U5yiqVquvUNM1Cj6Q=="],
 
-    "@ractive-ch/tab-mcp": ["@ractive-ch/tab-mcp@0.10.1", "", { "bin": { "tab-mcp": "main.js" } }, "sha512-BR7S5+QpNo9J35x7B92zUPiFRB86cH/Fz4XE7ZhNRL8LmVUJbw4ubXGziIJku0TCSksRo77YEqd2v6CqTs/dMg=="],
+    "@ractive-ch/tab-mcp": ["@ractive-ch/tab-mcp@0.10.2", "", { "bin": { "tab-mcp": "main.js" } }, "sha512-M+0PIyTqftz3jQfLdibgBTz65B3Iwha3JB1xCjYoAeWewgqmo0oCOvhfUsVuPOWj3oGUfJHmzjn1w3NGbZPqbA=="],
 
-    "@ractive-ch/tab-mcp-client": ["@ractive-ch/tab-mcp-client@0.16.0", "", { "dependencies": { "@cfworker/json-schema": "4.1.6" }, "peerDependencies": { "react": ">=18.3.0 <20" }, "optionalPeers": ["react"] }, "sha512-FpPeq4pth0bCpV7LmX2xKdf7+TQFo5lSFH2qn6nZqElP3p1YDbmdfBeq4V4aqbY3XhCv4uAXEvBog9AUMrfa9Q=="],
+    "@ractive-ch/tab-mcp-client": ["@ractive-ch/tab-mcp-client@0.16.1", "", { "dependencies": { "@cfworker/json-schema": "4.1.6" }, "peerDependencies": { "react": ">=18.3.0 <20" }, "optionalPeers": ["react"] }, "sha512-7kjWjmoQmWjMbTj/mKsSCm8/AZ6HaPfT5HFkLULB2iiqErmcJU5r/Y+0xWBQJy7U6ArRdTht5lX+RBpqR2NkBQ=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 

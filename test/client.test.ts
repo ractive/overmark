@@ -28,14 +28,18 @@ import {
 	badgeOf,
 	revokeProblem,
 	sessionOnAfter,
+	unattributed,
 } from "../src/worker/connection.ts";
 import { KeepOn } from "../src/worker/keep-on.ts";
 
 /** A memory store whose revocations fail while `failing`, as a store that is down. */
 class FlakyStore extends MemoryTokenStore {
 	failing = false;
-	override revoke(selector: RevokeSelector, options: RevokeOptions) {
-		if (this.failing) return Promise.reject(new Error("store down"));
+	/** How long a revocation takes. */
+	slowMs = 0;
+	override async revoke(selector: RevokeSelector, options: RevokeOptions) {
+		if (this.slowMs > 0) await Bun.sleep(this.slowMs);
+		if (this.failing) throw new Error("store down");
 		return super.revoke(selector, options);
 	}
 }
@@ -117,40 +121,75 @@ describe("the library's state, as the worker reads it", () => {
 	});
 
 	test("Disconnect that did not work says why, for each of revoke's rejections", () => {
-		const relayError = (code: string) =>
-			Object.assign(new Error(`Relay error ${code}: x`), { code });
-		expect(revokeProblem(relayError("store_unavailable"), "Claude")).toBe(
+		const relayError = (code: string, named = false) =>
+			Object.assign(
+				new Error(`Relay error ${code}: x`),
+				{ code },
+				named ? { for: "grant.revoke", grantId: "g" } : {},
+			);
+		const problem = (
+			error: unknown,
+			state: ConnectionState = "connected",
+			unattributed = false,
+		) => revokeProblem({ error, state, unattributed }, "Claude");
+		expect(problem(relayError("store_unavailable"))).toBe(
 			"Claude was not disconnected: the relay could not save this. Try again.",
 		);
-		expect(revokeProblem(relayError("unknown_id"), "Claude")).toBe(
+		expect(problem(relayError("unknown_id"))).toBe(
 			"The relay no longer knows Claude, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
 		);
-		expect(
-			revokeProblem(
-				new DOMException("TabMcp: not connected", "InvalidStateError"),
-				"Claude",
-			),
-		).toBe(
+		const notSent = new DOMException(
+			"TabMcp: not connected",
+			"InvalidStateError",
+		);
+		expect(problem(notSent, "disconnected")).toBe(
 			"Claude was not disconnected: Overmark is not connected to the relay. Turn on AI access and try again.",
 		);
+		// AI access is on: the connection is on its way back, or closing.
+		for (const state of ["reconnecting", "connecting", "connected"] as const)
+			expect(problem(notSent, state)).toBe(
+				"Claude was not disconnected: the connection to the relay is being restored. Try again once it is connected.",
+			);
 		expect(
-			revokeProblem(
+			problem(
 				new DOMException("TabMcp: the relay did not answer", "TimeoutError"),
-				"Claude",
 			),
 		).toBe("Claude was not disconnected: the relay did not answer. Try again.");
-		// Sent while connected, then the session ended: the relay may have done it.
+		// Sent, then the session ended: the relay may have done it.
 		expect(
-			revokeProblem(
-				new DOMException("TabMcp: not connected", "InvalidStateError"),
-				"Claude",
-				true,
+			problem(
+				new DOMException(
+					"TabMcp: the session ended before the relay answered",
+					"NetworkError",
+				),
+				"disconnected",
 			),
 		).toBe(
 			"Overmark could not confirm that Claude was disconnected: the connection ended first. It shows when AI access is next on.",
 		);
-		expect(revokeProblem(new Error("odd"), "Claude")).toBe(
-			"Claude was not disconnected: odd",
+		expect(problem(new Error("odd"))).toBe("Claude was not disconnected: odd");
+		// An older relay's answer after an earlier revoke timed out.
+		expect(problem(relayError("unknown_id"), "connected", true)).toBe(
+			"Claude was not disconnected: the relay's answer may be for an earlier Disconnect it was slow to answer. Try again.",
+		);
+	});
+
+	test("an older relay's error after a revoke timed out may be that revoke's answer", () => {
+		const error = (code: string, named: boolean) =>
+			Object.assign(
+				new Error(code),
+				{ code },
+				named ? { for: "grant.revoke", grantId: "g" } : {},
+			);
+		for (const code of ["unknown_id", "store_unavailable"]) {
+			// Named (relay 0.10.2): always its own.
+			expect(unattributed(error(code, true), true)).toBe(false);
+			// Unnamed: its own unless a revoke timed out before.
+			expect(unattributed(error(code, false), false)).toBe(false);
+			expect(unattributed(error(code, false), true)).toBe(true);
+		}
+		expect(unattributed(new DOMException("x", "TimeoutError"), true)).toBe(
+			false,
 		);
 	});
 });
@@ -250,17 +289,28 @@ describe("tab-mcp client 0.16 with a relay", () => {
 			expect(mcp.grants.some((g) => g.grantId === first)).toBe(false);
 			expect(changes.length).toBeGreaterThan(0);
 
-			// Gone from the relay's store behind the session's back: unknown_id.
+			// Gone from the relay's store behind the session's back: the
+			// relay's unknown_id names it (0.10.2), so the library drops it
+			// from `grants` and the revoke resolves (0.16.1).
 			const second = await named("https://two.example/client.json");
 			await relay.store.revoke(
 				{ grantId: second },
 				{ now: Date.now(), keepUntil: Date.now() },
 			);
-			await expect(mcp.revoke(second)).rejects.toMatchObject({
-				code: "unknown_id",
-			});
+			await expect(mcp.revoke(second)).resolves.toBeUndefined();
+			expect(mcp.grants.some((g) => g.grantId === second)).toBe(false);
+
+			// Sent, and the session ends before the answer: NetworkError (the
+			// relay may have done it); nothing sent is InvalidStateError above.
+			const third = await named("https://three.example/client.json");
+			store.slowMs = 300;
+			const cut = mcp.revoke(third);
+			await Bun.sleep(20);
+			mcp.disconnect();
+			await expect(cut).rejects.toMatchObject({ name: "NetworkError" });
 		} finally {
 			store.failing = false;
+			store.slowMs = 0;
 			mcp.disconnect();
 		}
 	});
@@ -367,6 +417,55 @@ describe("tab-mcp client 0.16 with a relay", () => {
 			a.mcp.disconnect();
 			b.mcp.disconnect();
 		}
+	});
+
+	test('tools/list: no "usually in the page\'s browser tab" for a page that asks with its own onConfirm, as Overmark does', async () => {
+		const SENTENCE =
+			"The page may ask the user to allow each call, usually in the page's browser tab.";
+		const description = async (onConfirm: boolean) => {
+			const mcp = new TabMcp({
+				relay: relay.url,
+				server: { name: "overmark", version: "0.0.0" },
+				storage: null,
+				...(onConfirm ? { onConfirm: () => true } : {}),
+			});
+			await mcp.registerTool(
+				{
+					name: "change",
+					description: "Changes something. The user is asked first.",
+					annotations: { consequentialHint: true },
+					execute: () => "ok",
+				},
+				{ callers: ["relay"] },
+			);
+			const { address } = await mcp.connect();
+			const client = new Client(
+				{ name: "test", version: "1.0.0" },
+				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+			);
+			await client.connect(
+				new StreamableHTTPClientTransport(new URL(address), {
+					requestInit: {
+						headers: {
+							Authorization: `Bearer ${await tokenFor(relay.store, address)}`,
+						},
+					},
+				}),
+			);
+			try {
+				return (await client.listTools()).tools[0]?.description;
+			} finally {
+				await client.close();
+				mcp.disconnect();
+			}
+		};
+		expect(await description(true)).toBe(
+			"Changes something. The user is asked first.",
+		);
+		// Without one the library's own dialog asks, in the page: it says so.
+		expect(await description(false)).toBe(
+			`Changes something. The user is asked first. ${SENTENCE}`,
+		);
 	});
 
 	// Last: it stops the relay.
