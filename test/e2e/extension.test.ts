@@ -1046,7 +1046,7 @@ describe.skipIf(browserBinary === undefined)(
 				ok: boolean;
 				details: { tag: string };
 			}>(
-				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "[data-truth=submit]", number: 9, blurForms: true })`,
+				`chrome.tabs.sendMessage(${v2.tabId}, { type: "element:mark", selector: "button[type=submit]", number: 9, blurForms: true })`,
 			);
 			expect(described.ok).toBe(true);
 			expect(described.details.tag).toBe("button");

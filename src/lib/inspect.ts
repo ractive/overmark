@@ -29,6 +29,7 @@ import {
 	pageText,
 	TEST_ID_ATTRIBUTES,
 } from "./element.ts";
+import { selectorVocabularyProblem } from "./selector.ts";
 import { closestAcross, hostOf, parentOf, shadowOf } from "./shadow.ts";
 
 export const LIMITS = {
@@ -233,6 +234,9 @@ export function attributeValue(
 	value: string,
 ): string | undefined {
 	if (FIELDS.has(el.localName) && !fieldKeeps(name)) return undefined;
+	// What a select offers to choose, and what was chosen.
+	if (el.localName === "option" && (name === "value" || name === "selected"))
+		return undefined;
 	if (name === "nonce") return undefined;
 	const gone = value === "" ? "" : "…";
 	// A whole document of its own.
@@ -263,6 +267,15 @@ function holdsInput(el: Element): boolean {
 /** Inside an editor, a text area or a select: typed or chosen content. */
 function inInput(el: Element): boolean {
 	return isEditable(el) || closestAcross(el, "textarea, select") !== null;
+}
+
+/**
+ * Inside an editor, a text area or a select, not the field itself: what is
+ * there was typed or chosen, so no selector names it (CR-01).
+ */
+export function insideInput(el: Element): boolean {
+	const parent = parentOf(el);
+	return parent !== null && inInput(parent);
 }
 
 function openTag(el: Element): string {
@@ -1079,7 +1092,11 @@ export function isOffLimits(el: Element): boolean {
 	return NOT_CONTENT.has(el.localName) || el.closest("head") !== null;
 }
 
-/** Why `selector` is not looked for, if it is not. */
+/**
+ * Why `selector` is not looked for, if it is not: not valid CSS, a name that
+ * could ask about form state or look inside an element (`selector.ts`), or
+ * nothing but `*`.
+ */
 export function selectorProblem(
 	doc: Document,
 	selector: string,
@@ -1090,8 +1107,9 @@ export function selectorProblem(
 	} catch {
 		return `Not a valid CSS selector: ${cut(selector, 200)}`;
 	}
-	if ((selector.match(/:has\(/gi)?.length ?? 0) > 1)
-		return "A selector may use :has() once at most.";
+	// Names only what the markup shows: no form state, nothing inside (CR-01).
+	const vocabulary = selectorVocabularyProblem(selector);
+	if (vocabulary !== undefined) return vocabulary;
 	if (/^[\s*>+~,()]*$/.test(selector.replace(/\|\*/g, "*")))
 		return "A selector of only * names no element; use a tag, class, id or attribute.";
 	return undefined;
@@ -1125,7 +1143,9 @@ function firstMatch(
  * it: the nearest ancestor (or `base` itself) that matches, else the first
  * match inside it, visible ones first. Without one, on the whole page, but
  * only when `pageWide` (the tab shows the case's page). Never `skip`, the
- * head, scripts, styles or templates.
+ * head, scripts, styles or templates, nor what is inside a select, a text
+ * area or an editor: such a match counts as none, so the answer is the same
+ * whatever was typed or chosen there.
  */
 export function resolveSelector(
 	doc: Document,
@@ -1137,12 +1157,15 @@ export function resolveSelector(
 	if (problem !== undefined) return { error: problem };
 	const { skip } = options;
 	const ok = (e: Element) =>
-		!isOffLimits(e) && (skip === undefined || !skip.contains(e));
+		!isOffLimits(e) &&
+		!insideInput(e) &&
+		(skip === undefined || !skip.contains(e));
 	const shown = cut(selector, 200);
 	if (base !== undefined) {
-		const up = closestAcross(base, selector);
-		if (up !== null && ok(up))
-			return { element: up, relation: up === base ? "mark" : "ancestor" };
+		// Past an ancestor that may not be named, on to the next that matches.
+		for (let up: Element | null = base; up !== null; up = parentOf(up))
+			if (up.matches(selector) && ok(up))
+				return { element: up, relation: up === base ? "mark" : "ancestor" };
 		const down = firstMatch(base, selector, ok);
 		if (down !== undefined) return { element: down, relation: "descendant" };
 		return {

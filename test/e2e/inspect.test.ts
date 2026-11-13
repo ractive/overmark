@@ -136,6 +136,87 @@ describe.skipIf(browserBinary === undefined)("get_mark_element", () => {
 			expect(JSON.stringify(missing.content)).toContain(
 				"Nothing around the mark's element matches .nothing-like-this",
 			);
+
+			// A selector is no oracle for the form's state (CR-01): a filled
+			// form, a choice made, a box ticked.
+			await v1.page.eval(`(() => {
+				const form = document.querySelector("form");
+				const button = form.querySelector("button");
+				const select = document.createElement("select");
+				select.name = "country";
+				select.innerHTML = '<option value="DE">Deutschland</option><option value="CH">Schweiz</option>';
+				form.insertBefore(select, button);
+				select.value = "CH";
+				const box = document.createElement("input");
+				box.type = "checkbox";
+				box.name = "terms";
+				form.insertBefore(box, button);
+				box.checked = true;
+			})()`);
+			const refused = async (selector: string) => {
+				const result = await client.callTool({
+					name: "get_mark_element",
+					arguments: { caseId, mark: 1, selector },
+				});
+				expect(result.isError).toBe(true);
+				const said = JSON.stringify(result.content);
+				expect(said).toContain("is not allowed");
+				for (const value of ["8001", "8099", "1985-typed", "Schweiz", '\\"CH'])
+					expect(said).not.toContain(value);
+				return said;
+			};
+			for (const selector of [
+				'html:has(input[name=zip][value^="80"])',
+				"option:checked",
+				"html:has(option:checked)",
+				":is(html):has(:checked)",
+				"form :checked",
+				"form :\\63 hecked",
+				"form [v\\61 lue^='8']",
+				"form [VALUE]",
+				"input:placeholder-shown",
+				"input:-webkit-autofill",
+				"form:not(:invalid)",
+				"input:/**/checked",
+			])
+				await refused(selector);
+			// Structure is still asked, but nothing inside the select answers.
+			const option = await client.callTool({
+				name: "get_mark_element",
+				arguments: {
+					caseId,
+					mark: 1,
+					selector: "select > option:nth-child(2)",
+				},
+			});
+			expect(option.isError).toBe(true);
+			expect(JSON.stringify(option.content)).toContain(
+				"Nothing around the mark's element matches",
+			);
+			const filled = await read({ selector: "form:not(.x)" });
+			expect(filled.tag).toBe("form");
+			expect(filled.html).toContain('<select name="country">');
+			expect(filled.html).toContain('<input type="checkbox" name="terms">');
+			for (const value of [
+				"8001",
+				"8099",
+				"Schweiz",
+				'value="CH"',
+				"selected",
+				"checked",
+			])
+				expect(filled.html).not.toContain(value);
+			// Markup and structure pseudo-classes are matched as before.
+			const self = await read({ selector: "button:enabled:last-child" });
+			expect(self.element.relation).toBe("mark");
+			const around = await read({ selector: "form:first-of-type" });
+			expect(around.element.relation).toBe("ancestor");
+			// An AI app's mark takes the same rules.
+			const marked = await h.control.eval<{ ok: boolean; error?: string }>(
+				`chrome.tabs.sendMessage(${v1.tabId}, { type: "element:mark", selector: "input[name=zip][value^='80']", number: 9, blurForms: true })`,
+			);
+			expect(marked.ok).toBe(false);
+			expect(marked.error).toContain("is not allowed");
 		} finally {
 			await client.close();
 			await v1.page.send("Page.close");

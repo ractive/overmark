@@ -12,6 +12,7 @@ import {
 	resolveSelector,
 	splitSelectors,
 } from "../src/lib/inspect.ts";
+import { selectorVocabularyProblem } from "../src/lib/selector.ts";
 
 let doc: Document;
 
@@ -472,13 +473,284 @@ describe("the element on the page", () => {
 			});
 	});
 
-	test("selectors that are too broad or nest :has() are refused", () => {
+	test("selectors that are too broad or use :has() are refused", () => {
 		page(`<p>x</p>`);
 		for (const selector of ["*", "* > *", "*, *"])
 			expect("error" in resolveSelector(doc, $("p"), selector)).toBe(true);
-		expect(resolveSelector(doc, $("p"), "div:has(p):has(span)")).toEqual({
-			error: "A selector may use :has() once at most.",
-		});
+		for (const selector of ["div:has(p):has(span)", "html:has(p)"])
+			expect(
+				(resolveSelector(doc, $("p"), selector) as { error: string }).error,
+			).toStartWith("The pseudo-class :has() is not allowed");
 		expect("element" in resolveSelector(doc, $("p"), "*:not(div)")).toBe(true);
+	});
+});
+
+/** The error of a refused selector, or `undefined` when it was looked for. */
+function refusal(base: Element, selector: string): string | undefined {
+	const found = resolveSelector(doc, base, selector);
+	return "error" in found ? found.error : undefined;
+}
+
+describe("a selector cannot ask about form state (CR-01)", () => {
+	const FORM = `<main class="Page"><form class="Form_root" data-testid="pay">
+		<input name="iban" value="CH9300762011623852957">
+		<input type="checkbox" name="terms" checked>
+		<input name="zip" required placeholder="z.B. 8000">
+		<select name="country"><option value="DE">Deutschland</option><option value="CH" selected>Schweiz</option></select>
+		<textarea name="note">prefilled note</textarea>
+		<div class="Editor" contenteditable="true"><p class="line">typed line</p></div>
+		<button class="Button_primary" type="submit" aria-label="Pay">Pay</button>
+	</form></main>`;
+
+	test("state pseudo-classes are refused, also inside :is(), :where(), :not() and :nth-child(of)", () => {
+		page(FORM);
+		const button = $("button");
+		const state = [
+			":checked",
+			"option:checked",
+			"input:indeterminate",
+			":default",
+			"input:placeholder-shown",
+			"input:autofill",
+			"input:-webkit-autofill",
+			":valid",
+			":invalid",
+			":user-valid",
+			":user-invalid",
+			":in-range",
+			":out-of-range",
+			":focus",
+			":focus-within",
+			":focus-visible",
+			":hover",
+			":active",
+			":target",
+			":visited",
+			":link",
+			"form:is(:checked, .x)",
+			"form :where(:checked)",
+			"form:not(:invalid)",
+			"input:nth-child(1 of :checked)",
+			"INPUT:CHECKED",
+			"input:Placeholder-Shown",
+		];
+		for (const selector of state) {
+			const error = refusal(button, selector);
+			expect(error).toContain("is not allowed");
+			expect(error).toContain("may not test what is typed or chosen");
+		}
+		expect(refusal(button, "p:empty")).toStartWith(
+			"The pseudo-class :empty is not allowed",
+		);
+		expect(refusal(button, "p::before")).toContain("pseudo-element");
+		expect(refusal(button, "form:has(input[name=iban])")).toStartWith(
+			"The pseudo-class :has() is not allowed",
+		);
+		expect(refusal(button, ":is(form:has(:checked))")).toStartWith(
+			"The pseudo-class :has() is not allowed",
+		);
+	});
+
+	test("attribute selectors only on attributes that hold no field value, with any operator and flag", () => {
+		page(FORM);
+		const form = $("form");
+		const refused = [
+			"[value]",
+			'[value="CH9300762011623852957"]',
+			'input[name=iban][value^="CH9"]',
+			"[value*=CH]",
+			"[value$='957']",
+			"[value~=CH]",
+			"[value|=CH]",
+			'[value^="ch9" i]',
+			'[value^="CH9" s]',
+			"[VALUE^=CH]",
+			"[checked]",
+			"[selected]",
+			"option[selected]",
+			"[aria-valuenow]",
+			"[aria-valuetext^=a]",
+			"[aria-checked=true]",
+			"[data-replicated-value]",
+			"[ng-reflect-model]",
+			"[style*=width]",
+			"[title]",
+			"[href*=token]",
+			"[src]",
+		];
+		for (const selector of refused) {
+			const error = refusal(form, selector);
+			expect(error).toStartWith("The attribute selector [");
+			expect(error).toContain("is not allowed");
+			// What the page holds is not in the answer.
+			expect(error).not.toContain("9300762011623852957");
+		}
+		expect(selectorVocabularyProblem("[*|value]")).toContain("namespace");
+	});
+
+	test("tags, classes, ids, test ids, roles, structure and combinators are still looked for", () => {
+		page(FORM);
+		const input = $("input[name=zip]");
+		const allowed: [Element, string][] = [
+			[input, "form"],
+			[input, ".Form_root"],
+			[input, "main.Page > form"],
+			[input, "[data-testid=pay]"],
+			[input, '[class*="Form_"]'],
+			[input, "[name=zip]"],
+			[input, "input[required]"],
+			[input, ":is(.Form_root, .Other)"],
+			[input, "form:not(.Other)"],
+			[input, "input:nth-child(3)"],
+			[input, "input:nth-of-type(2n + 1)"],
+			[input, "input:nth-child(odd of [name])"],
+			[$("form"), "input + input"],
+			[$("form"), "select ~ button"],
+			[$("form"), '[type=submit][aria-label="Pay" i]'],
+			[$("form"), "button:first-of-type:last-of-type"],
+			[$("form"), "#nothing, button"],
+			[$("form"), "[aria-label]"],
+		];
+		for (const [base, selector] of allowed)
+			expect([selector, refusal(base, selector)]).toEqual([
+				selector,
+				undefined,
+			]);
+	});
+
+	test("a selector never names what is inside a select, a text area or an editor", () => {
+		page(FORM);
+		const form = $("form");
+		for (const selector of [
+			"option",
+			"select > option:nth-child(2)",
+			".line",
+			"[contenteditable] > p",
+			"p",
+		])
+			expect(refusal(form, selector)).toStartWith(
+				"Nothing around the mark's element matches",
+			);
+		// The field and the editor themselves may be read: their content is left out.
+		const editor = resolveSelector(doc, form, ".Editor");
+		expect("element" in editor && editor.element).toBe($(".Editor"));
+		const select = resolveSelector(doc, form, "select");
+		expect("element" in select && markupOf(select.element).html).not.toContain(
+			"CH",
+		);
+		// From inside an editor, the ancestors in it are skipped, not a dead end.
+		const up = resolveSelector(doc, $(".line"), "div, form");
+		expect("element" in up && up.element).toBe($(".Editor"));
+		const out = resolveSelector(doc, $(".line"), "form");
+		expect("element" in out && out.element).toBe(form);
+		// Page-wide, for a mark without an element, the same.
+		expect(
+			resolveSelector(doc, undefined, ".line", { pageWide: true }),
+		).toEqual({ error: "No element of this page's content matches .line." });
+	});
+
+	test("an option keeps no value and is never selected in the markup", () => {
+		page(FORM);
+		const chosen = doc.querySelectorAll("option")[1] as Element;
+		expect(attributeValue(chosen, "value", "CH")).toBeUndefined();
+		expect(attributeValue(chosen, "selected", "")).toBeUndefined();
+		expect(markupOf(chosen).html).toBe(`<option>${LEFT_OUT_INPUT}</option>`);
+	});
+
+	test("two pages that differ only in what was typed or chosen give the same answers", () => {
+		const answers = (html: string) => {
+			page(html);
+			const form = $("form");
+			return [
+				"input",
+				"[name=iban]",
+				"option",
+				"p",
+				".line",
+				"div > *",
+				"input:nth-child(1)",
+				"form > *:last-child",
+			].map((s) => {
+				const r = resolveSelector(doc, form, s);
+				return "error" in r ? r.error : `${r.relation} ${r.element.localName}`;
+			});
+		};
+		const typed = answers(
+			`<form><input name="iban" value="CH93"><select><option>a</option><option selected>b</option></select><div contenteditable><p class="line">x</p><p>y</p></div></form>`,
+		);
+		const empty = answers(
+			`<form><input name="iban" value=""><select><option>a</option><option>b</option></select><div contenteditable></div></form>`,
+		);
+		expect(typed).toEqual(empty);
+		expect(typed.filter((a) => a.startsWith("descendant"))).toHaveLength(4);
+	});
+});
+
+describe("selector vocabulary (escapes, comments, case)", () => {
+	test("escapes are read as CSS reads them", () => {
+		for (const selector of [
+			":\\63 hecked",
+			":\\000063hecked",
+			":\\43 HECKED",
+			":c\\68 ecked",
+			"input:\\70 laceholder-shown",
+			":\\68 as(p)",
+			":i\\73(:checked)",
+			"[v\\61 lue]",
+			"[\\76 alue^=C]",
+			"[val\\ue]",
+			"[\\56 ALUE]",
+			"[d\\61ta-replicated-value]",
+			// Spaces happy-dom does not parse, as Chrome does.
+			"[ value ^= CH ]",
+		])
+			expect([selector, selectorVocabularyProblem(selector)]).toEqual([
+				selector,
+				expect.stringContaining("is not allowed"),
+			]);
+		// An escaped colon is part of a tag's name, not a pseudo-class.
+		expect(selectorVocabularyProblem("a\\:checked")).toBeUndefined();
+		expect(selectorVocabularyProblem(".\\31 23")).toBeUndefined();
+		expect(selectorVocabularyProblem("[n\\61me=zip]")).toBeUndefined();
+		// Markup, not state (happy-dom does not match them; Chrome does).
+		for (const selector of [
+			"input:required",
+			"input:optional",
+			"input:read-only",
+			"div:read-write",
+			"button:disabled",
+			"[ name = zip i ]",
+			"[role=button]",
+		])
+			expect(selectorVocabularyProblem(selector)).toBeUndefined();
+	});
+
+	test("comments, namespaces, nesting and other syntax are refused", () => {
+		for (const selector of [
+			"input:/**/checked",
+			"form/**/input",
+			'[class="a"]/* x */',
+			"svg|a",
+			"*|input",
+			"|input",
+			"a || b",
+			"& > p",
+			":host",
+			":host(.x)",
+			":lang(de)",
+			":dir(rtl)",
+			":state(checked)",
+			":-webkit-any(:checked)",
+			"input::part(x)",
+			":nth-child(\\6e)",
+		])
+			expect([selector, selectorVocabularyProblem(selector)]).toEqual([
+				selector,
+				expect.stringContaining("not allowed"),
+			]);
+		// A string is only a value: what it says is not read as a selector.
+		expect(selectorVocabularyProblem('[class=":checked /* [value]"]')).toBe(
+			undefined,
+		);
 	});
 });

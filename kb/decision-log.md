@@ -153,8 +153,23 @@ inside it: a page-wide lookup would let the AI app read anything on whatever tab
 front, hidden content included. For a mark without an element (box, arrow, pen, note)
 there is nothing to start from, so the selector is looked for on the whole page, and only
 when the tab in front shows the case's page (`isPageUrl`). Selectors that name only `*`
-or use `:has()` more than once are refused; the whole page is queried only for such a
-mark, and the first visible match wins.
+are refused; the whole page is queried only for such a mark, and the first visible match
+wins.
+
+Whether a selector matches is itself an answer, so a selector may name only what the
+markup shows (`src/lib/selector.ts`, from the November 2026 code review, CR-01): an
+allow-list of tags, classes, ids, attributes that hold no field value (`id`, `class`,
+`role`, `name`, `type`, `aria-label`, the test ids and the other markup attributes a
+field keeps, but not `style` or `title`), the structural pseudo-classes and `:is()`,
+`:where()`, `:not()`, the markup ones (`:required`, `:optional`, `:disabled`,
+`:enabled`, `:read-only`, `:read-write`) and the combinators. Refused: pseudo-classes of
+form or page state (`:checked`, `:placeholder-shown`, `:autofill`, `:valid`, `:focus`,
+`:target`, `:visited`, …), `:has()` and `:empty`, which look inside an element and so
+into fields and editors, `[value]`, `[checked]`, `[selected]`, `aria-value*`, `href`,
+`src` and other `data-*` than a test id, pseudo-elements, namespaces and comments. The
+selector is read as CSS tokenizes it (escapes decoded, any case). A match inside a
+select, a text area or an editor counts as none, and an `option` keeps neither `value`
+nor `selected`. The same rules hold for `add_annotation`'s selector.
 
 Nothing of it is stored, so DEC-009's allow-list of recorded details does not apply, but
 its reasons do: the HTML is written by Overmark's own serializer (`src/lib/inspect.ts`),
