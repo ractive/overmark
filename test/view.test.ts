@@ -2108,6 +2108,103 @@ describe("a loaded mark", () => {
 		expect(said()).toBeUndefined();
 	});
 
+	test("the pin: its colour is the status, its fill the match (DEC-024)", async () => {
+		const at = "2026-11-14T09:00:00Z";
+		const marks: Annotation[] = [
+			{ ...mark, id: "a1", number: 1 },
+			{ ...mark, id: "a2", number: 2, resolution: { kind: "fixed", at } },
+			{
+				...mark,
+				id: "a3",
+				number: 3,
+				resolution: { kind: "fixed", at, verified: { at } },
+			},
+			{ ...mark, id: "a4", number: 4, resolution: { kind: "wontfix", at } },
+		];
+		const candidate = (found: boolean) => ({
+			score: found ? 1 : 0.6,
+			summary: "button",
+			selector: "b",
+			visible: true,
+			found,
+		});
+		const match = (
+			n: number,
+			status: AnnotationMatch["status"],
+			candidates: ReturnType<typeof candidate>[],
+		): [string, AnnotationMatch] => [
+			`a${n}`,
+			{
+				annotationId: `a${n}`,
+				number: n,
+				status,
+				score: candidates[0]?.score ?? 0,
+				current: 0,
+				candidates,
+			},
+		];
+		render(
+			caseState({ ...sampleCase("c_pin"), annotations: marks }, (s) => {
+				s.loaded = {
+					caseId: "c_pin",
+					tabId: 1,
+					matches: new Map([
+						match(1, "found", [candidate(true)]),
+						match(2, "probable", [candidate(false)]),
+						match(3, "lost", []),
+						// The fourth mark was not looked for: no match at all.
+					]),
+				};
+			}),
+			noActions,
+		);
+		const pins = [...document.querySelectorAll<HTMLElement>(".annotation")].map(
+			(li) => [
+				li.querySelector(".number")?.textContent,
+				li.dataset["status"],
+				li.dataset["colour"],
+			],
+		);
+		expect(pins).toEqual([
+			["1", "open", "found"],
+			["2", "fixed", "unsure"],
+			["3", "verified", "lost"],
+			["4", "wontfix", undefined],
+		]);
+		// The style sheet turns the two into the pin's look.
+		const css = await Bun.file(
+			new URL("../src/sidepanel/style.css", import.meta.url),
+		).text();
+		const rule = (selector: string) => {
+			const from = css.indexOf(`${selector} {`);
+			expect(from).toBeGreaterThanOrEqual(0);
+			return css.slice(from, css.indexOf("}", from)).replace(/\s+/g, " ");
+		};
+		for (const [selector, tone] of [
+			['[data-status="open"],\n[data-group="open"]', "--st-open"],
+			['[data-status="fixed"],\n[data-group="toVerify"]', "--st-verify"],
+			['[data-status="verified"],\n[data-group="verified"]', "--st-verified"],
+			[
+				'[data-status="wontfix"],\n[data-status="cantreproduce"],\n[data-group="closed"]',
+				"--st-closed",
+			],
+		] as const)
+			expect(rule(selector)).toContain(`--tone: var(${tone});`);
+		// Found, or not looked for: filled, with a ring of paper on the rail.
+		expect(rule(".number")).toContain(
+			"background: var(--tone, var(--st-open));",
+		);
+		expect(rule(".number")).toContain("box-shadow: 0 0 0 2px var(--paper);");
+		// Unsure: a dashed ring outside it. Not found: hollow.
+		expect(rule('.annotation[data-colour="unsure"] .number')).toContain(
+			"outline: 1.5px dashed var(--tone, var(--st-open));",
+		);
+		const hollow = rule('.annotation[data-colour="lost"] .number');
+		expect(hollow).toContain("background: var(--paper);");
+		expect(hollow).toContain("inset 0 0 0 2px var(--tone, var(--st-open))");
+		expect(hollow).toContain("color: var(--tone, var(--st-open));");
+	});
+
 	test("names another element, and says when one is hidden", () => {
 		render(shownAs("a link"), noActions);
 		expect(said()).toBe("a link");

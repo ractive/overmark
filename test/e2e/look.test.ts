@@ -11,6 +11,7 @@ import {
 	ALL_ICONS_BELOW,
 	CASING_EXTRA,
 	PAGE_LOOK,
+	STATUS_COLOUR,
 	TOOL_ICONS_BELOW,
 	TWO_ROWS_BELOW,
 } from "../../src/content/overlay.ts";
@@ -112,18 +113,63 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		await holds([]);
 		await panel.eval(`${id("add-marks")}.click()`);
 		await panel.waitFor(
-			`${id("add-marks")}.textContent === "Add marks" && ${id("case-hint")}.textContent.includes("3 of 3 marks found")`,
+			`${id("add-marks")}.textContent === "Add marks"`,
 			20_000,
+		);
+
+		// Home, with the case in its list.
+		await panel.eval(`${id("back")}.click()`);
+		await panel.waitFor(
+			`!${id("home")}.hidden && document.querySelectorAll("[data-case]").length === 1`,
+			20_000,
+		);
+		await holds(["annotate"]);
+
+		// The case, opened from the list: its marks are drawn on the page.
+		await panel.eval(`document.querySelector("[data-case]").click()`);
+		await panel.waitFor(
+			`${id("case-hint")}?.textContent.includes("3 of 3 marks found")`,
+			20_000,
+		);
+		// The found line names no colour: a mark's colour is its status.
+		expect(await panel.eval<string>(`${id("case-hint")}.textContent`)).toMatch(
+			/^3 of 3 marks found on [^ ]+\.$/,
 		);
 		await panel.eval(`${id("toggle-marks")}.click()`);
 		await panel.waitFor(
 			`document.querySelectorAll(".annotation[data-open]").length === 3`,
 		);
-		await holds(["add-marks"]);
-		// The found line names no colour: a mark's colour is its status.
-		expect(await panel.eval<string>(`${id("case-hint")}.textContent`)).toMatch(
-			/^3 of 3 marks found on [^ ]+\.$/,
+		// One mark fixed: its second row has the pill, Verified and Reopen….
+		const first = `document.querySelector(".annotation")`;
+		await panel.eval(
+			`${first}.querySelector('[data-mark-action="resolve"]').click()`,
 		);
+		await panel.waitFor(
+			`document.querySelector('[data-mark-action="resolve-done"]')`,
+		);
+		await panel.eval(
+			`document.querySelector('[data-mark-action="resolve-done"]').click()`,
+		);
+		await panel.waitFor(
+			`${first}.dataset.status === "fixed" && ${first}.querySelector('.mark-sub [data-mark-action="verify"]') !== null`,
+			20_000,
+		);
+		await holds(["add-marks"]);
+		// The status block: a chip per status with marks, tinted in its colour.
+		expect(
+			await panel.eval<string[][]>(
+				`[...document.querySelectorAll("#case-status .chip")].map((c) => [c.dataset.group, getComputedStyle(c).color, getComputedStyle(c).backgroundColor])`,
+			),
+		).toEqual([
+			["open", "rgb(194, 15, 76)", "rgb(252, 228, 236)"],
+			["toVerify", "rgb(67, 71, 201)", "rgb(232, 233, 253)"],
+		]);
+		// The pins: the status's colour, on the rail.
+		expect(
+			await panel.eval<string[]>(
+				`[...document.querySelectorAll(".annotation .number")].map((n) => getComputedStyle(n).backgroundColor)`,
+			),
+		).toEqual(["rgb(67, 71, 201)", "rgb(194, 15, 76)", "rgb(194, 15, 76)"]);
 
 		// Settings, over the case: the pill turns AI access on, and the card
 		// shows the address and the code, its widest content.
@@ -146,16 +192,11 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		} finally {
 			await relay.stop();
 		}
+		// The steps above take less than half a second: a click on the back
+		// button that soon after "All cases" counts as a double click's second.
+		await Bun.sleep(600);
 		await panel.eval(`${id("back")}.click()`);
 		await panel.waitFor(`!${id("case-view")}.hidden`);
-
-		// Home again, with the case in its list.
-		await panel.eval(`${id("back")}.click()`);
-		await panel.waitFor(
-			`!${id("home")}.hidden && document.querySelectorAll("[data-case]").length === 1`,
-			20_000,
-		);
-		await holds(["annotate"]);
 		await panel.send("Emulation.clearDeviceMetricsOverride");
 	}, 120_000);
 
@@ -211,16 +252,17 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 			[true, PAGE_LOOK.casing, 3 + CASING_EXTRA],
 			[false, MARK_COLOUR, 3],
 		];
-		// The case of the test before, opened: its marks are drawn on the page.
-		await panel.eval(`document.querySelector("[data-case]").click()`);
-		await panel.waitFor(
-			`${id("case-hint")}?.textContent.includes("3 of 3 marks found")`,
-			20_000,
-		);
+		// The case of the test before is open: its marks are drawn on the page,
+		// the first one fixed and to verify, in its colour.
 		await page.waitFor(
 			`${shadow("svg.marks")}.querySelectorAll("[data-review]").length === 3`,
+			20_000,
 		);
-		expect(await shapes("[data-review]")).toEqual([cased, cased, cased]);
+		const toVerify: typeof cased = [
+			[true, PAGE_LOOK.casing, 3 + CASING_EXTRA],
+			[false, STATUS_COLOUR.toVerify, 3],
+		];
+		expect(await shapes("[data-review]")).toEqual([toVerify, cased, cased]);
 		// The bars have their white ring before the shadow.
 		expect(
 			await page.eval<string>(

@@ -129,6 +129,34 @@ const PANEL: Row[] = [
 	["--warn-edge", ["--paper"], [4.25], [6.26], EDGE],
 ];
 
+/**
+ * Pairs the components use beyond the review's table: status words and the
+ * banner's lines on the surfaces they stand on, edges on tinted notices.
+ */
+const USED: Row[] = [
+	// A history's verb on the open mark's sheet.
+	["--st-closed", ["--sheet"], [6.72], [7.48], TEXT],
+	// "Paused: …" in the sync section, on paper.
+	["--warn", ["--paper"], [7.01], [12.02], TEXT],
+	// The banner's problem line, and quiet text and links on a notice.
+	["--danger", ["--warn-bg"], [5.79], [6.63], TEXT],
+	["--ink-2", ["--warn-bg", "--danger-bg"], [5.95, 5.61], [6.55, 7.17], TEXT],
+	["--link", ["--warn-bg", "--wash"], [5.95, 5.49], [7.29, 7.16], TEXT],
+	// A reopened mark's line while its row is hovered.
+	["--st-open", ["--wash"], [4.95], [5.87], TEXT],
+	// A default button's edge on a wash, a notice and a failed banner.
+	[
+		"--edge",
+		["--wash", "--warn-bg", "--danger-bg"],
+		[3.15, 3.41, 3.22],
+		[3.42, 3.48, 3.81],
+		EDGE,
+	],
+	// The banner's and a notice's own edge against their fill.
+	["--warn-edge", ["--warn-bg"], [4.14], [4.97], EDGE],
+	["--danger", ["--danger-bg"], [5.46], [7.25], EDGE],
+];
+
 describe("the panel's tokens", () => {
 	test("both schemes define every colour, and dark changes the ones it must", () => {
 		expect(Object.keys(light).length).toBeGreaterThanOrEqual(29);
@@ -138,7 +166,7 @@ describe("the panel's tokens", () => {
 		expect(css).not.toMatch(/--band|--on-ink|--mark\b|--amber/);
 	});
 
-	for (const [on, under, inLight, inDark, needs] of PANEL)
+	for (const [on, under, inLight, inDark, needs] of [...PANEL, ...USED])
 		for (const [i, below] of under.entries())
 			for (const [scheme, t, want] of [
 				["light", light, inLight[i]],
