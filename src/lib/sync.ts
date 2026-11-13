@@ -729,7 +729,14 @@ export class Sync {
 				file: settled.file,
 			};
 		const all = await cases.listCases();
-		const todo = all.filter((c) => byCase[c.id]?.version !== versionOf(c));
+		// A case without marks gets no file until its first mark (DEC-026): a
+		// file in Downloads cannot be taken back, and an empty case that is
+		// left goes again. One written before is kept up to date.
+		const todo = all.filter(
+			(c) =>
+				byCase[c.id]?.version !== versionOf(c) &&
+				(c.annotations.length > 0 || byCase[c.id] !== undefined),
+		);
 		if (todo.length === 0)
 			return this.#report(
 				{ folderId: target.id, state: "synced", lastSyncedAt: this.#now() },

@@ -1179,6 +1179,16 @@ export function withComment(
 }
 
 /**
+ * The case under a new title (DEC-026: the side panel's Rename), trimmed and
+ * cut to `MAX_TITLE`; an empty one is refused, as a case always has a title.
+ */
+export function withTitle(c: Case, title: string, now: string): Case {
+	const text = cutText(title.trim(), MAX_TITLE);
+	if (text === "") throw new CaseError("A case needs a title.");
+	return { ...c, title: text, updatedAt: now };
+}
+
+/**
  * The case without the mark, and the images that go with it: its crop, and its
  * screenshot when no other mark is on it.
  */

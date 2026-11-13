@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	CaseError,
 	caseCounts,
 	cutText,
 	type Finding,
@@ -14,6 +15,7 @@ import {
 	MAX_FINDINGS_TEXT,
 	MAX_REOPEN_NOTE,
 	MAX_REOPENS,
+	MAX_TITLE,
 	MAX_URL,
 	markStatus,
 	newId,
@@ -31,6 +33,7 @@ import {
 	withoutFinding,
 	withReopen,
 	withResolution,
+	withTitle,
 	withVerified,
 } from "../src/lib/case.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -1037,5 +1040,31 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 			verified: 0,
 			closed: 0,
 		});
+	});
+});
+
+describe("a case's title (DEC-026)", () => {
+	const NOW = "2026-11-13T10:00:00.000Z";
+
+	test("renamed: trimmed, the case changed now, nothing else", () => {
+		const c = withMarks();
+		const renamed = withTitle(c, "  Login button  ", NOW);
+		expect(renamed).toEqual({ ...c, title: "Login button", updatedAt: NOW });
+		expect(validateCase(JSON.parse(JSON.stringify(renamed)))).toEqual(renamed);
+	});
+
+	test("an empty title is refused, spaces only too", () => {
+		for (const title of ["", "   ", "\n\t"])
+			expect(() => withTitle(sampleCase(), title, NOW)).toThrow(CaseError);
+		expect(() => withTitle(sampleCase(), " ", NOW)).toThrow(
+			"A case needs a title.",
+		);
+	});
+
+	test("a long title is cut to MAX_TITLE characters, never inside a pair", () => {
+		const long = withTitle(sampleCase(), "😀".repeat(MAX_TITLE + 5), NOW);
+		expect(textLength(long.title)).toBe(MAX_TITLE);
+		expect(long.title).toBe("😀".repeat(MAX_TITLE));
+		expect(validateCase(long).title).toBe(long.title);
 	});
 });
