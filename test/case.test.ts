@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	caseCounts,
 	cutText,
 	type Finding,
 	findingsTextOf,
@@ -11,7 +12,10 @@ import {
 	MAX_FINDING,
 	MAX_FINDINGS,
 	MAX_FINDINGS_TEXT,
+	MAX_REOPEN_NOTE,
+	MAX_REOPENS,
 	MAX_URL,
+	markStatus,
 	newId,
 	nextNumbers,
 	plainUrl,
@@ -19,12 +23,15 @@ import {
 	shapeOnBox,
 	textLength,
 	validateCase,
+	withChoice,
 	withComment,
 	withFinding,
 	withFindingText,
 	withoutAnnotation,
 	withoutFinding,
+	withReopen,
 	withResolution,
+	withVerified,
 } from "../src/lib/case.ts";
 import { sampleCase } from "./fixtures.ts";
 
@@ -625,7 +632,7 @@ describe("settling, editing and deleting a mark", () => {
 		});
 		expect(done.updatedAt).toBe(NOW);
 		expect(validateCase(JSON.parse(JSON.stringify(done)))).toEqual(done);
-		const open = withResolution(done, "a2", null, NOW);
+		const open = withReopen(done, "a2", {}, NOW);
 		expect("resolution" in (open.annotations[1] as object)).toBe(false);
 	});
 
@@ -686,5 +693,349 @@ describe("settling, editing and deleting a mark", () => {
 		expect(() => withComment(three(), "a9", "x", NOW)).toThrow(
 			"The mark no longer exists.",
 		);
+	});
+});
+
+describe("Verify: statuses, reopens and their format (DEC-023)", () => {
+	const T1 = "2026-11-13T11:00:00.000Z";
+	const T2 = "2026-11-13T16:00:00.000Z";
+	const T3 = "2026-11-14T09:00:00.000Z";
+	const T4 = "2026-11-14T15:00:00.000Z";
+	const CLAUDE = {
+		id: "https://claude.ai/oauth",
+		name: "Claude",
+		host: "claude.ai",
+	};
+	const one = (): Case => withMarks();
+	const statusOf = (c: Case) => markStatus(c.annotations[0] as Annotation);
+	const roundTrip = (c: Case) => validateCase(JSON.parse(JSON.stringify(c)));
+
+	test("each status from what is stored", () => {
+		const c = one();
+		expect(statusOf(c)).toBe("open");
+		const fixed = withResolution(c, "a1", { kind: "fixed" }, T1);
+		expect(statusOf(fixed)).toBe("fixed");
+		expect(statusOf(withVerified(fixed, "a1", undefined, T2))).toBe("verified");
+		expect(statusOf(withResolution(c, "a1", { kind: "wontfix" }, T1))).toBe(
+			"wontfix",
+		);
+		expect(
+			statusOf(withResolution(c, "a1", { kind: "cantreproduce" }, T1)),
+		).toBe("cantreproduce");
+	});
+
+	test("every transition of the table", () => {
+		const c = one();
+		// open → fixed, and fixed → verified.
+		const fixed = withResolution(
+			c,
+			"a1",
+			{ kind: "fixed", note: "Darker text, 7:1 now" },
+			T1,
+		);
+		expect(fixed.annotations[0]?.resolution).toEqual({
+			kind: "fixed",
+			note: "Darker text, 7:1 now",
+			at: T1,
+		});
+		const verified = withVerified(fixed, "a1", undefined, T2);
+		expect(verified.annotations[0]?.resolution?.verified).toEqual({ at: T2 });
+		expect(verified.updatedAt).toBe(T2);
+		// open → fixed and verified at once (the panel's choice).
+		const atOnce = withResolution(
+			c,
+			"a1",
+			{ kind: "fixed", verified: true },
+			T1,
+		);
+		expect(atOnce.annotations[0]?.resolution).toEqual({
+			kind: "fixed",
+			at: T1,
+			verified: { at: T1 },
+		});
+		// verified → open: the whole resolution moves into the reopen.
+		const reopened = withReopen(verified, "a1", { note: "Still pale" }, T3);
+		const a = reopened.annotations[0] as Annotation;
+		expect(a.resolution).toBeUndefined();
+		expect(a.reopens).toEqual([
+			{
+				note: "Still pale",
+				at: T3,
+				was: {
+					kind: "fixed",
+					note: "Darker text, 7:1 now",
+					at: T1,
+					verified: { at: T2 },
+				},
+			},
+		]);
+		expect(markStatus(a)).toBe("open");
+		// wontfix and cantreproduce reopen the same way.
+		for (const kind of ["wontfix", "cantreproduce"] as const) {
+			const closed = withResolution(c, "a1", { kind }, T1);
+			const back = withReopen(closed, "a1", { note: "Not so" }, T2);
+			expect(back.annotations[0]?.reopens?.[0]?.was.kind).toBe(kind);
+		}
+		// Change: a verified fix stays verified as it was when chosen again...
+		const kept = withResolution(
+			verified,
+			"a1",
+			{ kind: "fixed", verified: true, note: "Hover too" },
+			T3,
+		);
+		expect(kept.annotations[0]?.resolution).toEqual({
+			kind: "fixed",
+			note: "Hover too",
+			at: T3,
+			verified: { at: T2 },
+		});
+		// ...and is no longer verified as "Fixed, to verify" or another kind.
+		expect(
+			statusOf(withResolution(verified, "a1", { kind: "fixed" }, T3)),
+		).toBe("fixed");
+		const wontfix = withResolution(verified, "a1", { kind: "wontfix" }, T3);
+		expect(wontfix.annotations[0]?.resolution).toEqual({
+			kind: "wontfix",
+			at: T3,
+		});
+		// A reopen stays when the mark is settled again.
+		const again = withResolution(reopened, "a1", { kind: "fixed" }, T4);
+		expect(again.annotations[0]?.reopens?.length).toBe(1);
+		expect(roundTrip(again)).toEqual(again);
+	});
+
+	test("Change… to the same status keeps when and who: only the note changes", () => {
+		const fixed = withResolution(
+			one(),
+			"a1",
+			{ kind: "fixed", note: "Hover state too", app: CLAUDE },
+			T1,
+		);
+		const verified = withVerified(fixed, "a1", undefined, T2);
+		const typo = withChoice(verified, "a1", "verified", "Hover state, too", T3);
+		expect(typo.annotations[0]?.resolution).toEqual({
+			kind: "fixed",
+			note: "Hover state, too",
+			at: T1,
+			app: CLAUDE,
+			verified: { at: T2 },
+		});
+		// Nothing changed: nothing written.
+		expect(
+			withChoice(verified, "a1", "verified", " Hover state too ", T3),
+		).toBe(verified);
+		expect(
+			withChoice(fixed, "a1", "fixed", "Other", T3).annotations[0]?.resolution,
+		).toEqual({ kind: "fixed", note: "Other", at: T1, app: CLAUDE });
+		// The same kind: when and who stay, only the verification changes.
+		expect(
+			withChoice(verified, "a1", "fixed", "Hover state too", T3).annotations[0]
+				?.resolution,
+		).toEqual({ kind: "fixed", note: "Hover state too", at: T1, app: CLAUDE });
+		expect(
+			withChoice(fixed, "a1", "verified", "Hover state too", T3).annotations[0]
+				?.resolution,
+		).toEqual({
+			kind: "fixed",
+			note: "Hover state too",
+			at: T1,
+			app: CLAUDE,
+			verified: { at: T3 },
+		});
+		// Another kind: the resolution is the user's, now.
+		expect(
+			withChoice(verified, "a1", "wontfix", "", T3).annotations[0]?.resolution,
+		).toEqual({ kind: "wontfix", at: T3 });
+		expect(statusOf(withChoice(one(), "a1", "verified", "", T3))).toBe(
+			"verified",
+		);
+	});
+
+	test("an open mark reopened, or a verified one verified, stays as it is", () => {
+		const c = one();
+		expect(withReopen(c, "a1", { note: "x" }, T1)).toBe(c);
+		const verified = withVerified(
+			withResolution(c, "a1", { kind: "fixed" }, T1),
+			"a1",
+			undefined,
+			T2,
+		);
+		expect(withVerified(verified, "a1", undefined, T3)).toBe(verified);
+	});
+
+	test("the panel's reopen of a mark opened meanwhile says its note was not saved", () => {
+		const c = one();
+		expect(() =>
+			withReopen(c, "a1", { note: "Still pale", refuseOpen: true }, T1),
+		).toThrow(
+			"Mark 1 is open already: it was reopened meanwhile. Your note is not saved; add it to the comment, or Cancel.",
+		);
+		// An AI app's call stays idempotent.
+		expect(withReopen(c, "a1", { note: "x" }, T1)).toBe(c);
+	});
+
+	test("the note of the fix a reopen ended is kept to the reopen note's limit", () => {
+		const fixed = withResolution(
+			one(),
+			"a1",
+			{ kind: "fixed", note: "z".repeat(MAX_COMMENT) },
+			T1,
+		);
+		const back = withReopen(fixed, "a1", { note: "Still" }, T2);
+		expect(back.annotations[0]?.reopens?.[0]?.was.note?.length).toBe(
+			MAX_REOPEN_NOTE,
+		);
+		// A file with a longer one is read cut the same way, not refused.
+		const file = JSON.parse(JSON.stringify(back));
+		file.annotations[0].reopens[0].was.note = "z".repeat(MAX_COMMENT);
+		expect(
+			validateCase(file).annotations[0]?.reopens?.[0]?.was.note?.length,
+		).toBe(MAX_REOPEN_NOTE);
+	});
+
+	test("only a fixed mark can be verified", () => {
+		const c = one();
+		expect(() => withVerified(c, "a1", undefined, T1)).toThrow(
+			"Mark 1 is open: only a fixed mark can be verified.",
+		);
+		const closed = withResolution(c, "a1", { kind: "wontfix" }, T1);
+		expect(() => withVerified(closed, "a1", undefined, T2)).toThrow(
+			"only a fixed mark can be verified",
+		);
+		// "verified" on another kind is no verification.
+		expect(
+			withResolution(c, "a1", { kind: "wontfix", verified: true }, T1)
+				.annotations[0]?.resolution,
+		).toEqual({ kind: "wontfix", at: T1 });
+	});
+
+	test("an AI app's status records the app", () => {
+		const c = one();
+		const fixed = withResolution(
+			c,
+			"a1",
+			{ kind: "fixed", note: "Hover state too", app: CLAUDE },
+			T3,
+		);
+		const verified = withVerified(fixed, "a1", CLAUDE, T4);
+		expect(verified.annotations[0]?.resolution).toEqual({
+			kind: "fixed",
+			note: "Hover state too",
+			at: T3,
+			app: CLAUDE,
+			verified: { at: T4, app: CLAUDE },
+		});
+		const back = withReopen(verified, "a1", { app: CLAUDE }, T4);
+		expect(back.annotations[0]?.reopens?.[0]).toEqual({
+			at: T4,
+			app: CLAUDE,
+			was: verified.annotations[0]?.resolution as never,
+		});
+		expect(roundTrip(back)).toEqual(back);
+		expect(roundTrip(verified)).toEqual(verified);
+	});
+
+	test("reopens keep `was` whole and the newest 20; a long note is cut", () => {
+		let c = one();
+		for (let i = 0; i < MAX_REOPENS + 3; i++) {
+			c = withResolution(c, "a1", { kind: "fixed", note: `Fix ${i}` }, T1);
+			c = withReopen(c, "a1", { note: `Still ${i}` }, T2);
+		}
+		const reopens = c.annotations[0]?.reopens ?? [];
+		expect(reopens.length).toBe(MAX_REOPENS);
+		expect(reopens[0]?.note).toBe("Still 3");
+		expect(reopens[0]?.was).toEqual({ kind: "fixed", note: "Fix 3", at: T1 });
+		expect(reopens.at(-1)?.note).toBe(`Still ${MAX_REOPENS + 2}`);
+		const long = withReopen(
+			withResolution(one(), "a1", { kind: "fixed" }, T1),
+			"a1",
+			{ note: "x".repeat(MAX_REOPEN_NOTE + 50) },
+			T2,
+		);
+		expect(long.annotations[0]?.reopens?.[0]?.note?.length).toBe(
+			MAX_REOPEN_NOTE,
+		);
+		// A file with more keeps the newest; an empty list is none.
+		const file = JSON.parse(JSON.stringify(c));
+		file.annotations[0].reopens = [
+			...file.annotations[0].reopens,
+			...file.annotations[0].reopens.slice(0, 5),
+		];
+		const read = validateCase(file);
+		expect(read.annotations[0]?.reopens?.length).toBe(MAX_REOPENS);
+		expect(read.annotations[0]?.reopens?.at(-1)?.note).toBe("Still 7");
+		file.annotations[0].reopens = [];
+		expect("reopens" in (validateCase(file).annotations[0] as object)).toBe(
+			false,
+		);
+	});
+
+	test("a case without the new fields validates and serializes unchanged", () => {
+		// As the build before Verify wrote it (its validateCase, then
+		// JSON.stringify): every kind, a finding, importedAt, lastNumber.
+		const OLD_BUILD =
+			'{"format":"overmark/1","id":"c_old","title":"From before Verify","createdAt":"2026-11-04T10:00:00Z","updatedAt":"2026-11-05T10:00:00Z","page":{"url":"https://www.example.com/kk","title":"KK","lang":"de","viewport":{"width":1280,"height":800,"dpr":2},"userAgent":"UA"},"shots":[{"id":"s1","image":"shots/s1.webp","scrollX":0,"scrollY":0,"viewport":{"width":1280,"height":800,"dpr":2},"capturedAt":"2026-11-04T10:00:00Z"}],"annotations":[{"id":"a1","number":1,"shot":"s1","comment":"Comment 1","author":"user","shape":{"kind":"note","at":{"x":1,"y":2}},"crop":"crops/a1.webp","element":null},{"id":"a2","number":2,"shot":"s1","comment":"Comment 2","author":"user","shape":{"kind":"note","at":{"x":1,"y":2}},"crop":"crops/a2.webp","element":null,"resolution":{"kind":"fixed","note":"Darker","at":"2026-11-05T09:00:00Z"},"findings":[{"id":"f_1","text":"Padding","app":{"id":"https://claude.ai/oauth","name":"Claude","host":"claude.ai"},"at":"2026-11-05T08:00:00Z","editedAt":"2026-11-05T08:30:00Z","imported":true}]},{"id":"a3","number":3,"shot":"s1","comment":"Comment 3","author":"user","shape":{"kind":"note","at":{"x":1,"y":2}},"crop":"crops/a3.webp","element":null,"resolution":{"kind":"wontfix","at":"2026-11-05T09:00:00Z"}},{"id":"a4","number":4,"shot":"s1","comment":"Comment 4","author":"user","shape":{"kind":"note","at":{"x":1,"y":2}},"crop":"crops/a4.webp","element":null,"resolution":{"kind":"cantreproduce","note":"Not on dev","at":"2026-11-05T09:00:00Z"}}],"verdict":"Use the dark button.","importedAt":"2026-11-05T11:00:00Z","lastNumber":5}';
+		expect(JSON.stringify(validateCase(JSON.parse(OLD_BUILD)))).toBe(OLD_BUILD);
+		const plain = JSON.stringify(one());
+		expect(JSON.stringify(validateCase(JSON.parse(plain)))).toBe(plain);
+	});
+
+	test("verified on wontfix is dropped, not refused; a bad one on a fix is", () => {
+		const file = JSON.parse(JSON.stringify(one()));
+		file.annotations[0].resolution = {
+			kind: "wontfix",
+			at: T1,
+			verified: { at: T2 },
+		};
+		expect(validateCase(file).annotations[0]?.resolution).toEqual({
+			kind: "wontfix",
+			at: T1,
+		});
+		file.annotations[0].resolution = { kind: "fixed", at: T1, verified: 1 };
+		expect(() => validateCase(file)).toThrow(
+			"case.annotations[0].resolution.verified",
+		);
+		file.annotations[0].resolution = { kind: "fixed", at: T1 };
+		file.annotations[0].reopens = [{ at: T2, was: { kind: "duplicate" } }];
+		expect(() => validateCase(file)).toThrow(
+			"case.annotations[0].reopens[0].was.kind",
+		);
+		file.annotations[0].reopens = [
+			{
+				at: T2,
+				note: "x".repeat(MAX_REOPEN_NOTE + 1),
+				was: { kind: "fixed", at: T1 },
+			},
+		];
+		expect(() => validateCase(file)).toThrow(
+			"case.annotations[0].reopens[0].note",
+		);
+	});
+
+	test("caseCounts: open, to verify, verified, closed", () => {
+		const c = withMarks();
+		const [first] = c.annotations as [Annotation];
+		c.annotations = [1, 2, 3, 4, 5].map((n) => ({
+			...first,
+			id: `a${n}`,
+			number: n,
+			crop: `crops/a${n}.webp`,
+		}));
+		let d = withResolution(c, "a2", { kind: "fixed" }, T1);
+		d = withResolution(d, "a3", { kind: "fixed", verified: true }, T1);
+		d = withResolution(d, "a4", { kind: "wontfix" }, T1);
+		d = withResolution(d, "a5", { kind: "cantreproduce" }, T1);
+		expect(caseCounts(d)).toEqual({
+			open: 1,
+			toVerify: 1,
+			verified: 1,
+			closed: 2,
+		});
+		expect(caseCounts({ ...c, annotations: [] })).toEqual({
+			open: 0,
+			toVerify: 0,
+			verified: 0,
+			closed: 0,
+		});
 	});
 });

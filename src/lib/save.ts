@@ -295,7 +295,8 @@ export async function undoAdd(
 			new SaveError(
 				`mark ${gone.number} ${why}; delete it in the side panel if it should go.`,
 			);
-		if (gone.resolution !== undefined) throw refuse("was resolved since");
+		if (gone.resolution !== undefined || gone.reopens !== undefined)
+			throw refuse("was resolved since");
 		if (gone.comment !== added.comment || gone.author !== "user")
 			throw refuse("was edited since");
 		if (current.annotations.some((a) => a.number > gone.number))

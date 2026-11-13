@@ -5,7 +5,7 @@
  * of work for the same thing makes an older one drop its result (`Latest`).
  */
 
-import type { Case, ResolutionKind } from "../lib/case.ts";
+import type { Case, ResolveChoice, StatusGroup } from "../lib/case.ts";
 import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
 import type { SyncStatus } from "../lib/sync.ts";
@@ -13,10 +13,11 @@ import type { Size } from "./size.ts";
 
 export interface MarkEdit {
 	annotationId: string;
-	mode: "resolve" | "comment";
-	/** The resolution chosen (resolve). */
-	kind: ResolutionKind;
-	/** The note (resolve) or the comment (comment), as typed. */
+	/** Resolve… or Change…, Edit comment, or Reopen… with its note (DEC-023). */
+	mode: "resolve" | "comment" | "reopen";
+	/** The status chosen (resolve). */
+	kind: ResolveChoice;
+	/** The note (resolve, reopen) or the comment (comment), as typed. */
 	text: string;
 }
 
@@ -119,6 +120,12 @@ export interface PanelState {
 	deleteArmedAt: number | undefined;
 	/** A mark of the open case being resolved or its comment edited. */
 	markEdit: MarkEdit | undefined;
+	/**
+	 * The status chip pressed: the open case's list shows only those marks,
+	 * while there are any and no mark above `upTo` (the highest number when
+	 * it was pressed) was added.
+	 */
+	markFilter: { caseId: string; group: StatusGroup; upTo: number } | undefined;
 	/** A mark's Delete, clicked once: the second click deletes. */
 	markDeleteArmed: { annotationId: string; at: number } | undefined;
 	/**
@@ -179,6 +186,7 @@ export const initialState = (): PanelState => ({
 	downloads: false,
 	deleteArmedAt: undefined,
 	markEdit: undefined,
+	markFilter: undefined,
 	markDeleteArmed: undefined,
 	findingDeleteArmed: undefined,
 	verdictStatus: undefined,

@@ -802,6 +802,13 @@ fixed, to verify / verified. The details are the
   fixed and, as its description says, only when the user says so, never for its own
   fix; `open` on a resolved mark records a reopen, its note optional so that existing
   calls keep working. An Always allow for `set_mark_status` covers `verified` too.
+  For an AI app a verified mark changes only by a reopen (decided in the review of
+  pull request 47): `open` records the reopen with the verified fix as `was`;
+  `fixed`, `wontfix`, `cantreproduce` and `verified` on a verified mark change
+  nothing and say so (`fixed`: "add a finding" to say more). This departs from the
+  UX review's "`fixed` on a verified mark changes only the note", which let an AI
+  app's text stand as the user's note. In the panel, the user's Change… still
+  changes a verified mark.
 - **No role switch.** One panel for tester and developer: each mark offers the action
   its status calls for, and the case's status chips (Open, To verify, Verified, Closed)
   are legend and filter in one. The case list, `get_case`, `list_cases` and `case.md`

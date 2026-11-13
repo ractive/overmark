@@ -138,6 +138,11 @@ export interface Annotation {
 	element: ElementDetails | null;
 	/** How the mark was settled; none: still open. */
 	resolution?: Resolution;
+	/**
+	 * The times it was opened again after it was settled, oldest first, each
+	 * with the resolution it ended; none: never reopened (DEC-023).
+	 */
+	reopens?: Reopen[];
 	/** What AI apps found about the mark, oldest first; none: no findings. */
 	findings?: Finding[];
 }
@@ -193,6 +198,122 @@ export interface Resolution {
 	/** Why, in the user's words; none when it says nothing. */
 	note?: string;
 	at: string;
+	/** The AI app that set it through a tool; none: set in the panel. */
+	app?: FindingApp;
+	/**
+	 * The fix was checked and holds (DEC-023); only with `kind: "fixed"`. An
+	 * addition, never a kind of its own: an older build refuses a kind it does
+	 * not know, and with it the whole file.
+	 */
+	verified?: Verification;
+	/** Came in from a file: who set it and when is what the file says. */
+	imported?: true;
+}
+
+export interface Verification {
+	at: string;
+	/** The AI app that set it through a tool; none: set in the panel. */
+	app?: FindingApp;
+	/** Came in from a file. */
+	imported?: true;
+}
+
+/** A settled mark opened again, and the resolution that ended (DEC-023). */
+export interface Reopen {
+	/** What is still wrong; none when nothing was said (an AI app's call). */
+	note?: string;
+	at: string;
+	/** The AI app that reopened it through a tool; none: in the panel. */
+	app?: FindingApp;
+	/** The resolution it ended, whole: the claimed fix and its note stay. */
+	was: Resolution;
+	/** Came in from a file. */
+	imported?: true;
+}
+
+/** The most reopens a mark keeps; the oldest goes when there are more. */
+export const MAX_REOPENS = 20;
+
+/** The longest reopen note, in characters: get_case stays readable. */
+export const MAX_REOPEN_NOTE = 2000;
+
+/** A mark's status: derived from its resolution, never stored as such. */
+export const MARK_STATUSES = [
+	"open",
+	"fixed",
+	"verified",
+	"wontfix",
+	"cantreproduce",
+] as const;
+export type MarkStatus = (typeof MARK_STATUSES)[number];
+
+export const STATUS_LABEL: Record<MarkStatus, string> = {
+	open: "Open",
+	fixed: "Fixed, to verify",
+	verified: "Verified",
+	wontfix: "Won't fix",
+	cantreproduce: "Can't reproduce",
+};
+
+/** The status of a mark settled as `r`; none: open. */
+export function resolutionStatus(r: Resolution | undefined): MarkStatus {
+	if (r === undefined) return "open";
+	if (r.kind === "fixed") return r.verified ? "verified" : "fixed";
+	return r.kind;
+}
+
+export const markStatus = (a: Annotation): MarkStatus =>
+	resolutionStatus(a.resolution);
+
+/** What Resolve… and Change… can set: every status but open. */
+export type ResolveChoice = Exclude<MarkStatus, "open">;
+
+export const RESOLVE_CHOICES: readonly ResolveChoice[] = [
+	"fixed",
+	"verified",
+	"wontfix",
+	"cantreproduce",
+];
+
+/** The resolution a choice stands for: verified is a fix, verified at once. */
+export const resolutionFor = (
+	choice: ResolveChoice,
+): { kind: ResolutionKind; verified: boolean } =>
+	choice === "verified"
+		? { kind: "fixed", verified: true }
+		: { kind: choice, verified: false };
+
+/** The four groups the case's summary counts and filters by. */
+export const STATUS_GROUPS = [
+	"open",
+	"toVerify",
+	"verified",
+	"closed",
+] as const;
+export type StatusGroup = (typeof STATUS_GROUPS)[number];
+
+export const GROUP_OF: Record<MarkStatus, StatusGroup> = {
+	open: "open",
+	fixed: "toVerify",
+	verified: "verified",
+	wontfix: "closed",
+	cantreproduce: "closed",
+};
+
+export const GROUP_LABEL: Record<StatusGroup, string> = {
+	open: "Open",
+	toVerify: "To verify",
+	verified: "Verified",
+	closed: "Closed",
+};
+
+export type CaseCounts = Record<StatusGroup, number>;
+
+/** How many marks are open, to verify, verified and closed. */
+export function caseCounts(c: Case): CaseCounts {
+	const counts: CaseCounts = { open: 0, toVerify: 0, verified: 0, closed: 0 };
+	for (const a of c.annotations) counts[GROUP_OF[markStatus(a)]]++;
+	return counts;
 }
 
 export interface PageInfo {
@@ -675,6 +796,7 @@ export function validateCase(value: unknown): Case {
 			...(a["resolution"] === undefined
 				? {}
 				: { resolution: resolution(a["resolution"], `${p}.resolution`) }),
+			...reopensOf(a["reopens"], `${p}.reopens`),
 			...findingsOf(a["findings"], `${p}.findings`),
 		};
 	});
@@ -715,13 +837,90 @@ function resolution(value: unknown, path: string): Resolution {
 	if (!RESOLUTION_KINDS.includes(kind as ResolutionKind))
 		fail(`${path}.kind`, `must be one of ${RESOLUTION_KINDS.join(", ")}`);
 	const note = o["note"];
+	const verified = o["verified"];
 	return {
 		kind: kind as ResolutionKind,
 		...(note === undefined || note === ""
 			? {}
 			: { note: str(note, `${path}.note`, MAX_COMMENT) }),
 		at: str(o["at"], `${path}.at`, 64),
+		...appOf(o["app"], `${path}.app`),
+		// Only a fix is verified: on another kind it is dropped, not refused.
+		...(verified === undefined || kind !== "fixed"
+			? {}
+			: { verified: verification(verified, `${path}.verified`) }),
+		...importedOf(o["imported"], `${path}.imported`),
 	};
+}
+
+function verification(value: unknown, path: string): Verification {
+	const o = obj(value, path);
+	return {
+		at: str(o["at"], `${path}.at`, 64),
+		...appOf(o["app"], `${path}.app`),
+		...importedOf(o["imported"], `${path}.imported`),
+	};
+}
+
+/** `imported: true`, or nothing; anything else is refused. */
+function importedOf(value: unknown, path: string): { imported?: true } {
+	if (value !== undefined && typeof value !== "boolean")
+		fail(path, "must be true or false");
+	return value === true ? { imported: true } : {};
+}
+
+/** A resolution that came in from a file, its verification too. */
+export const importedResolution = (r: Resolution): Resolution => ({
+	...r,
+	...(r.verified ? { verified: { ...r.verified, imported: true } } : {}),
+	imported: true,
+});
+
+/** The AI app that set something, as a finding records it; none: nothing. */
+function appOf(value: unknown, path: string): { app?: FindingApp } {
+	if (value === undefined) return {};
+	const app = obj(value, path);
+	const name = app["name"];
+	return {
+		app: {
+			id: str(app["id"], `${path}.id`, 2000),
+			...(name === undefined ? {} : { name: str(name, `${path}.name`, 200) }),
+			host: str(app["host"], `${path}.host`, 255),
+		},
+	};
+}
+
+/**
+ * The resolution a reopen ended, its note cut to a reopen note's length:
+ * twenty of them stay per mark, and a mark's history is bounded, or a case
+ * outgrows what a file may hold.
+ */
+function cutWas(was: Resolution): Resolution {
+	return was.note && was.note.length > MAX_REOPEN_NOTE
+		? { ...was, note: cutText(was.note, MAX_REOPEN_NOTE) }
+		: was;
+}
+
+/** A mark's reopens, the newest `MAX_REOPENS`; none or an empty list: none. */
+function reopensOf(value: unknown, path: string): { reopens?: Reopen[] } {
+	if (value === undefined) return {};
+	const given = arr(value, path, 1000);
+	const from = Math.max(0, given.length - MAX_REOPENS);
+	const reopens = given.slice(from).map((v, j): Reopen => {
+		const p = `${path}[${from + j}]`;
+		const r = obj(v, p);
+		const note = r["note"];
+		return {
+			...(note === undefined || note === ""
+				? {}
+				: { note: str(note, `${p}.note`, MAX_REOPEN_NOTE) }),
+			at: str(r["at"], `${p}.at`, 64),
+			...appOf(r["app"], `${p}.app`),
+			was: cutWas(resolution(r["was"], `${p}.was`)),
+			...importedOf(r["imported"], `${p}.imported`),
+		};
+	});
+	return reopens.length > 0 ? { reopens } : {};
 }
 
 /** A mark's findings; none, or an empty list: no `findings` at all. */
@@ -735,7 +934,6 @@ function findingsOf(value: unknown, path: string): { findings?: Finding[] } {
 		if (ids.has(findingId)) fail(`${p}.id`, "is used twice");
 		ids.add(findingId);
 		const app = obj(f["app"], `${p}.app`);
-		const name = app["name"];
 		const editedAt = f["editedAt"];
 		const imported = f["imported"];
 		if (imported !== undefined && typeof imported !== "boolean")
@@ -743,13 +941,7 @@ function findingsOf(value: unknown, path: string): { findings?: Finding[] } {
 		return {
 			id: findingId,
 			text: str(f["text"], `${p}.text`, MAX_FINDING),
-			app: {
-				id: str(app["id"], `${p}.app.id`, 2000),
-				...(name === undefined
-					? {}
-					: { name: str(name, `${p}.app.name`, 200) }),
-				host: str(app["host"], `${p}.app.host`, 255),
-			},
+			app: appOf(app, `${p}.app`).app as FindingApp,
 			at: str(f["at"], `${p}.at`, 64),
 			...(editedAt === undefined
 				? {}
@@ -793,28 +985,165 @@ function changed(
 	};
 }
 
-/** The case with the mark settled as `resolution`, or open again (`null`). */
+/** What a resolution is set to: in the panel, or by an AI app (`app`). */
+export interface ResolutionChange {
+	kind: ResolutionKind;
+	note?: string;
+	/** Fixed and verified at once (the panel's "Fixed and verified"); only with `fixed`. */
+	verified?: boolean;
+	/** The AI app that sets it through a tool. */
+	app?: FindingApp;
+}
+
+/**
+ * The case with the mark settled as `change`, in place of any resolution it
+ * had. A verified fix stays verified as it was when it is still chosen.
+ */
 export function withResolution(
 	c: Case,
 	annotationId: string,
-	resolution: { kind: ResolutionKind; note?: string } | null,
+	change: ResolutionChange,
 	now: string,
 ): Case {
 	return changed(
 		c,
 		annotationId,
 		(a) => {
-			const { resolution: _, ...open } = a;
-			if (resolution === null) return open;
-			const note = cutText(resolution.note?.trim() ?? "", MAX_COMMENT);
+			const note = cutText(change.note?.trim() ?? "", MAX_COMMENT);
+			const verified =
+				change.kind === "fixed" && change.verified === true
+					? (a.resolution?.verified ?? { at: now })
+					: undefined;
 			return {
-				...open,
+				...a,
 				resolution: {
-					kind: resolution.kind,
+					kind: change.kind,
 					...(note ? { note } : {}),
 					at: now,
+					...(change.app ? { app: change.app } : {}),
+					...(verified ? { verified } : {}),
 				},
 			};
+		},
+		now,
+	);
+}
+
+/**
+ * The panel's Resolve… and Change…: another kind replaces the resolution;
+ * the same kind keeps when and by whom it was set, and changes only the note
+ * and whether the fix is verified. Nothing changed writes nothing.
+ */
+export function withChoice(
+	c: Case,
+	annotationId: string,
+	choice: ResolveChoice,
+	note: string,
+	now: string,
+): Case {
+	const r = c.annotations.find((x) => x.id === annotationId)?.resolution;
+	const target = resolutionFor(choice);
+	if (r?.kind === target.kind) {
+		const text = cutText(note.trim(), MAX_COMMENT);
+		if (
+			(r.note ?? "") === text &&
+			(r.verified !== undefined) === target.verified
+		)
+			return c;
+		const verified = target.verified ? (r.verified ?? { at: now }) : undefined;
+		return changed(
+			c,
+			annotationId,
+			(a) => {
+				const { note: _n, verified: _v, ...kept } = r;
+				return {
+					...a,
+					resolution: {
+						...kept,
+						...(text ? { note: text } : {}),
+						...(verified ? { verified } : {}),
+					},
+				};
+			},
+			now,
+		);
+	}
+	return withResolution(
+		c,
+		annotationId,
+		{ ...resolutionFor(choice), note },
+		now,
+	);
+}
+
+/**
+ * The case with the mark's fix verified. Only a fixed mark can be; one that
+ * is verified already stays as it was.
+ */
+export function withVerified(
+	c: Case,
+	annotationId: string,
+	app: FindingApp | undefined,
+	now: string,
+): Case {
+	const a = c.annotations.find((x) => x.id === annotationId);
+	if (a?.resolution?.verified) return c;
+	return changed(
+		c,
+		annotationId,
+		(a) => {
+			const r = a.resolution;
+			if (r?.kind !== "fixed")
+				throw new CaseError(
+					`Mark ${a.number} is ${STATUS_LABEL[markStatus(a)].toLowerCase()}: only a fixed mark can be verified.`,
+				);
+			return {
+				...a,
+				resolution: { ...r, verified: { at: now, ...(app ? { app } : {}) } },
+			};
+		},
+		now,
+	);
+}
+
+/**
+ * The case with the mark open again: its resolution moves, whole (its note
+ * cut to `MAX_REOPEN_NOTE`), into a new reopen with `note`, the oldest going
+ * past `MAX_REOPENS`. An open mark stays as it is.
+ */
+export function withReopen(
+	c: Case,
+	annotationId: string,
+	reopen: {
+		note?: string;
+		app?: FindingApp;
+		/** The panel's: a note typed for a mark opened meanwhile is not lost unsaid. */
+		refuseOpen?: boolean;
+	},
+	now: string,
+): Case {
+	const a = c.annotations.find((x) => x.id === annotationId);
+	if (a !== undefined && a.resolution === undefined) {
+		if (reopen.refuseOpen)
+			throw new CaseError(
+				`Mark ${a.number} is open already: it was reopened meanwhile. Your note is not saved; add it to the comment, or Cancel.`,
+			);
+		return c;
+	}
+	return changed(
+		c,
+		annotationId,
+		(a) => {
+			const { resolution: was, reopens = [], ...open } = a;
+			if (was === undefined) return a;
+			const note = cutText(reopen.note?.trim() ?? "", MAX_REOPEN_NOTE);
+			const entry: Reopen = {
+				...(note ? { note } : {}),
+				at: now,
+				...(reopen.app ? { app: reopen.app } : {}),
+				was: cutWas(was),
+			};
+			return { ...open, reopens: [...reopens, entry].slice(-MAX_REOPENS) };
 		},
 		now,
 	);

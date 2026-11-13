@@ -257,7 +257,7 @@ describe("a loaded case that changes", () => {
 		};
 	}
 
-	test("a resolved mark is drawn resolved, no longer counted, its candidate kept", async () => {
+	test("a closed mark is drawn settled, no longer counted, its candidate kept", async () => {
 		doc.body.innerHTML = PAGE;
 		const c = twoMarks();
 		await reviewer.load(c);
@@ -266,18 +266,52 @@ describe("a loaded case that changes", () => {
 			...c,
 			annotations: c.annotations.map((a) =>
 				a.id === "a2"
-					? { ...a, resolution: { kind: "fixed" as const, at: "now" } }
+					? { ...a, resolution: { kind: "wontfix" as const, at: "now" } }
 					: a,
 			),
 		};
 		const result = await reviewer.update(settled);
 		expect(result?.matches.map((m) => m.annotationId)).toEqual(["a1", "a2"]);
 		expect(
-			(overlay.items as unknown as { resolved: boolean }[]).map(
-				(i) => i.resolved,
+			(overlay.items as unknown as { status: string }[]).map((i) => i.status),
+		).toEqual(["open", "wontfix"]);
+		expect(bar()).toContain("1 of 1 found");
+		expect(bar()).not.toContain("to verify");
+	});
+
+	test("a mark to verify is counted and said; all settled says so", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = twoMarks();
+		await reviewer.load(c);
+		const fixed = {
+			...c,
+			annotations: c.annotations.map((a) =>
+				a.id === "a2"
+					? { ...a, resolution: { kind: "fixed" as const, at: "now" } }
+					: a,
 			),
-		).toEqual([false, true]);
-		expect(bar()).toContain("1 of 1 open found, 1 resolved");
+		};
+		await reviewer.update(fixed);
+		expect(
+			(overlay.items as unknown as { status: string }[]).map((i) => i.status),
+		).toEqual(["open", "fixed"]);
+		expect(bar()).toBe(`${c.title}·2 of 2 found · 1 to verify`);
+		const done = {
+			...c,
+			annotations: c.annotations.map((a) => ({
+				...a,
+				resolution: {
+					kind: "fixed" as const,
+					at: "now",
+					verified: { at: "now" },
+				},
+			})),
+		};
+		await reviewer.update(done);
+		expect(
+			(overlay.items as unknown as { status: string }[]).map((i) => i.status),
+		).toEqual(["verified", "verified"]);
+		expect(bar()).toContain("all verified or closed");
 	});
 
 	test("a deleted mark leaves; another case is not touched", async () => {

@@ -9,12 +9,22 @@ import {
 	type Annotation,
 	appLabel,
 	type Case,
+	caseCounts,
+	type FindingApp,
+	GROUP_LABEL,
+	GROUP_OF,
 	isPageOf,
 	MAX_COMMENT,
+	MAX_REOPEN_NOTE,
 	MAX_VERDICT,
-	RESOLUTION_KINDS,
+	type MarkStatus,
+	markStatus,
 	RESOLUTION_LABEL,
-	type ResolutionKind,
+	RESOLVE_CHOICES,
+	type Resolution,
+	type ResolveChoice,
+	STATUS_GROUPS,
+	type StatusGroup,
 	samePath,
 } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
@@ -31,12 +41,21 @@ export interface Actions {
 	closeCase(): void;
 	loadOntoTab(c: Case): void;
 	hideFromTab(c: Case): void;
-	/** Open a mark's form: settle it, or edit its comment. */
-	editMark(c: Case, a: Annotation, mode: "resolve" | "comment"): void;
-	typeMark(change: { kind?: ResolutionKind; text?: string }): void;
+	/** Open a mark's form: settle it, edit its comment, or reopen it. */
+	editMark(
+		c: Case,
+		a: Annotation,
+		mode: "resolve" | "comment" | "reopen",
+	): void;
+	typeMark(change: { kind?: ResolveChoice; text?: string }): void;
 	cancelMarkEdit(): void;
-	resolveMark(c: Case, a: Annotation, kind: ResolutionKind, note: string): void;
-	reopenMark(c: Case, a: Annotation): void;
+	resolveMark(c: Case, a: Annotation, kind: ResolveChoice, note: string): void;
+	/** "Verified" on a fixed mark: the fix holds (DEC-023). */
+	verifyMark(c: Case, a: Annotation): void;
+	/** "Reopen" in its form: the note says what is still wrong. */
+	reopenMark(c: Case, a: Annotation, note: string): void;
+	/** A status chip: show only those marks; `undefined`: all of them. */
+	filterMarks(caseId: string, group: StatusGroup | undefined): void;
 	saveComment(c: Case, a: Annotation, text: string): void;
 	deleteMark(c: Case, a: Annotation): void;
 	/** An AI app's finding on a mark: the first click asks, the second deletes. */
@@ -463,7 +482,7 @@ function renderSync({ sync }: PanelState, actions: Actions): void {
 function caseItem(c: Case, actions: Actions): HTMLLIElement {
 	const count = c.annotations.length;
 	// The bar beside it is a picture; the words say the same.
-	const counts = countsText(c);
+	const counts = countsText(caseCounts(c));
 	return h(
 		"li",
 		{},
@@ -482,7 +501,7 @@ function caseItem(c: Case, actions: Actions): HTMLLIElement {
 				{ class: "meta" },
 				`${count} mark${count === 1 ? "" : "s"}${counts ? ` (${counts})` : ""}, ${formatDate(c.updatedAt)}`,
 			),
-			progress(c),
+			statusBar(c),
 			c.verdict
 				? h(
 						"span",
@@ -561,6 +580,12 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 			"p",
 			{},
 			`“${importing.existing.title}” is here already (changed ${formatDate(importing.existing.updatedAt)}); the file's copy was changed ${formatDate(importing.parsed.case.updatedAt)}.`,
+		),
+		// What differs on a hand-back: the marks' statuses.
+		h(
+			"p",
+			{ class: "meta", "data-role": "import-counts" },
+			`Here: ${marksText(importing.existing)}. In the file: ${marksText(importing.parsed.case)}.`,
 		),
 		...(batch
 			? [
@@ -665,15 +690,20 @@ function colourOf(m: AnnotationMatch): "found" | "unsure" | "lost" {
 	return sure ? "found" : "unsure";
 }
 
-/** A mark's state in a word, for its head: the number's colour says it too, but not to everyone. */
-function stateWord(
-	a: Annotation,
-	m: AnnotationMatch | undefined,
-): string | undefined {
-	if (a.resolution) return RESOLUTION_LABEL[a.resolution.kind];
+/** Where the mark is on the tab in front, in words: the number's colour says it too, but not to everyone. */
+function matchWord(m: AnnotationMatch | undefined): string | undefined {
 	if (m === undefined || m.status === "no-element") return undefined;
-	return { found: "Found", unsure: "Unsure", lost: "Not found" }[colourOf(m)];
+	return colourOf(m) === "unsure" ? "Unsure" : matchText(m);
 }
+
+/** A mark's status in its head; an open mark has none. */
+const PILL: Record<MarkStatus, string | undefined> = {
+	open: undefined,
+	fixed: "To verify",
+	verified: "Verified",
+	wontfix: RESOLUTION_LABEL.wontfix,
+	cantreproduce: RESOLUTION_LABEL.cantreproduce,
+};
 
 function matchText(m: AnnotationMatch): string {
 	if (m.current > 0)
@@ -975,104 +1005,247 @@ function createParts(c: Case, actions: Actions): CaseParts {
 
 // --- a mark's status and its actions ---------------------------------------
 
-/** "5 open, 2 fixed, 1 won't fix"; nothing while every mark is open. */
-function countsText(c: Case): string | undefined {
-	const resolved = c.annotations.filter((a) => a.resolution);
-	if (resolved.length === 0) return undefined;
-	const parts = [`${c.annotations.length - resolved.length} open`];
-	for (const kind of RESOLUTION_KINDS) {
-		const n = resolved.filter((a) => a.resolution?.kind === kind).length;
-		if (n > 0) parts.push(`${n} ${RESOLUTION_LABEL[kind].toLowerCase()}`);
-	}
-	return parts.join(", ");
+/** "2 open, 1 to verify, 1 closed": the groups with marks; nothing while every mark is open. */
+function countsText(n: Record<StatusGroup, number>): string | undefined {
+	if (n.toVerify + n.verified + n.closed === 0) return undefined;
+	return STATUS_GROUPS.filter((g) => n[g] > 0)
+		.map((g) => `${n[g]} ${GROUP_LABEL[g].toLowerCase()}`)
+		.join(", ");
 }
 
-function markCounts(c: Case): HTMLElement | null {
-	const text = countsText(c);
-	return text ? h("p", { class: "meta mark-counts" }, text) : null;
+/** "3 open", "1 open, 2 to verify", "no marks": for the import prompt. */
+function marksText(c: Case): string {
+	const n = caseCounts(c);
+	const parts = STATUS_GROUPS.filter((g) => n[g] > 0).map(
+		(g) => `${n[g]} ${GROUP_LABEL[g].toLowerCase()}`,
+	);
+	return parts.length > 0 ? parts.join(", ") : "no marks";
 }
 
-/** How far the case has come, as a bar: open, then each way of settling. */
-function progress(c: Case): HTMLElement | null {
+/**
+ * How far the case has come, as a bar: open, to verify, verified, closed
+ * (DEC-023). The chips or the counts beside it say it in words: the bar is
+ * only a picture. A span: it also sits inside a case's button in the list.
+ */
+function statusBar(c: Case): HTMLElement | null {
 	if (c.annotations.length === 0) return null;
-	const count = (kind?: ResolutionKind) =>
-		c.annotations.filter((a) => a.resolution?.kind === kind).length;
-	const parts: [string, number][] = [
-		["open", count()],
-		...RESOLUTION_KINDS.map((k): [string, number] => [k, count(k)]),
-	];
-	// The counts above say it in words: the bar is only a picture of them.
-	// A span: it also sits inside a case's button in the list.
+	const n = caseCounts(c);
 	return h(
 		"span",
 		{ class: "progress", "aria-hidden": "true" },
-		...parts
-			.filter(([, n]) => n > 0)
-			.map(([kind, n]) =>
-				h("span", { "data-kind": kind, style: `flex-grow: ${n}` }),
-			),
+		...STATUS_GROUPS.filter((g) => n[g] > 0).map((g) =>
+			h("span", { "data-kind": g, style: `flex-grow: ${n[g]}` }),
+		),
 	);
 }
 
-function resolutionLine(a: Annotation): HTMLElement | null {
-	const r = a.resolution;
-	if (r === undefined) return null;
+/** A chip's sign, beside its word: told apart without colour. */
+const CHIP_SIGN: Record<StatusGroup, string> = {
+	open: "●",
+	toVerify: "◐",
+	verified: "✓",
+	closed: "–",
+};
+
+/**
+ * The case's summary (DEC-023): the bar, and under it a chip per status with
+ * marks, the legend and the filter in one. A click shows only those marks,
+ * another all again.
+ */
+function statusBlock(
+	c: Case,
+	filter: StatusGroup | undefined,
+	actions: Actions,
+): HTMLElement | null {
+	if (c.annotations.length === 0) return null;
+	const n = caseCounts(c);
 	return h(
-		"p",
-		{ class: "resolution", "data-kind": r.kind },
-		h("span", { class: "kind" }, RESOLUTION_LABEL[r.kind]),
-		r.note ? h("span", { class: "note" }, r.note) : null,
+		"div",
+		{ class: "status-block", id: "case-status" },
+		statusBar(c),
+		h(
+			"div",
+			{ class: "chips", role: "group", "aria-label": "Show marks by status" },
+			...STATUS_GROUPS.filter((g) => n[g] > 0).map((g) =>
+				h(
+					"button",
+					{
+						type: "button",
+						class: "chip",
+						"data-group": g,
+						"aria-pressed": String(filter === g),
+						title:
+							filter === g
+								? "Show all marks again"
+								: `Show only the marks that are ${GROUP_LABEL[g].toLowerCase()}`,
+						onclick: () =>
+							actions.filterMarks(c.id, filter === g ? undefined : g),
+					},
+					h("span", { class: "sign", "aria-hidden": "true" }, CHIP_SIGN[g]),
+					` ${GROUP_LABEL[g]} `,
+					h("span", { class: "count" }, String(n[g])),
+				),
+			),
+		),
+		n.open + n.toVerify === 0
+			? h(
+					"p",
+					{ class: "meta all-done" },
+					h("span", { class: "sign", "aria-hidden": "true" }, "✓"),
+					" All marks are verified or closed.",
+				)
+			: null,
 	);
 }
 
+/** "13 Nov, 11:00": a mark's history is read within days. */
+function historyTime(iso: string): string {
+	const date = new Date(iso);
+	return Number.isNaN(date.getTime())
+		? iso
+		: date.toLocaleString(undefined, {
+				day: "numeric",
+				month: "short",
+				hour: "2-digit",
+				minute: "2-digit",
+			});
+}
+
+interface HistoryLine {
+	kind: MarkStatus | "reopened";
+	label: string;
+	at: string;
+	app: FindingApp | undefined;
+	note: string | undefined;
+	/** Came in from a file: who and when is what the file says. */
+	imported: boolean;
+}
+
+/** A resolution as history: how it was settled, then its verification. */
+function resolutionHistory(r: Resolution): HistoryLine[] {
+	return [
+		{
+			kind: r.kind,
+			label: RESOLUTION_LABEL[r.kind],
+			at: r.at,
+			app: r.app,
+			note: r.note,
+			imported: r.imported === true,
+		},
+		...(r.verified
+			? [
+					{
+						kind: "verified" as const,
+						label: "Verified",
+						at: r.verified.at,
+						app: r.verified.app,
+						note: undefined,
+						imported: r.verified.imported === true,
+					},
+				]
+			: []),
+	];
+}
+
+/** What became of the mark, oldest first: each reopen, then how it is settled now. */
+function historyList(a: Annotation): HTMLElement | null {
+	const lines: HistoryLine[] = [];
+	for (const r of a.reopens ?? [])
+		lines.push(...resolutionHistory(r.was), {
+			kind: "reopened",
+			label: "Reopened",
+			at: r.at,
+			app: r.app,
+			note: r.note,
+			imported: r.imported === true,
+		});
+	if (a.resolution) lines.push(...resolutionHistory(a.resolution));
+	if (lines.length === 0) return null;
+	return h(
+		"ol",
+		{ class: "history", "aria-label": `History of mark ${a.number}` },
+		...lines.map((l) =>
+			h(
+				"li",
+				{ "data-kind": l.kind },
+				h("span", { class: "kind" }, l.label),
+				` ${historyTime(l.at)}${l.app ? ` by ${appLabel(l.app)}` : ""}${l.imported ? ", as the file says" : ""}`,
+				l.note ? h("span", { class: "note" }, ` · ${l.note}`) : null,
+			),
+		),
+	);
+}
+
+/** A small button of a mark; `strong`: the one its status calls for. */
+function markButton(
+	label: string,
+	action: string,
+	title: string | undefined,
+	onclick: () => void,
+	strong = false,
+): HTMLButtonElement {
+	return h(
+		"button",
+		{
+			type: "button",
+			class: strong ? "small strong" : "small",
+			"data-mark-action": action,
+			title,
+			onclick,
+		},
+		label,
+	);
+}
+
+const VERIFIED_TITLE = "The fix holds on the page you checked";
+const REOPEN_TITLE =
+	"Open the mark again, with a note on what is still wrong; how it was settled stays in its history";
+
+const verifyButton = (c: Case, a: Annotation, actions: Actions) =>
+	markButton(
+		"Verified",
+		"verify",
+		VERIFIED_TITLE,
+		() => actions.verifyMark(c, a),
+		true,
+	);
+
+const reopenButton = (c: Case, a: Annotation, actions: Actions) =>
+	markButton("Reopen…", "reopen", REOPEN_TITLE, () =>
+		actions.editMark(c, a, "reopen"),
+	);
+
+/** The buttons a mark's status calls for, the strong one first (DEC-023). */
 function markActions(
 	c: Case,
 	a: Annotation,
 	armed: boolean,
 	actions: Actions,
 ): HTMLElement {
-	const button = (
-		label: string,
-		action: string,
-		title: string | undefined,
-		onclick: () => void,
-	) =>
-		h(
-			"button",
-			{
-				type: "button",
-				class: "small",
-				"data-mark-action": action,
-				title,
-				onclick,
-			},
-			label,
-		);
+	const status = markStatus(a);
 	return h(
 		"div",
 		{ class: "mark-actions" },
-		a.resolution
-			? button(
-					"Reopen",
-					"reopen",
-					"Make the mark open again; its resolution and note go",
-					() => actions.reopenMark(c, a),
-				)
-			: button(
+		status === "open"
+			? markButton(
 					"Resolve…",
 					"resolve",
-					"Mark it fixed, won't fix or can't reproduce, with a note if you like",
+					"Mark it fixed, verified, won't fix or can't reproduce, with a note if you like",
 					() => actions.editMark(c, a, "resolve"),
-				),
-		a.resolution
-			? button(
-					"Change…",
-					"resolve",
-					"Change how it was resolved, or its note",
-					() => actions.editMark(c, a, "resolve"),
+					true,
 				)
 			: null,
-		button("Edit comment", "comment", undefined, () =>
+		status === "fixed" ? verifyButton(c, a, actions) : null,
+		status === "open" ? null : reopenButton(c, a, actions),
+		status === "open"
+			? null
+			: markButton(
+					"Change…",
+					"change",
+					"Change how it was settled, or its note",
+					() => actions.editMark(c, a, "resolve"),
+				),
+		markButton("Edit comment", "comment", undefined, () =>
 			actions.editMark(c, a, "comment"),
 		),
 		h(
@@ -1114,10 +1287,18 @@ function focusOnOpen(form: string, field: HTMLElement): void {
 	queueMicrotask(() => field.focus());
 }
 
+/** The four ways Resolve… and Change… settle a mark. */
+const CHOICE_LABEL: Record<ResolveChoice, string> = {
+	fixed: "Fixed, to verify",
+	verified: "Fixed and verified",
+	wontfix: RESOLUTION_LABEL.wontfix,
+	cantreproduce: RESOLUTION_LABEL.cantreproduce,
+};
+
 function resolveForm(
 	c: Case,
 	a: Annotation,
-	kind: ResolutionKind,
+	kind: ResolveChoice,
 	note: string,
 	actions: Actions,
 ): HTMLElement {
@@ -1125,7 +1306,7 @@ function resolveForm(
 	const noteField: HTMLInputElement = h("input", {
 		type: "text",
 		class: "note",
-		placeholder: "Note (optional): why, or what was done",
+		placeholder: "Note (optional): what was done, or why",
 		maxlength: String(MAX_COMMENT),
 		"aria-label": `Note for mark ${a.number}`,
 		value: note,
@@ -1138,7 +1319,7 @@ function resolveForm(
 	});
 	const chosen = () =>
 		(form.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)
-			?.value ?? kind) as ResolutionKind;
+			?.value ?? kind) as ResolveChoice;
 	const submit = () => actions.resolveMark(c, a, chosen(), noteField.value);
 	const form = h(
 		"div",
@@ -1146,8 +1327,8 @@ function resolveForm(
 		h(
 			"fieldset",
 			{},
-			h("legend", {}, `Resolve mark ${a.number} as`),
-			...RESOLUTION_KINDS.map((k) =>
+			h("legend", {}, `Mark ${a.number} is`),
+			...RESOLVE_CHOICES.map((k) =>
 				h(
 					"label",
 					{ class: "choice" },
@@ -1158,7 +1339,7 @@ function resolveForm(
 						checked: k === kind,
 						onchange: () => actions.typeMark({ kind: k }),
 					}),
-					RESOLUTION_LABEL[k],
+					CHOICE_LABEL[k],
 				),
 			),
 		),
@@ -1174,7 +1355,7 @@ function resolveForm(
 					"data-mark-action": "resolve-done",
 					onclick: submit,
 				},
-				a.resolution ? "Save" : "Resolve",
+				"Save",
 			),
 			h(
 				"button",
@@ -1230,6 +1411,70 @@ function commentForm(
 				},
 				"Save",
 			),
+			h(
+				"button",
+				{
+					type: "button",
+					class: "small",
+					onclick: () => actions.cancelMarkEdit(),
+				},
+				"Cancel",
+			),
+		),
+	);
+}
+
+/** Reopen…: what is still wrong, which the developer reads first (DEC-023). */
+function reopenForm(
+	c: Case,
+	a: Annotation,
+	text: string,
+	actions: Actions,
+): HTMLElement {
+	const empty = (value: string) => value.trim() === "";
+	const done: HTMLButtonElement = h(
+		"button",
+		{
+			type: "button",
+			class: "strong small",
+			"data-mark-action": "reopen-done",
+			title: "Open the mark again with this note",
+			disabled: empty(text),
+			onclick: () => submit(),
+		},
+		"Reopen",
+	);
+	const field: HTMLTextAreaElement = h(
+		"textarea",
+		{
+			maxlength: String(MAX_REOPEN_NOTE),
+			placeholder: "What is still wrong? The developer reads this first.",
+			"aria-label": `What is still wrong with mark ${a.number}`,
+			oninput: () => {
+				// No redraw while typing: the button follows the text itself.
+				done.disabled = empty(field.value);
+				actions.typeMark({ text: field.value });
+			},
+			onkeydown: (e) => {
+				const k = e as KeyboardEvent;
+				if (k.key === "Enter" && (k.metaKey || k.ctrlKey)) submit();
+				if (k.key === "Escape") actions.cancelMarkEdit();
+			},
+		},
+		text,
+	);
+	const submit = () => {
+		if (!empty(field.value)) actions.reopenMark(c, a, field.value);
+	};
+	focusOnOpen(`${a.id}:reopen`, field);
+	return h(
+		"div",
+		{ class: "mark-form", "data-form": "reopen" },
+		h("fieldset", {}, h("legend", {}, `Reopen mark ${a.number}`), field),
+		h(
+			"div",
+			{ class: "row" },
+			done,
 			h(
 				"button",
 				{
@@ -1332,7 +1577,17 @@ function renderCase(state: PanelState, actions: Actions): void {
 	if (edit === undefined) focusedForm = undefined;
 	const markArmed = state.markDeleteArmed?.annotationId;
 	const findingArmed = state.findingDeleteArmed;
+	// A filter ends once none of its marks are left (nothing to show), or a
+	// mark was added (it would not show, as if it was not saved).
+	const f = state.markFilter;
+	const filter =
+		f?.caseId === c.id &&
+		caseCounts(c)[f.group] > 0 &&
+		c.annotations.every((a) => a.number <= f.upTo)
+			? f.group
+			: undefined;
 	const marksKey = JSON.stringify([
+		filter ?? null,
 		c.updatedAt,
 		images?.version,
 		loaded ? [...loaded.matches.values()] : null,
@@ -1343,7 +1598,11 @@ function renderCase(state: PanelState, actions: Actions): void {
 		ok,
 	]);
 	if (marksKey !== p.marksKey) {
-		const sorted = [...c.annotations].sort((x, y) => x.number - y.number);
+		const sorted = [...c.annotations]
+			.sort((x, y) => x.number - y.number)
+			.filter(
+				(a) => filter === undefined || GROUP_OF[markStatus(a)] === filter,
+			);
 		const items = sorted.map((a) =>
 			markItem(c, a, {
 				crop: images?.urls.get(a.crop),
@@ -1381,6 +1640,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		const marks = h(
 			"section",
 			{ class: "marks", "aria-labelledby": "marks-heading" },
+			statusBlock(c, filter, actions),
 			h(
 				"div",
 				{ class: "marks-bar" },
@@ -1391,12 +1651,29 @@ function renderCase(state: PanelState, actions: Actions): void {
 					h("span", { class: "count" }, String(c.annotations.length)),
 				),
 				toggleAll,
-				markCounts(c),
-				progress(c),
 			),
+			filter === undefined
+				? null
+				: h(
+						"p",
+						{ class: "meta filtered", id: "marks-filtered" },
+						`Showing ${items.length} of ${c.annotations.length} marks. `,
+						h(
+							"button",
+							{
+								type: "button",
+								class: "link",
+								"data-action": "show-all",
+								onclick: () => actions.filterMarks(c.id, undefined),
+							},
+							"Show all",
+						),
+					),
 			items.length > 0
 				? h("ol", { class: "annotations" }, ...items)
-				: h("p", { class: "empty" }, "No marks yet."),
+				: filter === undefined
+					? h("p", { class: "empty" }, "No marks yet.")
+					: null,
 		);
 		p.marks.replaceWith(marks);
 		p.marks = marks;
@@ -1466,12 +1743,16 @@ interface MarkContext {
 function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 	const { match: m, edit, actions } = x;
 	const bodyId = `mark-body-${a.id}`;
-	const state = stateWord(a, m);
+	const status = markStatus(a);
 	const li: HTMLElement = h("li", {
 		class: "annotation",
 		"data-annotation": a.id,
+		"data-status": status,
 		...(m ? { "data-colour": colourOf(m) } : {}),
-		...(a.resolution ? { "data-resolved": a.resolution.kind } : {}),
+		// Verified and closed step back; a mark to verify is to be looked at.
+		...(a.resolution && status !== "fixed"
+			? { "data-resolved": a.resolution.kind }
+			: {}),
 	});
 	const toggle = h(
 		"button",
@@ -1494,14 +1775,6 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 			a.comment || "No comment",
 		),
 		a.author === "ai" ? h("span", { class: "tag" }, "AI") : null,
-		a.findings?.length
-			? h(
-					"span",
-					{ class: "tag findings-count" },
-					`${a.findings.length} AI finding${a.findings.length === 1 ? "" : "s"}`,
-				)
-			: null,
-		state ? h("span", { class: "state" }, state) : null,
 	);
 	const show = canShow(m)
 		? h(
@@ -1524,19 +1797,74 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 		"div",
 		{ class: "body", id: bodyId },
 		x.crop ? cropView(c.id, a, x.crop) : null,
-		a.resolution ? resolutionLine(a) : null,
+		historyList(a),
 		findingsList(c, a, x.findingArmed, actions),
 		a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
 		m ? matchView(c.id, a, m, actions) : null,
 		edit
 			? edit.mode === "resolve"
 				? resolveForm(c, a, edit.kind, edit.text, actions)
-				: commentForm(c, a, edit.text, actions)
+				: edit.mode === "reopen"
+					? reopenForm(c, a, edit.text, actions)
+					: commentForm(c, a, edit.text, actions)
 			: markActions(c, a, x.armed, actions),
 	);
-	li.append(h("div", { class: "mark-head" }, toggle, show), body);
+	const sub = markSubline(c, a, m, edit === undefined, actions);
+	li.append(
+		h("div", { class: "mark-head" }, toggle, show),
+		...(sub ? [sub] : []),
+		body,
+	);
 	setOpen(c.id, li, edit !== undefined || openMarks.has(`${c.id}:${a.id}`));
 	return li;
+}
+
+/**
+ * A mark's head, second row: its status, where it is on the tab in front,
+ * its AI findings; why it came back, for a reopened one. A mark to verify
+ * offers Verified and Reopen… here, so verifying needs no expanding.
+ */
+function markSubline(
+	c: Case,
+	a: Annotation,
+	m: AnnotationMatch | undefined,
+	buttons: boolean,
+	actions: Actions,
+): HTMLElement | null {
+	const status = markStatus(a);
+	const pill = PILL[status];
+	const last = a.reopens?.at(-1);
+	const where = matchWord(m);
+	const findings = a.findings?.length ?? 0;
+	const parts = [
+		pill ? h("span", { class: "pill", "data-status": status }, pill) : null,
+		status === "open" && last
+			? h(
+					"span",
+					{ class: "reopened" },
+					last.note
+						? `Reopened: ${last.note.split(/\r\n?|\n/)[0]}`
+						: "Reopened",
+				)
+			: null,
+		where ? h("span", { class: "state" }, where) : null,
+		findings > 0
+			? h(
+					"span",
+					{ class: "tag findings-count" },
+					`${findings} AI finding${findings === 1 ? "" : "s"}`,
+				)
+			: null,
+		status === "fixed" && buttons
+			? h(
+					"span",
+					{ class: "head-actions" },
+					verifyButton(c, a, actions),
+					reopenButton(c, a, actions),
+				)
+			: null,
+	].filter((x) => x !== null);
+	return parts.length > 0 ? h("div", { class: "mark-sub" }, ...parts) : null;
 }
 
 /** When a finding was written, and last changed. */
