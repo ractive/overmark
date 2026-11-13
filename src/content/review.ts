@@ -15,6 +15,8 @@ import {
 import {
 	type Annotation,
 	type Case,
+	caseCounts,
+	markStatus,
 	type Rect,
 	type Shape,
 	samePath,
@@ -339,7 +341,7 @@ export class Reviewer {
 				entry.match.status !== "ambiguous" &&
 				entry.candidates[entry.match.current]?.found === true,
 			focused: annotation.id === this.#focused,
-			resolved: annotation.resolution !== undefined,
+			status: markStatus(annotation),
 		};
 	}
 
@@ -359,7 +361,7 @@ export class Reviewer {
 			rect: null,
 			found: false,
 			focused: annotation.id === this.#focused,
-			resolved: annotation.resolution !== undefined,
+			status: markStatus(annotation),
 		};
 	}
 
@@ -390,26 +392,33 @@ export class Reviewer {
 
 	#renderBar(): void {
 		const doc = this.overlay.doc;
-		// Resolved marks are drawn, faded, but no longer counted.
-		const open = this.#entries.filter((e) => !e.annotation.resolution);
-		const total = open.length;
-		const resolved = this.#entries.length - total;
-		const found = open.filter(
+		// Verified and closed marks are drawn, faded, but no longer counted;
+		// open ones and those to verify are what to look at.
+		const active = this.#entries.filter((e) => {
+			const status = markStatus(e.annotation);
+			return status === "open" || status === "fixed";
+		});
+		const found = active.filter(
 			(e) => e.match.status !== "lost" && e.match.status !== "no-element",
 		).length;
+		const toVerify = this.#case ? caseCounts(this.#case).toVerify : 0;
 		const title = doc.createElement("span");
 		title.className = "title";
 		title.textContent = this.#case?.title ?? "";
 		const count = doc.createElement("span");
 		count.className = "count";
 		count.textContent =
-			resolved === 0
-				? `${found} of ${total} found`
-				: `${found} of ${total} open found, ${resolved} resolved`;
+			active.length === 0 && this.#entries.length > 0
+				? "all verified or closed"
+				: `${found} of ${active.length} found${toVerify > 0 ? ` · ${toVerify} to verify` : ""}`;
+		const sep = doc.createElement("span");
+		sep.className = "sep";
+		sep.setAttribute("aria-hidden", "true");
+		sep.textContent = "·";
 		const text = doc.createElement("span");
 		text.className = "text";
 		text.dataset["role"] = "review-status";
-		text.append(title, count);
+		text.append(title, sep, count);
 		const hide = doc.createElement("button");
 		hide.type = "button";
 		hide.dataset["action"] = "review-hide";

@@ -7,6 +7,7 @@ import {
 	type Case,
 	CaseError,
 	caseImages,
+	importedResolution,
 	MAX_TITLE,
 	newId,
 	plainUrl,
@@ -418,7 +419,8 @@ export async function readExports(
  * a new id. Either everything is stored or nothing changes. It is marked as
  * imported, whatever the file says, and keeps no more of the page's address
  * than a saved case does. Its findings are no AI app's own: the app a finding
- * names is whatever the file says (DEC-019).
+ * names is whatever the file says (DEC-019), as are who set a mark's status
+ * and when (DEC-023).
  */
 export async function storeImport(
 	store: CaseStore,
@@ -436,14 +438,25 @@ export async function storeImport(
 				}
 			: {}),
 		page: { ...parsed.case.page, url: plainUrl(parsed.case.page.url) },
-		annotations: parsed.case.annotations.map((a) =>
-			a.findings === undefined
-				? a
+		annotations: parsed.case.annotations.map((a) => ({
+			...a,
+			...(a.findings === undefined
+				? {}
+				: { findings: a.findings.map((f) => ({ ...f, imported: true })) }),
+			// Who set a status and when is what the file says (DEC-023).
+			...(a.resolution === undefined
+				? {}
+				: { resolution: importedResolution(a.resolution) }),
+			...(a.reopens === undefined
+				? {}
 				: {
-						...a,
-						findings: a.findings.map((f) => ({ ...f, imported: true })),
-					},
-		),
+						reopens: a.reopens.map((r) => ({
+							...r,
+							was: importedResolution(r.was),
+							imported: true as const,
+						})),
+					}),
+		})),
 		importedAt: (options.now ?? new Date()).toISOString(),
 	};
 	await store.replaceCase(c, images);

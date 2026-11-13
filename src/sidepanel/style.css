@@ -29,6 +29,8 @@
 	--mark-lost: #c62828;
 	/* A resolved mark, here and on the page (overlay.ts). */
 	--resolved: #6b7385;
+	/* A mark fixed and waiting to be verified, here and on the page (DEC-023). */
+	--to-verify: #4f53e0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -761,12 +763,7 @@ ul.cases .load {
 	font-variant-numeric: tabular-nums;
 }
 
-.mark-counts {
-	flex-basis: 100%;
-	margin: 0;
-}
-
-/* The counts as a picture: open marks, then each way they were settled. */
+/* The counts as a picture: open, to verify, verified, closed. */
 .progress {
 	display: flex;
 	flex-basis: 100%;
@@ -792,21 +789,100 @@ ul.cases .progress {
 	background: var(--mark);
 }
 
-.progress [data-kind="fixed"] {
+.progress [data-kind="toVerify"] {
+	background: var(--to-verify);
+}
+
+.progress [data-kind="verified"] {
 	background: var(--ok);
 }
 
-.progress [data-kind="wontfix"] {
+.progress [data-kind="closed"] {
 	background: var(--resolved);
 }
 
-/* Striped: told apart from Won't fix without a paler, fainter grey. */
-.progress [data-kind="cantreproduce"] {
-	background: repeating-linear-gradient(
-		-45deg,
-		var(--resolved) 0 3px,
-		transparent 3px 5px
-	);
+/* The case's summary: the bar, then the chips that are legend and filter. */
+.status-block {
+	display: grid;
+	gap: 8px;
+	padding: 12px 14px 0;
+}
+
+div.status-block .progress {
+	height: 8px;
+	margin-top: 0;
+	border-radius: 4px;
+}
+
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.all-done .sign {
+	color: var(--ok);
+}
+
+button.chip {
+	padding: 2px 10px;
+	border-radius: 12px;
+	font-size: 12px;
+}
+
+button.chip[aria-pressed="true"],
+button.chip[aria-pressed="true"]:hover:not(:disabled) {
+	border-color: var(--fg);
+	background: var(--fg);
+	color: var(--sheet);
+}
+
+button.chip[aria-pressed="true"] .count {
+	background: none;
+	color: inherit;
+}
+
+.chip[data-group="open"] .sign {
+	color: var(--mark);
+}
+
+.chip[data-group="toVerify"] .sign {
+	color: var(--to-verify);
+}
+
+.chip[data-group="verified"] .sign {
+	color: var(--ok);
+}
+
+.chip[data-group="closed"] .sign {
+	color: var(--resolved);
+}
+
+button.chip[aria-pressed="true"] .sign {
+	color: inherit;
+}
+
+.status-block .all-done {
+	margin: 0;
+}
+
+.marks > .filtered {
+	margin: 0;
+	padding: 8px 14px;
+	border-bottom: 1px solid var(--rule);
+}
+
+/* The action a mark's status calls for: ink, not amber (amber is for annotating). */
+button.strong {
+	border-color: transparent;
+	background: var(--fg);
+	color: var(--sheet);
+	font-weight: 600;
+}
+
+button.strong:hover:not(:disabled) {
+	border-color: transparent;
+	background: color-mix(in srgb, var(--fg) 82%, var(--sheet));
 }
 
 .marks > .empty {
@@ -889,9 +965,19 @@ ol.annotations {
 	margin-top: 3px;
 }
 
-/* The mark's state in a word; the number's colour alone is not enough. */
-.mark-toggle .state {
-	margin-top: 3px;
+/* A mark's head, second row: status, where it is, findings (DEC-023). */
+.mark-sub {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 8px;
+	/* Under the comment, as the body: 12 + chevron 10 + 8 + number 24 + 8. */
+	padding: 0 14px 10px 62px;
+	margin-top: -4px;
+	font-size: 12px;
+}
+
+.mark-sub .pill {
 	padding: 0 6px;
 	border-radius: 8px;
 	background: var(--wash);
@@ -899,6 +985,29 @@ ol.annotations {
 	font-size: 11px;
 	font-weight: 600;
 	white-space: nowrap;
+}
+
+.mark-sub .pill[data-status="fixed"] {
+	color: var(--to-verify);
+}
+
+.mark-sub .pill[data-status="verified"] {
+	color: var(--ok);
+}
+
+/* Why a reopened mark came back, in the open colour. */
+.mark-sub .reopened {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--mark);
+	font-weight: 600;
+}
+
+/* Where the mark is on the tab in front; the number's colour alone is not enough. */
+.mark-sub .state {
+	color: var(--muted);
 }
 
 .annotation[data-colour="found"]:not([data-resolved]) .state {
@@ -911,6 +1020,12 @@ ol.annotations {
 
 .annotation[data-colour="lost"]:not([data-resolved]) .state {
 	color: var(--danger);
+}
+
+.mark-sub .head-actions {
+	display: inline-flex;
+	gap: 6px;
+	margin-left: auto;
 }
 
 /* Focus moving up the list stops below the bar, not under it. */
@@ -1046,44 +1161,49 @@ button.crop:hover img {
 	background: var(--mark-lost);
 }
 
-/* A resolved mark steps back, as it does on the page. */
+/* A mark to verify is to be looked at, in its colour on the page. */
+.annotation[data-status="fixed"] .number {
+	background: var(--to-verify);
+}
+
+/* A verified or closed mark steps back, as it does on the page; its crop stays as taken. */
 .annotation[data-resolved] .number {
 	background: var(--resolved);
 }
 
-.annotation[data-resolved] .comment,
-.annotation[data-resolved] img {
+.annotation[data-resolved] .comment {
 	opacity: 0.6;
 }
 
-/* The mark is painted into its crop in pink: grey it with the picture. */
-.annotation[data-resolved] img {
-	filter: grayscale(1);
-}
-
-.resolution {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px 8px;
-	align-items: baseline;
+/* What became of the mark, oldest first. */
+.history {
+	display: grid;
+	gap: 2px;
 	margin: 0;
+	padding: 0;
+	list-style: none;
 	font-size: 12px;
+	color: var(--muted);
 }
 
-.resolution .kind {
-	flex: none;
+.history .kind {
 	font-weight: 600;
-	padding: 0 6px;
-	border-radius: 8px;
-	background: var(--wash);
+	color: var(--fg);
 }
 
-.resolution[data-kind="fixed"] .kind {
+.history [data-kind="fixed"] .kind {
+	color: var(--to-verify);
+}
+
+.history [data-kind="verified"] .kind {
 	color: var(--ok);
 }
 
-.resolution .note {
-	color: var(--muted);
+.history [data-kind="reopened"] .kind {
+	color: var(--mark);
+}
+
+.history .note {
 	overflow-wrap: anywhere;
 }
 
