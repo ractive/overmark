@@ -294,7 +294,7 @@ chrome.runtime.onMessage.addListener(
 			(request?.type === "cases:changed" || request?.type === "sync:run") &&
 			fromExtensionPage(sender)
 		) {
-			void sync.request();
+			void sync.request(request.type === "sync:run" && request.force === true);
 			return false;
 		}
 		if (!isWorkerRequest(request)) return false;

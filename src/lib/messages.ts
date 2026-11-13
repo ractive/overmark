@@ -249,8 +249,11 @@ export type Broadcast =
 	| { type: "overlay:changed"; state: OverlayState }
 	/** The worker's sync status changed (DEC-021). */
 	| { type: "sync:changed" }
-	/** From the side panel: bring the sync folder up to date now. */
-	| { type: "sync:run" };
+	/**
+	 * From the side panel: bring the sync up to date now; `force` (Try again,
+	 * a new choice) also after a failure only the user can end.
+	 */
+	| { type: "sync:run"; force?: boolean };
 
 /** The content script's file, as the build writes it. */
 export const CONTENT_SCRIPT = "content.js";

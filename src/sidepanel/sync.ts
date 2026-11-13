@@ -55,9 +55,12 @@ export interface PanelSync extends SyncActions {
 	refresh(): Promise<void>;
 }
 
-/** Ask the worker to bring the target up to date. */
-function run(): void {
-	const news: Broadcast = { type: "sync:run" };
+/**
+ * Ask the worker to bring the target up to date; `force` after the user's
+ * Try again or a new choice, also when a failure was waiting for them.
+ */
+function run(force = false): void {
+	const news: Broadcast = { type: "sync:run", ...(force ? { force } : {}) };
 	chrome.runtime.sendMessage(news).catch(() => undefined);
 }
 
@@ -135,7 +138,7 @@ export function startSync(
 			s.sync.changing = false;
 		});
 		await refresh();
-		run();
+		run(true);
 	}
 
 	function syncChoose(): void {
@@ -196,7 +199,7 @@ export function startSync(
 				s.sync.refused = false;
 			});
 			await refresh();
-			run();
+			run(true);
 		});
 	}
 
@@ -209,7 +212,7 @@ export function startSync(
 					s.sync.changing = false;
 				});
 				// The worker clears its status, and the icon's "!".
-				return refresh().then(run);
+				return refresh().then(() => run());
 			},
 			(error: unknown) => problem(`Could not stop syncing: ${message(error)}`),
 		);
@@ -233,7 +236,7 @@ export function startSync(
 					s.sync.refused = !yes;
 					if (yes) s.sync.problem = undefined;
 				});
-				if (yes) run();
+				if (yes) run(true);
 			},
 			(error: unknown) =>
 				problem(
@@ -246,7 +249,7 @@ export function startSync(
 		const allowed = askForDownloads();
 		void allowed.then((yes) => {
 			update((s) => (s.sync.refused = !yes));
-			if (yes) run();
+			if (yes) run(true);
 		});
 	}
 
@@ -272,7 +275,7 @@ export function startSync(
 	if (typeof OVERMARK_TEST_BUILD !== "undefined" && OVERMARK_TEST_BUILD)
 		Object.assign(window, { overmarkUseFolder: use });
 
-	void refresh().then(run);
+	void refresh().then(() => run());
 	return {
 		refresh,
 		syncDownloads,
@@ -284,7 +287,7 @@ export function startSync(
 		syncAllowDownloads,
 		syncRetry: () => {
 			problem(undefined);
-			run();
+			run(true);
 		},
 		syncShow,
 	};

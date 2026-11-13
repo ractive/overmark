@@ -102,8 +102,19 @@ export const DOWNLOADS_FOLDER = "Overmark";
 /** No permission (any more): the user allows it again in the panel. */
 export class SyncPaused extends Error {}
 
-/** The target cannot be written to at all: the run stops, saying why. */
-export class TargetFailed extends Error {}
+/**
+ * The target cannot be written to at all: the run stops, saying why.
+ * `needsUser`: only the user can end it (a dialog of Chrome's to answer, a
+ * setting to change), so it is not tried again until the user asks.
+ */
+export class TargetFailed extends Error {
+	constructor(
+		message: string,
+		readonly needsUser = false,
+	) {
+		super(message);
+	}
+}
 
 /** What the user chose, as stored: Downloads, or a folder. */
 export type SyncChoice =
@@ -141,6 +152,8 @@ export interface SyncStatus {
 	problem?: string;
 	/** Syncing: how many cases are still to write. */
 	left?: number;
+	/** Failed in a way only the user can end: kept until Try again or a new choice. */
+	needsUser?: true;
 }
 
 /** Where the sync keeps the user's choice, what it wrote and its status. */
@@ -433,6 +446,7 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 				end = await api.finished(id, DOWNLOAD_TIMEOUT_MS);
 				if (end.state === "timeout") {
 					await api.cancel(id).catch(() => undefined);
+					await api.erase(id).catch(() => undefined);
 					throw new TargetFailed(
 						`Chrome did not finish saving “${name}” to your downloads within a minute. Overmark tries again at the next change, or click Try again.`,
 					);
@@ -440,11 +454,19 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 			} finally {
 				await api.revoke(url).catch(() => undefined);
 			}
-			if (end.state === "interrupted")
-				throw new TargetFailed(downloadProblem(end.error, name));
+			if (end.state === "interrupted") {
+				// A failed write leaves no entry in Chrome's list.
+				await api.erase(id).catch(() => undefined);
+				throw new TargetFailed(
+					downloadProblem(end.error, name),
+					end.error === "USER_CANCELED",
+				);
+			}
 			// Saved somewhere else: Chrome asked, and the user chose another place.
-			if (!savedAs(end.filename, name))
-				throw new TargetFailed(downloadProblem("USER_CANCELED", name));
+			if (!savedAs(end.filename, name)) {
+				await api.erase(id).catch(() => undefined);
+				throw new TargetFailed(downloadProblem("USER_CANCELED", name), true);
+			}
 			const before = await api.last().catch(() => undefined);
 			await api.setLast(id);
 			if (before !== undefined && before !== id)
@@ -475,15 +497,20 @@ export interface SyncDeps {
 export class Sync {
 	readonly #deps: SyncDeps;
 	#dirty = false;
+	#force = false;
 	#running: Promise<void> | undefined;
 
 	constructor(deps: SyncDeps) {
 		this.#deps = deps;
 	}
 
-	/** Bring the target up to date, now or after the run at work. */
-	request(): Promise<void> {
+	/**
+	 * Bring the target up to date, now or after the run at work. `force`
+	 * (Try again, a new choice): also after a failure only the user can end.
+	 */
+	request(force = false): Promise<void> {
 		this.#dirty = true;
+		this.#force ||= force;
 		this.#running ??= this.#loop();
 		return this.#running;
 	}
@@ -497,8 +524,10 @@ export class Sync {
 		try {
 			while (this.#dirty) {
 				this.#dirty = false;
+				const force = this.#force;
+				this.#force = false;
 				try {
-					await this.run();
+					await this.run(force);
 				} catch (error) {
 					console.warn("Overmark: sync", error);
 				}
@@ -528,7 +557,7 @@ export class Sync {
 	}
 
 	/** One run; use `request`, which never runs two at once. */
-	async run(): Promise<void> {
+	async run(force = false): Promise<void> {
 		const { store, notify } = this.#deps;
 		const choice = await store.choice();
 		if (choice === undefined) {
@@ -546,14 +575,14 @@ export class Sync {
 				problem: "This browser cannot save to your downloads.",
 			});
 		try {
-			await this.#run(target);
+			await this.#run(target, force);
 		} finally {
 			await target.end?.().catch(() => undefined);
 		}
 	}
 
-	async #run(target: SyncTarget): Promise<void> {
-		const { cases, store } = this.#deps;
+	async #run(target: SyncTarget, force: boolean): Promise<void> {
+		const { cases, store, notify } = this.#deps;
 		const before = await store.status();
 		const last =
 			before?.folderId === target.id ? before.lastSyncedAt : undefined;
@@ -565,6 +594,16 @@ export class Sync {
 			target.kind === "folder" ? "access" : "downloads";
 		const paused = (): SyncStatus => ({ ...base, state: "paused", reason });
 		if (!(await target.permission())) return this.#report(paused());
+		// Waiting for the user (a Save dialog cancelled): no new download by itself.
+		if (
+			!force &&
+			before?.folderId === target.id &&
+			before.state === "failed" &&
+			before.needsUser
+		) {
+			notify?.(before);
+			return;
+		}
 
 		const record = await store.files(target.id);
 		const byCase: Record<string, SyncedFile> =
@@ -603,7 +642,12 @@ export class Sync {
 				if (error instanceof SyncPaused) return this.#report(paused(), files());
 				if (error instanceof TargetFailed)
 					return this.#report(
-						{ ...base, state: "failed", problem: error.message },
+						{
+							...base,
+							state: "failed",
+							problem: error.message,
+							...(error.needsUser ? { needsUser: true as const } : {}),
+						},
 						files(),
 					);
 				// This case alone (an image missing, say): the others go on.

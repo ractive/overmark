@@ -739,6 +739,34 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(store.current?.problem).toContain("choose a folder instead");
 	});
 
+	test("a failure only the user can end is not tried again by itself, only by Try again", async () => {
+		await add("c_1", "Login");
+		api.next = Array.from({ length: 5 }, () => ({
+			state: "interrupted" as const,
+			error: "USER_CANCELED",
+		}));
+		for (let i = 0; i < 5; i++) await sync.request();
+		expect(api.downloads).toHaveLength(1);
+		expect(store.current?.state).toBe("failed");
+		expect(store.current?.needsUser).toBe(true);
+		// Its entry in Chrome's list goes too.
+		expect(api.erased).toEqual([1]);
+		// Try again (or a new choice) asks for it.
+		await sync.request(true);
+		expect(api.downloads).toHaveLength(2);
+		api.next = [];
+		await sync.request(true);
+		expect(store.current?.state).toBe("synced");
+		expect(store.current?.needsUser).toBeUndefined();
+	});
+
+	test("an interrupted download's entry is erased from Chrome's list", async () => {
+		await add("c_1", "Login");
+		api.next = [{ state: "interrupted", error: "NETWORK_FAILED" }];
+		await sync.request();
+		expect(api.erased).toEqual([1]);
+	});
+
 	test("saved somewhere else than Overmark/ (the user answered Save as): failed too", async () => {
 		await add("c_1", "Login");
 		api.savedIn = "/Users/me/Desktop";
