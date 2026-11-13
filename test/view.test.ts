@@ -2620,3 +2620,26 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		expect(banner().querySelector("button")).toBe(bannerButton);
 	});
 });
+
+test("every mask in the panel's style sheet has its -webkit- form beside it: Chrome 116 to 119 know no other", async () => {
+	const css = await Bun.file(
+		new URL("../src/sidepanel/style.css", import.meta.url),
+	).text();
+	const masks = [
+		...css.matchAll(/^\s*(-webkit-)?mask(-[a-z]+)?:\s*([^;]+);/gm),
+	];
+	expect(masks.length).toBeGreaterThan(0);
+	const plain = masks.filter((m) => m[1] === undefined);
+	const prefixed = masks.filter((m) => m[1] !== undefined);
+	expect(plain.map((m) => [m[2], m[3]])).toEqual(
+		prefixed.map((m) => [m[2], m[3]]),
+	);
+	// The prefixed one first: where both are known, the standard one wins.
+	for (const m of plain)
+		expect(
+			css
+				.slice(0, m.index)
+				.trimEnd()
+				.endsWith(`-webkit-mask${m[2] ?? ""}: ${m[3]};`),
+		).toBe(true);
+});

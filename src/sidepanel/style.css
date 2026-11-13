@@ -59,6 +59,8 @@
 	--r-pill: 999px;
 	/* The top bar's height: what sticks under it starts there. */
 	--bar: 44px;
+	/* The warning sign, as a mask: drawn in the colour of what it stands on. */
+	--warning-sign: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5 15 14H1z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M8 6v3.5' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='8' cy='11.75' r='.95'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: dark) {
@@ -780,9 +782,9 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	height: 16px;
 	margin-top: 1px;
 	background: var(--warn);
-	mask:
-		url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5 15 14H1z' fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M8 6v3.5' stroke='%23000' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='8' cy='11.75' r='.95'/%3E%3C/svg%3E")
-		center / contain no-repeat;
+	/* Both: Chrome takes `mask` unprefixed from 120, the manifest allows 116. */
+	-webkit-mask: var(--warning-sign) center / contain no-repeat;
+	mask: var(--warning-sign) center / contain no-repeat;
 }
 
 .sync-banner[data-sync="failed"] {
