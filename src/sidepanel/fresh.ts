@@ -45,10 +45,16 @@ export function newCase(id: string, page: PageInfo, now: string): Case {
  * The case is as "Annotate this page" made it: no marks and no screenshots,
  * no mark ever stored (`lastNumber`: a delete in the panel and the toolbar's
  * Undo both set it), not from a file, no summary stored or typed (`typed`,
- * the summary not saved yet), and the title it was given. A case that has
- * once had a mark, a rename or a summary is the user's, and it stays.
+ * the summary not saved yet), and the title it was given, with no other
+ * typed in Rename and not saved yet (`typedTitle`). A case that has once had
+ * a mark, a rename or a summary is the user's, and it stays.
  */
-export function isUntouched(c: Case, typed?: string): boolean {
+export function isUntouched(
+	c: Case,
+	typed?: string,
+	typedTitle?: string,
+): boolean {
+	const title = (typedTitle ?? "").trim();
 	return (
 		c.annotations.length === 0 &&
 		c.shots.length === 0 &&
@@ -56,6 +62,7 @@ export function isUntouched(c: Case, typed?: string): boolean {
 		c.importedAt === undefined &&
 		(c.verdict ?? "").trim() === "" &&
 		(typed ?? "").trim() === "" &&
+		(title === "" || title === c.title) &&
 		c.title === firstTitle(c.page)
 	);
 }

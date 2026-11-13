@@ -96,6 +96,13 @@ describe("an untouched case goes when it is left (DEC-026)", () => {
 		expect(isUntouched({ ...fresh(), verdict: "  " }, " ")).toBe(true);
 	});
 
+	test("a title typed in Rename and not saved: the user's, as a typed summary (review of PR 57)", () => {
+		expect(isUntouched(fresh(), undefined, "Checkout bugs")).toBe(false);
+		// The field opened and left as it was, or emptied: nothing typed.
+		expect(isUntouched(fresh(), undefined, "  Your cart ")).toBe(true);
+		expect(isUntouched(fresh(), undefined, "   ")).toBe(true);
+	});
+
 	test("imported from a file: someone's case, it stays", () => {
 		expect(isUntouched({ ...fresh(), importedAt: NOW })).toBe(false);
 	});

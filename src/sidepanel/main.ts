@@ -1012,8 +1012,9 @@ async function endDeleted(
 async function forgetUntouched(caseId: string): Promise<boolean> {
 	if (mayHold(await askAllTabs(), caseId)) return false;
 	const typed = state.verdictDrafts.get(caseId);
+	const title = typedTitle(caseId);
 	const gone = await store
-		.deleteCaseIf(caseId, (c) => isUntouched(c, typed))
+		.deleteCaseIf(caseId, (c) => isUntouched(c, typed, title))
 		.catch(() => false);
 	if (!gone) return false;
 	update((s) => {
@@ -1025,6 +1026,10 @@ async function forgetUntouched(caseId: string): Promise<boolean> {
 	return true;
 }
 
+/** A title typed in the case's Rename field and not saved yet. */
+const typedTitle = (caseId: string) =>
+	state.renaming?.caseId === caseId ? state.renaming.text : undefined;
+
 /**
  * The last tab with the open case's toolbar closed: an untouched case is
  * left as "← All cases" leaves it, and goes (DEC-026). Another tab still
@@ -1034,7 +1039,10 @@ async function leaveIfUntouched(caseId: string): Promise<void> {
 	if (!showing(caseId) || toolbarOn.size > 0 || state.leaving !== undefined)
 		return;
 	const c = await store.getCase(caseId);
-	if (c === undefined || !isUntouched(c, state.verdictDrafts.get(caseId)))
+	if (
+		c === undefined ||
+		!isUntouched(c, state.verdictDrafts.get(caseId), typedTitle(caseId))
+	)
 		return;
 	if (showing(caseId) && toolbarOn.size === 0) await leaveCase();
 }
