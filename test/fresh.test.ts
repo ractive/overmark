@@ -110,6 +110,11 @@ describe("an untouched case goes when it is left (DEC-026)", () => {
 		expect(isUntouched(fresh(), undefined, "   ")).toBe(true);
 	});
 
+	test("screenshots without marks: not as it was made, it stays", () => {
+		const shots = withOneMark(fresh()).shots;
+		expect(isUntouched({ ...fresh(), shots })).toBe(false);
+	});
+
 	test("imported from a file: someone's case, it stays", () => {
 		expect(isUntouched({ ...fresh(), importedAt: NOW })).toBe(false);
 	});

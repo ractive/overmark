@@ -22,6 +22,7 @@ import {
 	openCase,
 	panelHome,
 	READ_DB,
+	renameInPanel,
 	resetPanel,
 	saveAs,
 	shadow,
@@ -142,6 +143,12 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			() => toolbarUp(v1.tabId),
 			(up) => !up,
 		);
+		// The panel back on Home: the next case it opens is the next toolbar's.
+		await Bun.sleep(600);
+		await h.control.eval(
+			`document.getElementById("back").hidden || document.getElementById("back").click()`,
+		);
+		await h.control.waitFor(`!document.getElementById("home").hidden`);
 		return v1;
 	}
 
@@ -686,6 +693,59 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		).toBe("Still typing");
 		await b.page.send("Page.close");
 		await a.page.send("Page.close");
+	}, 60_000);
+
+	test("left without a mark, the user's case stays: renamed, or a summary typed and not saved (review of PR 57)", async () => {
+		const { page } = await h.open("v1");
+		const stays = async (id: string) =>
+			(await h.control.eval<Db>(READ_DB)).cases.some((c) => c.id === id);
+
+		// Renamed.
+		let panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const renamed = await openOne(panel);
+		await renameInPanel(panel, renamed.id, "Checkout bugs");
+		await allCases(panel);
+		await home(panel);
+		await Bun.sleep(1000);
+		expect(await stays(renamed.id)).toBe(true);
+
+		// A summary typed and not saved.
+		panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const typed = await openOne(panel);
+		await panel.eval(`(() => {
+			const v = document.getElementById("verdict");
+			v.value = "Make it darker";
+			v.dispatchEvent(new Event("input"));
+		})()`);
+		await panel.waitFor(`!document.getElementById("save-verdict").hidden`);
+		await allCases(panel);
+		await home(panel);
+		await Bun.sleep(1000);
+		expect(await stays(typed.id)).toBe(true);
+		await page.send("Page.close");
+	}, 60_000);
+
+	test("the tab closed while the case has a mark: the case stays open (review of PR 57)", async () => {
+		const { page } = await h.open("v1");
+		const panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		await markElement(page, "h1", "Kept");
+		await page.waitFor(`${status}?.startsWith("Mark 1 added")`, 20_000);
+		const made = await openOne(panel);
+		await page.send("Page.close");
+		await Bun.sleep(1500);
+		expect(
+			await panel.eval<string | undefined>(
+				`document.getElementById("case-view").hidden ? undefined : document.getElementById("verdict")?.dataset.case`,
+			),
+		).toBe(made.id);
+		expect(
+			(await h.control.eval<Db>(READ_DB)).cases.some((c) => c.id === made.id),
+		).toBe(true);
+		await allCases(panel);
+		await home(panel);
 	}, 60_000);
 
 	test("the tab closed with an untouched case's toolbar: the case goes, the panel on Home (DEC-026)", async () => {

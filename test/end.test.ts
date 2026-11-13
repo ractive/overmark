@@ -405,3 +405,34 @@ test("a mark the page moved away from gets its screenshot again by itself once t
 	// The page is back where the user left it.
 	expect(window.scrollY).toBe(400);
 });
+
+test("a failed mark takes the next number of the case the toolbar is shown for (review of PR 57)", async () => {
+	answer = noShots;
+	const { a, overlay } = annotator();
+	a.show({ target });
+	note(overlay, a);
+	const alert = () =>
+		overlay.toolbar.querySelector('[data-role="alert"]')?.textContent ?? "";
+	await settle(a, () => alert().startsWith("Mark 3 was not added"));
+	// "Add marks" for case B, whose next number is 7: the mark waits, as 7.
+	answer = works;
+	a.show({ target: { caseId: "c_b", title: "B", nextAnnotation: 7 } });
+	const retry = () =>
+		overlay.toolbar.querySelector<HTMLButtonElement>('[data-action="retry"]');
+	expect(retry()?.textContent).toBe("Add mark 7");
+	expect(alert()).toContain("it was for “Open case”");
+	expect(
+		overlay.marks
+			.querySelector(".drafts [data-number]")
+			?.getAttribute("data-number"),
+	).toBe("7");
+	// Not into B unasked: Add mark 7 puts it there.
+	expect(asked.some((r) => r.type === "case:save")).toBe(false);
+	retry()?.click();
+	await settle(a, () => asked.some((r) => r.type === "case:save"));
+	const save = asked.find((r) => r.type === "case:save");
+	expect(save?.type === "case:save" && save.request.caseId).toBe("c_b");
+	expect(
+		save?.type === "case:save" && save.request.annotations[0]?.number,
+	).toBe(7);
+});
