@@ -1,8 +1,10 @@
 /** Steps the end-to-end tests share: the toolbar, saving, reading the database. */
 
 import { join } from "node:path";
+import type { Case } from "../../src/lib/case.ts";
 import type { Page } from "./browser.ts";
 import type { Harness } from "./harness.ts";
+import { step } from "./trace.ts";
 
 export const HOST = `document.getElementById("overmark-root")`;
 
@@ -14,7 +16,9 @@ export const READ_DB = `new Promise((resolve, reject) => {
 	const open = indexedDB.open("overmark");
 	open.onerror = () => reject(open.error);
 	open.onsuccess = () => {
-		const tx = open.result.transaction(["cases", "images"]);
+		let tx;
+		// No stores (nobody made the database yet): an error, not a wait.
+		try { tx = open.result.transaction(["cases", "images"]); } catch (e) { return reject(e); }
 		const cases = tx.objectStore("cases").getAll();
 		const images = tx.objectStore("images").getAll();
 		const keys = tx.objectStore("images").getAllKeys();
@@ -24,6 +28,37 @@ export const READ_DB = `new Promise((resolve, reject) => {
 		});
 	};
 })`;
+
+/**
+ * Put cases into the extension's database, from the control page. If it
+ * gets there before the extension made the database, it makes it as the
+ * extension's store does (`IdbStore`): opened without a version it would
+ * make one with no stores, its transaction would throw in the handler, and
+ * the promise would wait for ever.
+ */
+export function putCases(h: Harness, cases: Case[]): Promise<unknown> {
+	return step("put the cases", () =>
+		h.control.eval(`new Promise((resolve, reject) => {
+			const open = indexedDB.open("overmark", 1);
+			open.onupgradeneeded = () => {
+				open.result.createObjectStore("cases", { keyPath: "id" });
+				open.result.createObjectStore("images");
+			};
+			open.onerror = () => reject(open.error);
+			open.onsuccess = () => {
+				try {
+					const tx = open.result.transaction("cases", "readwrite");
+					for (const c of ${JSON.stringify(cases)}) tx.objectStore("cases").put(c);
+					tx.oncomplete = () => { open.result.close(); resolve(); };
+					tx.onerror = () => reject(tx.error);
+				} catch (error) {
+					open.result.close();
+					reject(error);
+				}
+			};
+		})`),
+	);
+}
 
 export interface Db {
 	cases: {

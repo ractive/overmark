@@ -30,12 +30,14 @@ import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
 	KV,
+	putCases,
 	READ_DB,
 	restartWorker,
 	settingsOf,
 	until,
 	worker,
 } from "./steps.ts";
+import { step } from "./trace.ts";
 
 interface CallResult {
 	isError?: boolean;
@@ -43,17 +45,6 @@ interface CallResult {
 }
 
 /** Write these cases into the store. */
-const putCases = (h: Harness, cases: Case[]) =>
-	h.control.eval(`new Promise((resolve, reject) => {
-		const open = indexedDB.open("overmark");
-		open.onerror = () => reject(open.error);
-		open.onsuccess = () => {
-			const tx = open.result.transaction("cases", "readwrite");
-			for (const c of ${JSON.stringify(cases)}) tx.objectStore("cases").put(c);
-			tx.oncomplete = () => { open.result.close(); resolve(); };
-			tx.onerror = () => reject(tx.error);
-		};
-	})`);
 
 const verdictOf = async (h: Harness, caseId: string) =>
 	(await h.control.eval<{ cases: Case[] }>(READ_DB)).cases.find(
@@ -93,7 +84,7 @@ describe.skipIf(browserBinary === undefined)(
 			h = await startHarness(browserBinary as string);
 			await putCases(h, [sampleCase("c_1")]);
 			tab = await h.open("v1");
-			await tab.page.activate();
+			await step("bring the page to the front", () => tab.page.activate());
 			panel = await openSidePanel(h);
 			address = await connectAi(panel, relay.url);
 			client = await mcpClient(relay.store, address);
