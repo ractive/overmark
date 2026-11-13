@@ -202,8 +202,9 @@ function choices(sync: Sync): HTMLElement[] {
 
 /** The section's parts for the state it is in. */
 function sectionParts(sync: Sync): HTMLElement[] {
+	// While the banner is up it says it, above every view.
 	const problem =
-		sync.problem === undefined
+		sync.problem === undefined || bannerText(sync) !== undefined
 			? []
 			: [h("p", { class: "hint", role: "alert" }, sync.problem)];
 	if (sync.asking) return [h("p", {}, SYNC_ASKING_TEXT), ...problem];
@@ -313,6 +314,7 @@ export function renderSyncBanner(
 		sync.status?.state,
 		sync.status?.reason,
 		sync.refused,
+		sync.problem,
 	]);
 	if (banner.dataset["key"] === key) return;
 	banner.dataset["key"] = key;
@@ -336,6 +338,11 @@ export function renderSyncBanner(
 		...(sync.refused && !failed
 			? [h("p", { class: "sync-banner-refused" }, refusedText(sync))]
 			: []),
+		...(sync.problem === undefined
+			? []
+			: [
+					h("p", { class: "sync-banner-problem", role: "alert" }, sync.problem),
+				]),
 		h("div", { class: "row" }, ...helpButtons(sync)),
 	);
 }

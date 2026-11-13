@@ -1571,6 +1571,22 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		);
 	});
 
+	test("what a banner button could not do is said in the banner, in a case too", () => {
+		const box = draw(
+			(s) => {
+				pausedFolder(s);
+				s.problem = "Chrome did not allow Overmark to save to your downloads.";
+			},
+			noActions,
+			sampleCase("c_1"),
+		);
+		expect(banner().querySelector("[role=alert]")?.textContent).toBe(
+			"Chrome did not allow Overmark to save to your downloads.",
+		);
+		// Once is enough: not again in the section.
+		expect(box.querySelector("[role=alert]")).toBeNull();
+	});
+
 	test("paused, the downloads permission gone: Allow downloads", () => {
 		let asked = 0;
 		const box = draw(
