@@ -147,6 +147,14 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await showToolbar(h, page, tabId);
 		await markElement(page, "[data-truth=submit]", "Too pale");
 		await saveAs(page, "Synced case");
+		// "Save case…" opens the case in the panel (DEC-023): back to the list,
+		// where the sync's choice is.
+		await panel.waitFor(
+			`document.querySelector("#case-view h2")?.textContent === "Synced case"`,
+			10_000,
+		);
+		await panel.eval(`document.getElementById("back").click()`);
+		await panel.waitFor(`!document.getElementById("home").hidden`);
 		await page.send("Page.close");
 		const saved = (await h.control.eval<Db>(READ_DB)).cases.find(
 			(c) => c.title === "Synced case",
