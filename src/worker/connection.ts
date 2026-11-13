@@ -192,9 +192,14 @@ export function badgeOf(
 
 /**
  * What the card says when Disconnect for `app` did not work: `revoke()`
- * rejected with `error`.
+ * rejected with `error`; `sent`: it was sent while connected, so the relay
+ * may have done it before the session ended.
  */
-export function revokeProblem(error: unknown, app: string): string {
+export function revokeProblem(
+	error: unknown,
+	app: string,
+	sent = false,
+): string {
 	const not = `${app} was not disconnected`;
 	const code = (error as { code?: unknown } | undefined)?.code;
 	if (code === "store_unavailable")
@@ -203,7 +208,9 @@ export function revokeProblem(error: unknown, app: string): string {
 		return `The relay no longer knows ${app}, so it cannot reach Overmark any more. It leaves this list when AI access next connects.`;
 	const name = (error as { name?: unknown } | undefined)?.name;
 	if (name === "InvalidStateError")
-		return `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
+		return sent
+			? `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`
+			: `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
 	if (name === "TimeoutError")
 		return `${not}: the relay did not answer. Try again.`;
 	return `${not}: ${message(error)}`;
@@ -232,7 +239,15 @@ export class Connection {
 	#problem: string | undefined;
 	#lastCall: CallView | undefined;
 	/** Why Disconnect did not work, by grant: until it goes, or connected again. */
-	readonly #revokeProblems = new Map<string, { error: unknown }>();
+	readonly #revokeProblems = new Map<
+		string,
+		{ error: unknown; sent: boolean }
+	>();
+	/**
+	 * Disconnects, one at a time: the relay's error does not say which
+	 * revoke it answers, so the library rejects every revoke waiting for it.
+	 */
+	#revokes: Promise<void> = Promise.resolve();
 	/** Panel commands, one after the other. */
 	#commands: Promise<void> = Promise.resolve();
 	#sending = false;
@@ -780,8 +795,10 @@ export class Connection {
 		try {
 			// "connected" turns AI access on.
 			await this.#mcp.newAddress();
-			if (replaced) await this.#mcp.connect({ resume: true });
+			// The address is new: no longer the one taken over, also should
+			// the connect after it fail.
 			await this.#setReplaced(undefined);
+			if (replaced) await this.#mcp.connect({ resume: true });
 		} catch (error) {
 			this.#problem = message(error);
 		}
@@ -797,12 +814,16 @@ export class Connection {
 		const mcp = this.#mcp;
 		this.#revokeProblems.delete(grantId);
 		this.#changed();
-		mcp.revoke(grantId).catch((error: unknown) => {
+		this.#revokes = this.#revokes.then(() => {
 			if (mcp !== this.#mcp) return;
-			this.#revokeProblems.set(grantId, { error });
-			if ((error as { code?: unknown }).code === "unknown_id")
-				this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
-			this.#changed();
+			const sent = mcp.state === "connected";
+			return mcp.revoke(grantId).catch((error: unknown) => {
+				if (mcp !== this.#mcp) return;
+				this.#revokeProblems.set(grantId, { error, sent });
+				if ((error as { code?: unknown }).code === "unknown_id")
+					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
+				this.#changed();
+			});
 		});
 	}
 
@@ -868,7 +889,11 @@ export class Connection {
 				const problem =
 					failed === undefined
 						? undefined
-						: revokeProblem(failed.error, g.client.name || g.client.host);
+						: revokeProblem(
+								failed.error,
+								g.client.name || g.client.host,
+								failed.sent,
+							);
 				return {
 					grantId: g.grantId,
 					name: g.client.name,
