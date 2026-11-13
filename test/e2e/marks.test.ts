@@ -441,6 +441,9 @@ describe.skipIf(browserBinary === undefined)(
 				await shotsTaken(tabId);
 				await saveAs(page, title);
 				await close(page);
+				// Back to the list: the next toolbar's case opens there.
+				await h.control.eval(`document.getElementById("back").click()`);
+				await h.control.waitFor(`!document.getElementById("home").hidden`);
 			};
 			await shotOf("Clear", false);
 			await shotOf("Blurred", true);

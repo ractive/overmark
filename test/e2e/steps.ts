@@ -225,80 +225,122 @@ export async function markElement(
 
 /**
  * What "Save case…" with a title was before DEC-026: every mark drawn is in
- * the case the toolbar adds to (a comment still open is done first), and the
- * case is named `title`: with the Rename of the side panel that shows it,
- * as the user does, else in the store. Waits until it is stored so.
+ * the case the toolbar adds to (a comment still open is done first; nothing
+ * is clicked for them, and a mark waiting for "Add mark N" fails the step:
+ * a test about that button clicks it itself), then the case is named `title`
+ * with the Rename of the side panel that shows it (`panel`, else the control
+ * page). A test with no panel showing the case names it with `nameCase`.
  */
-export async function saveAs(page: Page, title: string): Promise<void> {
+export async function saveAs(
+	page: Page,
+	title: string,
+	panel?: Page,
+): Promise<void> {
 	const owner = opened.get(page);
 	if (owner === undefined)
 		throw new Error("saveAs: a page the harness did not open");
+	await renameInPanel(panel ?? owner.h.control, await marksIn(page), title);
+}
+
+/**
+ * Until every mark drawn on `page` is in the case its toolbar adds to (a
+ * comment still open is done first); answers that case's id. Nothing is
+ * clicked: a mark whose screenshot the page's moving gave up is taken again
+ * by itself (DEC-026), and one that waits for "Add mark N" fails the step.
+ */
+export async function marksIn(page: Page): Promise<string> {
+	const owner = opened.get(page);
+	if (owner === undefined)
+		throw new Error("marksIn: a page the harness did not open");
 	const { h, tabId } = owner;
 	await page.eval(
 		`(() => { const p = ${shadow(".popover")}; if (p && !p.hidden) ${shadow('[data-action="comment-done"]')}?.click(); })()`,
 	);
-	// Nothing is clicked for them: a mark whose screenshot the page's moving
-	// gave up is taken again by itself once the page stands still (DEC-026).
+	const retry = shadow('[data-action="retry"]');
 	const end = Date.now() + 30_000;
 	let state = await overlayOf(h, tabId);
 	while (
 		!(state?.target !== undefined && state.drafts === 0 && !state.saving)
 	) {
-		if (Date.now() > end) {
-			const said = await page.eval(`${shadow(".toolbar")}?.textContent`);
+		const said = async () =>
+			await page.eval(`${shadow(".toolbar")}?.textContent`);
+		if (
+			state?.saving === false &&
+			(await page.eval<boolean>(`${retry} !== null`))
+		)
 			throw new Error(
-				`the marks are not in the case; the toolbar says: ${said}`,
+				`a mark waits for Add mark N; the toolbar says: ${await said()}`,
 			);
-		}
+		if (Date.now() > end)
+			throw new Error(
+				`the marks are not in the case; the toolbar says: ${await said()}`,
+			);
 		await Bun.sleep(250);
 		state = await overlayOf(h, tabId);
 	}
-	const caseId = state.target.caseId;
-	await renameCase(h, caseId, title, tabId);
+	return state.target.caseId;
 }
 
 /**
- * Rename the case: in the side panel that shows it (Rename, the title,
- * Enter), else in the store, telling the toolbar on `tabId` and the panels.
+ * Rename the case in `panel`, a side panel that shows it (it opens the case
+ * a toolbar adds to a moment after the page shows it, DEC-023): Rename, the
+ * title, Enter, as the user does. Waits until it is stored so.
  */
-export async function renameCase(
-	h: Harness,
+export async function renameInPanel(
+	panel: Page,
 	caseId: string,
 	title: string,
-	tabId?: number,
 ): Promise<void> {
-	const panel = h.control;
-	const shown = `(!document.getElementById("case-view")?.hidden && document.getElementById("verdict")?.dataset.case === ${JSON.stringify(caseId)})`;
-	if (await panel.eval<boolean>(`!!${shown}`).catch(() => false)) {
-		await panel.eval(`document.getElementById("rename-case").click()`);
-		await panel.waitFor(`!document.getElementById("rename").hidden`);
-		await panel.eval(`(() => {
-			const field = document.getElementById("rename-field");
-			field.value = ${JSON.stringify(title)};
-			field.dispatchEvent(new Event("input"));
-			field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
-		})()`);
-		await panel.waitFor(
-			`document.querySelector("#case-view .case-title")?.textContent === ${JSON.stringify(title)}`,
-			10_000,
+	const shown = `(!document.getElementById("case-view")?.hidden && document.getElementById("verdict")?.dataset.case === ${JSON.stringify(caseId)} && document.getElementById("rename-case") !== null)`;
+	await panel.waitFor(shown, 10_000).catch(async () => {
+		const shows = await panel
+			.eval<string>(
+				`document.getElementById("case-view")?.hidden === false ? "case " + document.getElementById("verdict")?.dataset.case : "home"`,
+			)
+			.catch(() => "no panel");
+		throw new Error(
+			`renameInPanel: no side panel shows the case ${caseId} (it shows: ${shows}); name it with nameCase where the test has none`,
 		);
-	} else {
-		const { cases } = await panel.eval<{ cases: Case[] }>(READ_DB);
-		const c = cases.find((x) => x.id === caseId);
-		if (c === undefined) throw new Error(`renameCase: no case ${caseId}`);
-		await panel.eval(
-			PUT_CASE({ ...c, title, updatedAt: new Date().toISOString() }),
-		);
-		if (tabId !== undefined)
-			await panel.eval(
-				`chrome.tabs.sendMessage(${tabId}, ${JSON.stringify({ type: "overlay:title", caseId, title })}).catch(() => undefined)`,
-			);
-	}
+	});
+	await panel.eval(`document.getElementById("rename-case").click()`);
+	await panel.waitFor(`!document.getElementById("rename").hidden`);
+	await panel.eval(`(() => {
+		const field = document.getElementById("rename-field");
+		field.value = ${JSON.stringify(title)};
+		field.dispatchEvent(new Event("input"));
+		field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+	})()`);
+	await panel.waitFor(
+		`document.querySelector("#case-view .case-title")?.textContent === ${JSON.stringify(title)}`,
+		10_000,
+	);
 	await until(
 		() => panel.eval<Db>(READ_DB),
 		(db) => db.cases.some((x) => x.id === caseId && x.title === title),
 		10_000,
 	);
+}
+
+/**
+ * Setup, not the product's path: name a case in the store, where a test has
+ * no side panel showing it, and tell the toolbar on `tabId` and the panels.
+ */
+export async function nameCase(
+	h: Harness,
+	caseId: string,
+	title: string,
+	tabId?: number,
+): Promise<void> {
+	const { cases } = await h.control.eval<{ cases: Case[] }>(READ_DB);
+	const c = cases.find((x) => x.id === caseId);
+	if (c === undefined) throw new Error(`nameCase: no case ${caseId}`);
+	await h.control.eval(
+		PUT_CASE({ ...c, title, updatedAt: new Date().toISOString() }),
+	);
+	if (tabId !== undefined)
+		await h.control.eval(
+			`chrome.tabs.sendMessage(${tabId}, ${JSON.stringify({ type: "overlay:title", caseId, title })}).catch(() => undefined)`,
+		);
 }
 
 /** Run `body` (an expression using `image`, the stored `{ blob, width, height }`) on a case's image. */

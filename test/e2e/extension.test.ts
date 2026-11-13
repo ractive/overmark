@@ -25,6 +25,8 @@ import {
 	imageBytes,
 	imagesOf,
 	markElement,
+	marksIn,
+	nameCase,
 	READ_DB,
 	resetPanel,
 	saveAs,
@@ -903,6 +905,9 @@ describe.skipIf(browserBinary === undefined)(
 		});
 
 		test("a case from v1 finds its elements on v2 through the side panel", async () => {
+			// The control page, a side panel, on Home: it opens the case the
+			// toolbar adds to, where the case is named.
+			await resetPanel(h);
 			const v1 = await h.open("v1");
 			await showToolbar(h, v1.page, v1.tabId);
 			await markElement(v1.page, "[data-truth=submit]", "Too pale");
@@ -982,7 +987,13 @@ describe.skipIf(browserBinary === undefined)(
 					`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
 				),
 			).toBe(3);
-			await saveAs(v2.page, "With outlines loaded");
+			// The panel shows the loaded case, not this toolbar's: named as setup.
+			await nameCase(
+				h,
+				await marksIn(v2.page),
+				"With outlines loaded",
+				v2.tabId,
+			);
 			expect(
 				await countColour(
 					h.control,
