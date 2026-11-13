@@ -93,7 +93,7 @@ describe("KeepOn", () => {
 		expect(connection.calls).toEqual([]);
 	});
 
-	test.each(["user", "replaced", "new_address", "network"] as const)(
+	test.each(["user", "replaced", "new_address"] as const)(
 		"leaves a session that ended as %s alone",
 		(reason) => {
 			connection.state = "connected";
@@ -105,10 +105,20 @@ describe("KeepOn", () => {
 	);
 
 	test.each([
-		["rate_limited", "The relay ended the connection: too many messages."],
-		["too_large", "The relay ended the connection: a message was too large."],
+		[
+			"rate_limited",
+			"The relay ended the connection: Overmark sent it too many messages at once.",
+		],
+		[
+			"too_large",
+			"The relay ended the connection: a message was too large for it.",
+		],
 		["policy", "The relay ended the connection: it refused a message."],
 		["closed", "The relay closed the connection."],
+		// Only without the library's reconnecting, which Overmark leaves on.
+		["shutdown", "The relay shut down."],
+		["heartbeat", "The relay stopped answering."],
+		["network", "The network connection to the relay broke."],
 	] as const)(
 		"a session the relay ended as %s: says why and tries again later",
 		async (reason, why) => {
@@ -128,7 +138,7 @@ describe("KeepOn", () => {
 		connection.state = "connected";
 		connection.end("rate_limited");
 		expect(keep.problem).toBe(
-			"The relay ended the connection: too many messages.",
+			"The relay ended the connection: Overmark sent it too many messages at once.",
 		);
 		expect(keep.retrying).toBe(false);
 		await Bun.sleep(10);

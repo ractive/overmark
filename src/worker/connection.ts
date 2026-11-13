@@ -26,7 +26,7 @@ import type { CaseStore } from "../lib/store.ts";
 import { AlwaysAllowed } from "./always.ts";
 import { badge } from "./badge.ts";
 import { decide } from "./decide.ts";
-import { KeepOn } from "./keep-on.ts";
+import { endedProblem, KeepOn } from "./keep-on.ts";
 import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
 	type AiState,
@@ -167,8 +167,9 @@ export function stopProblem(
 /**
  * AI access on for this browser session after a change of the library's
  * state: on once connected; off after the user's `disconnect()`, and after
- * the relay ended an idle or old session unless "Keep AI access on" connects
- * again (`KeepOn`). `undefined`: unchanged, as while reconnecting.
+ * the relay ended a session (idle, old, or for a reason `KeepOn` names)
+ * unless "Keep AI access on" connects again. `undefined`: unchanged, as
+ * while reconnecting.
  */
 export function sessionOnAfter(
 	{ state, reason }: StateChangeDetail,
@@ -177,7 +178,11 @@ export function sessionOnAfter(
 	if (state === "connected") return true;
 	if (state !== "disconnected") return undefined;
 	if (reason === "user") return false;
-	if ((reason === "idle" || reason === "expired") && !keepOn) return false;
+	const ended =
+		reason === "idle" ||
+		reason === "expired" ||
+		endedProblem(reason) !== undefined;
+	if (ended && !keepOn) return false;
 	return undefined;
 }
 

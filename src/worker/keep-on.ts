@@ -13,16 +13,36 @@ import { Latest } from "../lib/latest.ts";
 const KEEP_ON_DELAYS_MS = [5000, 10_000, 20_000, 40_000, 60_000];
 
 /**
- * Why the relay ended a session for good, for the reasons the library does
- * not reconnect after and nobody chose (the user, a new address, a takeover)
- * and that are not the end of an idle or old session.
+ * Why a session ended, in the user's words, for every reason nobody here
+ * chose (`user`, `new_address`, a takeover) that is not the end of an idle
+ * or old session either. The last three come only without the library's
+ * reconnecting, which Overmark leaves on.
  */
-const ENDED: Partial<Record<DisconnectReason, string>> = {
-	rate_limited: "The relay ended the connection: too many messages.",
-	too_large: "The relay ended the connection: a message was too large.",
+const ENDED: Record<
+	Exclude<
+		DisconnectReason,
+		"user" | "new_address" | "replaced" | "idle" | "expired"
+	>,
+	string
+> = {
+	rate_limited:
+		"The relay ended the connection: Overmark sent it too many messages at once.",
+	too_large: "The relay ended the connection: a message was too large for it.",
 	policy: "The relay ended the connection: it refused a message.",
 	closed: "The relay closed the connection.",
+	shutdown: "The relay shut down.",
+	heartbeat: "The relay stopped answering.",
+	network: "The network connection to the relay broke.",
 };
+
+/** Why the relay ended a session for `reason`, or `undefined` for one somebody chose or an idle or old session. */
+export function endedProblem(
+	reason: DisconnectReason | undefined,
+): string | undefined {
+	return reason !== undefined && reason in ENDED
+		? ENDED[reason as keyof typeof ENDED]
+		: undefined;
+}
 
 /** The part of `TabMcp` that `KeepOn` uses. */
 export type KeptConnection = Pick<
@@ -85,9 +105,10 @@ export class KeepOn {
 				)
 					this.connect();
 				// Ended by the relay for another reason: say why, and try again
-				// later, as after a failed connect.
-				else if (state === "disconnected" && reason !== undefined) {
-					const ended = ENDED[reason];
+				// after the waits of a failed connect, never at once (a relay
+				// that ends every session must get no tight loop).
+				else if (state === "disconnected") {
+					const ended = endedProblem(reason);
 					if (ended !== undefined) this.failed(new Error(ended));
 				}
 			},

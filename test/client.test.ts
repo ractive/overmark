@@ -79,9 +79,20 @@ describe("the library's state, as the worker reads it", () => {
 			// Keep AI access on connects again: it stays on.
 			expect(on({ state: "disconnected", reason }, true)).toBeUndefined();
 		}
-		// Taken over (the `replaced` event turns it off), a new address, a
-		// refusal: unchanged, as before.
-		for (const reason of ["replaced", "new_address", "policy"] as const)
+		// Ended by the relay for another reason: off, unless Keep AI access on
+		// tries again (KeepOn names the reason either way).
+		for (const reason of [
+			"rate_limited",
+			"too_large",
+			"policy",
+			"closed",
+		] as const) {
+			expect(on({ state: "disconnected", reason })).toBe(false);
+			expect(on({ state: "disconnected", reason }, true)).toBeUndefined();
+		}
+		// Taken over (the `replaced` event turns it off), a new address:
+		// unchanged, as before.
+		for (const reason of ["replaced", "new_address"] as const)
 			expect(on({ state: "disconnected", reason })).toBeUndefined();
 		// A failed connect, reconnecting, connecting: unchanged.
 		expect(on({ state: "disconnected" })).toBeUndefined();
