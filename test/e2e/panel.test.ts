@@ -1157,9 +1157,10 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		slowTest(
 			"the panel's draw overtaken by an AI app's load_case of the case: both end with its marks",
 			async () => {
-				await fresh();
-				const { page, tabId, caseId } = await annotated("Loaded twice");
-				await openPanel();
+				// Many marks: the second load reaches the page while the first runs.
+				const caseId = "c_twice";
+				await fresh([manyMarks(caseId)]);
+				const { page, tabId } = await h.open("v1");
 				// Right behind the panel's draw, as an AI app's load_case of the
 				// same case: the page finds the marks once more.
 				await wrapSend(`async (tabId, message, send) => {
@@ -1172,13 +1173,13 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				}`);
 				await page.activate();
 				await openCase(caseId);
-				await h.control.waitFor(`${hint}.includes("1 of 1 marks found")`);
+				await h.control.waitFor(`${hint}.includes("0 of 60 marks found")`);
 				expect(await h.control.eval<string>(hint)).not.toContain(REPLACED);
 				expect(
 					await h.control.eval<number>(
 						`globalThis.other.then((r) => r.matches.length)`,
 					),
-				).toBe(1);
+				).toBe(60);
 				expect(await pageCase(tabId)).toBe(caseId);
 				expect(
 					await h.control.eval<string>(`${id("load-case")}.textContent`),
@@ -1192,11 +1193,10 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		slowTest(
 			"a clear close behind the panel's draw: the panel shows what the page shows, and Show marks draws",
 			async () => {
-				await fresh();
-				const { page, tabId, caseId } = await annotated(
-					"Cleared while drawing",
-				);
-				await openPanel();
+				// Many marks: the clear reaches the page while the load runs, mostly.
+				const caseId = "c_cleared";
+				await fresh([manyMarks(caseId)]);
+				const { page, tabId } = await h.open("v1");
 				// Right behind the panel's draw, a clear of whatever the page shows,
 				// as the Hide on the page's own bar, an AI app's tool or another
 				// window's panel would. Which takes effect first is the page's
@@ -1222,9 +1222,12 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				expect(await pageCase(tabId)).toBeNull();
 				expect(await h.control.eval<string>(hint)).not.toContain(REPLACED);
 				expect(await h.control.eval<string>(hint)).not.toContain("marks found");
+				expect(
+					await h.control.eval<string>(`${id("tab-line")}.textContent`),
+				).toBe("Marks are hidden on this tab.");
 				// Show marks is the newest load: it draws them.
 				await h.control.eval(`${button}.click()`);
-				await h.control.waitFor(`${hint}.includes("1 of 1 marks found")`);
+				await h.control.waitFor(`${hint}.includes("0 of 60 marks found")`);
 				await until(
 					async () => (await pageCase(tabId)) === caseId,
 					"the marks on the page",

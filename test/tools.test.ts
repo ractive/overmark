@@ -115,6 +115,8 @@ class FakeTab implements TabBridge {
 	/** The annotation ids of the loaded copy. */
 	loadedIds = new Set<string>();
 	loadError: string | undefined;
+	/** The page's answer when a clear or another case's load stopped it. */
+	loadReplaced = false;
 	captureFails = false;
 	/** Runs during a capture, e.g. the user saving a mark meanwhile. */
 	duringCapture: (() => Promise<void>) | undefined;
@@ -157,6 +159,7 @@ class FakeTab implements TabBridge {
 		switch (request.type) {
 			case "case:load":
 				if (this.loadError !== undefined) return { error: this.loadError } as T;
+				if (this.loadReplaced) return { replaced: true } as T;
 				this.loaded = request.case.id;
 				this.loadedIds = new Set(request.case.annotations.map((a) => a.id));
 				return {
@@ -465,12 +468,24 @@ describe("tools", () => {
 
 	test("load_case passes on the page's error", async () => {
 		await seed();
-		tab.loadError = "Loading was replaced by another case.";
+		tab.loadError = "The user is saving marks on this page right now.";
 		await expect(call("load_case", { caseId: "c_1" })).rejects.toThrow(
-			"Loading was replaced by another case.",
+			"The user is saving marks on this page right now.",
 		);
 		await expect(call("highlight", { caseId: "c_1", mark: 1 })).rejects.toThrow(
-			"Loading was replaced by another case.",
+			"The user is saving marks on this page right now.",
+		);
+	});
+
+	test("load_case stopped by a clear or another case's load says so, and to call it again", async () => {
+		await seed();
+		tab.loadReplaced = true;
+		await expect(call("load_case", { caseId: "c_1" })).rejects.toThrow(
+			"taken off the page (Hide) or another case was loaded onto it; call load_case again",
+		);
+		tab.loadReplaced = false;
+		expect(json(await call("load_case", { caseId: "c_1" })).marks).toHaveLength(
+			2,
 		);
 	});
 
