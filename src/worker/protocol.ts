@@ -75,6 +75,8 @@ export interface GrantView {
 	allowAll: boolean;
 	/** The tools that run without asking (Always allow), with their titles. */
 	always: { tool: string; title: string }[];
+	/** Why its last Disconnect did not work, until it goes or the next try. */
+	problem?: string;
 }
 
 /** A question waiting for the user (a tool that changes something). */

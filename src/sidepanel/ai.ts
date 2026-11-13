@@ -588,6 +588,8 @@ export async function startAi(
 		const problem = [
 			a.relayNote,
 			a.state === "disconnected" ? a.problem : undefined,
+			// A Disconnect that did not work, named by its app.
+			...a.grants.map((g) => g.problem),
 		]
 			.filter(Boolean)
 			.join(" ");

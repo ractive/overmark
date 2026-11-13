@@ -190,6 +190,25 @@ export function badgeOf(
 	return "off";
 }
 
+/**
+ * What the card says when Disconnect for `app` did not work: `revoke()`
+ * rejected with `error`.
+ */
+export function revokeProblem(error: unknown, app: string): string {
+	const not = `${app} was not disconnected`;
+	const code = (error as { code?: unknown } | undefined)?.code;
+	if (code === "store_unavailable")
+		return `${not}: the relay could not save this. Try again.`;
+	if (code === "unknown_id")
+		return `The relay no longer knows ${app}, so it cannot reach Overmark any more. It leaves this list when AI access next connects.`;
+	const name = (error as { name?: unknown } | undefined)?.name;
+	if (name === "InvalidStateError")
+		return `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
+	if (name === "TimeoutError")
+		return `${not}: the relay did not answer. Try again.`;
+	return `${not}: ${message(error)}`;
+}
+
 export class Connection {
 	readonly #deps: ConnectionDeps;
 	readonly #tab: TabBridge;
@@ -212,6 +231,8 @@ export class Connection {
 	/** Why the last command failed, until the next connection. */
 	#problem: string | undefined;
 	#lastCall: CallView | undefined;
+	/** Why Disconnect did not work, by grant: until it goes, or connected again. */
+	readonly #revokeProblems = new Map<string, { error: unknown }>();
 	/** Panel commands, one after the other. */
 	#commands: Promise<void> = Promise.resolve();
 	#sending = false;
@@ -390,7 +411,12 @@ export class Connection {
 		// a start or a lost connection (no list yet) forgets nothing.
 		mcp.addEventListener(
 			"grantschange",
-			({ detail: { grants } }) => this.#keepGrants(grants),
+			({ detail: { grants } }) => {
+				this.#keepGrants(grants);
+				for (const id of this.#revokeProblems.keys())
+					if (!grants.some((g) => g.grantId === id))
+						this.#revokeProblems.delete(id);
+			},
 			{ signal },
 		);
 		mcp.addEventListener(
@@ -414,6 +440,8 @@ export class Connection {
 			({ detail }) => {
 				if (detail.state === "connected") {
 					this.#problem = undefined;
+					// "Not connected" no longer holds.
+					this.#revokeProblems.clear();
 					void this.#setReplaced(undefined);
 				}
 				const on = sessionOnAfter(detail, this.#settings.keepOn);
@@ -649,7 +677,9 @@ export class Connection {
 				this.#changed();
 				return;
 			case "revoke":
-				this.#mcp.revoke(command.grantId).catch(() => {});
+				// Not awaited: the commands after it (a Stop) must not wait for
+				// the relay's answer, up to 15 s.
+				this.#revoke(command.grantId);
 				return;
 			case "allow-all":
 				// Only for an app the card shows.
@@ -758,6 +788,24 @@ export class Connection {
 		this.#changed();
 	}
 
+	/**
+	 * Disconnect one AI app (DEC-017). Its Always allow goes with the grant,
+	 * once the relay's list no longer has it (`#keepGrants`, DEC-018), or
+	 * when the relay says it does not know the grant at all.
+	 */
+	#revoke(grantId: string): void {
+		const mcp = this.#mcp;
+		this.#revokeProblems.delete(grantId);
+		this.#changed();
+		mcp.revoke(grantId).catch((error: unknown) => {
+			if (mcp !== this.#mcp) return;
+			this.#revokeProblems.set(grantId, { error });
+			if ((error as { code?: unknown }).code === "unknown_id")
+				this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
+			this.#changed();
+		});
+	}
+
 	/** Pairing stops once no panel's pairing view is open. */
 	#pairingOff(): void {
 		if (![...this.#panels].some((p) => p.pairing)) this.#mcp.stopPairing();
@@ -816,6 +864,11 @@ export class Connection {
 			...(address !== undefined ? { address } : {}),
 			grants: mcp.grants.map((g) => {
 				const always = this.#always.entry(g.grantId);
+				const failed = this.#revokeProblems.get(g.grantId);
+				const problem =
+					failed === undefined
+						? undefined
+						: revokeProblem(failed.error, g.client.name || g.client.host);
 				return {
 					grantId: g.grantId,
 					name: g.client.name,
@@ -825,6 +878,7 @@ export class Connection {
 						tool,
 						title: this.#titles.get(tool) ?? tool,
 					})),
+					...(problem !== undefined ? { problem } : {}),
 				};
 			}),
 			pairing: [...this.#panels].some((p) => p.pairing),
