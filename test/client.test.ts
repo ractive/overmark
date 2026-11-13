@@ -2,11 +2,16 @@
  * What the worker reads from the tab-mcp client library, checked against the
  * library itself and a relay in this process: the events and states the
  * connection (`connection.ts`) and Keep AI access on (`keep-on.ts`) follow,
- * and what `revoke()` answers. The fakes in `keep-on.test.ts` send the same
+ * what `revoke()` answers, who sees the tools, and what `newAddress()`
+ * does after a takeover. The fakes in `keep-on.test.ts` send the same
  * shapes; this is where a change of the library shows.
  */
 
 import { afterAll, describe, expect, test } from "bun:test";
+import {
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import {
 	MemoryTokenStore,
 	type RevokeOptions,
@@ -18,6 +23,7 @@ import {
 	type StateChangeDetail,
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
+import { createTunnelFetch } from "@ractive-ch/tab-mcp-client/tunnel";
 import {
 	badgeOf,
 	revokeProblem,
@@ -35,11 +41,17 @@ class FlakyStore extends MemoryTokenStore {
 }
 
 /** A page of Overmark's kind on `relay`, and the `statechange` details it heard. */
-function page(relay: string) {
+function page(relay: string, storage: Map<string, string> | null = null) {
 	const mcp = new TabMcp({
 		relay,
 		server: { name: "overmark", version: "0.0.0" },
-		storage: null,
+		storage:
+			storage === null
+				? null
+				: {
+						getItem: (key) => storage.get(key) ?? null,
+						setItem: (key, value) => void storage.set(key, value),
+					},
 	});
 	const heard: StateChangeDetail[] = [];
 	mcp.addEventListener("statechange", (e) => heard.push(e.detail));
@@ -116,6 +128,16 @@ describe("the library's state, as the worker reads it", () => {
 				"Claude",
 			),
 		).toBe("Claude was not disconnected: the relay did not answer. Try again.");
+		// Sent while connected, then the session ended: the relay may have done it.
+		expect(
+			revokeProblem(
+				new DOMException("TabMcp: not connected", "InvalidStateError"),
+				"Claude",
+				true,
+			),
+		).toBe(
+			"Overmark could not confirm that Claude was disconnected: the connection ended first. It shows when AI access is next on.",
+		);
 		expect(revokeProblem(new Error("odd"), "Claude")).toBe(
 			"Claude was not disconnected: odd",
 		);
@@ -232,32 +254,122 @@ describe("tab-mcp client 0.16 with a relay", () => {
 		}
 	});
 
-	test("registerTool takes callers: relay only; the old webmcp option is refused", async () => {
+	test("callers: relay only: the tools are listed through the relay and not over a served port; the old webmcp option is refused", async () => {
 		const { mcp } = page(relay.url);
 		const tool = {
 			name: "t",
 			description: "A tool",
 			execute: () => "ok",
 		};
-		await expect(
-			mcp.registerTool(tool, { callers: ["relay"] }),
-		).resolves.toBeUndefined();
+		await mcp.registerTool(tool, { callers: ["relay"] });
 		await expect(
 			mcp.registerTool({ ...tool, name: "u" }, { webmcp: false } as unknown as {
 				callers: [];
 			}),
 		).rejects.toBeInstanceOf(TypeError);
+		type Fetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
+		const listed = async (fetch?: Fetch, token?: string) => {
+			const client = new Client(
+				{ name: "test", version: "1.0.0" },
+				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+			);
+			const address =
+				fetch === undefined
+					? (mcp.session?.address as string)
+					: "https://tab.invalid/mcp";
+			await client.connect(
+				new StreamableHTTPClientTransport(new URL(address), {
+					...(fetch !== undefined ? { fetch } : {}),
+					...(token !== undefined
+						? { requestInit: { headers: { Authorization: `Bearer ${token}` } } }
+						: {}),
+				}),
+			);
+			try {
+				const names = (await client.listTools()).tools.map((t) => t.name);
+				const call = await client.callTool({ name: "t", arguments: {} }).then(
+					(r) => r as { isError?: boolean; content: { text?: string }[] },
+					(error: unknown) => ({
+						isError: true,
+						content: [{ text: String(error) }],
+					}),
+				);
+				return { names, call };
+			} finally {
+				await client.close();
+			}
+		};
+		const { address } = await mcp.connect();
+		const channel = new MessageChannel();
+		const served = await mcp.serve(channel.port1, {
+			client: { id: "local-test" },
+		});
+		const tunnel = createTunnelFetch({
+			send: (message) => channel.port2.postMessage(message),
+		});
+		channel.port2.onmessage = (event) => tunnel.receive(event.data);
+		try {
+			const relayed = await listed(
+				undefined,
+				await tokenFor(relay.store, address),
+			);
+			expect(relayed.names).toEqual(["t"]);
+			expect(relayed.call.isError).toBeFalsy();
+			const local = await listed(tunnel.fetch);
+			expect(local.names).toEqual([]);
+			expect(local.call.isError).toBe(true);
+			expect(JSON.stringify(local.call.content)).toContain("not found");
+		} finally {
+			served.close();
+			tunnel.close();
+			channel.port1.close();
+			channel.port2.close();
+			mcp.disconnect();
+		}
+	});
+
+	test("taken over, newAddress() takes the address back itself, also in a page that never saw the takeover", async () => {
+		const storage = new Map<string, string>();
+		const a = page(relay.url, storage);
+		const b = page(relay.url, storage);
+		try {
+			const { address: old } = await a.mcp.connect();
+			// A program with a copy of the secret takes the address over.
+			await b.mcp.connect();
+			await until(() => a.mcp.state === "disconnected");
+			expect(a.heard.at(-1)).toEqual({
+				state: "disconnected",
+				reason: "replaced",
+			});
+			// A new worker's library: same secret, nothing heard of it.
+			const fresh = page(relay.url, storage);
+			await fresh.mcp.newAddress();
+			// It was off: it stays off, so the worker connects after it.
+			expect(fresh.mcp.state).toBe("disconnected");
+			expect(fresh.heard.some((d) => d.state === "connected")).toBe(false);
+			await until(() => b.mcp.state === "disconnected");
+			const { address } = await fresh.mcp.connect();
+			expect(address).not.toBe(old);
+			expect(fresh.mcp.grants).toEqual([]);
+			fresh.mcp.disconnect();
+		} finally {
+			a.mcp.disconnect();
+			b.mcp.disconnect();
+		}
 	});
 
 	// Last: it stops the relay.
-	test("the relay going away: reconnecting with the reason, the attempt in `reconnecting`", async () => {
+	test("the relay going away: reconnecting with the reason; a refusal ends it with error, then statechange", async () => {
 		const { mcp, heard } = page(relay.url);
 		await mcp.connect();
-		const keep = new KeepOn(
-			() => true,
-			() => {},
-		);
+		const keep = new KeepOn(() => true, () => {}, [60_000]);
 		keep.watch(mcp);
+		const order: string[] = [];
+		mcp.addEventListener("error", () => order.push(`error:${mcp.state}`));
+		mcp.addEventListener("statechange", (e) =>
+			order.push(`statechange:${e.detail.state}:${e.detail.reason ?? ""}`),
+		);
+		let refusing: ReturnType<typeof Bun.serve> | undefined;
 		try {
 			await relay.stop();
 			await until(() => mcp.state === "reconnecting");
@@ -271,10 +383,46 @@ describe("tab-mcp client 0.16 with a relay", () => {
 			keep.connect();
 			expect(keep.retrying).toBe(false);
 			expect(mcp.state).toBe("reconnecting");
+
+			// On the relay's port now: something that refuses every hello.
+			refusing = Bun.serve({
+				hostname: "127.0.0.1",
+				port: relay.relay.port,
+				fetch(req, server) {
+					return server.upgrade(req, {
+						headers: { "Sec-WebSocket-Protocol": "tab-mcp.v1" },
+						data: undefined,
+					})
+						? undefined
+						: new Response("no", { status: 400 });
+				},
+				websocket: {
+					message(ws) {
+						ws.send(
+							JSON.stringify({
+								type: "error",
+								code: "forbidden",
+								message: "not here",
+							}),
+						);
+					},
+				},
+			});
+			order.length = 0;
+			// The next attempt at once.
+			await mcp.connect().catch(() => undefined);
+			await until(() => mcp.state === "disconnected");
+			expect(order).toEqual([
+				"error:disconnected",
+				"statechange:disconnected:",
+			]);
+			expect(mcp.reconnecting).toBeUndefined();
+			expect(keep.problem).toContain("not here");
+			expect(keep.retrying).toBe(true);
 		} finally {
 			keep.stop();
 			mcp.disconnect();
+			refusing?.stop(true);
 		}
-		expect(heard.at(-1)).toEqual({ state: "disconnected", reason: "user" });
 	});
 });
