@@ -1161,6 +1161,10 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				const caseId = "c_twice";
 				await fresh([manyMarks(caseId)]);
 				const { page, tabId } = await h.open("v1");
+				// Overmark runs there already: the message behind the draw reaches it.
+				await h.control.eval(
+					`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`,
+				);
 				// Right behind the panel's draw, as an AI app's load_case of the
 				// same case: the page finds the marks once more.
 				await wrapSend(`async (tabId, message, send) => {
@@ -1197,6 +1201,10 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				const caseId = "c_cleared";
 				await fresh([manyMarks(caseId)]);
 				const { page, tabId } = await h.open("v1");
+				// Overmark runs there already: the message behind the draw reaches it.
+				await h.control.eval(
+					`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`,
+				);
 				// Right behind the panel's draw, a clear of whatever the page shows,
 				// as the Hide on the page's own bar, an AI app's tool or another
 				// window's panel would. Which takes effect first is the page's
