@@ -1,0 +1,61 @@
+/**
+ * A case starts the moment "Annotate this page" is clicked (DEC-026): stored
+ * at once, with the page's title as its title and no marks. One that is left
+ * as it was made goes again, silently, so trying the button leaves no empty
+ * case behind. Pure: main.ts creates and deletes.
+ */
+
+import {
+	CASE_FORMAT,
+	type Case,
+	cutText,
+	MAX_TITLE,
+	type PageInfo,
+	plainUrl,
+	validateCase,
+} from "../lib/case.ts";
+import { shortUrl } from "./dom.ts";
+
+/** A new case's title: the page's title, else its short address. */
+export function firstTitle(page: Pick<PageInfo, "url" | "title">): string {
+	const title = cutText(page.title.trim(), MAX_TITLE);
+	if (title !== "") return title;
+	const address = cutText(shortUrl(page.url).trim(), MAX_TITLE);
+	return address === "" ? "Untitled case" : address;
+}
+
+/** The case "Annotate this page" stores: the page's, no marks, no screenshots. */
+export function newCase(id: string, page: PageInfo, now: string): Case {
+	const kept = { ...page, url: plainUrl(page.url) };
+	return validateCase({
+		format: CASE_FORMAT,
+		id,
+		title: firstTitle(kept),
+		createdAt: now,
+		updatedAt: now,
+		page: kept,
+		shots: [],
+		annotations: [],
+		verdict: null,
+	});
+}
+
+/**
+ * The case is as "Annotate this page" made it: no marks and no screenshots,
+ * no mark ever deleted (`lastNumber`), not from a file, no summary stored or
+ * typed (`typed`, the summary not saved yet), and the title it was given. A
+ * mark added and taken out again by the toolbar's Undo leaves it so (its
+ * number is free again); a rename, a summary or a deleted mark make it the
+ * user's, and it stays.
+ */
+export function isUntouched(c: Case, typed?: string): boolean {
+	return (
+		c.annotations.length === 0 &&
+		c.shots.length === 0 &&
+		c.lastNumber === undefined &&
+		c.importedAt === undefined &&
+		(c.verdict ?? "").trim() === "" &&
+		(typed ?? "").trim() === "" &&
+		c.title === firstTitle(c.page)
+	);
+}

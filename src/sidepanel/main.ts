@@ -8,13 +8,16 @@ import {
 	type Annotation,
 	type Case,
 	markStatus,
+	newId,
 	nextNumbers,
+	type PageInfo,
 	validateCase,
 	withChoice,
 	withComment,
 	withoutAnnotation,
 	withoutFinding,
 	withReopen,
+	withTitle,
 	withVerified,
 } from "../lib/case.ts";
 import {
@@ -52,6 +55,7 @@ import {
 	isFound,
 	noneFound,
 } from "./follow.ts";
+import { isUntouched, newCase } from "./fresh.ts";
 import { CaseHints } from "./hints.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
@@ -62,7 +66,7 @@ import {
 	type PanelState,
 } from "./state.ts";
 import { startSync, syncActions } from "./sync.ts";
-import { type Actions, NO_ACCESS, render } from "./view.ts";
+import { type Actions, lostMarksText, NO_ACCESS, render } from "./view.ts";
 
 const store = new IdbStore();
 
@@ -294,9 +298,10 @@ async function loadInto(
 				settling,
 			};
 		});
-		// None found: the case view says so, and where the case is from.
+		// None found: the case view says so, and where the case is from. A case
+		// without marks yet (just created, DEC-026) has nothing to say.
 		hint(
-			noneFound(result.matches) && !settling
+			(noneFound(result.matches) && !settling) || result.matches.length === 0
 				? undefined
 				: foundText(
 						result.matches,
@@ -586,9 +591,9 @@ async function adopt(): Promise<void> {
 		]);
 		if (!now?.visible || now.target?.caseId !== caseId) return;
 		if (state.view.kind !== "home" || (await activeTab())?.id !== tabId) return;
-		// Its case was deleted meanwhile (elsewhere, the tab not in front): it
-		// draws a new case, its drafts kept, as clearDeleted does.
-		if (c === undefined) return await startAnnotating();
+		// Its case was deleted meanwhile (elsewhere, the tab not in front): the
+		// toolbar ends, as clearDeleted ends it (DEC-026).
+		if (c === undefined) return await endDeleted(caseId, undefined);
 		toolbarOn.add(tabId);
 		update((s) => {
 			if (s.tab?.id === tabId) s.overlay = now;
@@ -692,6 +697,7 @@ function openCase(id: string): void {
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
+		s.renaming = undefined;
 		s.markFilter = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
@@ -814,6 +820,9 @@ async function leaveCase(): Promise<void> {
 			});
 			return;
 		}
+		// Gone before the list shows: no empty case flashes there (DEC-026).
+		await forgetUntouched(caseId);
+		if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
 		closeCase();
 	} finally {
 		// Not left for good when something above failed.
@@ -842,6 +851,7 @@ function closeCase(): void {
 		s.current = undefined;
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
+		s.renaming = undefined;
 		s.loaded = undefined;
 		s.leaving = undefined;
 		// Where the case's export went is the case's.
@@ -897,21 +907,90 @@ async function forgetLoaded(
 
 /**
  * A deleted case's draft goes, its marks and bar leave the page, and a
- * toolbar adding to it starts a new case.
+ * toolbar adding to it ends (`endDeleted`). `title`: the case's, as the
+ * panel knew it.
  */
-async function clearDeleted(caseId: string): Promise<void> {
+async function clearDeleted(caseId: string, title?: string): Promise<void> {
 	update((s) => s.verdictDrafts.delete(caseId));
 	if (state.loaded?.caseId === caseId) await forgetLoaded({ clearTab: true });
 	const tabId = state.tab?.id;
-	if (tabId === undefined) return;
 	// An AI app's load_case: only the page knows.
-	const overlay = await overlayState(tabId);
-	if (overlay?.loadedCase === caseId)
+	if (tabId !== undefined && (await overlayState(tabId))?.loadedCase === caseId)
 		await chrome.tabs
 			.sendMessage(tabId, { type: "case:clear", caseId })
 			.catch(() => undefined);
-	if (overlay?.visible && overlay.target?.caseId === caseId)
-		await startAnnotating();
+	await endDeleted(caseId, title);
+}
+
+/** A tab that does not answer (frozen, discarded) is no toolbar's. */
+const ASK_TAB_MS = 2000;
+
+/**
+ * Toolbars still adding to a deleted case end, on every tab (an AI app's
+ * delete_case, another window's panel): there is no new case to fall back
+ * to (DEC-026). The marks not in the case yet go with it; only such a loss
+ * is said, under This page.
+ */
+async function endDeleted(
+	caseId: string,
+	title: string | undefined,
+): Promise<void> {
+	const tabs = await chrome.tabs.query({}).catch(() => []);
+	let lost = 0;
+	await Promise.all(
+		tabs.map(async ({ id }) => {
+			if (id === undefined) return;
+			const now = await Promise.race([
+				overlayState(id),
+				sleep(ASK_TAB_MS).then(() => undefined),
+			]);
+			if (now?.target?.caseId !== caseId) return;
+			lost += now.drafts;
+			toolbarOn.delete(id);
+			await Promise.race([
+				chrome.tabs
+					.sendMessage(id, { type: "overlay:end", caseId, discard: true })
+					.catch(() => undefined),
+				sleep(END_TIMEOUT_MS),
+			]);
+		}),
+	);
+	if (lost > 0) update((s) => (s.hint = lostMarksText(title, lost)));
+	void refreshTab();
+}
+
+/**
+ * A case "Annotate this page" made and the user left as it was made goes
+ * again, silently (DEC-026), so trying the button leaves no empty case
+ * behind. Checked as the case is stored, in the delete's transaction.
+ */
+async function forgetUntouched(caseId: string): Promise<boolean> {
+	const typed = state.verdictDrafts.get(caseId);
+	const gone = await store
+		.deleteCaseIf(caseId, (c) => isUntouched(c, typed))
+		.catch(() => false);
+	if (!gone) return false;
+	update((s) => {
+		s.verdictDrafts.delete(caseId);
+		s.cases = s.cases.filter((c) => c.id !== caseId);
+	});
+	announce(caseId);
+	void refreshCases();
+	return true;
+}
+
+/**
+ * The last tab with the open case's toolbar closed: an untouched case is
+ * left as "← All cases" leaves it, and goes (DEC-026). Another tab still
+ * adding to it, or anything in it, keeps it open.
+ */
+async function leaveIfUntouched(caseId: string): Promise<void> {
+	if (!showing(caseId) || toolbarOn.size > 0 || state.leaving !== undefined)
+		return;
+	const c = await store.getCase(caseId);
+	if (c === undefined || !isUntouched(c, state.verdictDrafts.get(caseId)))
+		return;
+	if (showing(caseId) && toolbarOn.size === 0) await leaveCase();
 }
 
 /** Tell a panel in another window; a page does not hear its own message. */
@@ -921,35 +1000,29 @@ function announce(caseId: string): void {
 }
 
 /**
- * Show the overlay on the tab in front: to add to the open case, or to draw
- * a new one ("Annotate this page" never continues a case, DEC-023).
+ * Show the toolbar on the tab in front, adding to the open case: "Add marks",
+ * and a case "Annotate this page" just made (DEC-026).
  */
-async function startAnnotating(target?: Case): Promise<void> {
-	// On Home its outcome goes under This page; in a case under the case's
-	// buttons, and only where there is one (what a draw found stays).
+async function startAnnotating(target: Case): Promise<void> {
+	// Under the case's buttons, and only where there is something to say
+	// (what a draw found stays).
 	const say = (text: string | undefined) => {
-		if (target === undefined) update((s) => (s.hint = text));
-		else if (text !== undefined) caseHintWriter()(text);
+		if (text !== undefined) caseHintWriter()(text);
 	};
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
 	tabWork.cancel(); // a refresh still running must not overwrite this
 	try {
-		const next = nextNumbers(target);
 		const overlay = await sendToTab<OverlayState>(tab.id, {
 			type: "overlay:show",
 			blurForms: await blurFormsNow(),
-			...(target
-				? {
-						target: {
-							caseId: target.id,
-							title: target.title,
-							nextAnnotation: next.annotation,
-						},
-					}
-				: {}),
+			target: {
+				caseId: target.id,
+				title: target.title,
+				nextAnnotation: nextNumbers(target).annotation,
+			},
 		});
-		if (target !== undefined) toolbarOn.add(tab.id);
+		toolbarOn.add(tab.id);
 		update((s) => (s.overlay = overlay));
 		say(
 			overlay.saving
@@ -958,6 +1031,106 @@ async function startAnnotating(target?: Case): Promise<void> {
 		);
 	} catch (error) {
 		say(describeError(error));
+	}
+}
+
+/**
+ * Rename (DEC-026): stored at once, as every change is. The case list, the
+ * export, case.md and the AI tools read the stored title; a toolbar adding to
+ * the case is told.
+ */
+async function renameCase(caseId: string, text: string): Promise<void> {
+	// The field says why an empty title is not saved.
+	if (text.trim() === "") return;
+	if (state.current?.id === caseId && state.current.title === text.trim()) {
+		update((s) => (s.renaming = undefined));
+		return;
+	}
+	try {
+		const saved = await store.updateCase(caseId, (current) => {
+			if (current === undefined) throw new Error("the case no longer exists");
+			return {
+				value: validateCase(withTitle(current, text, new Date().toISOString())),
+			};
+		});
+		update((s) => {
+			if (s.renaming?.caseId === caseId) s.renaming = undefined;
+			if (s.current?.id === caseId) s.current = saved;
+		});
+		announce(caseId);
+		void refreshCases();
+		await retitleToolbars(saved);
+	} catch (error) {
+		update((s) => {
+			if (s.renaming?.caseId === caseId)
+				s.renaming = {
+					caseId,
+					text: s.renaming.text,
+					error: `Not renamed: ${message(error)}`,
+				};
+		});
+	}
+}
+
+/** Toolbars adding to the case say its new title (`overlay:title`). */
+async function retitleToolbars(c: Case): Promise<void> {
+	const front = (await activeTab())?.id;
+	const tabs = new Set(toolbarOn);
+	if (front !== undefined) tabs.add(front);
+	for (const tabId of tabs) {
+		const now = (await chrome.tabs
+			.sendMessage(tabId, {
+				type: "overlay:title",
+				caseId: c.id,
+				title: c.title,
+			})
+			.catch(() => undefined)) as OverlayState | undefined;
+		if (now !== undefined)
+			update((s) => {
+				if (s.tab?.id === tabId) s.overlay = now;
+			});
+	}
+}
+
+/** "Annotate this page" is creating its case: a second click waits for it. */
+let creating = false;
+
+/**
+ * "Annotate this page" (DEC-026): the case is stored at once, with the
+ * page's title and info and no marks, and opens as if chosen from the list,
+ * with the toolbar on the page adding to it. The page says what it is; the
+ * panel writes the case, as it writes every change to a case but a mark's
+ * add (the worker's, from the page).
+ */
+async function annotate(): Promise<void> {
+	if (creating) return;
+	creating = true;
+	try {
+		const tab = await activeTab();
+		if (tab?.id === undefined) return;
+		tabWork.cancel();
+		let page: PageInfo;
+		try {
+			page = await sendToTab<PageInfo>(tab.id, { type: "page:info" });
+		} catch (error) {
+			update((s) => (s.hint = describeError(error)));
+			return;
+		}
+		const id = newId("c");
+		const made = newCase(id, page, new Date().toISOString());
+		const c = await store.updateCase(id, (current) => {
+			if (current !== undefined)
+				throw new Error("a case with this id exists already");
+			return { value: made };
+		});
+		announce(c.id);
+		update((s) => (s.hint = undefined));
+		openCase(c.id);
+		await startAnnotating(c);
+	} catch (error) {
+		update((s) => (s.hint = `Could not start a case: ${message(error)}`));
+	} finally {
+		creating = false;
 	}
 }
 
@@ -1091,24 +1264,7 @@ async function refreshDownloads(): Promise<void> {
 }
 
 const actions: Actions = {
-	toggleAnnotate() {
-		void (async () => {
-			const tab = await activeTab();
-			if (tab?.id === undefined) return;
-			tabWork.cancel();
-			// Ask the page: the state may have changed while no panel was listening.
-			const now = await overlayState(tab.id);
-			try {
-				if (!now?.visible) return await startAnnotating();
-				const overlay = await sendToTab<OverlayState>(tab.id, {
-					type: "overlay:hide",
-				});
-				update((s) => (s.overlay = overlay));
-			} catch (error) {
-				update((s) => (s.hint = describeError(error)));
-			}
-		})();
-	},
+	annotate: () => void annotate(),
 
 	openCase,
 	closeCase: () => void leaveCase(),
@@ -1279,6 +1435,20 @@ const actions: Actions = {
 		update((s) => (s.markFilter = undefined));
 		void startAnnotating(c);
 	},
+
+	startRename: (c) =>
+		update((s) => (s.renaming = { caseId: c.id, text: c.title })),
+
+	typeRename(text) {
+		update((s) => {
+			if (s.renaming !== undefined)
+				s.renaming = { caseId: s.renaming.caseId, text };
+		});
+	},
+
+	saveRename: (c, text) => void renameCase(c.id, text),
+
+	cancelRename: () => update((s) => (s.renaming = undefined)),
 
 	doneAdding(c) {
 		const hint = caseHintWriter();
@@ -1640,7 +1810,7 @@ chrome.permissions.onRemoved.addListener(() => {
 });
 
 byId<HTMLButtonElement>("annotate").addEventListener("click", () =>
-	actions.toggleAnnotate(),
+	actions.annotate(),
 );
 
 exportAllButton.addEventListener("click", () => {
@@ -1731,11 +1901,16 @@ byId<HTMLButtonElement>("import-dismiss").addEventListener("click", () =>
 
 /** A tool, or another panel, changed or deleted a case: show it. */
 function caseChanged(caseId: string): void {
+	// Its title, as the panel knew it, in case it is gone.
+	const title =
+		state.current?.id === caseId
+			? state.current.title
+			: state.cases.find((c) => c.id === caseId)?.title;
 	if (state.view.kind === "case" && state.view.id === caseId)
 		void refreshCase();
 	void refreshCases();
 	void store.getCase(caseId).then((c) => {
-		if (c === undefined) return clearDeleted(caseId);
+		if (c === undefined) return clearDeleted(caseId, title);
 		// A mark settled or deleted elsewhere (an AI app, another window).
 		return redrawLoaded(c);
 	});
@@ -1908,6 +2083,9 @@ chrome.tabs.onRemoved.addListener((id) => {
 	if (id === pendingLoad?.tabId) pendingLoad = undefined;
 	if (id === drawn?.tabId) drawn = undefined;
 	hiddenOn.delete(id);
+	// The open case's toolbar went with its tab: an untouched case goes (DEC-026).
+	if (toolbarOn.delete(id) && state.view.kind === "case")
+		void leaveIfUntouched(state.view.id);
 });
 
 void refreshTab();

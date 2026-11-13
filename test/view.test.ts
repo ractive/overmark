@@ -1792,7 +1792,7 @@ describe("settings and errors at home", () => {
 	});
 });
 
-describe("the annotate button (DEC-023)", () => {
+describe("the annotate button (DEC-023, DEC-026)", () => {
 	const c = sampleCase();
 	const overlay = (
 		change: Partial<NonNullable<PanelState["overlay"]>> = {},
@@ -1816,75 +1816,174 @@ describe("the annotate button (DEC-023)", () => {
 		state.cases = cases;
 		render(state, noActions);
 		const button = el<HTMLButtonElement>("annotate");
-		const hint = el("annotate-hint");
 		return {
 			label: button.textContent,
 			primary: button.classList.contains("primary"),
 			disabled: button.disabled,
-			hint: hint.hidden ? undefined : hint.textContent,
 		};
 	};
 
-	test("no toolbar: Annotate this page, the one primary, no hint", () => {
-		expect(home(undefined)).toEqual({
-			label: "Annotate this page",
-			primary: true,
-			disabled: false,
-			hint: undefined,
-		});
-		expect(home(overlay())).toEqual({
-			label: "Annotate this page",
-			primary: true,
-			disabled: false,
-			hint: undefined,
-		});
-	});
-
-	test("no toolbar, drafts on the page: they show again", () => {
-		expect(home(overlay({ drafts: 3 }))).toEqual({
-			label: "Annotate this page",
-			primary: true,
-			disabled: false,
-			hint: "3 marks on this page are not saved yet. Annotate this page shows them again.",
-		});
-		expect(home(overlay({ drafts: 1 })).hint).toBe(
-			"1 mark on this page is not saved yet. Annotate this page shows it again.",
-		);
-	});
-
-	test("toolbar up: Stop annotating, with what to do on the page", () => {
-		expect(home(overlay({ visible: true }))).toEqual({
-			label: "Stop annotating",
-			primary: false,
-			disabled: false,
-			hint: "Draw on the page with the toolbar at its bottom.",
-		});
-		expect(home(overlay({ visible: true, drafts: 3 })).hint).toBe(
-			"3 marks drawn. Click Save case… on the page's toolbar to keep them.",
-		);
-	});
-
-	test("saving: Stop annotating waits", () => {
-		expect(home(overlay({ visible: true, drafts: 2, saving: true }))).toEqual({
-			label: "Stop annotating",
-			primary: false,
-			disabled: true,
-			hint: "Saving…",
-		});
-	});
-
-	test("never Continue annotating, whatever case the page last added to", () => {
+	test("one state: Annotate this page, the one primary, whatever the page shows", () => {
 		const target = { caseId: c.id, title: c.title, nextAnnotation: 2 };
 		for (const o of [
+			undefined,
+			overlay(),
+			overlay({ drafts: 3 }),
+			overlay({ visible: true }),
+			overlay({ visible: true, drafts: 2, saving: true }),
 			overlay({ target }),
-			overlay({ target, drafts: 2 }),
-			overlay({ target, visible: true }),
-		]) {
-			const { label } = home(o);
-			expect(label).not.toBe("Continue annotating");
-			expect(label).toBe(o.visible ? "Stop annotating" : "Annotate this page");
-		}
+			overlay({ target, visible: true, drafts: 1 }),
+		])
+			expect(home(o)).toEqual({
+				label: "Annotate this page",
+				primary: true,
+				disabled: false,
+			});
 		expect(home(overlay({ target }), []).label).toBe("Annotate this page");
+	});
+
+	test("no hint lines for drafts: there are no drafts (DEC-026)", () => {
+		home(overlay({ visible: true, drafts: 3 }));
+		expect(el("annotate-hint")).toBeNull();
+		expect(el("hint").hidden).toBe(true);
+	});
+});
+
+describe("a case deleted elsewhere while its toolbar was adding (DEC-026)", () => {
+	test("says only what was lost", async () => {
+		const { lostMarksText } = await import("../src/sidepanel/view.ts");
+		expect(lostMarksText("Login", 1)).toBe(
+			"“Login” was deleted, and 1 mark not in it yet is gone with it.",
+		);
+		expect(lostMarksText(undefined, 3)).toBe(
+			"The case was deleted, and 3 marks not in it yet are gone with it.",
+		);
+	});
+});
+
+describe("the title is renamed where it is shown (DEC-026)", () => {
+	const c = sampleCase("c_rename");
+	const renaming = (text: string, error?: string) =>
+		caseState(c, (s) => {
+			s.renaming = {
+				caseId: c.id,
+				text,
+				...(error === undefined ? {} : { error }),
+			};
+		});
+	const shown = (id: string) => !el(id).hidden;
+
+	test("the title with a quiet Rename beside it, which has a name", () => {
+		const called: string[] = [];
+		render(
+			caseState(c),
+			actionsWith({ startRename: (x) => void called.push(x.id) }),
+		);
+		// Made with these actions: the first render of this case.
+		expect(el("case-view").querySelector(".case-title")?.textContent).toBe(
+			"Button contrast",
+		);
+		const button = el<HTMLButtonElement>("rename-case");
+		expect(button.textContent).toBe("Rename");
+		expect(button.getAttribute("aria-label")).toBe("Rename this case");
+		expect(button.className).toContain("quiet");
+		expect(shown("rename")).toBe(false);
+		button.click();
+		expect(called).toEqual(["c_rename"]);
+	});
+
+	test("renaming: a field with the title and its name, Save and Cancel; the title row goes", () => {
+		render(renaming("Button contrast"), noActions);
+		expect(shown("rename")).toBe(true);
+		expect(
+			el("case-view").querySelector<HTMLElement>(".case-title-row")?.hidden,
+		).toBe(true);
+		const field = el<HTMLInputElement>("rename-field");
+		expect(field.value).toBe("Button contrast");
+		expect(field.getAttribute("aria-label")).toBe("Case title");
+		expect(field.maxLength).toBe(500);
+		expect(el<HTMLButtonElement>("rename-save").disabled).toBe(false);
+		expect(shown("rename-hint")).toBe(false);
+	});
+
+	test("Enter saves what is typed, Escape cancels, as the buttons do", () => {
+		const called: string[] = [];
+		const actions = actionsWith({
+			saveRename: (_c, text) => void called.push(`save ${text}`),
+			cancelRename: () => void called.push("cancel"),
+			typeRename: (text) => void called.push(`type ${text}`),
+		});
+		// The case's parts keep the actions they were made with: a case of its own.
+		const keys = sampleCase("c_rename_keys");
+		render(
+			caseState(keys, (s) => {
+				s.renaming = { caseId: keys.id, text: "Login" };
+			}),
+			actions,
+		);
+		const field = el<HTMLInputElement>("rename-field");
+		field.value = "Login button";
+		field.dispatchEvent(new window.Event("input") as unknown as Event);
+		const key = (k: string) =>
+			field.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: k,
+					cancelable: true,
+				}) as unknown as Event,
+			);
+		key("Enter");
+		key("Escape");
+		el<HTMLButtonElement>("rename-save").click();
+		el<HTMLButtonElement>("rename-cancel").click();
+		expect(called).toEqual([
+			"type Login button",
+			"save Login button",
+			"cancel",
+			"save Login button",
+			"cancel",
+		]);
+	});
+
+	test("an empty title is refused: Save off, and the field says why", () => {
+		render(renaming("   "), noActions);
+		expect(el<HTMLButtonElement>("rename-save").disabled).toBe(true);
+		expect(el("rename-field").getAttribute("aria-invalid")).toBe("true");
+		expect(shown("rename-hint")).toBe(true);
+		expect(el("rename-hint").textContent).toBe("A case needs a title.");
+	});
+
+	test("a save that failed says why under the field", () => {
+		render(
+			renaming("Login", "Not renamed: the case no longer exists"),
+			noActions,
+		);
+		expect(el("rename-hint").textContent).toBe(
+			"Not renamed: the case no longer exists",
+		);
+		expect(el("rename-field").getAttribute("aria-invalid")).toBe("false");
+	});
+
+	test("done: the stored title shows, Rename has the focus again", async () => {
+		render(renaming("Login"), noActions);
+		await Promise.resolve();
+		expect(window.document.activeElement?.id).toBe("rename-field");
+		render(caseState({ ...c, title: "Login" }), noActions);
+		await Promise.resolve();
+		expect(shown("rename")).toBe(false);
+		expect(el("case-view").querySelector(".case-title")?.textContent).toBe(
+			"Login",
+		);
+		expect(window.document.activeElement?.id).toBe("rename-case");
+	});
+
+	test("another case's rename is not this one's", () => {
+		render(
+			caseState(c, (s) => {
+				s.renaming = { caseId: "c_other", text: "X" };
+			}),
+			noActions,
+		);
+		expect(shown("rename")).toBe(false);
 	});
 });
 
@@ -2086,7 +2185,7 @@ describe("the case view's actions and this tab (DEC-023)", () => {
 		expect(el("add-marks").textContent).toBe("Add marks");
 	});
 
-	test("drafts of a new case on the page: Add marks takes them", () => {
+	test("marks of no case on the page are no case's: nothing said (DEC-026)", () => {
 		const c = sampleCase("c_drafts");
 		render(
 			caseState(c, (s) => {
@@ -2095,9 +2194,7 @@ describe("the case view's actions and this tab (DEC-023)", () => {
 			}),
 			noActions,
 		);
-		expect(line()).toBe(
-			"3 unsaved marks are on this page. Add marks puts them into this case; go back to All cases to save them as a new one.",
-		);
+		expect(line()).toBeUndefined();
 	});
 
 	test("drawing, hidden, found: each says so, Hide or Show where it applies", () => {

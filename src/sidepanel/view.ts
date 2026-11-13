@@ -16,6 +16,7 @@ import {
 	isPageOf,
 	MAX_COMMENT,
 	MAX_REOPEN_NOTE,
+	MAX_TITLE,
 	MAX_VERDICT,
 	type MarkStatus,
 	markStatus,
@@ -41,7 +42,8 @@ import {
 
 /** What the user can do; main.ts carries it out and updates the state. */
 export interface Actions extends SyncActions {
-	toggleAnnotate(): void;
+	/** "Annotate this page": a new case, stored at once and opened (DEC-026). */
+	annotate(): void;
 	openCase(id: string): void;
 	/** "← All cases": end the toolbar adding to the case, then close it (DEC-023). */
 	closeCase(): void;
@@ -77,6 +79,13 @@ export interface Actions extends SyncActions {
 	addMarks(c: Case): void;
 	/** "Done adding": the toolbar adding to the case finishes, as its Done. */
 	doneAdding(c: Case): void;
+	/** "Rename": the title becomes a field (DEC-026). */
+	startRename(c: Case): void;
+	typeRename(text: string): void;
+	/** Enter or Save: stored at once; an empty title is refused. */
+	saveRename(c: Case, text: string): void;
+	/** Escape or Cancel. */
+	cancelRename(): void;
 	exportCase(c: Case): void;
 	/** Copy an exported file's path; whether it worked. */
 	copyPath(path: string): Promise<boolean>;
@@ -99,7 +108,6 @@ const settingsView = byId<HTMLElement>("settings");
 const pageText = byId<HTMLParagraphElement>("page");
 const hint = byId<HTMLParagraphElement>("hint");
 const annotate = byId<HTMLButtonElement>("annotate");
-const annotateHint = byId<HTMLParagraphElement>("annotate-hint");
 /** Its title in index.html, for when Overmark may run on the tab. */
 const annotateTitle = annotate.title;
 const casesList = byId<HTMLDivElement>("cases");
@@ -403,7 +411,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 			h(
 				"p",
 				{ class: "empty" },
-				"No cases yet. Annotate a page and save it as a case, or import a case someone sent you.",
+				"No cases yet. Annotate a page to start one, or import a case someone sent you.",
 			),
 		);
 		return;
@@ -515,23 +523,6 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 	importPrompt.hidden = false;
 }
 
-/** "3 marks are drawn" and the like: what Annotate this page means now. */
-export function annotateHintText(state: PanelState): string | undefined {
-	const o = state.overlay;
-	if (o === undefined) return undefined;
-	const n = o.drafts;
-	const one = n === 1;
-	const marks = `${n} mark${one ? "" : "s"}`;
-	if (!o.visible)
-		return n === 0
-			? undefined
-			: `${marks} on this page ${one ? "is" : "are"} not saved yet. Annotate this page shows ${one ? "it" : "them"} again.`;
-	if (o.saving) return "Saving…";
-	return n === 0
-		? "Draw on the page with the toolbar at its bottom."
-		: `${marks} drawn. Click Save case… on the page's toolbar to keep ${one ? "it" : "them"}.`;
-}
-
 function renderHome(state: PanelState, actions: Actions): void {
 	const tab = state.tab;
 	// Under "This page": its address, else its title (Chrome tells the
@@ -541,14 +532,9 @@ function renderHome(state: PanelState, actions: Actions): void {
 	renderAccess(homeAccess, state);
 	setHint(hint, state.hint);
 	const ok = access(state) === "yes";
-	// "Annotate this page" always starts a new case (DEC-023).
-	const up = state.overlay?.visible === true;
-	const saving = up && state.overlay?.saving === true;
-	annotate.disabled = !ok || saving;
+	// Always a new case, stored and opened at once (DEC-023, DEC-026).
+	annotate.disabled = !ok;
 	annotate.title = ok ? annotateTitle : NEEDS_ACCESS;
-	annotate.textContent = up ? "Stop annotating" : "Annotate this page";
-	annotate.classList.toggle("primary", !up);
-	setHint(annotateHint, ok ? annotateHintText(state) : undefined);
 	importError.hidden = state.importError === undefined;
 	importErrorText.textContent = state.importError ?? "";
 	// One import at a time, and no export of all cases while it stores them.
@@ -705,6 +691,15 @@ interface CaseParts {
 	/** The case as last drawn, for the buttons. */
 	current: Case;
 	title: HTMLElement;
+	/** The title and its Rename button; the rename form instead while renaming. */
+	titleRow: HTMLElement;
+	renameButton: HTMLButtonElement;
+	rename: HTMLElement;
+	renameField: HTMLInputElement;
+	renameSave: HTMLButtonElement;
+	renameHint: HTMLElement;
+	/** The rename form was shown at the last render. */
+	renameOpen: boolean;
 	meta: HTMLElement;
 	/** The case's address, a link where it is a web page. */
 	page: HTMLButtonElement;
@@ -770,9 +765,84 @@ function createParts(c: Case, actions: Actions): CaseParts {
 	const madeAt = h("span");
 	const madeOn = h("span");
 	const sizeText = h("span");
+	const title = h("h2", { class: "case-title" });
+	const renameButton = h(
+		"button",
+		{
+			type: "button",
+			class: "quiet",
+			id: "rename-case",
+			"aria-label": "Rename this case",
+			title: "Change this case's title; it is saved at once",
+			onclick: () => actions.startRename(created.current),
+		},
+		"Rename",
+	);
+	const renameField: HTMLInputElement = h("input", {
+		type: "text",
+		id: "rename-field",
+		"aria-label": "Case title",
+		"aria-describedby": "rename-hint",
+		maxlength: String(MAX_TITLE),
+		autocomplete: "off",
+		oninput: () => actions.typeRename(renameField.value),
+		onkeydown: (e) => {
+			const k = e as KeyboardEvent;
+			if (k.key === "Enter") {
+				k.preventDefault();
+				actions.saveRename(created.current, renameField.value);
+			} else if (k.key === "Escape") {
+				k.preventDefault();
+				actions.cancelRename();
+			}
+		},
+	});
+	const renameSave = h(
+		"button",
+		{
+			type: "button",
+			class: "strong small",
+			id: "rename-save",
+			onclick: () => actions.saveRename(created.current, renameField.value),
+		},
+		"Save",
+	);
+	const renameHint = h("p", {
+		class: "hint",
+		id: "rename-hint",
+		role: "status",
+		hidden: true,
+	});
 	const created: CaseParts = {
 		current: c,
-		title: h("h2", { class: "case-title" }),
+		title,
+		titleRow: h("div", { class: "case-title-row" }, title, renameButton),
+		renameButton,
+		rename: h(
+			"div",
+			{ class: "rename", id: "rename", hidden: true },
+			renameField,
+			h(
+				"div",
+				{ class: "row" },
+				renameSave,
+				h(
+					"button",
+					{
+						type: "button",
+						class: "small",
+						id: "rename-cancel",
+						onclick: () => actions.cancelRename(),
+					},
+					"Cancel",
+				),
+			),
+			renameHint,
+		),
+		renameField,
+		renameSave,
+		renameHint,
+		renameOpen: false,
 		meta: h("p", { class: "meta case-meta" }, page, about, madeAt, madeOn),
 		page,
 		about,
@@ -874,7 +944,8 @@ function createParts(c: Case, actions: Actions): CaseParts {
 	const header = h(
 		"section",
 		{ class: "case-header" },
-		created.title,
+		created.titleRow,
+		created.rename,
 		created.meta,
 		created.origin,
 		created.status,
@@ -939,11 +1010,6 @@ function tabLineText(
 ): string | undefined {
 	if (adding)
 		return "Adding marks: draw on the page. Each mark is saved into this case when its comment is done.";
-	const o = state.overlay;
-	if (o !== undefined && o.drafts > 0 && o.target === undefined) {
-		const one = o.drafts === 1;
-		return `${o.drafts} unsaved mark${one ? " is" : "s are"} on this page. Add marks puts ${one ? "it" : "them"} into this case; go back to All cases to save ${one ? "it" : "them"} as a new one.`;
-	}
 	const tabId = state.tab?.id;
 	if (tabId === undefined) return undefined;
 	if (state.hiddenOn.has(tabId)) return "Marks are hidden on this tab.";
@@ -963,6 +1029,45 @@ export function leavingText(
 	if (leaving.phase === "finishing") return "Finishing the marks…";
 	const one = leaving.left === 1;
 	return `${leaving.left} mark${one ? " is" : "s are"} not in the case yet; the toolbar on the page says why. Click All cases again to leave without ${one ? "it" : "them"}.`;
+}
+
+/**
+ * Under This page when a case was deleted elsewhere while its toolbar was
+ * still adding to it, and marks not in it yet went with it (DEC-026).
+ */
+export function lostMarksText(title: string | undefined, lost: number): string {
+	const one = lost === 1;
+	const what = title === undefined ? "The case" : `“${title}”`;
+	return `${what} was deleted, and ${lost} mark${one ? "" : "s"} not in it yet ${one ? "is" : "are"} gone with it.`;
+}
+
+/** Draw the title, or the rename form in its place (DEC-026). */
+function renderTitle(state: PanelState, p: CaseParts, c: Case): void {
+	p.title.textContent = c.title;
+	const renaming = state.renaming?.caseId === c.id ? state.renaming : undefined;
+	p.titleRow.hidden = renaming !== undefined;
+	p.rename.hidden = renaming === undefined;
+	if (renaming === undefined) {
+		if (!p.renameOpen) return;
+		p.renameOpen = false;
+		// The keyboard is back where the rename started.
+		const at = document.activeElement;
+		if (at === null || at === document.body || p.rename.contains(at))
+			queueMicrotask(() => p.renameButton.focus());
+		return;
+	}
+	if (p.renameField.value !== renaming.text)
+		p.renameField.value = renaming.text;
+	const empty = renaming.text.trim() === "";
+	p.renameSave.disabled = empty;
+	p.renameField.setAttribute("aria-invalid", String(empty));
+	setHint(p.renameHint, empty ? "A case needs a title." : renaming.error);
+	if (p.renameOpen) return;
+	p.renameOpen = true;
+	queueMicrotask(() => {
+		p.renameField.focus();
+		p.renameField.select();
+	});
 }
 
 // --- a mark's status and its actions ---------------------------------------
@@ -1469,7 +1574,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	// Only while the text differs from what is stored.
 	p.saveVerdict.hidden = draft === undefined;
 
-	p.title.textContent = c.title;
+	renderTitle(state, p, c);
 	const web = isWebPage(c.page.url);
 	p.page.hidden = !web;
 	p.page.textContent = web ? shortUrl(c.page.url) : "";
