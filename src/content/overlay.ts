@@ -194,8 +194,8 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	box-shadow: ${SHADOW};
 	pointer-events: auto; max-width: min(440px, calc(100vw - 32px));
 }
-/* Under a toolbar at the top: it would cover the toolbar's last buttons. */
-.toolbar.top:not([hidden]) ~ .reviewbar { top: 64px; }
+/* Under a toolbar at the top, whatever its height (fitToolbar measures it): it would cover the toolbar's last buttons, or its status row. */
+.toolbar.top:not([hidden]) ~ .reviewbar { top: var(--under-toolbar, 64px); }
 /* The count says what the bar is for: a long title gives way. */
 .reviewbar .text { display: flex; gap: 8px; min-width: 0; }
 .reviewbar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${L.barMuted}; }
@@ -529,8 +529,14 @@ export class Overlay {
 		if (this.layer.hidden || bar.hidden) return;
 		for (const fit of TOOLBAR_FITS) {
 			bar.dataset["fit"] = fit;
-			if (this.#toolbarFits(fit === "")) return;
+			if (this.#toolbarFits(fit === "")) break;
 		}
+		// The review bar's place under a toolbar at the top: 16 px above the
+		// toolbar, its one or two rows, 8 px between the two.
+		this.layer.style.setProperty(
+			"--under-toolbar",
+			`${16 + bar.offsetHeight + 8}px`,
+		);
 	}
 
 	/** One row that does not overflow (`beside`), or no button on a second row. */

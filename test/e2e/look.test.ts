@@ -385,6 +385,20 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		expect(plain[0]).toMatchObject({ fit: "", status: 1, words: 7 });
 		expect(plain.at(-1)).toMatchObject({ status: 2, words: 0 });
 
+		// Moved to the top, the toolbar has the loaded case's bar under it,
+		// also under its second row.
+		const two = await at(800);
+		expect(two.status).toBe(2);
+		await page.click(shadow('[data-action="move-toolbar"]'));
+		const gap = () =>
+			page.eval<{ shown: boolean; gap: number }>(
+				`(() => { const t = ${shadow(".toolbar")}.getBoundingClientRect(); const r = ${shadow(".reviewbar")}; return { shown: !r.hidden && ${shadow(".toolbar")}.classList.contains("top"), gap: Math.round(r.getBoundingClientRect().top - t.bottom) }; })()`,
+			);
+		expect(await gap()).toEqual({ shown: true, gap: 8 });
+		expect((await at(1600)).status).toBe(1);
+		expect(await gap()).toEqual({ shown: true, gap: 8 });
+		await page.click(shadow('[data-action="move-toolbar"]'));
+
 		// A system font a third wider, and a classic scrollbar on the page: the
 		// same holds, with other layouts at the same widths.
 		await page.eval(`(() => {
