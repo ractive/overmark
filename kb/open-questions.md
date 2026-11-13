@@ -59,4 +59,3 @@ timestamp: 2026-11-04T17:00:00+01:00
    `test/view.test.ts` fail when its tests run in another order (`--randomize`), and an
    export test's sizes leave about 470 bytes of margin for a longer `case.md` preamble.
 10. **Dependabot's Biome 2.6.6** pull request fails CI and was not looked at.
-
