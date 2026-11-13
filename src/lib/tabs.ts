@@ -28,6 +28,82 @@ export async function inject(tabId: number): Promise<void> {
 	}
 }
 
+/** How long a click waits for a page that is still on its way. */
+export const CLICK_LOAD_WAIT_MS = 30_000;
+
+/** After a refusal right after a click, the wait before one more try. */
+export const CLICK_RETRY_MS = 250;
+
+/**
+ * Resolves once the tab has loaded: `false` if it was closed first or did
+ * not load within `timeoutMs`.
+ */
+function loaded(tabId: number, timeoutMs: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const done = (ok: boolean) => {
+			clearTimeout(timer);
+			chrome.tabs.onUpdated.removeListener(updated);
+			chrome.tabs.onRemoved.removeListener(removed);
+			resolve(ok);
+		};
+		const updated = (id: number, info: { status?: string }) => {
+			if (id === tabId && info.status === "complete") done(true);
+		};
+		const removed = (id: number) => {
+			if (id === tabId) done(false);
+		};
+		const timer = setTimeout(() => done(false), timeoutMs);
+		chrome.tabs.onUpdated.addListener(updated);
+		chrome.tabs.onRemoved.addListener(removed);
+		// It may have loaded before the listeners were there.
+		chrome.tabs.get(tabId).then(
+			(tab) => {
+				if (tab.status === "complete") done(true);
+			},
+			() => done(false),
+		);
+	});
+}
+
+/**
+ * Inject after a click on the icon, which grants the tab's page to
+ * Overmark. Two things in Chrome make one try not enough:
+ *
+ * - Clicked while the tab loads, the page the script would go into is the
+ *   one on its way out, and the next one comes without it. The grant holds
+ *   across a navigation within the site (a reload, a link), so once the page
+ *   has loaded the script goes in again. A page that comes from elsewhere
+ *   (a new tab's first page) is not granted: the panel asks for the click
+ *   again.
+ * - Right after a click on a loaded page Chrome now and then refuses the
+ *   script; a moment later it lets it in.
+ */
+export async function injectOnClick(
+	tab: Pick<chrome.tabs.Tab, "id" | "status">,
+	options: { loadWaitMs?: number; retryMs?: number } = {},
+): Promise<void> {
+	const { loadWaitMs = CLICK_LOAD_WAIT_MS, retryMs = CLICK_RETRY_MS } = options;
+	const id = tab.id;
+	if (id === undefined) return;
+	if (tab.status === "loading") {
+		const first = await inject(id).then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		if (!(await loaded(id, loadWaitMs))) {
+			if (first !== undefined) throw first;
+			return;
+		}
+		return inject(id);
+	}
+	try {
+		await inject(id);
+	} catch {
+		await new Promise((resolve) => setTimeout(resolve, retryMs));
+		await inject(id);
+	}
+}
+
 /** Send a request to the tab's content script, injecting it if needed. */
 export async function sendToTab<T = OverlayState>(
 	tabId: number,

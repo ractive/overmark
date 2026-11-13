@@ -73,7 +73,11 @@ function servePages(): ReturnType<typeof Bun.serve> {
 		hostname: "127.0.0.1",
 		port: 0,
 		async fetch(req) {
-			const path = new URL(req.url).pathname.replace(/^\/+/, "") || "v1";
+			const address = new URL(req.url);
+			const path = address.pathname.replace(/^\/+/, "") || "v1";
+			// `?wait=<ms>`: a page that takes that long to come (a slow site).
+			const wait = Number(address.searchParams.get("wait"));
+			if (wait > 0) await Bun.sleep(Math.min(wait, 10_000));
 			const file = Bun.file(
 				join(pages, path.endsWith(".html") ? path : `${path}.html`),
 			);

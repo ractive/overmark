@@ -199,6 +199,25 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 	}, 60_000);
 
+	test("a click on the icon while the site's next page loads runs Overmark on that page", async () => {
+		const { page } = await h.open("v1?next=1");
+		const tab = await h.browser.waitForTarget(
+			(t) => t.type === "tab" && t.url === `${h.base}/v1?next=1`,
+		);
+		// A link to the next page of the site, which is slow to come: clicked
+		// while it comes, the script went into the page on its way out.
+		const next = `${h.base}/v2?wait=1500`;
+		await page.eval(`location.href = ${JSON.stringify(next)}`);
+		await Bun.sleep(300);
+		await h.browser.send("Extensions.triggerAction", {
+			id: h.extensionId,
+			targetId: tab.targetId,
+		});
+		await page.waitFor(`location.href === ${JSON.stringify(next)}`, 10_000);
+		await page.waitFor(HOST, 10_000);
+		await page.send("Page.close");
+	}, 30_000);
+
 	test("a case's address opens a tab, and the icon's click there loads the case", async () => {
 		const url = `${h.base}/v1?opened=1`;
 		const first = await h.open("v1?opened=1");
