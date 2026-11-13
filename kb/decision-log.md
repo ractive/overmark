@@ -804,8 +804,12 @@ fixed, to verify / verified. The details are the
   calls keep working. An Always allow for `set_mark_status` covers `verified` too.
   For an AI app a verified mark changes only by a reopen (decided in the review of
   pull request 47): `open` records the reopen with the verified fix as `was`;
-  `fixed`, `wontfix`, `cantreproduce` and `verified` on a verified mark change
-  nothing and say so (`fixed`: "add a finding" to say more). This departs from the
+  `fixed` and `verified` on a verified mark change nothing and say so (`fixed`:
+  "add a finding" to say more); `wontfix` and `cantreproduce` on it are refused
+  with an error, since the AI app asked for a change it did not get (the owner,
+  2026-11-13, after the live test: as a plain result it read as done). The
+  question to the user says beforehand when a call will change nothing or be
+  refused, by the same rule the tool then holds to (`statusOutcome`). This departs from the
   UX review's "`fixed` on a verified mark changes only the note", which let an AI
   app's text stand as the user's note. In the panel, the user's Change… still
   changes a verified mark.

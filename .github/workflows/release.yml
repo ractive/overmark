@@ -10,6 +10,16 @@ name: Release
 #
 # The build job runs third-party code (bun install, the tests, Chrome) with a
 # read-only token; only the release job, which runs none, may write.
+#
+# In a public repository the release job also attests both zips: a signed
+# statement (SLSA build provenance, through Sigstore) that this workflow built
+# a file with that digest from that commit. Whoever has a zip checks it with
+#
+#   gh attestation verify overmark-X.Y.Z.zip --repo ractive/overmark
+#
+# GitHub offers attestations in private repositories only on Enterprise Cloud,
+# so while this repository is private the step is skipped and the release is
+# made without them.
 
 on:
   push:
@@ -79,6 +89,11 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      # For the zips' attestations: an OIDC token for the signing certificate,
+      # and storing the attestation and its record.
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -94,6 +109,11 @@ jobs:
           tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
           test "$tagged" = "$BUILT" \
             || { echo "tag $TAG is at $tagged, this run built $BUILT"; exit 1; }
+      - name: Attest both zips (a public repository only)
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: overmark-*.zip
       - name: Create the release with both zips
         env:
           GH_TOKEN: ${{ github.token }}
