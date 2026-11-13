@@ -118,6 +118,41 @@ async function until(ok: () => boolean, ms = 5000): Promise<void> {
 	}
 }
 
+/**
+ * A relay before 0.10.2, as the page hears it: its error frames name no
+ * request (no `for`, no `grantId`). Until `globals.WebSocket` is restored.
+ */
+function olderRelay(): void {
+	const Real = before.WebSocket as typeof WebSocket;
+	globals["WebSocket"] = class extends Real {
+		override addEventListener(
+			type: string,
+			listener: EventListenerOrEventListenerObject,
+			options?: boolean | AddEventListenerOptions,
+		): void {
+			if (type !== "message" || typeof listener !== "function") {
+				super.addEventListener(type, listener, options);
+				return;
+			}
+			super.addEventListener(
+				type,
+				(event) => {
+					const data = (event as MessageEvent).data;
+					const message =
+						typeof data === "string" ? JSON.parse(data) : undefined;
+					if (message?.type !== "error") return listener(event);
+					delete message.for;
+					delete message.grantId;
+					listener(
+						new MessageEvent("message", { data: JSON.stringify(message) }),
+					);
+				},
+				options,
+			);
+		}
+	};
+}
+
 interface Worker {
 	/** Every state the panel was sent. */
 	states: AiState[];
@@ -243,35 +278,7 @@ describe("the worker's connection with client 0.16", () => {
 	});
 
 	test("Review of PR 58, 1: with a relay before 0.10.2 (its errors name nothing) the Disconnects go one at a time", async () => {
-		// What such a relay sends: the error frame without `for` and `grantId`.
-		const Real = before.WebSocket as typeof WebSocket;
-		globals["WebSocket"] = class extends Real {
-			override addEventListener(
-				type: string,
-				listener: EventListenerOrEventListenerObject,
-				options?: boolean | AddEventListenerOptions,
-			): void {
-				if (type !== "message" || typeof listener !== "function") {
-					super.addEventListener(type, listener, options);
-					return;
-				}
-				super.addEventListener(
-					type,
-					(event) => {
-						const data = (event as MessageEvent).data;
-						const message =
-							typeof data === "string" ? JSON.parse(data) : undefined;
-						if (message?.type !== "error") return listener(event);
-						delete message.for;
-						delete message.grantId;
-						listener(
-							new MessageEvent("message", { data: JSON.stringify(message) }),
-						);
-					},
-					options,
-				);
-			}
-		};
+		olderRelay();
 		try {
 			const { w, listed, log } = await twoDisconnects();
 			// One's revoke reached the relay only once Two's was answered.
@@ -292,6 +299,33 @@ describe("the worker's connection with client 0.16", () => {
 			globals["WebSocket"] = before.WebSocket;
 		}
 	});
+
+	test("Review of PR 59, 1: with an older relay, an answer that comes after its revoke timed out is not taken for the next", async () => {
+		olderRelay();
+		try {
+			const { w, ids } = await paired(["One", "Two"]);
+			// One's store write takes longer than the library waits (15 s), and
+			// then fails; Two goes next in the queue.
+			store.slowMs = 16_000;
+			store.failing = true;
+			w.send({ type: "revoke", grantId: ids["One"] });
+			w.send({ type: "revoke", grantId: ids["Two"] });
+			await until(() => grant(w, "One")?.problem !== undefined, 16_000);
+			expect(grant(w, "One")?.problem).toBe(
+				"One was not disconnected: the relay did not answer. Try again.",
+			);
+			// One's late store_unavailable, naming nothing, rejects Two's.
+			await until(() => grant(w, "Two")?.problem !== undefined, 5000);
+			expect(grant(w, "Two")?.problem).toBe(
+				"Two was not disconnected: the relay's answer may be for an earlier Disconnect it was slow to answer. Try again.",
+			);
+			expect(grant(w, "Two")?.allowAll).toBe(true);
+		} finally {
+			globals["WebSocket"] = before.WebSocket;
+			store.slowMs = 0;
+			store.failing = false;
+		}
+	}, 30_000);
 
 	test("Review of PR 58, 2: a Disconnect sent and then cut off by Stop could not be confirmed", async () => {
 		const { w, ids } = await paired(["One"]);

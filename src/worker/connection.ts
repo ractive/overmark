@@ -197,12 +197,36 @@ export function badgeOf(
 	return "off";
 }
 
+/** What the worker knows when `revoke()` rejected. */
+export interface RevokeFailure {
+	error: unknown;
+	/** The relay's error may answer an earlier revoke (`unattributed`). */
+	unattributed: boolean;
+}
+
 /**
- * What the card says when Disconnect for `app` did not work: `revoke()`
- * rejected with `error`.
+ * Whether a relay's `error` may answer another revoke than the one it
+ * rejected: it names no request (a relay before 0.10.2), and a revoke of
+ * this session timed out before, whose answer may still come. The queue
+ * pairs answers only while every revoke waits for its own.
  */
-export function revokeProblem(error: unknown, app: string): string {
+export function unattributed(error: unknown, timedOut: boolean): boolean {
+	const e = error as { code?: unknown; for?: unknown } | undefined;
+	return (
+		timedOut &&
+		e?.for === undefined &&
+		(e?.code === "unknown_id" || e?.code === "store_unavailable")
+	);
+}
+
+/** What the card says when Disconnect for `app` did not work. */
+export function revokeProblem(
+	{ error, unattributed }: RevokeFailure,
+	app: string,
+): string {
 	const not = `${app} was not disconnected`;
+	if (unattributed)
+		return `${not}: the relay's answer may be for an earlier Disconnect it was slow to answer. Try again.`;
 	const code = (error as { code?: unknown } | undefined)?.code;
 	if (code === "store_unavailable")
 		return `${not}: the relay could not save this. Try again.`;
@@ -243,7 +267,9 @@ export class Connection {
 	#problem: string | undefined;
 	#lastCall: CallView | undefined;
 	/** Why Disconnect did not work, by grant: until it goes, or connected again. */
-	readonly #revokeProblems = new Map<string, { error: unknown }>();
+	readonly #revokeProblems = new Map<string, RevokeFailure>();
+	/** A revoke of this session timed out: its answer may still come. */
+	#revokeTimedOut = false;
 	/**
 	 * Disconnects, one at a time. Relays from 0.10.2 name the grant their
 	 * error answers and the library pairs it; an older one (the user may set
@@ -458,8 +484,9 @@ export class Connection {
 			({ detail }) => {
 				if (detail.state === "connected") {
 					this.#problem = undefined;
-					// "Not connected" no longer holds.
+					// "Not connected" no longer holds; a new session owes no answers.
 					this.#revokeProblems.clear();
+					this.#revokeTimedOut = false;
 					void this.#setReplaced(undefined);
 				}
 				const on = sessionOnAfter(detail, this.#settings.keepOn);
@@ -829,9 +856,19 @@ export class Connection {
 			if (mcp !== this.#mcp) return;
 			return mcp.revoke(grantId).catch((error: unknown) => {
 				if (mcp !== this.#mcp) return;
-				this.#revokeProblems.set(grantId, { error });
-				// A relay before 0.10.2: the queue makes it this grant's answer.
-				if ((error as { code?: unknown }).code === "unknown_id")
+				const failure: RevokeFailure = {
+					error,
+					unattributed: unattributed(error, this.#revokeTimedOut),
+				};
+				if ((error as { name?: unknown }).name === "TimeoutError")
+					this.#revokeTimedOut = true;
+				this.#revokeProblems.set(grantId, failure);
+				// A relay before 0.10.2: the queue makes it this grant's answer,
+				// unless an earlier one's may still come.
+				if (
+					(error as { code?: unknown }).code === "unknown_id" &&
+					!failure.unattributed
+				)
 					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
 				this.#changed();
 			});
@@ -900,7 +937,7 @@ export class Connection {
 				const problem =
 					failed === undefined
 						? undefined
-						: revokeProblem(failed.error, g.client.name || g.client.host);
+						: revokeProblem(failed, g.client.name || g.client.host);
 				return {
 					grantId: g.grantId,
 					name: g.client.name,

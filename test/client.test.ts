@@ -28,6 +28,7 @@ import {
 	badgeOf,
 	revokeProblem,
 	sessionOnAfter,
+	unattributed,
 } from "../src/worker/connection.ts";
 import { KeepOn } from "../src/worker/keep-on.ts";
 
@@ -120,42 +121,67 @@ describe("the library's state, as the worker reads it", () => {
 	});
 
 	test("Disconnect that did not work says why, for each of revoke's rejections", () => {
-		const relayError = (code: string) =>
-			Object.assign(new Error(`Relay error ${code}: x`), { code });
-		expect(revokeProblem(relayError("store_unavailable"), "Claude")).toBe(
+		const relayError = (code: string, named = false) =>
+			Object.assign(
+				new Error(`Relay error ${code}: x`),
+				{ code },
+				named ? { for: "grant.revoke", grantId: "g" } : {},
+			);
+		const problem = (error: unknown, _state?: string, unattributed = false) =>
+			revokeProblem({ error, unattributed }, "Claude");
+		expect(problem(relayError("store_unavailable"))).toBe(
 			"Claude was not disconnected: the relay could not save this. Try again.",
 		);
-		expect(revokeProblem(relayError("unknown_id"), "Claude")).toBe(
+		expect(problem(relayError("unknown_id"))).toBe(
 			"The relay no longer knows Claude, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
 		);
-		expect(
-			revokeProblem(
-				new DOMException("TabMcp: not connected", "InvalidStateError"),
-				"Claude",
-			),
-		).toBe(
+		const notSent = new DOMException(
+			"TabMcp: not connected",
+			"InvalidStateError",
+		);
+		expect(problem(notSent, "disconnected")).toBe(
 			"Claude was not disconnected: Overmark is not connected to the relay. Turn on AI access and try again.",
 		);
 		expect(
-			revokeProblem(
+			problem(
 				new DOMException("TabMcp: the relay did not answer", "TimeoutError"),
-				"Claude",
 			),
 		).toBe("Claude was not disconnected: the relay did not answer. Try again.");
 		// Sent, then the session ended: the relay may have done it.
 		expect(
-			revokeProblem(
+			problem(
 				new DOMException(
 					"TabMcp: the session ended before the relay answered",
 					"NetworkError",
 				),
-				"Claude",
+				"disconnected",
 			),
 		).toBe(
 			"Overmark could not confirm that Claude was disconnected: the connection ended first. It shows when AI access is next on.",
 		);
-		expect(revokeProblem(new Error("odd"), "Claude")).toBe(
-			"Claude was not disconnected: odd",
+		expect(problem(new Error("odd"))).toBe("Claude was not disconnected: odd");
+		// An older relay's answer after an earlier revoke timed out.
+		expect(problem(relayError("unknown_id"), "connected", true)).toBe(
+			"Claude was not disconnected: the relay's answer may be for an earlier Disconnect it was slow to answer. Try again.",
+		);
+	});
+
+	test("an older relay's error after a revoke timed out may be that revoke's answer", () => {
+		const error = (code: string, named: boolean) =>
+			Object.assign(
+				new Error(code),
+				{ code },
+				named ? { for: "grant.revoke", grantId: "g" } : {},
+			);
+		for (const code of ["unknown_id", "store_unavailable"]) {
+			// Named (relay 0.10.2): always its own.
+			expect(unattributed(error(code, true), true)).toBe(false);
+			// Unnamed: its own unless a revoke timed out before.
+			expect(unattributed(error(code, false), false)).toBe(false);
+			expect(unattributed(error(code, false), true)).toBe(true);
+		}
+		expect(unattributed(new DOMException("x", "TimeoutError"), true)).toBe(
+			false,
 		);
 	});
 });
