@@ -567,6 +567,64 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.send("Page.close");
 	}, 120_000);
 
+	/** Make the panel's `chrome.tabs.sendMessage` go through `body` (until it is reloaded). */
+	const wrapSend = (body: string) =>
+		h.control.eval(
+			`(() => { const send = chrome.tabs.sendMessage.bind(chrome.tabs); chrome.tabs.sendMessage = (tabId, message) => (${body})(tabId, message, send); })()`,
+		);
+
+	test("Annotate this page stays with the tab it was clicked for (review of PR 57)", async () => {
+		const a = await h.open("v1");
+		const b = await h.open("v2");
+		// The page answers late: the user is on another tab by then.
+		await wrapSend(`async (tabId, message, send) => {
+			if (message.type === "page:info") await new Promise((r) => setTimeout(r, 1500));
+			return send(tabId, message);
+		}`);
+		const panel = await annotate(a.page);
+		await b.page.activate();
+		// No content script on the tab yet: no toolbar either.
+		const upOn = (tabId: number) =>
+			h.control.eval<boolean>(
+				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.visible, () => false)`,
+			);
+		await until(
+			() => upOn(a.tabId),
+			(up) => up,
+			10_000,
+		);
+		expect(await upOn(b.tabId)).toBe(false);
+		const made = await openOne(panel);
+		expect(made.page.url).toBe(`${h.base}/v1`);
+		expect(made.title).toBe("Krankenkasse vergleichen (v1)");
+		await a.page.send("Page.close");
+		await b.page.send("Page.close");
+	}, 60_000);
+
+	test("a page that does not answer: said under the button, which works again (review of PR 57)", async () => {
+		const { page, tabId } = await h.open("v1");
+		await wrapSend(`(tabId, message, send) =>
+			message.type === "page:info" && globalThis.mute ? new Promise(() => {}) : send(tabId, message)`);
+		await h.control.eval("globalThis.mute = true");
+		const panel = await annotate(page);
+		await panel.waitFor(
+			`document.getElementById("hint").textContent === "This page did not answer. Reload it and try again."`,
+			15_000,
+		);
+		expect(
+			await panel.eval<boolean>(`document.getElementById("annotate").disabled`),
+		).toBe(false);
+		// The button works again once the page answers.
+		await h.control.eval("globalThis.mute = false");
+		await panel.eval(`document.getElementById("annotate").click()`);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		await until(
+			() => toolbarUp(tabId),
+			(up) => up,
+		);
+		await page.send("Page.close");
+	}, 60_000);
+
 	test("an empty case whose toolbar holds a comment on another tab stays when left (review of PR 57)", async () => {
 		const a = await h.open("v1");
 		let panel = await annotate(a.page);

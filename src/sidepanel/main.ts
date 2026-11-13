@@ -1017,17 +1017,19 @@ function announce(caseId: string): void {
 }
 
 /**
- * Show the toolbar on the tab in front, adding to the open case: "Add marks",
- * and a case "Annotate this page" just made (DEC-026).
+ * Show the toolbar adding to the open case: on the tab in front ("Add
+ * marks"), or on `tabId`, the tab "Annotate this page" was clicked for
+ * (DEC-026), whatever tab is in front by then.
  */
-async function startAnnotating(target: Case): Promise<void> {
+async function startAnnotating(target: Case, tabId?: number): Promise<void> {
 	// Under the case's buttons, and only where there is something to say
 	// (what a draw found stays).
 	const say = (text: string | undefined) => {
 		if (text !== undefined) caseHintWriter()(text);
 	};
-	const tab = await activeTab();
-	if (tab?.id === undefined) return;
+	const id = tabId ?? (await activeTab())?.id;
+	if (id === undefined) return;
+	const tab = { id };
 	tabWork.cancel(); // a refresh still running must not overwrite this
 	try {
 		const overlay = await sendToTab<OverlayState>(tab.id, {
@@ -1040,7 +1042,9 @@ async function startAnnotating(target: Case): Promise<void> {
 			},
 		});
 		toolbarOn.add(tab.id);
-		update((s) => (s.overlay = overlay));
+		update((s) => {
+			if (s.tab?.id === tab.id) s.overlay = overlay;
+		});
 		say(
 			overlay.saving
 				? "Overmark is still saving the last marks on this page; the toolbar switches once that is done."
@@ -1113,6 +1117,25 @@ async function retitleToolbars(c: Case): Promise<void> {
 let creating = false;
 
 /**
+ * How long "Annotate this page" waits for the page to say what it is: a tab
+ * in an alert(), paused in DevTools or still loading says nothing, and the
+ * button must work again.
+ */
+const PAGE_ANSWER_MS = 5000;
+
+/** What the page is, from its content script (injected if need be). */
+async function askPage(tabId: number): Promise<PageInfo | undefined> {
+	const ask = () =>
+		sendToTab<PageInfo | undefined>(tabId, { type: "page:info" });
+	const page = await ask();
+	if (page !== undefined) return page;
+	// Something there that does not answer it (not this build's content
+	// script): once more, with it injected.
+	await inject(tabId);
+	return ask();
+}
+
+/**
  * "Annotate this page" (DEC-026): the case is stored at once, with the
  * page's title and info and no marks, and opens as if chosen from the list,
  * with the toolbar on the page adding to it. The page says what it is; the
@@ -1123,27 +1146,27 @@ async function annotate(): Promise<void> {
 	if (creating) return;
 	creating = true;
 	try {
-		const tab = await activeTab();
-		if (tab?.id === undefined) return;
+		// The tab clicked for: the case is its page's, and its toolbar goes
+		// up there, whatever tab is in front when the page answers.
+		const tabId = (await activeTab())?.id;
+		if (tabId === undefined) return;
 		tabWork.cancel();
-		let page: PageInfo | undefined;
+		let page: PageInfo | "late" | undefined;
 		try {
-			const ask = () =>
-				sendToTab<PageInfo | undefined>(tab.id as number, {
-					type: "page:info",
-				});
-			page = await ask();
-			// Something there that does not answer it (not this build's
-			// content script): once more, with it injected.
-			if (page === undefined) {
-				await inject(tab.id);
-				page = await ask();
-			}
+			page = await Promise.race([
+				askPage(tabId),
+				sleep(PAGE_ANSWER_MS).then(() => "late" as const),
+			]);
 		} catch (error) {
 			update((s) => (s.hint = describeError(error)));
 			return;
 		}
-		if (page === undefined) throw new Error("the page did not answer");
+		if (page === "late" || page === undefined) {
+			update(
+				(s) => (s.hint = "This page did not answer. Reload it and try again."),
+			);
+			return;
+		}
 		const id = newId("c");
 		const made = newCase(id, page, new Date().toISOString());
 		const c = await store.updateCase(id, (current) => {
@@ -1154,7 +1177,7 @@ async function annotate(): Promise<void> {
 		announce(c.id);
 		update((s) => (s.hint = undefined));
 		openCase(c.id);
-		await startAnnotating(c);
+		await startAnnotating(c, tabId);
 	} catch (error) {
 		update((s) => (s.hint = `Could not start a case: ${message(error)}`));
 	} finally {
