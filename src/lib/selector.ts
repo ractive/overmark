@@ -87,6 +87,18 @@ const PSEUDO_CLASSES = new Set([
 ]);
 
 /**
+ * Attributes whose value a substring operator (`^=`, `$=`, `*=`) may test:
+ * the markup sends them whole. The others take `=`, `~=`, `|=` and the bare
+ * `[name]`: the markup cuts or cleans their values (a URL's query string in
+ * an `aria-label`, past 200 characters), and a substring would read that.
+ */
+const SUBSTRING_ATTRIBUTES: ReadonlySet<string> = new Set([
+	"id",
+	"class",
+	...TEST_ID_ATTRIBUTES,
+]);
+
+/**
  * Pseudo-classes of markup a page's own style rule may also use and still be
  * listed (`rule` mode): `:link` and `:any-link` follow `href` (Chrome never
  * lets a page see `:visited`), `:defined` a custom element's definition,
@@ -134,6 +146,9 @@ const HAS =
 
 const EMPTY =
 	"The pseudo-class :empty is not allowed: it tests what a text area or an editor holds.";
+
+const SUBSTRING = (name: string) =>
+	`The operators ^=, $= and *= are not allowed on [${said(name)}]: they would read what the markup cuts or cleans. They are allowed on ${[...SUBSTRING_ATTRIBUTES].join(", ")}; the other attributes take =, ~=, |= or [name] alone.`;
 
 const ATTRIBUTE = (name: string) =>
 	`The attribute selector [${said(name)}] is not allowed: one may hold what is typed or chosen in a form. A selector may test only these attributes: ${ALLOWED_ATTRIBUTES}.`;
@@ -310,7 +325,14 @@ class Scanner {
 			this.#i++;
 			return;
 		}
-		if ("~|^$*".includes(this.#peek() ?? "=")) this.#i++;
+		const operator = this.#peek() ?? "=";
+		if (
+			"^$*".includes(operator) &&
+			!this.#rule &&
+			!SUBSTRING_ATTRIBUTES.has(name)
+		)
+			throw new Refused(SUBSTRING(name));
+		if ("~|^$*".includes(operator)) this.#i++;
 		if (this.#peek() !== "=") throw new Refused(OTHER("An attribute operator"));
 		this.#i++;
 		this.#spaces();

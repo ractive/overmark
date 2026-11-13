@@ -745,6 +745,34 @@ describe("a selector cannot ask about form state (CR-01)", () => {
 			[],
 		]);
 	});
+
+	test("substring operators only on id, class and test ids: the markup cuts the rest", () => {
+		page(
+			`<main><button aria-label="Copy invite link https://app.example/invite?token=s3cr3t" data-testid="copy-link">Copy</button><img alt="https://app.example/a.png?sig=abc"></main>`,
+		);
+		const main = $("main");
+		for (const selector of [
+			'[aria-label*="token=s3"]',
+			'[aria-label^="Copy"]',
+			'[alt$="abc"]',
+			'[name^="x"]',
+		])
+			expect(refusal(main, selector)).toStartWith(
+				"The operators ^=, $= and *= are not allowed on [",
+			);
+		for (const selector of [
+			'[aria-label="Copy invite link https://app.example/invite?token=s3cr3t"]',
+			'[data-testid^="copy"]',
+			'[class*="x"], button',
+			'[id$="y"], button',
+			"[aria-label~=Copy]",
+			"[aria-label]",
+		])
+			expect([selector, refusal(main, selector)]).toEqual([
+				selector,
+				undefined,
+			]);
+	});
 });
 
 describe("selector vocabulary (escapes, comments, case)", () => {
