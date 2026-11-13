@@ -145,6 +145,11 @@ plus its images:
     "shape": { "kind": "box", "rect": { "x": 10, "y": 20, "width": 200, "height": 40 } },
     "crop": "crops/a1.webp",
     "element": { "tag": "button", "role": "button", "name": "Anmelden", "…": "…" },
+    "resolution": { "kind": "fixed", "note": "…", "at": "…",
+                    "app": { "id": "https://claude.ai/oauth", "name": "Claude", "host": "claude.ai" },
+                    "verified": { "at": "…" } },
+    "reopens": [{ "note": "Still pale on hover", "at": "…",
+                  "was": { "kind": "fixed", "note": "…", "at": "…" } }],
     "findings": [{ "id": "f_…", "text": "…", "at": "…",
                    "app": { "id": "https://claude.ai/oauth", "name": "Claude", "host": "claude.ai" } }]
   }],
@@ -155,6 +160,17 @@ plus its images:
 `verdict` holds the summary for the developer: the field kept its name from before
 DEC-019. `findings` is there only when a mark has some; a finding has `editedAt` once its
 app changed it, and `imported: true` once it came in from a file.
+
+A mark's status is derived, never stored as such (DEC-023): open (no `resolution`),
+fixed and to verify (`kind: "fixed"`), verified (`kind: "fixed"` with
+`resolution.verified`), won't fix (`wontfix`), can't reproduce (`cantreproduce`).
+`resolution.kind` never gets another value: an older build refuses a kind it does not
+know, and with it the whole file. Every Verify field is optional: `verified { at, app? }`
+is read only on a fix (dropped on another kind), `app` names the AI app that set a
+status through a tool (absent: set in the panel), and `reopens` lists, oldest first and
+at most 20, each time the mark was opened again with its note (at most 2,000
+characters) and the whole resolution it ended. An older build reading a file of this one
+drops `verified`, `reopens` and `app`; `case.md` in the same zip still has them.
 
 Shape kinds: `element` (a picked element's box), `box`, `arrow` (`from`, `to`), `pen`
 (`points`), `note` (`at`). The element details carry a best-effort CSS selector as a
@@ -206,8 +222,8 @@ loading is searched for again.
 
 | Tool | What it does | Asks first |
 |---|---|---|
-| `list_cases` | Cases with title, page, number of annotations, the start of the summary for the developer | no |
-| `get_case` | A case's summary, annotations with their findings (`own` for the caller's), element details and crops | no |
+| `list_cases` | Cases with title, page, their marks by status (`open`, `toVerify`, `verified`, `closed`), the start of the summary for the developer | no |
+| `get_case` | A case's summary, annotations with their status, resolution (`verified`, `by`), reopens and findings (`own` for the caller's), element details and crops | no |
 | `get_image` | One screenshot or crop, scaled to at most 1568 px | no |
 | `load_case` | Loads a case onto the tab in front and reports what was found | no |
 | `highlight` | Scrolls to and outlines one annotation's element (or another candidate) | no |
@@ -215,7 +231,7 @@ loading is searched for again.
 | `capture` | A screenshot of the tab in front | no |
 | `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes |
 | `set_summary` | Writes the case's summary for the developer (stored as `verdict`, DEC-019) | yes |
-| `set_mark_status` | Resolves a mark (fixed, won't fix, can't reproduce) or opens it again | yes |
+| `set_mark_status` | Sets a mark fixed (to verify), verified (only a fixed mark, and only when the user says so), won't fix or can't reproduce, or opens it again with a note, which records a reopen (DEC-023) | yes |
 | `add_finding` | Adds a finding of the calling AI app to a mark (DEC-019) | yes |
 | `edit_finding` | Changes the text of one of the calling app's own findings | yes |
 | `delete_finding` | Deletes one of the calling app's own findings | yes |
