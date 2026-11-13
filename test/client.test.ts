@@ -385,6 +385,55 @@ describe("tab-mcp client 0.16 with a relay", () => {
 		}
 	});
 
+	test('tools/list: no "usually in the page\'s browser tab" for a page that asks with its own onConfirm, as Overmark does', async () => {
+		const SENTENCE =
+			"The page may ask the user to allow each call, usually in the page's browser tab.";
+		const description = async (onConfirm: boolean) => {
+			const mcp = new TabMcp({
+				relay: relay.url,
+				server: { name: "overmark", version: "0.0.0" },
+				storage: null,
+				...(onConfirm ? { onConfirm: () => true } : {}),
+			});
+			await mcp.registerTool(
+				{
+					name: "change",
+					description: "Changes something. The user is asked first.",
+					annotations: { consequentialHint: true },
+					execute: () => "ok",
+				},
+				{ callers: ["relay"] },
+			);
+			const { address } = await mcp.connect();
+			const client = new Client(
+				{ name: "test", version: "1.0.0" },
+				{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+			);
+			await client.connect(
+				new StreamableHTTPClientTransport(new URL(address), {
+					requestInit: {
+						headers: {
+							Authorization: `Bearer ${await tokenFor(relay.store, address)}`,
+						},
+					},
+				}),
+			);
+			try {
+				return (await client.listTools()).tools[0]?.description;
+			} finally {
+				await client.close();
+				mcp.disconnect();
+			}
+		};
+		expect(await description(true)).toBe(
+			"Changes something. The user is asked first.",
+		);
+		// Without one the library's own dialog asks, in the page: it says so.
+		expect(await description(false)).toBe(
+			`Changes something. The user is asked first. ${SENTENCE}`,
+		);
+	});
+
 	// Last: it stops the relay.
 	test("the relay going away: reconnecting with the reason; a refusal ends it with error, then statechange", async () => {
 		const { mcp, heard } = page(relay.url);
