@@ -1147,6 +1147,11 @@ export function createTools(deps: ToolDeps): Tool[] {
 							`Mark ${mark} is fixed, to verify.`,
 						);
 					default:
+						// The user's verification goes only with a reopen, which keeps it.
+						if (was === "verified")
+							throw new CaseError(
+								`Mark ${mark} is verified: reopen it first, with a note on what is still wrong.`,
+							);
 						return set(
 							withResolution(
 								c,

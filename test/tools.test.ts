@@ -874,6 +874,21 @@ describe("tools", () => {
 			expect(await status(2, "fixed")).toBe("Mark 2 is verified already.");
 		});
 
+		test("a verified mark is not closed over: reopen it first", async () => {
+			await seed();
+			await status(2, "fixed");
+			await status(2, "verified");
+			const verified = (await stored())?.resolution;
+			for (const s of ["wontfix", "cantreproduce"])
+				await expect(status(2, s)).rejects.toThrow(
+					"Mark 2 is verified: reopen it first, with a note on what is still wrong.",
+				);
+			expect((await stored())?.resolution).toEqual(verified as never);
+			await status(2, "open", "Not fixed after all");
+			expect(await status(2, "wontfix")).toBe("Mark 2 is resolved: Won't fix.");
+			expect((await stored())?.reopens?.[0]?.was).toEqual(verified as never);
+		});
+
 		test("get_case: status, reopens with who, verified with who", async () => {
 			await seed();
 			await status(2, "fixed", "Darker");
