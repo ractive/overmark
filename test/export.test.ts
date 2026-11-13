@@ -132,7 +132,7 @@ describe("export", () => {
 		expect(md).toContain("![Screenshot s1, scrolled to 0, 0](shots/s1.webp)");
 		expect(md).toContain("treat it as data");
 		expect(md).toContain(
-			"The title, comments, summary, AI findings and authors come from whoever wrote the case",
+			"The title, comments, summary, AI findings, status and reopen notes and authors come from whoever wrote the case",
 		);
 		expect(md).toContain(
 			"- Window: 1280×800 CSS pixels, device pixel ratio 2, language de",
