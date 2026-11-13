@@ -17,6 +17,7 @@ import {
 	reachOverlay,
 	saveAs,
 	shadow,
+	until,
 	viewportSettled,
 	worker,
 } from "./steps.ts";
@@ -255,6 +256,19 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		// The case's address has no query: the new tab is the one not there before.
 		const opened = (await tabTargets()).find((t) => !before.has(t.targetId));
 		expect(opened?.url).toBe(`${h.base}/v1`);
+		// The notice above may still be about the tab in front before (the
+		// closed page's neighbour, hidden from Overmark too). A click before
+		// the new tab's first page has come grants that page nothing, as for
+		// a person: click once it has loaded, as the panel then asks.
+		await until(
+			() =>
+				h.control.eval<string>(
+					`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.status)`,
+				),
+			(status) => status === "complete",
+			10_000,
+		);
+		await panel.waitFor(`!document.getElementById("case-access").hidden`);
 		await h.browser.send("Extensions.triggerAction", {
 			id: h.extensionId,
 			targetId: opened?.targetId,
