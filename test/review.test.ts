@@ -7,6 +7,8 @@ import { describeElement } from "../src/lib/element.ts";
 import { sampleCase } from "./fixtures.ts";
 
 let doc: Document;
+/** Puts happy-dom's own `getBoundingClientRect` back. */
+let restoreLayout: () => void = () => undefined;
 let overlay: ReturnType<typeof stubOverlay>;
 let reviewer: Reviewer;
 
@@ -37,8 +39,15 @@ function stubOverlay(document: Document) {
 beforeEach(() => {
 	const window = new Window({ url: "https://www.example.com/kk" });
 	doc = window.document as unknown as Document;
-	// happy-dom lays nothing out.
-	window.Element.prototype.getBoundingClientRect = () =>
+	// happy-dom lays nothing out. Its windows share one Element class, so
+	// what is put on the prototype here is taken off again after each test:
+	// left there, every element of a test file that runs later has a size.
+	const proto = window.Element.prototype;
+	const layout = proto.getBoundingClientRect;
+	restoreLayout = () => {
+		proto.getBoundingClientRect = layout;
+	};
+	proto.getBoundingClientRect = () =>
 		({ x: 0, y: 0, width: 100, height: 20 }) as never;
 	Object.assign(globalThis, {
 		location: window.location,
@@ -50,6 +59,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	reviewer.clear();
+	restoreLayout();
 });
 
 const $ = (s: string) => doc.querySelector(s) as Element;

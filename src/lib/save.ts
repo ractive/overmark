@@ -53,12 +53,40 @@ export interface SaveRequest {
 	 */
 	keepPending?: boolean;
 	/**
+	 * Sent by the content script (`fromPage`): its numbers may not run far
+	 * above the case's next one. Set by the worker, whatever the page says.
+	 */
+	fromPage?: boolean;
+	/**
 	 * Marks of the case on the same view, drawn on the new shot under the new
 	 * marks: the screenshot shows what the user saw, as one save would. Only
 	 * marks numbered below the new ones are drawn: Undo, which takes the
 	 * highest number out, then never leaves a pin of its mark behind.
 	 */
 	alsoDrawn?: (RenderedMark & { shot: string })[];
+}
+
+/**
+ * How far above the case's next number (and one more for each further mark
+ * of the save) a mark from the page may be numbered. The toolbar numbers its
+ * drafts on from the next number, and a draft taken out before it was added
+ * leaves its number unused; nothing else leaves a gap. A number chosen at
+ * will (99999) would end the case's numbers for good: a deleted mark's
+ * number is never given again (DEC-014).
+ */
+export const MAX_NUMBER_GAP = 100;
+
+/**
+ * A save the content script sent (`case:save`): its marks are the user's,
+ * whatever the draft says. Only an AI app's `add_annotation`, in the worker,
+ * stores a mark of an AI app (CR-07).
+ */
+export function fromPage(request: SaveRequest): SaveRequest {
+	return {
+		...request,
+		fromPage: true,
+		annotations: request.annotations.map((a) => ({ ...a, author: "user" })),
+	};
 }
 
 /** The most marks drawn on a screenshot besides its own (`alsoDrawn`). */
@@ -159,20 +187,31 @@ export async function saveCase(
 		}
 		const taken = new Set(current?.annotations.map((a) => a.number));
 		const annotations: Annotation[] = [...(current?.annotations ?? [])];
+		const next = nextNumbers(current).annotation;
+		const highest = next + request.annotations.length - 1 + MAX_NUMBER_GAP;
 		for (const draft of request.annotations) {
+			if (request.fromPage && draft.number > highest)
+				throw new SaveError(
+					`mark ${draft.number} is far above the case's next number, ${next}: a mark from the page is numbered on from it.`,
+				);
 			// A deleted mark's number stays its own: its pin is on the screenshots.
 			if (taken.has(draft.number) || draft.number <= (current?.lastNumber ?? 0))
 				throw new SaveError(
 					`mark ${draft.number} exists in the case already: the case changed meanwhile. Adding it again gives it the next free number.`,
 				);
 			taken.add(draft.number);
-			const { cropRect: _, ...rest } = draft;
 			const id = `a${draft.number}`;
+			// A new mark's fields, and nothing else of the draft: it is open and
+			// has no findings, whatever the sender put in (CR-07).
 			annotations.push({
-				...rest,
 				id,
+				number: draft.number,
 				shot: finalIds.get(draft.shot) ?? draft.shot,
+				comment: draft.comment,
+				author: draft.author,
+				shape: draft.shape,
 				crop: cropImage(id),
+				element: draft.element,
 			});
 			const image = crops.get(draft);
 			if (image !== undefined) images.set(cropImage(id), image);

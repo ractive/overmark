@@ -799,7 +799,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		name: "get_mark_element",
 		title: "Read a mark's element from the page",
 		description:
-			"The live page's markup and CSS for one mark's element on the page in front: its HTML (trimmed; scripts, styles, comments, hidden elements, form field values and typed text left out), its box and the window's size, computed styles that explain layout and look (values at their default left out), the CSS rules that match it (selector, declarations, style sheet, media condition), a few ancestors with their layout styles, and its children. selector reads another element instead, only around the mark's element: the nearest ancestor (or the element itself) that matches, else the first match inside it. For a mark without an element (box, arrow, pen, note), selector is looked for on the whole page, and only when the tab in front shows the case's page. The page's head, scripts, styles and templates are never read. Loads the case onto the page first when needed, as highlight does; otherwise it only reads.",
+			"The live page's markup and CSS for one mark's element on the page in front: its HTML (trimmed; scripts, styles, comments, hidden elements, form field values and typed text left out), its box and the window's size, computed styles that explain layout and look (values at their default left out), the CSS rules that match it (selector, declarations, style sheet, media condition; a rule whose selector depends on a state, such as :checked, :hover, :focus or :has(), is never listed), a few ancestors with their layout styles, and its children. selector reads another element instead, only around the mark's element: the nearest ancestor (or the element itself) that matches, else the first match inside it. For a mark without an element (box, arrow, pen, note), selector is looked for on the whole page, and only when the tab in front shows the case's page. The page's head, scripts, styles and templates are never read. Loads the case onto the page first when needed, as highlight does; otherwise it only reads.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -814,7 +814,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 					minLength: 1,
 					maxLength: 1000,
 					description:
-						"A CSS selector for another element: a parent (`.Card_root`, `form`) or something inside the mark's element; for a mark without an element, any element of the case's page.",
+						"A CSS selector for another element: a parent (`.Card_root`, `form`) or something inside the mark's element; for a mark without an element, any element of the case's page. It may use tags, classes, ids, test ids, the attributes role, name, type, aria-label and others that hold no field value (^=, $= and *= only on id, class and test ids), structural pseudo-classes (:nth-child(), :first-child, …), :is(), :where(), :not() and the combinators; not :has(), :empty, attributes such as value or checked, nor pseudo-classes of form or page state (:checked, :focus, …). Nothing inside a select, text area or editor is matched.",
 				},
 			},
 			required: ["caseId", "mark"],
@@ -1008,7 +1008,8 @@ export function createTools(deps: ToolDeps): Tool[] {
 					type: "string",
 					minLength: 1,
 					maxLength: 1000,
-					description: "A CSS selector for one element of the page in front.",
+					description:
+						"A CSS selector for one element of the page in front, with the same rules as get_mark_element's selector.",
 				},
 				comment: { type: "string", minLength: 1, maxLength: 5000 },
 			},
