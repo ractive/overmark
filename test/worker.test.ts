@@ -302,7 +302,7 @@ describe("questions", () => {
 			);
 		expect(left).not.toBeNull();
 		const shown = message.length - head.length - (left?.[0].length ?? 0);
-		expect(Number(left?.[1].replaceAll(",", ""))).toBe(compact.length - shown);
+		expect(Number(left?.[1]?.replaceAll(",", ""))).toBe(compact.length - shown);
 	});
 
 	test("a notification with short arguments and no lines shows them whole, and says nothing more", async () => {
