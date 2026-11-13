@@ -214,6 +214,15 @@ describe("a call of a tool that changes something", () => {
 		expect(await decide(d, r)).toBe(false);
 		expect(d.asked).toBe(0);
 		expect(refused).toEqual(["delete_case"]);
+		// So is a caller over a message port (`serve`, client 0.15), which
+		// Overmark never opens: only an AI app through the relay is asked about.
+		const local: ConfirmRequest = {
+			...request(),
+			client: { kind: "local", id: "port-1" },
+		};
+		expect(await decide(d, local)).toBe(false);
+		expect(d.asked).toBe(0);
+		expect(refused).toEqual(["delete_case", "delete_case"]);
 		// An AI app through the relay is as before.
 		expect(await decide(d, request())).toBe(true);
 	});
