@@ -778,6 +778,10 @@ export class Annotator {
 			retry = false,
 		}: { discard?: boolean; retry?: boolean } = {},
 	): Promise<void> {
+		// "Add marks" for it waits for a new case's save: it is not shown then.
+		const deferred = this.#activity.deferred;
+		if (deferred?.kind === "show" && deferred.options.target?.caseId === caseId)
+			this.#activity.defer({ kind: "hide" });
 		if (this.#target?.caseId !== caseId) return;
 		// Not a Done again: what an earlier Done left out is tried once more.
 		if (retry) this.#leftOut = undefined;

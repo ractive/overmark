@@ -259,3 +259,27 @@ test("a case loaded onto the page leaves Undo its marks, whatever copy it is", a
 	expect(undo()?.disabled).toBe(false);
 	expect(undo()?.title).toBe("Take mark 3 out of “Open case”");
 });
+
+test("All cases during a new case's save: a show for that case waiting for it is dropped", async () => {
+	let release: () => void = () => undefined;
+	const held = new Promise<void>((r) => {
+		release = r;
+	});
+	const { a, overlay } = annotator();
+	a.show({});
+	note(overlay, a);
+	answer = (r) => {
+		if (r.type !== "case:save") return works(r);
+		return held.then(() => works(r));
+	};
+	const saving = a.save("A new one");
+	await settle(a, () => a.state().saving);
+	// The panel opens case X and Add marks: the show waits for the save.
+	a.show({ target: { caseId: "c_x", title: "X", nextAnnotation: 1 } });
+	// "← All cases" for X before the save is over.
+	await a.end("c_x");
+	release();
+	await saving;
+	expect(a.state().target?.caseId).not.toBe("c_x");
+	expect(a.state().visible).toBe(false);
+});
