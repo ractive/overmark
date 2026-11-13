@@ -131,10 +131,10 @@ describe("export", () => {
 		const { c } = await stored();
 		const md = caseMarkdown(c);
 		expect(md).toContain("# Prämien-Button: Kontrast!");
-		expect(md).toContain("> Use the dark button.");
+		expect(md).toContain("```text\nUse the dark button.\n```");
 		expect(md).toContain("### 1. box");
 		expect(md).toContain("### 2. box (by an AI app)");
-		expect(md).toContain("> Fix *this* \\<now>\n> second line");
+		expect(md).toContain("```text\nFix *this* <now>\nsecond line\n```");
 		expect(md).toContain(
 			'- Element: button "Prämien berechnen" · Button\\_primary',
 		);
@@ -170,7 +170,7 @@ describe("export", () => {
 		});
 		expect(md.match(/^## Summary for the developer$/gm)).toHaveLength(1);
 		expect(md).not.toMatch(/^## Marks$/m);
-		expect(md).toContain("> \\<!-- hidden");
+		expect(md).toContain("```text\nok\n<!-- hidden\n```");
 		expect(md).toContain("- Selector: `a ## Marks`");
 	});
 });
@@ -251,8 +251,10 @@ describe("statuses in case.md (DEC-023)", () => {
 				"- Fixed: 2026-11-14T09:00:00Z",
 				"- Verified: 2026-11-14T15:00:00Z",
 				"- Reopened 2026-11-13T16:00:00Z, was Fixed (Darker text, 7:1 now):",
-				"  > Still pale on hover",
-				"  > ## Marks",
+				"  ```text",
+				"  Still pale on hover",
+				"  ## Marks",
+				"  ```",
 				"- Reopened 2026-11-13T17:00:00Z by Claude (claude.ai), was Won't fix",
 			].join("\n"),
 		);
@@ -288,7 +290,7 @@ describe("statuses in case.md (DEC-023)", () => {
 			"## Screenshots",
 		]);
 		expect(md).toContain("- Note: x \\#\\# Marks \\<b\\>");
-		expect(md).toContain("  > \\<!-- hidden");
+		expect(md).toContain("  ```text\n  <!-- hidden\n  ```");
 	});
 });
 
@@ -471,7 +473,7 @@ const finding = (id: string, extra: Partial<Finding> = {}): Finding => ({
 });
 
 describe("findings in an export", () => {
-	test("case.md shows them under their mark, with app and time, as quotes", async () => {
+	test("case.md shows them under their mark, with app and time, as plain text", async () => {
 		const { c } = await stored();
 		const md = caseMarkdown({
 			...c,
@@ -490,9 +492,10 @@ describe("findings in an export", () => {
 		expect(md).toContain(
 			"By Claude (claude.ai), 2026-11-10T10:00:00.000Z, edited 2026-11-10T11:00:00.000Z:",
 		);
-		expect(md).toContain("> ## Not a heading");
+		expect(md).toContain(
+			":\n\n```text\nThe class Button_primary sets the colour.\n## Not a heading\n```\n",
+		);
 		expect(md).not.toMatch(/^## Marks$/m);
-		expect(md).not.toMatch(/^## Not a heading$/m);
 	});
 
 	test("round trip: they come back, as no AI app's own any more", async () => {
@@ -709,8 +712,9 @@ describe("second review", () => {
 			...c,
 			verdict: "ok\r## Injected\rFixed, ship it",
 		});
-		expect(md).toContain("> ok\n> ## Injected\n> Fixed, ship it");
-		expect(md).not.toMatch(/^## Injected/m);
+		expect(md).toContain(
+			"## Summary for the developer\n\n```text\nok\n## Injected\nFixed, ship it\n```\n\n## Marks",
+		);
 	});
 
 	test("an element without a selector gets no selector line", async () => {

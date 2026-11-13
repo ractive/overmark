@@ -27,17 +27,35 @@ const KIND: Record<ShapeKind, string> = {
 	note: "note",
 };
 
-/** Text that cannot break out of its Markdown context. */
+/**
+ * Text that cannot break out of its Markdown context, on one line: what could
+ * start a link, an image, an autolink, HTML, emphasis, strikethrough, a table
+ * cell, math or a heading's end is escaped, and `&` where it would start a
+ * named reference (`&lt;`; a numeric one loses its `#`), so the text shows as
+ * written. `!` and `(` do nothing without a `[`; a bare URL may be linked by a
+ * previewer, but as itself.
+ */
 function inline(text: string): string {
-	return text.replace(/\s+/g, " ").replace(/([\\`*_[\]<>#|])/g, "\\$1");
+	return text
+		.replace(/\s+/g, " ")
+		.replace(/([\\`*_[\]<>#|~$])/g, "\\$1")
+		.replace(/&(?=#?[0-9A-Za-z]+;)/g, "\\&");
 }
 
-/** A quote; `<` is escaped so a comment cannot open HTML (and hide the rest). */
+/**
+ * Text someone else wrote (a comment, a finding, the summary, a reopen note)
+ * as a fenced block of plain text: shown as written, line by line, and nothing
+ * in it is Markdown (no image is fetched, no link, heading or HTML made). The
+ * fence is longer than any run of backticks in the text, so no line of it can
+ * close the block.
+ */
 function block(text: string): string {
-	return text
-		.split(/\r\n?|\n/)
-		.map((line) => `> ${line.replaceAll("<", "\\<")}`)
-		.join("\n");
+	const longest = (text.match(/`+/g) ?? []).reduce(
+		(n, run) => Math.max(n, run.length),
+		0,
+	);
+	const fence = "`".repeat(Math.max(3, longest + 1));
+	return [`${fence}text`, ...text.split(/\r\n?|\n/), fence].join("\n");
 }
 
 /** Text in a code span, on one line. */
@@ -45,7 +63,7 @@ function code(text: string): string {
 	return `\`${text.replace(/\s+/g, " ").replaceAll("`", "'")}\``;
 }
 
-/** An AI app's finding: who wrote it and when, then its text as a quote. */
+/** An AI app's finding: who wrote it and when, then its text as a block. */
 function finding(f: Finding): string {
 	const when = `${inline(f.at)}${f.editedAt ? `, edited ${inline(f.editedAt)}` : ""}`;
 	return `By ${inline(appLabel(f.app))}${f.imported ? " (as the file says)" : ""}, ${when}:\n\n${block(f.text)}\n`;
