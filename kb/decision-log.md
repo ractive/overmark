@@ -253,6 +253,10 @@ the toolbar stays up and says so, and Done again discards it.
   `role="alert"`; the button that had the focus has it again after the toolbar changes.
 - A new case gets its own id instead of the pending images' id, so one id holds a
   page's pending screenshots for as long as the page is open.
+- **Replaced in part by DEC-026:** the toolbar has one mode. There are no drafts and no
+  "Save case…" with its form ("Keep drawing", the title it kept): "Annotate this page"
+  creates the case at once, and every mark goes into it as above. A page no longer
+  creates a case through `case:save` (`isNew` is refused from a page).
 
 ## DEC-015: The AI connection lives in the service worker; questions in the panel or a notification (storage replaced by DEC-016)
 
@@ -770,7 +774,9 @@ fixed, to verify / verified. The details are the
   case being drawn (the panel is on Home) or to the open case (the panel shows it):
   *toolbar adding to case X ⇔ case X is open in the panel*. "Annotate this page" always
   starts a new case; "Continue annotating" no longer exists. The toolbar's "New case"
-  button goes (it made a toolbar with no case open).
+  button goes (it made a toolbar with no case open). *DEC-026 replaces the first half:
+  no toolbar belongs to a new case being drawn; "Annotate this page" creates the case
+  and opens it, so a toolbar always adds to the open case.*
 - **"← All cases" closes the case.** The toolbar adding to it is ended (as its Done,
   then its target cleared: the page message `overlay:end`), and the case's marks are
   taken off the tab in front whoever drew them. This changes DEC-022, which left the
@@ -778,7 +784,9 @@ fixed, to verify / verified. The details are the
   up and the panel in the case, which says so; a second click leaves without it. The
   back button is a real button in a top bar (32 px high), not a 12 px link.
 - **The panel adopts what the page shows.** On Home, a toolbar on the tab in front that
-  adds to a stored case opens that case (so "Save case…" opens the new case). When the
+  adds to a stored case opens that case (so "Save case…" opens the new case; *with
+  DEC-026 there is no "Save case…": the adopt stays for a panel opened again, and a
+  toolbar whose case is gone ends instead of drawing a new case*). When the
   panel starts, the case whose marks the tab in front shows is opened too: closing the
   side panel leaves marks and toolbar on the page as before (PR 42's open question),
   and opening it again is in that case again, not on Home with orphaned marks.
@@ -941,3 +949,71 @@ cannot be missed.
   permission is taken back or given (`permissions.onRemoved` / `onAdded`), so a
   permission taken back in Chrome's settings shows as "paused" at once. Stop syncing
   clears the status and the "!".
+
+## DEC-026: A case is created at once; every action is stored; no drafts (owner)
+
+The owner, 2026-11-13, after getting lost in the flow of DEC-023: "I opened a page,
+clicked on 'Annotate this page' and I stayed on the main screen. What do I do now? I
+can't see the mark I added and I can't seem to 'save' the case." Then: "Why not directly
+creating the case (without saving in the beginning), switching into the case 'view' (as
+if you'd choose an existing case now) and show the marks there." And, asked whether a
+draft with a Save button or no save step: "Store it the moment it's created. Probably
+also true for all the marks you add. Every action should save immediately. Then we
+wouldn't have drafts — which is ok I think."
+
+- **"Annotate this page" creates the case and opens it.** The side panel asks the page
+  what it is (`page:info`: address, title, language, viewport, user agent, as a mark's
+  screenshot records them), stores the case at once with the page's title as its title
+  (its short address where it has none, cut to 500 characters), no marks and no
+  screenshots, opens it as if it had been chosen from the list, and puts the toolbar up
+  adding to it (the "Adding" state, "Done adding"). The panel writes the case, as it
+  writes every change to a case but a mark's add; the page's info passes
+  `validateCase`. A page no longer creates a case: `case:save` from a page with `isNew`
+  is refused, so a case has one creator.
+- **No drafts, no new-case mode.** The toolbar always adds to a case (`overlay:show`
+  requires its target): its "Save case…", the save form with its title field and "Keep
+  drawing", Close, "New case: …" and the panel's "Stop annotating" with its hint lines go,
+  and so do `overlay:hide` and the panel's hiding of a new case's toolbar. Home's button
+  is always "Annotate this page". Every mark goes into the case when its comment is done
+  (DEC-014). A mark that could not be added (the worker unreachable, a number taken, its
+  screenshot given up or failed) stays on the page with "Add mark N": a failed write, not
+  a draft; one whose screenshot failed says so ("its screenshot could not be taken
+  (…)"). The case keeps its marks in the order of their numbers, whatever order they
+  went in.
+- **Rename where the title is shown.** A quiet "Rename" beside the case's title (named
+  "Rename this case") turns it into a field: Enter or Save stores it at once
+  (`withTitle`: trimmed, at most 500 characters), Escape or Cancel leaves it, an empty
+  title is refused (Save off, "A case needs a title."). The toolbar adding to the case is
+  told (`overlay:title`) and says "Adding to “<new title>”"; the list, the export,
+  `case.md` and the AI tools read the stored title.
+- **An untouched case does not litter.** A case left as "Annotate this page" made it
+  goes again, silently, when "← All cases" leaves it (after "Done adding" too) or when the
+  last tab with its toolbar closes while it is open. Untouched (`isUntouched`, pure):
+  no marks and no screenshots, no mark ever deleted (`lastNumber`), not imported, no
+  summary stored or typed, and still the title it was given. It is known from the case
+  itself, not from a flag, so it holds across a panel closed and opened again; a mark
+  added and taken out again with the toolbar's Undo leaves the case untouched (its
+  number is free again), a rename, a summary or a mark deleted in the panel make it the
+  user's. The check runs in the delete's transaction (`deleteCaseIf`), so a mark an AI
+  app adds meanwhile is never lost. **Closing the side panel** leaves the case and its
+  toolbar on the page as before; opening it again opens the case. If the tab closes or
+  reloads while the panel is closed, the empty case stays in the list until it is
+  opened and left, and then goes by the same rule: nothing deletes a case nobody is
+  looking at.
+- **The sync writes no file for a case without marks** until its first mark: a file in
+  Downloads cannot be taken back, and a renamed case leaves its old file there
+  (DEC-025). A case written before whose marks were all deleted is written again, empty.
+- **What follows from it.** "← All cases" with a mark still on its way waits for it, and
+  with a mark that could not be added stays two-step as DEC-023 has it; with no mark
+  left, the case is checked as above. A case deleted while its toolbar is up (Delete in
+  the panel, an AI app's `delete_case`, another window) ends that toolbar on every tab
+  (`overlay:end` with `discard`), the panel goes to Home, and only a mark lost so is said
+  under This page ("“<title>” was deleted, and 1 mark not in it yet is gone with it.").
+  The icon's click and the keyboard shortcut are unchanged: on a tab Overmark may not run
+  on yet, "Annotate this page" is off with the access notice. Undo right after the first
+  mark takes it out; the case stays, empty and untouched. A reload or navigation takes
+  the toolbar with the page, the panel stays in the case ("Add marks" again); a tab
+  switch leaves the toolbar on its tab and the marks follow (DEC-022). The panel draws
+  a case on the page once it has a mark: an empty one has nothing to show ("0 of 0
+  marks found" is not said). `list_cases` and `get_case` show an empty case with zero
+  marks; `add_annotation` adds to a case as before.

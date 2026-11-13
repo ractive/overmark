@@ -43,15 +43,18 @@ window size, and the fix itself changes the element. So the **annotated screensh
 is what a case is about, and finding the element again is a best-effort extra:
 
 - When a mark is drawn, Overmark captures the visible part of the page as the user sees
-  it (DEC-012); marks drawn while nothing scrolled or changed share that screenshot.
-  Saving draws the marks onto the screenshots and cuts a crop per annotation.
-- Marks for a case that exists go into it one by one, each as soon as its comment is
-  done, with a screenshot of its own (DEC-014); a new case is saved once, with a title.
-- The page's toolbar adds to a case only while that case is open in the side panel
-  (DEC-023): "Annotate this page" on Home always starts a new case, "Save case…" opens
-  the case it saved, "Add marks" adds to the open case, and "← All cases" ends the
-  toolbar (as its Done, then without a case: `overlay:end`) and takes the case's marks
-  off the tab in front. A panel opened again opens the case the tab in front shows.
+  it (DEC-012); marks drawn while nothing scrolled or changed share that capture.
+  Adding a mark draws it onto its copy of the screenshot and cuts its crop.
+- A case is created the moment "Annotate this page" is clicked, with the page's title
+  and no marks, and every action is stored at once: no drafts, no save step (DEC-026).
+  Marks go into the case one by one, each as soon as its comment is done, with a
+  screenshot of its own (DEC-014); "Rename" beside the title changes the title. A case
+  left as it was made goes again when it is left.
+- The page's toolbar always adds to a case, and only while that case is open in the side
+  panel (DEC-023, DEC-026): "Annotate this page" on Home creates a case and opens it,
+  "Add marks" adds to the open case, and "← All cases" ends the toolbar (as its Done,
+  then without a case: `overlay:end`) and takes the case's marks off the tab in front.
+  A panel opened again opens the case the tab in front shows.
 - Shapes are stored in the screenshot's own coordinates (CSS pixels of that viewport).
   They never have to follow the live page.
 - Each annotation also stores the details of its element (tag, role, accessible name,
