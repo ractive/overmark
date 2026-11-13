@@ -4,6 +4,7 @@ import {
 	FOUND_COLOUR,
 	PROBABLE_COLOUR,
 	RESOLVED_COLOUR,
+	TO_VERIFY_COLOUR,
 } from "../src/content/overlay.ts";
 import type { Annotation, Case } from "../src/lib/case.ts";
 import { summarize } from "../src/lib/element.ts";
@@ -199,19 +200,21 @@ describe("a mark's status and actions", () => {
 		row(id).querySelector(
 			`[data-mark-action="${name}"]`,
 		) as unknown as HTMLButtonElement;
+	const chips = () =>
+		[...window.document.querySelectorAll("#case-status .chip")].map((b) =>
+			(b.textContent ?? "").trim(),
+		);
 
-	test("a resolved mark says how, with its note, and the counts sum up", () => {
+	test("a resolved mark says how, with its note, and the chips sum up", () => {
 		render(caseState(twoMarks()), noActions);
 		expect(row("a2").dataset["resolved"]).toBe("wontfix");
-		expect(row("a2").querySelector(".resolution")?.textContent).toBe(
-			"Won't fixLegal wants it",
+		expect(row("a2").querySelector(".history")?.textContent).toMatch(
+			/^Won't fix .+ · Legal wants it$/,
 		);
-		expect(row("a1").querySelector(".resolution")).toBeNull();
-		expect(window.document.querySelector(".mark-counts")?.textContent).toBe(
-			"1 open, 1 won't fix",
-		);
+		expect(row("a1").querySelector(".history")).toBeNull();
+		expect(chips()).toEqual(["● Open 1", "– Closed 1"]);
 		expect(action("a1", "resolve").textContent).toBe("Resolve…");
-		expect(action("a2", "reopen").textContent).toBe("Reopen");
+		expect(action("a2", "reopen").textContent).toBe("Reopen…");
 	});
 
 	test("Resolve opens its form; the choice and note go to resolveMark", () => {
@@ -548,27 +551,431 @@ describe("a mark's status and actions", () => {
 			noActions,
 		);
 		const state = (id: string) =>
-			row(id).querySelector(".mark-toggle .state")?.textContent;
-		expect(state("a1")).toBe("Not found");
-		expect(state("a2")).toBe("Won't fix");
+			row(id).querySelector(".mark-sub .state")?.textContent;
+		const pill = (id: string) =>
+			row(id).querySelector(".mark-sub .pill")?.textContent;
+		expect(state("a1")).toBe("Not found on this page");
+		expect(pill("a1")).toBeUndefined();
+		expect(pill("a2")).toBe("Won't fix");
 		expect(window.document.getElementById("marks-heading")?.textContent).toBe(
 			"Marks 2",
 		);
-		// The bar: one open, one won't fix, each its share.
+		// The bar: one open, one closed, each its share.
 		const bar = [
-			...window.document.querySelectorAll(".marks-bar .progress > span"),
+			...window.document.querySelectorAll("#case-status .progress > span"),
 		].map((s) => [s.getAttribute("data-kind"), s.getAttribute("style")]);
 		expect(bar).toEqual([
 			["open", "flex-grow: 1"],
-			["wontfix", "flex-grow: 1"],
+			["closed", "flex-grow: 1"],
 		]);
 	});
 
-	test("the panel's resolved colour is the page's", async () => {
+	test("the panel's resolved and to-verify colours are the page's", async () => {
 		const css = await Bun.file(
 			new URL("../src/sidepanel/style.css", import.meta.url),
 		).text();
 		expect(css).toContain(`--resolved: ${RESOLVED_COLOUR};`);
+		expect(css).toContain(`--to-verify: ${TO_VERIFY_COLOUR};`);
+	});
+});
+
+describe("Verify (DEC-023)", () => {
+	const CLAUDE = {
+		id: "https://claude.ai/oauth",
+		name: "Claude",
+		host: "claude.ai",
+	};
+	const mark = (n: number, more: Partial<Annotation> = {}): Annotation => ({
+		id: `a${n}`,
+		number: n,
+		shot: "s1",
+		comment: `Comment ${n}`,
+		author: "user",
+		shape: { kind: "note", at: { x: 1, y: 1 } },
+		crop: `crops/a${n}.webp`,
+		element: null,
+		...more,
+	});
+	let n = 0;
+	/** Open, to verify, verified, won't fix; mark 1 reopened once. */
+	const fourMarks = (): Case => ({
+		...sampleCase(`c_verify${++n}`),
+		annotations: [
+			mark(1, {
+				reopens: [
+					{
+						note: "Still pale on hover\nand on focus",
+						at: "2026-11-13T16:00:00Z",
+						was: {
+							kind: "fixed",
+							note: "Darker text, 7:1 now",
+							at: "2026-11-13T11:00:00Z",
+						},
+					},
+				],
+			}),
+			mark(2, {
+				resolution: {
+					kind: "fixed",
+					note: "Hover state too",
+					at: "2026-11-14T09:00:00Z",
+					app: CLAUDE,
+				},
+			}),
+			mark(3, {
+				resolution: {
+					kind: "fixed",
+					at: "2026-11-14T09:00:00Z",
+					verified: { at: "2026-11-14T15:00:00Z" },
+				},
+			}),
+			mark(4, { resolution: { kind: "wontfix", at: "2026-11-14T09:00:00Z" } }),
+		],
+	});
+	const row = (id: string) =>
+		window.document.querySelector(
+			`[data-annotation="${id}"]`,
+		) as unknown as HTMLElement;
+	const actionsOf = (id: string) =>
+		[...row(id).querySelectorAll(".mark-actions [data-mark-action]")].map(
+			(b) => b.textContent,
+		);
+	const rows = () =>
+		[...window.document.querySelectorAll("li.annotation")].map((li) =>
+			li.getAttribute("data-annotation"),
+		);
+
+	test("the status block: a bar and the chips in order, counts above zero", () => {
+		render(caseState(fourMarks()), noActions);
+		const bar = [
+			...window.document.querySelectorAll("#case-status .progress > span"),
+		].map((s) => s.getAttribute("data-kind"));
+		expect(bar).toEqual(["open", "toVerify", "verified", "closed"]);
+		expect(
+			[...window.document.querySelectorAll("#case-status .chip")].map((b) =>
+				(b.textContent ?? "").trim(),
+			),
+		).toEqual(["● Open 1", "◐ To verify 1", "✓ Verified 1", "– Closed 1"]);
+		expect(window.document.querySelector(".all-done")).toBeNull();
+	});
+
+	test("a chip filters the list, a second click or Show all shows all", () => {
+		const c = fourMarks();
+		const filters: unknown[] = [];
+		const actions = actionsWith({
+			filterMarks: (id, group) => void filters.push([id, group]),
+		});
+		render(caseState(c), actions);
+		(
+			window.document.querySelector(
+				'#case-status .chip[data-group="toVerify"]',
+			) as unknown as HTMLElement
+		).click();
+		const filtered = caseState(c, (s) => {
+			s.markFilter = { caseId: c.id, group: "toVerify" };
+		});
+		render(filtered, actions);
+		expect(rows()).toEqual(["a2"]);
+		expect(
+			window.document
+				.querySelector('.chip[data-group="toVerify"]')
+				?.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(el("marks-filtered").textContent).toBe(
+			"Showing 1 of 4 marks. Show all",
+		);
+		(
+			window.document.querySelector(
+				'.chip[data-group="toVerify"]',
+			) as unknown as HTMLElement
+		).click();
+		(
+			window.document.querySelector(
+				'[data-action="show-all"]',
+			) as unknown as HTMLElement
+		).click();
+		expect(filters).toEqual([
+			[c.id, "toVerify"],
+			[c.id, undefined],
+			[c.id, undefined],
+		]);
+		// Another case's filter is not this one's.
+		render(
+			caseState(c, (s) => {
+				s.markFilter = { caseId: "c_other", group: "toVerify" };
+			}),
+			actions,
+		);
+		expect(rows()).toEqual(["a1", "a2", "a3", "a4"]);
+		expect(el("marks-filtered")).toBeNull();
+	});
+
+	test("nothing open or to verify: a line says so", () => {
+		const c = fourMarks();
+		c.annotations = c.annotations.slice(2);
+		render(caseState(c), noActions);
+		expect(
+			window.document.querySelector("#case-status .all-done")?.textContent,
+		).toBe("✓ All marks are verified or closed.");
+	});
+
+	test("each status: its pill, its strong button and the others", () => {
+		render(caseState(fourMarks()), noActions);
+		const pill = (id: string) =>
+			row(id).querySelector(".mark-sub .pill")?.textContent;
+		expect([pill("a1"), pill("a2"), pill("a3"), pill("a4")]).toEqual([
+			undefined,
+			"To verify",
+			"Verified",
+			"Won't fix",
+		]);
+		expect(actionsOf("a1")).toEqual(["Resolve…", "Edit comment", "Delete"]);
+		expect(actionsOf("a2")).toEqual([
+			"Verified",
+			"Reopen…",
+			"Change…",
+			"Edit comment",
+			"Delete",
+		]);
+		for (const id of ["a3", "a4"])
+			expect(actionsOf(id)).toEqual([
+				"Reopen…",
+				"Change…",
+				"Edit comment",
+				"Delete",
+			]);
+		const strong = (id: string) =>
+			[...row(id).querySelectorAll(".mark-actions .strong")].map(
+				(b) => b.textContent,
+			);
+		expect([strong("a1"), strong("a2"), strong("a3")]).toEqual([
+			["Resolve…"],
+			["Verified"],
+			[],
+		]);
+		// To verify: Verified and Reopen… in the collapsed head too.
+		expect(
+			[...row("a2").querySelectorAll(".mark-sub button")].map(
+				(b) => b.textContent,
+			),
+		).toEqual(["Verified", "Reopen…"]);
+		expect(row("a3").querySelector(".mark-sub button")).toBeNull();
+		expect(
+			row("a2")
+				.querySelector('.mark-sub [data-mark-action="verify"]')
+				?.getAttribute("title"),
+		).toBe("The fix holds on the page you checked");
+		// A mark to verify is drawn in full; verified and closed step back.
+		expect(row("a2").hasAttribute("data-resolved")).toBe(false);
+		expect(row("a2").dataset["status"]).toBe("fixed");
+		expect(row("a3").dataset["resolved"]).toBe("fixed");
+	});
+
+	test("Verified and Reopen… in the head call their actions", () => {
+		const c = fourMarks();
+		const calls: unknown[] = [];
+		render(
+			caseState(c),
+			actionsWith({
+				verifyMark: (_c, a) => void calls.push(["verify", a.id]),
+				editMark: (_c, a, mode) => void calls.push(["edit", a.id, mode]),
+			}),
+		);
+		for (const name of ["verify", "reopen"])
+			(
+				row("a2").querySelector(
+					`.mark-sub [data-mark-action="${name}"]`,
+				) as unknown as HTMLElement
+			).click();
+		expect(calls).toEqual([
+			["verify", "a2"],
+			["edit", "a2", "reopen"],
+		]);
+	});
+
+	test("a reopened mark: its note's first line in the head, the history in order", () => {
+		const c = fourMarks();
+		const verified: Case = {
+			...c,
+			updatedAt: "2026-11-14T15:00:00Z",
+			annotations: [
+				{
+					...(c.annotations[0] as Annotation),
+					resolution: {
+						kind: "fixed",
+						note: "Hover state too",
+						at: "2026-11-14T09:00:00Z",
+						app: CLAUDE,
+						verified: { at: "2026-11-14T15:00:00Z" },
+					},
+				},
+			],
+		};
+		render(caseState(c), noActions);
+		expect(row("a1").querySelector(".mark-sub .reopened")?.textContent).toBe(
+			"Reopened: Still pale on hover",
+		);
+		render(caseState(verified), noActions);
+		const lines = [...row("a1").querySelectorAll(".history li")].map((li) => [
+			li.getAttribute("data-kind"),
+			li.textContent,
+		]);
+		expect(lines.map(([kind]) => kind)).toEqual([
+			"fixed",
+			"reopened",
+			"fixed",
+			"verified",
+		]);
+		expect(lines[0]?.[1]).toMatch(/^Fixed .+ · Darker text, 7:1 now$/);
+		expect(lines[1]?.[1]).toMatch(/^Reopened .+ · Still pale on hover/);
+		expect(lines[2]?.[1]).toMatch(
+			/^Fixed .+ by Claude \(claude\.ai\) · Hover state too$/,
+		);
+		expect(lines[3]?.[1]).toMatch(/^Verified /);
+		// Not reopened any more: no reopen line in the head.
+		expect(row("a1").querySelector(".mark-sub .reopened")).toBeNull();
+	});
+
+	test("the crop of a verified or closed mark is not greyed", async () => {
+		const css = await Bun.file(
+			new URL("../src/sidepanel/style.css", import.meta.url),
+		).text();
+		expect(css).not.toMatch(/\[data-resolved\][^{]*img/);
+	});
+
+	test("Resolve…: four choices, the note, and the choice to resolveMark", () => {
+		const c = fourMarks();
+		const calls: unknown[] = [];
+		const actions = actionsWith({
+			resolveMark: (_c, a, kind, note) => void calls.push([a.id, kind, note]),
+		});
+		render(
+			caseState(c, (s) => {
+				s.markEdit = {
+					annotationId: "a1",
+					mode: "resolve",
+					kind: "fixed",
+					text: "",
+				};
+			}),
+			actions,
+		);
+		const form = row("a1").querySelector(
+			"[data-form=resolve]",
+		) as unknown as HTMLElement;
+		expect(form.querySelector("legend")?.textContent).toBe("Mark 1 is");
+		expect(
+			[...form.querySelectorAll("label.choice")].map((l) => l.textContent),
+		).toEqual([
+			"Fixed, to verify",
+			"Fixed and verified",
+			"Won't fix",
+			"Can't reproduce",
+		]);
+		expect(
+			(form.querySelector("input.note") as unknown as HTMLInputElement)
+				.placeholder,
+		).toBe("Note (optional): what was done, or why");
+		(
+			form.querySelector(
+				'input[value="verified"]',
+			) as unknown as HTMLInputElement
+		).checked = true;
+		const done = form.querySelector(
+			'[data-mark-action="resolve-done"]',
+		) as unknown as HTMLElement;
+		expect(done.textContent).toBe("Save");
+		done.click();
+		expect(calls).toEqual([["a1", "verified", ""]]);
+	});
+
+	test("Reopen…: the note is required, then goes to reopenMark", () => {
+		const c = fourMarks();
+		const calls: unknown[] = [];
+		const actions = actionsWith({
+			reopenMark: (_c, a, note) => void calls.push([a.id, note]),
+		});
+		render(
+			caseState(c, (s) => {
+				s.markEdit = {
+					annotationId: "a2",
+					mode: "reopen",
+					kind: "fixed",
+					text: "",
+				};
+			}),
+			actions,
+		);
+		const form = row("a2").querySelector(
+			"[data-form=reopen]",
+		) as unknown as HTMLElement;
+		expect(form.querySelector("legend")?.textContent).toBe("Reopen mark 2");
+		const field = form.querySelector(
+			"textarea",
+		) as unknown as HTMLTextAreaElement;
+		expect(field.placeholder).toBe(
+			"What is still wrong? The developer reads this first.",
+		);
+		const done = form.querySelector(
+			'[data-mark-action="reopen-done"]',
+		) as unknown as HTMLButtonElement;
+		expect(done.textContent).toBe("Reopen");
+		expect(done.disabled).toBe(true);
+		field.value = "   ";
+		field.dispatchEvent(new window.Event("input") as unknown as Event);
+		expect(done.disabled).toBe(true);
+		field.value = "Still pale";
+		field.dispatchEvent(new window.Event("input") as unknown as Event);
+		expect(done.disabled).toBe(false);
+		done.click();
+		expect(calls).toEqual([["a2", "Still pale"]]);
+		// The head's buttons wait while a form is open.
+		expect(row("a2").querySelector(".mark-sub button")).toBeNull();
+	});
+
+	test("the case list counts by status, with the bar", () => {
+		const c = fourMarks();
+		const home = initialState();
+		home.cases = [c];
+		render(home, noActions);
+		const item = window.document.querySelector(
+			`[data-case="${c.id}"]`,
+		) as unknown as HTMLElement;
+		expect(item.textContent).toContain(
+			"4 marks (1 open, 1 to verify, 1 verified, 1 closed)",
+		);
+		expect(
+			[...item.querySelectorAll(".progress > span")].map((s) =>
+				s.getAttribute("data-kind"),
+			),
+		).toEqual(["open", "toVerify", "verified", "closed"]);
+	});
+
+	test("the import prompt says what differs: the counts of both copies", () => {
+		const here = {
+			...sampleCase("c_back"),
+			annotations: [mark(1), mark(2), mark(3)],
+		};
+		const file: Case = {
+			...here,
+			updatedAt: "2026-11-14T10:00:00Z",
+			annotations: [
+				mark(1),
+				mark(2, { resolution: { kind: "fixed", at: "2026-11-14T09:00:00Z" } }),
+				mark(3, { resolution: { kind: "fixed", at: "2026-11-14T09:00:00Z" } }),
+			],
+		};
+		const state = initialState();
+		state.importing = {
+			parsed: { case: file, images: async () => new Map() },
+			existing: here,
+		};
+		render(state, noActions);
+		expect(
+			window.document.querySelector('[data-role="import-counts"]')?.textContent,
+		).toBe("Here: 3 open. In the file: 1 open, 2 to verify.");
+		state.importing = undefined;
+		render(state, noActions);
 	});
 });
 

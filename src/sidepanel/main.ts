@@ -7,12 +7,16 @@
 import {
 	type Annotation,
 	type Case,
+	markStatus,
 	nextNumbers,
+	resolutionFor,
 	validateCase,
 	withComment,
 	withoutAnnotation,
 	withoutFinding,
+	withReopen,
 	withResolution,
+	withVerified,
 } from "../lib/case.ts";
 import {
 	type CheckedExport,
@@ -986,13 +990,19 @@ const actions: Actions = {
 	},
 
 	editMark(_c, a, mode) {
+		const status = markStatus(a);
 		update((s) => {
 			s.markDeleteArmed = undefined;
 			s.markEdit = {
 				annotationId: a.id,
 				mode,
-				kind: a.resolution?.kind ?? "fixed",
-				text: mode === "comment" ? a.comment : (a.resolution?.note ?? ""),
+				kind: status === "open" ? "fixed" : status,
+				text:
+					mode === "comment"
+						? a.comment
+						: mode === "resolve"
+							? (a.resolution?.note ?? "")
+							: "",
 			};
 		});
 	},
@@ -1010,15 +1020,35 @@ const actions: Actions = {
 	resolveMark(c, a, kind, note) {
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withResolution(current, a.id, { kind, note }, now),
+			value: withResolution(
+				current,
+				a.id,
+				{ ...resolutionFor(kind), note },
+				now,
+			),
 		}));
 	},
 
-	reopenMark(c, a) {
+	verifyMark(c, a) {
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withResolution(current, a.id, null, now),
+			value: withVerified(current, a.id, undefined, now),
 		}));
+	},
+
+	reopenMark(c, a, note) {
+		// The developer reads it first: in the panel, a reopen says why.
+		if (note.trim() === "") return;
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) => ({
+			value: withReopen(current, a.id, { note }, now),
+		}));
+	},
+
+	filterMarks(caseId, group) {
+		update((s) => {
+			s.markFilter = group === undefined ? undefined : { caseId, group };
+		});
 	},
 
 	saveComment(c, a, text) {

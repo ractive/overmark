@@ -324,7 +324,7 @@ describe("tools", () => {
 				caseId: "c_1",
 				title: "Button contrast",
 				url: "https://www.example.com/kk",
-				marks: 2,
+				marks: { open: 2, toVerify: 0, verified: 0, closed: 0 },
 				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
 			},
@@ -747,6 +747,174 @@ describe("tools", () => {
 		await expect(
 			call("set_mark_status", { caseId: "c_1", mark: 9, status: "fixed" }),
 		).rejects.toThrow("has no mark 9");
+	});
+
+	describe("set_mark_status and Verify (DEC-023)", () => {
+		const status = (mark: number, s: string, note?: string) =>
+			call("set_mark_status", {
+				caseId: "c_1",
+				mark,
+				status: s,
+				...(note === undefined ? {} : { note }),
+			}).then((r) => r.content[0]?.text);
+		const stored = async (mark = 2) =>
+			(await store.getCase("c_1"))?.annotations.find((a) => a.number === mark);
+
+		test("each status, its result, and the app that set it", async () => {
+			await seed();
+			const app = {
+				id: "https://claude.ai/oauth",
+				name: "Claude",
+				host: "claude.ai",
+			};
+			expect(await status(2, "fixed", "Darker text")).toBe(
+				"Mark 2 is fixed, to verify.",
+			);
+			expect((await stored())?.resolution).toMatchObject({
+				kind: "fixed",
+				note: "Darker text",
+				app,
+			});
+			expect(await status(2, "verified")).toBe("Mark 2 is verified.");
+			expect((await stored())?.resolution?.verified).toMatchObject({ app });
+			expect(await status(2, "open", "Still pale on hover")).toBe(
+				"Mark 2 is open again (it was Verified).",
+			);
+			const reopened = await stored();
+			expect(reopened?.resolution).toBeUndefined();
+			expect(reopened?.reopens?.[0]).toMatchObject({
+				note: "Still pale on hover",
+				app,
+				was: { kind: "fixed", note: "Darker text", verified: { app } },
+			});
+			expect(await status(1, "wontfix")).toBe("Mark 1 is resolved: Won't fix.");
+			expect(await status(1, "cantreproduce")).toBe(
+				"Mark 1 is resolved: Can't reproduce.",
+			);
+			expect(await status(1, "open")).toBe(
+				"Mark 1 is open again (it was Can't reproduce).",
+			);
+			// Without a note, as calls before Verify made it.
+			expect((await stored(1))?.reopens?.[0]?.note).toBeUndefined();
+		});
+
+		test("verified is refused unless the mark is fixed", async () => {
+			await seed();
+			await expect(status(2, "verified")).rejects.toThrow(
+				"Mark 2 is open: only a fixed mark can be verified. Set it fixed once the fix is in; verifying is the user's.",
+			);
+			await status(2, "wontfix");
+			await expect(status(2, "verified")).rejects.toThrow(
+				"Mark 2 is resolved as Won't fix: only a fixed mark can be verified.",
+			);
+			expect((await stored())?.resolution?.verified).toBeUndefined();
+		});
+
+		test("open on an open mark changes nothing; verified twice stays as it was", async () => {
+			await seed();
+			const before = await store.getCase("c_1");
+			expect(await status(2, "open", "x")).toBe("Mark 2 is open already.");
+			const after = await store.getCase("c_1");
+			expect(after).toEqual(before as Case);
+			expect(after?.annotations[1]?.reopens).toBeUndefined();
+			await status(2, "fixed");
+			await status(2, "verified");
+			const once = (await stored())?.resolution;
+			expect(await status(2, "verified")).toBe("Mark 2 is verified.");
+			expect((await stored())?.resolution).toEqual(once as never);
+		});
+
+		test("fixed on a verified mark changes only its note", async () => {
+			await seed();
+			await status(2, "fixed", "First");
+			await status(2, "verified");
+			const verified = (await stored())?.resolution;
+			expect(await status(2, "fixed", "Hover state too")).toBe(
+				"Mark 2 stays verified; its note is saved.",
+			);
+			expect((await stored())?.resolution).toEqual({
+				...verified,
+				note: "Hover state too",
+			} as never);
+			expect(await status(2, "fixed")).toBe("Mark 2 is verified already.");
+			expect((await stored())?.resolution?.note).toBe("Hover state too");
+		});
+
+		test("get_case: status, reopens with who, verified with who", async () => {
+			await seed();
+			await status(2, "fixed", "Darker");
+			await status(2, "open", "Still pale");
+			await status(2, "fixed", "Hover too");
+			await status(2, "verified");
+			const view = json(
+				await call("get_case", { caseId: "c_1", images: false }),
+			);
+			expect(view.marks.map((m: { status: string }) => m.status)).toEqual([
+				"open",
+				"verified",
+			]);
+			const two = view.marks[1];
+			expect(two.resolution).toEqual({
+				kind: "fixed",
+				note: "Hover too",
+				at: expect.any(String),
+				by: "Claude (claude.ai)",
+				verified: { at: expect.any(String), by: "Claude (claude.ai)" },
+			});
+			expect(two.reopens).toEqual([
+				{
+					note: "Still pale",
+					at: expect.any(String),
+					was: "fixed",
+					by: "Claude (claude.ai)",
+				},
+			]);
+			expect("reopens" in view.marks[0]).toBe(false);
+			expect(json(await call("list_cases"))[0].marks).toEqual({
+				open: 1,
+				toVerify: 0,
+				verified: 1,
+				closed: 0,
+			});
+		});
+
+		test("a compact get_case shows the newest reopens, their notes cut", async () => {
+			build({ maxMessageBytes: () => 40_000 });
+			await seed(10, "x".repeat(20_000));
+			for (let i = 0; i < 5; i++) {
+				await status(2, "fixed");
+				await status(2, "open", `${i}${"y".repeat(500)}`);
+			}
+			const view = json(
+				await call("get_case", { caseId: "c_1", images: false }),
+			);
+			const two = view.marks[1];
+			expect(two.reopens.length).toBe(3);
+			expect(two.reopensLeftOut).toBe(2);
+			expect(two.reopens[0].note.startsWith("2y")).toBe(true);
+			expect(two.reopens[0].note.length).toBeLessThan(250);
+		});
+
+		test("the description and the instructions name the new status", () => {
+			const tool = tools.get("set_mark_status");
+			expect(tool?.title).toBe("Set a mark's status");
+			const schema = tool?.inputSchema as {
+				properties: { status: { enum: string[] } };
+			};
+			expect(schema.properties.status.enum).toEqual([
+				"open",
+				"fixed",
+				"verified",
+				"wontfix",
+				"cantreproduce",
+			]);
+			expect(tool?.description).toContain(
+				"set it only when the user says so, never for a fix of your own, and only on a mark that is fixed.",
+			);
+			expect(INSTRUCTIONS).toContain(
+				"leave verified to the user who checks the new build, and reopen with a note that says what is still wrong.",
+			);
+		});
 	});
 
 	test("hints: reading tools are read-only, changing ones ask first", () => {
@@ -1333,6 +1501,19 @@ describe("confirmations", () => {
 			request("set_mark_status", { caseId: "c_1", mark: 2, status: "fixed" }),
 		);
 		expect(status.join("\n")).toContain("Mark 2: “Comment 2”, now open.");
+		await call("set_mark_status", { caseId: "c_1", mark: 2, status: "fixed" });
+		const fixed = await confirmLines(
+			store,
+			tab,
+			request("set_mark_status", {
+				caseId: "c_1",
+				mark: 2,
+				status: "verified",
+			}),
+		);
+		expect(fixed.join("\n")).toContain(
+			"Mark 2: “Comment 2”, now Fixed, to verify.",
+		);
 	});
 });
 

@@ -6,7 +6,7 @@
  * block, and neither leak in nor out.
  */
 
-import type { Rect, Shape } from "../lib/case.ts";
+import type { MarkStatus, Rect, Shape } from "../lib/case.ts";
 import {
 	arrowHead,
 	badgePosition,
@@ -22,7 +22,9 @@ export const HOVER_COLOUR = "#1f6feb";
 /** Both carry a mark's white number, here and in the side panel's list. */
 export const FOUND_COLOUR = "#1a7f37";
 export const PROBABLE_COLOUR = "#b45f06";
-/** A resolved mark: grey and faded, so the open ones stand out. */
+/** A mark fixed and waiting to be verified: drawn in full, to be checked (DEC-023). */
+export const TO_VERIFY_COLOUR = "#4f53e0";
+/** A verified or closed mark: grey and faded, so the others stand out. */
 export const RESOLVED_COLOUR = "#6b7385";
 /** How much of a resolved mark's outline shows; its pin stays solid to be found. */
 export const RESOLVED_OPACITY = 0.3;
@@ -116,6 +118,7 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 /* The count says what the bar is for: a long title gives way. */
 .reviewbar .text { display: flex; gap: 8px; min-width: 0; }
 .reviewbar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b8c0d0; }
+.reviewbar .sep { flex: none; color: #b8c0d0; }
 .reviewbar .count { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
 .reviewbar button {
 	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 8px; color: #fff; font: inherit;
@@ -198,9 +201,13 @@ export interface ReviewItem {
 	/** The shown candidate is a confident, unambiguous match. */
 	found: boolean;
 	focused: boolean;
-	/** Settled: drawn faded, so the open marks stand out. */
-	resolved: boolean;
+	/** Its status: a verified or closed mark is drawn faded, so the others stand out. */
+	status: MarkStatus;
 }
+
+/** Drawn faded: nothing more to do about it. */
+export const isSettled = (status: MarkStatus): boolean =>
+	status === "verified" || status === "wontfix" || status === "cantreproduce";
 
 /** What the page must not see: a click on the overlay is no click outside its menu. */
 const OWN_EVENTS = [
@@ -443,11 +450,14 @@ export class Overlay {
 	renderReview(items: readonly ReviewItem[]): void {
 		const doc = this.doc;
 		const groups = items.map((item) => {
-			const colour = item.resolved
+			const settled = isSettled(item.status);
+			const colour = settled
 				? RESOLVED_COLOUR
-				: item.found
-					? FOUND_COLOUR
-					: PROBABLE_COLOUR;
+				: item.status === "fixed"
+					? TO_VERIFY_COLOUR
+					: item.found
+						? FOUND_COLOUR
+						: PROBABLE_COLOUR;
 			const look = {
 				"stroke-width": item.focused ? 4 : 3,
 				// Round caps would close the gaps.
@@ -457,7 +467,8 @@ export class Overlay {
 			};
 			const group = svg(doc, "g", {
 				"data-review": item.number,
-				...(item.resolved ? { "data-resolved": "" } : {}),
+				"data-status": item.status,
+				...(settled ? { "data-resolved": "" } : {}),
 			});
 			if (item.focused && item.rect !== null)
 				group.append(
@@ -474,7 +485,7 @@ export class Overlay {
 				);
 			const shape = this.#shape(item.shape, colour, look);
 			// A focused one is looked for: it shows fully.
-			if (item.resolved && !item.focused) {
+			if (settled && !item.focused) {
 				const faded = svg(doc, "g", {
 					"data-faded": "",
 					opacity: RESOLVED_OPACITY,

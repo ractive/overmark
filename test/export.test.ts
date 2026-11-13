@@ -165,6 +165,115 @@ describe("export", () => {
 	});
 });
 
+describe("statuses in case.md (DEC-023)", () => {
+	const CLAUDE = {
+		id: "https://claude.ai/oauth",
+		name: "Claude",
+		host: "claude.ai",
+	};
+	const status = (a: Annotation) => {
+		const md = caseMarkdown({ ...sampleCase(), annotations: [a] });
+		const start = md.indexOf("- Status:");
+		return md.slice(start, md.indexOf("- Element:", start)).trimEnd();
+	};
+
+	test("the marks line counts each group", async () => {
+		const { c } = await stored();
+		const [a, b] = c.annotations as [Annotation, Annotation];
+		const md = caseMarkdown({
+			...c,
+			annotations: [
+				a,
+				{ ...b, resolution: { kind: "fixed", at: "2026-11-14T09:00:00Z" } },
+			],
+		});
+		expect(md).toContain(
+			"- Created: 2026-11-04T10:00:00Z, updated: 2026-11-04T10:00:00Z\n- Marks: 1 open, 1 fixed (to verify)\n",
+		);
+		expect(caseMarkdown({ ...c, annotations: [] })).toContain("- Marks: none");
+	});
+
+	test("each status, its note, who set it, the verification and the reopens", async () => {
+		const { c } = await stored();
+		const a = c.annotations[0] as Annotation;
+		expect(status(a)).toBe("- Status: Open");
+		expect(
+			status({
+				...a,
+				resolution: {
+					kind: "fixed",
+					note: "Hover state too",
+					at: "2026-11-14T09:00:00Z",
+					app: CLAUDE,
+				},
+			}),
+		).toBe(
+			"- Status: Fixed, to verify (2026-11-14T09:00:00Z, by Claude (claude.ai))\n- Note: Hover state too",
+		);
+		expect(
+			status({
+				...a,
+				resolution: {
+					kind: "fixed",
+					at: "2026-11-14T09:00:00Z",
+					verified: { at: "2026-11-14T15:00:00Z" },
+				},
+				reopens: [
+					{
+						note: "Still pale on hover\n## Marks",
+						at: "2026-11-13T16:00:00Z",
+						was: {
+							kind: "fixed",
+							note: "Darker text, 7:1 now",
+							at: "2026-11-13T11:00:00Z",
+						},
+					},
+					{
+						at: "2026-11-13T17:00:00Z",
+						app: CLAUDE,
+						was: { kind: "wontfix", at: "x" },
+					},
+				],
+			}),
+		).toBe(
+			[
+				"- Status: Verified (2026-11-14T09:00:00Z)",
+				"- Verified: 2026-11-14T15:00:00Z",
+				"- Reopened 2026-11-13T16:00:00Z, was Fixed (Darker text, 7:1 now):",
+				"  > Still pale on hover",
+				"  > ## Marks",
+				"- Reopened 2026-11-13T17:00:00Z by Claude (claude.ai), was Won't fix",
+			].join("\n"),
+		);
+		for (const [kind, label] of [
+			["wontfix", "Won't fix"],
+			["cantreproduce", "Can't reproduce"],
+		] as const)
+			expect(status({ ...a, resolution: { kind, at: "t" } })).toBe(
+				`- Status: ${label} (t)`,
+			);
+	});
+
+	test("a note cannot add structure", async () => {
+		const { c } = await stored();
+		const md = caseMarkdown({
+			...c,
+			annotations: [
+				{
+					...(c.annotations[0] as Annotation),
+					resolution: { kind: "fixed", note: "x\n\n## Marks <b>", at: "t" },
+					reopens: [
+						{ note: "<!-- hidden", at: "t", was: { kind: "fixed", at: "t" } },
+					],
+				},
+			],
+		});
+		expect(md).not.toMatch(/^## Marks$/m);
+		expect(md).toContain("- Note: x \\#\\# Marks \\<b\\>");
+		expect(md).toContain("  > \\<!-- hidden");
+	});
+});
+
 /** A finding of Claude's on a mark. */
 const finding = (id: string, extra: Partial<Finding> = {}): Finding => ({
 	id,
