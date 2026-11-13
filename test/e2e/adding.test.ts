@@ -474,6 +474,55 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.send("Page.close");
 	}, 90_000);
 
+	test("All cases after a blocked one: the page decides, a later mark that fails blocks again", async () => {
+		const { page, tabId } = await savedCase("Blocked once");
+		const panel = await addMarks(page, "Blocked once");
+		const { c } = await caseTitled("Blocked once");
+		const leaveHint = `document.getElementById("leave-hint")`;
+		let stored = await takeOut(c.id);
+		await markElement(page, "[data-truth=submit]", "Second");
+		await page.waitFor(`${alert}?.startsWith("Mark 2 was not added")`, 20_000);
+		await allCases(panel);
+		await panel.waitFor(
+			`!${leaveHint}.hidden && ${leaveHint}.textContent.startsWith("1 mark is not in the case yet")`,
+			20_000,
+		);
+
+		// The mark goes in after all: the panel says nothing more about it.
+		await putBack(stored);
+		await page.click(shadow('[data-action="retry"]'));
+		await page.waitFor(
+			`${status} === "Mark 2 added to “Blocked once”"`,
+			20_000,
+		);
+		await panel.waitFor(`${leaveHint}.hidden`, 10_000);
+
+		// Much later a mark fails again: the first click finishes, it does not
+		// discard.
+		stored = await takeOut(c.id);
+		await markElement(page, "[data-truth=tip]", "Third");
+		await page.waitFor(`${alert}?.startsWith("Mark 3 was not added")`, 20_000);
+		await allCases(panel);
+		await panel.waitFor(
+			`!${leaveHint}.hidden && ${leaveHint}.textContent.startsWith("1 mark is not in the case yet")`,
+			20_000,
+		);
+		expect(await toolbarUp(tabId)).toBe(true);
+		await drawnAre(page, { drafts: ["3"], saved: ["1", "2"] });
+		await putBack(stored);
+		// The second click leaves without it.
+		await allCases(panel);
+		await home(panel);
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		expect(
+			(await caseTitled("Blocked once")).c.annotations.map((a) => a.comment),
+		).toEqual(["First", "Second"]);
+		await page.send("Page.close");
+	}, 120_000);
+
 	test("All cases with a mark not in the case: the panel stays and says so; again leaves without it", async () => {
 		const { page, tabId } = await savedCase("Left behind");
 		const panel = await addMarks(page, "Left behind");

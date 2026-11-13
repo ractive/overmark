@@ -458,6 +458,7 @@ async function refreshTab(): Promise<void> {
 				s.hint = undefined;
 			s.tab = next;
 			s.overlay = overlay;
+			unblock(s);
 			// Results describe the tab they came from, with that case loaded.
 			if (
 				s.loaded !== undefined &&
@@ -672,6 +673,20 @@ async function endToolbars(
 	};
 }
 
+/**
+ * "← All cases" could not leave: it stays so only while the page in front
+ * says that marks of the case are still not in it (its toolbar up, adding to
+ * the case, with drafts); once they are, the line under the actions goes.
+ */
+function unblock(s: PanelState): void {
+	if (s.leaving?.phase !== "blocked" || s.view.kind !== "case") return;
+	const o = s.overlay;
+	s.leaving =
+		o?.visible && o.target?.caseId === s.view.id && o.drafts > 0
+			? { phase: "blocked", left: o.drafts }
+			: undefined;
+}
+
 /** What "← All cases" is at now (read again after an await). */
 const leavingNow = (): PanelState["leaving"] => state.leaving;
 
@@ -679,18 +694,18 @@ const leavingNow = (): PanelState["leaving"] => state.leaving;
  * "← All cases" (DEC-023): the toolbar adding to the case finishes as its
  * Done does and adds to no case any more, then the case closes and its marks
  * leave the tab in front. A mark that could not be added keeps the toolbar
- * up and the panel in the case, which says so; the next click leaves
- * without it.
+ * up and the panel in the case, which says so. The next click ends it again,
+ * and the page decides: a mark its last Done left out goes then, as with its
+ * own Done again; one drawn or tried since is tried once more (DEC-014).
  */
 async function leaveCase(): Promise<void> {
 	if (state.view.kind !== "case" || state.leaving?.phase === "finishing")
 		return;
 	const caseId = state.view.id;
-	const discard = state.leaving?.phase === "blocked";
 	update((s) => (s.leaving = { phase: "finishing" }));
 	// A refresh read before the end would show the toolbar as it was.
 	tabWork.cancel();
-	const { left, front } = await endToolbars(caseId, discard);
+	const { left, front } = await endToolbars(caseId, false);
 	// Closed meanwhile (deleted elsewhere), or opened again.
 	if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
 	if (left > 0) {
@@ -1691,7 +1706,10 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 			void forgetLoaded();
 		// Only the tab the panel shows matters.
 		if (from !== undefined && from === state.tab?.id) {
-			update((s) => (s.overlay = news.state));
+			update((s) => {
+				s.overlay = news.state;
+				unblock(s);
+			});
 			// A toolbar adding to a case: the panel opens it (DEC-023).
 			void adopt();
 			// A refresh may have read the page before this news, or be finding
