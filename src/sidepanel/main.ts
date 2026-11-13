@@ -7,12 +7,15 @@
 import {
 	type Annotation,
 	type Case,
+	markStatus,
 	nextNumbers,
 	validateCase,
+	withChoice,
 	withComment,
 	withoutAnnotation,
 	withoutFinding,
-	withResolution,
+	withReopen,
+	withVerified,
 } from "../lib/case.ts";
 import {
 	type CheckedExport,
@@ -629,6 +632,7 @@ function openCase(id: string): void {
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
+		s.markFilter = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
 		s.leaving = undefined;
@@ -1209,7 +1213,11 @@ const actions: Actions = {
 		})();
 	},
 
-	addMarks: (c) => void startAnnotating(c),
+	addMarks: (c) => {
+		// The marks drawn now show, whatever the list was filtered by.
+		update((s) => (s.markFilter = undefined));
+		void startAnnotating(c);
+	},
 
 	doneAdding(c) {
 		const hint = caseHintWriter();
@@ -1288,13 +1296,19 @@ const actions: Actions = {
 	},
 
 	editMark(_c, a, mode) {
+		const status = markStatus(a);
 		update((s) => {
 			s.markDeleteArmed = undefined;
 			s.markEdit = {
 				annotationId: a.id,
 				mode,
-				kind: a.resolution?.kind ?? "fixed",
-				text: mode === "comment" ? a.comment : (a.resolution?.note ?? ""),
+				kind: status === "open" ? "fixed" : status,
+				text:
+					mode === "comment"
+						? a.comment
+						: mode === "resolve"
+							? (a.resolution?.note ?? "")
+							: "",
 			};
 		});
 	},
@@ -1312,15 +1326,36 @@ const actions: Actions = {
 	resolveMark(c, a, kind, note) {
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withResolution(current, a.id, { kind, note }, now),
+			value: withChoice(current, a.id, kind, note, now),
 		}));
 	},
 
-	reopenMark(c, a) {
+	verifyMark(c, a) {
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withResolution(current, a.id, null, now),
+			value: withVerified(current, a.id, undefined, now),
 		}));
+	},
+
+	reopenMark(c, a, note) {
+		// The developer reads it first: in the panel, a reopen says why.
+		if (note.trim() === "") return;
+		const now = new Date().toISOString();
+		void changeMark(c.id, a.id, (current) => ({
+			// Opened meanwhile: the form stays, and says why.
+			value: withReopen(current, a.id, { note, refuseOpen: true }, now),
+		}));
+	},
+
+	filterMarks(caseId, group) {
+		update((s) => {
+			const highest = Math.max(
+				0,
+				...(s.current?.annotations.map((a) => a.number) ?? []),
+			);
+			s.markFilter =
+				group === undefined ? undefined : { caseId, group, upTo: highest };
+		});
 	},
 
 	saveComment(c, a, text) {

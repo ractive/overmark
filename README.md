@@ -79,9 +79,18 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    container changed its size. A mark without an element goes where it was, in amber.
    Show scrolls to a mark; Next candidate tries the next best element. The screenshots
    stay the record, so a mark makes sense even when its element is not found.
-5. Each mark in the side panel can be resolved (Fixed, Won't fix or Can't reproduce, with
-   an optional note), opened again, have its comment edited, or be deleted. A resolved
-   mark is drawn grey on a loaded page and no longer counted as open. A deleted mark's
+5. Each mark in the side panel has a status: open, fixed and to verify, verified, won't
+   fix or can't reproduce. Resolve… sets it (Fixed, to verify; Fixed and verified; Won't
+   fix; Can't reproduce; with an optional note). The tester on the new build then
+   clicks Verified on a fix that holds, or Reopen… with a note on what is still wrong;
+   the claimed fix and its note stay in the mark's history. The status chips under the
+   case's bar (Open, To verify, Verified, Closed) count the marks and filter the list:
+   the developer works through Open, the tester through To verify. On a loaded page a
+   mark to verify is drawn in full in violet; a verified or closed one is drawn grey and
+   faded, and no longer counted. Both sides should run this version: an older one
+   reading the file shows a verified mark as Fixed and a reopened one as open without
+   its note (`case.md` in the file still has them). A mark can also have its comment
+   edited, or be deleted. A deleted mark's
    number is not given again, and its pin stays on screenshots that other marks share.
    Under the comment a mark shows its AI findings: what a connected AI app found out
    about it, each with the app's name and when it was written. An AI app never changes
@@ -126,8 +135,8 @@ The tools:
 
 | Tool | What it does |
 |---|---|
-| `list_cases` | The saved cases |
-| `get_case` | A case's summary for the developer and its marks with their comments, AI findings, element details and crops |
+| `list_cases` | The saved cases, with their marks by status |
+| `get_case` | A case's summary for the developer and its marks with their comments, statuses, reopens, AI findings, element details and crops |
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
@@ -135,7 +144,7 @@ The tools:
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |
 | `set_summary` | Records the summary for the developer: what should change overall, as agreed; asks first |
-| `set_mark_status` | Resolves a mark or opens it again; asks first |
+| `set_mark_status` | Sets a mark fixed, verified (a fixed one, when you say so), won't fix or can't reproduce, or reopens it with a note; asks first |
 | `add_finding` | Adds a finding of the AI app to a mark, apart from your comment; asks first |
 | `edit_finding` | Changes one of the app's own findings; asks first |
 | `delete_finding` | Deletes one of the app's own findings; asks first |
