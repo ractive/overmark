@@ -8,12 +8,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
 import {
-	ALL_ICONS_BELOW,
 	CASING_EXTRA,
 	PAGE_LOOK,
 	STATUS_COLOUR,
-	TOOL_ICONS_BELOW,
-	TWO_ROWS_BELOW,
 } from "../../src/content/overlay.ts";
 import { MARK_COLOUR } from "../../src/lib/marks.ts";
 import { openSidePanel, setRelay } from "./ai.ts";
@@ -23,8 +20,12 @@ import { markElement, saveAs, shadow } from "./steps.ts";
 
 const id = (name: string) => `document.getElementById(${JSON.stringify(name)})`;
 
-/** The panel's widths: Chrome's narrowest side panel, and a common one. */
-const WIDTHS = [360, 420];
+/**
+ * The panel's widths: Chrome's narrowest side panel with a classic scrollbar
+ * beside its content (15 px on Windows and Linux, whenever a case is taller
+ * than the panel), the same without one, and a common width.
+ */
+const WIDTHS = [345, 360, 420];
 
 describe.skipIf(browserBinary === undefined)("the look", () => {
 	let h: Harness;
@@ -52,21 +53,26 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		await panel.waitFor(`innerWidth === ${width}`);
 	}
 
-	/** What reaches past the panel's right edge, and the view's amber buttons. */
+	/**
+	 * What reaches past the right edge of the panel's content, and the view's
+	 * amber buttons. The content's width is the scrolling element's
+	 * `clientWidth`: the window's less a classic scrollbar, where there is one.
+	 */
 	const measure = () =>
 		panel.eval<{
 			scroll: number;
-			inner: number;
+			client: number;
 			past: string[];
 			amber: string[];
 		}>(
 			`(() => {
 				const shown = (e) => e.getClientRects().length > 0;
+				const root = document.scrollingElement;
 				return {
-					scroll: document.documentElement.scrollWidth,
-					inner: innerWidth,
+					scroll: root.scrollWidth,
+					client: root.clientWidth,
 					past: [...document.querySelectorAll("body *")]
-						.filter((e) => shown(e) && !e.closest(".visually-hidden") && e.getBoundingClientRect().right > innerWidth + 0.5)
+						.filter((e) => shown(e) && !e.closest(".visually-hidden") && e.getBoundingClientRect().right > root.clientWidth + 0.5)
 						.map((e) => e.tagName + "#" + e.id + "." + e.className),
 					amber: [...document.querySelectorAll("button.primary")].filter(shown).map((e) => e.id || e.textContent),
 				};
@@ -78,13 +84,14 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		for (const width of WIDTHS) {
 			await panelWidth(width);
 			const seen = await measure();
-			expect(seen.scroll).toBe(width);
+			expect(seen.client).toBeLessThanOrEqual(width);
+			expect(seen.scroll).toBeLessThanOrEqual(seen.client);
 			expect(seen.past).toEqual([]);
 			expect(seen.amber).toEqual(amber);
 		}
 	}
 
-	test("Home, a case with its marks open, and Settings: no sideways scroll at 360 and 420 px, at most one amber button", async () => {
+	test("Home, a case with its marks open, and Settings: no sideways scroll at 345, 360 and 420 px, at most one amber button", async () => {
 		await panel.waitFor(`!${id("annotate")}.disabled`);
 		// Home, empty.
 		await holds(["annotate"]);
@@ -305,81 +312,103 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		);
 	}, 120_000);
 
-	test("the toolbar: one row on a wide page, the status on a second row on a narrower one, and the tools never wrap", async () => {
+	test("the toolbar at any page width and font: the tools never wrap, the status is beside them or on its own row, every button keeps its name", async () => {
 		await page.activate();
 		await panel.eval(`${id("add-marks")}.click()`);
 		await page.waitFor(shadow('[data-action="tool-box"]'));
-		const rows = (width: number) =>
-			page
-				.send("Emulation.setDeviceMetricsOverride", {
-					width,
-					height: 600,
-					deviceScaleFactor: 1,
-					mobile: false,
-				})
-				.then(() => page.waitFor(`innerWidth === ${width}`))
-				.then(() =>
-					page.eval<{
-						buttons: number;
-						status: number;
-						fits: boolean;
-						words: number;
-						named: boolean;
-					}>(
-						`(() => {
-							const bar = ${shadow(".toolbar")};
-							const all = [...bar.querySelectorAll("button")];
-							const top = (e) => Math.round(e.getBoundingClientRect().top);
-							const box = bar.getBoundingClientRect();
-							const tops = [...new Set(all.map(top))];
-							const under = Math.max(...all.map((e) => e.getBoundingClientRect().bottom));
-							return {
-								buttons: tops.length,
-								status: bar.querySelector(".status").getBoundingClientRect().top >= under - 1 ? 2 : 1,
-								fits: box.left >= 0 && box.right <= innerWidth,
-								words: all.filter((b) => { const w = b.querySelector(".word"); return w && w.getBoundingClientRect().width > 2; }).length,
-								named: all.every((b) => (b.textContent || b.getAttribute("aria-label") || "").trim() !== ""),
-							};
-						})()`,
-					),
-				);
+		interface Layout {
+			fit: string;
+			/** Rows the buttons stand in. */
+			buttons: number;
+			/** 1: beside the buttons; 2: on a row of its own under them. */
+			status: number;
+			fits: boolean;
+			/** Buttons whose word shows. */
+			words: number;
+			named: boolean;
+		}
+		const at = async (width: number): Promise<Layout> => {
+			await page.send("Emulation.setDeviceMetricsOverride", {
+				width,
+				height: 600,
+				deviceScaleFactor: 1,
+				mobile: false,
+			});
+			await page.waitFor(`innerWidth === ${width}`);
+			// The toolbar lays itself out on the page's resize.
+			await page.eval(
+				"new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))))",
+			);
+			return page.eval<Layout>(
+				`(() => {
+					const bar = ${shadow(".toolbar")};
+					const all = [...bar.querySelectorAll("button")];
+					const box = bar.getBoundingClientRect();
+					const tops = all.map((e) => e.getBoundingClientRect().top);
+					const under = Math.max(...all.map((e) => e.getBoundingClientRect().bottom));
+					const status = bar.querySelector(".status").getBoundingClientRect();
+					return {
+						fit: bar.dataset.fit,
+						buttons: Math.max(...tops) - Math.min(...tops) < 8 ? 1 : 2,
+						status: status.top >= under - 1 ? 2 : (status.top + status.bottom) / 2 > Math.min(...tops) && (status.top + status.bottom) / 2 < under ? 1 : 0,
+						fits: box.left >= 0 && box.right <= document.documentElement.clientWidth,
+						words: all.filter((b) => { const w = b.querySelector(".word"); return w && w.getBoundingClientRect().width > 2; }).length,
+						named: all.every((b) => (b.textContent || b.getAttribute("aria-label") || "").trim() !== ""),
+					};
+				})()`,
+			);
+		};
+		/** From wide to narrow: what must hold whatever the font and the scrollbar. */
+		const check = async (): Promise<Layout[]> => {
+			const seen: Layout[] = [];
+			for (const width of [1600, 1200, 1000, 900, 800, 700, 600, 500, 440]) {
+				const layout = await at(width);
+				seen.push(layout);
+				// The tools never wrap in the middle, and the bar stays on the page.
+				expect([width, layout.buttons, layout.fits]).toEqual([width, 1, true]);
+				// Beside the tools or on its own row, never between or across.
+				expect([1, 2]).toContain(layout.status);
+				expect(layout.named).toBe(true);
+				// Words go only once the status has a row of its own.
+				if (layout.status === 1) expect(layout.words).toBe(7);
+			}
+			// Narrower never brings a roomier layout back.
+			const tightness = seen.map((l) => l.fit.length);
+			expect(tightness).toEqual([...tightness].sort((a, b) => a - b));
+			const words = seen.map((l) => l.words);
+			expect(words).toEqual([...words].sort((a, b) => b - a));
+			return seen;
+		};
+		const plain = await check();
 		// Adding to a case: five tools, Undo and Done have an icon and a word.
-		expect(await rows(TWO_ROWS_BELOW + 240)).toEqual({
-			buttons: 1,
-			status: 1,
-			fits: true,
-			words: 7,
-			named: true,
-		});
-		expect(await rows(TWO_ROWS_BELOW - 1)).toEqual({
-			buttons: 1,
-			status: 2,
-			fits: true,
-			words: 7,
-			named: true,
-		});
-		// The tools are their icons; their names stay for a screen reader.
-		expect(await rows(TOOL_ICONS_BELOW - 1)).toEqual({
-			buttons: 1,
-			status: 2,
-			fits: true,
-			words: 2,
-			named: true,
-		});
-		expect(await rows(ALL_ICONS_BELOW - 1)).toEqual({
-			buttons: 1,
-			status: 2,
-			fits: true,
-			words: 0,
-			named: true,
-		});
-		expect(await rows(420)).toEqual({
-			buttons: 1,
-			status: 2,
-			fits: true,
-			words: 0,
-			named: true,
-		});
+		// Wide enough, all of it is one row; narrow enough, only icons are left.
+		expect(plain[0]).toMatchObject({ fit: "", status: 1, words: 7 });
+		expect(plain.at(-1)).toMatchObject({ status: 2, words: 0 });
+
+		// A system font a third wider, and a classic scrollbar on the page: the
+		// same holds, with other layouts at the same widths.
+		await page.eval(`(() => {
+			const root = ${shadow(".toolbar")}.getRootNode();
+			const wide = new CSSStyleSheet();
+			wide.replaceSync(".layer { letter-spacing: 0.14em; font-size: 15px; }");
+			root.adoptedStyleSheets = [...root.adoptedStyleSheets, wide];
+			const bar = document.createElement("style");
+			bar.id = "classic-scrollbar";
+			bar.textContent = "html { overflow-y: scroll; } ::-webkit-scrollbar { width: 15px; } body { min-height: 200vh; }";
+			document.head.append(bar);
+		})()`);
+		const wide = await check();
+		expect(wide.at(-1)).toMatchObject({ status: 2, words: 0 });
+		// The wider font needs the tighter layout sooner.
+		expect(
+			wide.every((l, i) => l.fit.length >= (plain[i] as Layout).fit.length),
+		).toBe(true);
+		expect(wide.some((l, i) => l.fit !== (plain[i] as Layout).fit)).toBe(true);
+		await page.eval(`(() => {
+			const root = ${shadow(".toolbar")}.getRootNode();
+			root.adoptedStyleSheets = root.adoptedStyleSheets.slice(0, -1);
+			document.getElementById("classic-scrollbar").remove();
+		})()`);
 		await page.send("Emulation.clearDeviceMetricsOverride");
 		await panel.eval(`${id("add-marks")}.click()`);
 	}, 120_000);

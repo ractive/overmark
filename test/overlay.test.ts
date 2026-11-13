@@ -263,9 +263,81 @@ describe("the overlay's style", () => {
 		expect(source).toContain("color-scheme: light;");
 		expect(source).toContain("@media (forced-colors: active)");
 		expect(source).toContain("background: Highlight;");
-		expect(source).toMatch(/@media \(max-width: \$\{TWO_ROWS_BELOW - 1\}px\)/);
-		expect(o.TWO_ROWS_BELOW).toBeGreaterThan(o.TOOL_ICONS_BELOW);
-		expect(o.TOOL_ICONS_BELOW).toBeGreaterThan(o.ALL_ICONS_BELOW);
-		expect(o.ALL_ICONS_BELOW).toBeGreaterThan(o.TIGHT_BELOW);
+		// No page width decides the toolbar's layout: it is measured.
+		expect(source).not.toMatch(/@media \((max|min)-width/);
+	});
+});
+
+describe("the toolbar's layout is measured, not guessed from the page's width", () => {
+	const button = (top: () => number) => {
+		const b = window.document.createElement("button");
+		Object.defineProperty(b, "offsetTop", { get: top });
+		return b as unknown as HTMLElement;
+	};
+	/** A toolbar whose row overflows, or whose last button wraps, in these fits. */
+	const withRoomFrom = (first: string) => {
+		const bar = overlay.toolbar;
+		const tight = () => o.TOOLBAR_FITS.indexOf(bar.dataset["fit"] as never);
+		const fits = () => tight() >= o.TOOLBAR_FITS.indexOf(first as never);
+		Object.defineProperty(bar, "clientWidth", {
+			configurable: true,
+			get: () => 600,
+		});
+		Object.defineProperty(bar, "scrollWidth", {
+			configurable: true,
+			get: () => (fits() ? 600 : 700),
+		});
+		bar.replaceChildren(
+			button(() => 5),
+			button(() => (fits() ? 5 : 35)),
+		);
+	};
+
+	test("the first layout that fits: the status beside the tools, then under them, then icons, then closer", () => {
+		overlay.setAnnotating(true);
+		for (const fit of o.TOOLBAR_FITS) {
+			withRoomFrom(fit);
+			overlay.fitToolbar();
+			expect<string | undefined>(overlay.toolbar.dataset["fit"]).toBe(fit);
+		}
+		// Each step keeps what the one before did.
+		expect(o.TOOLBAR_FITS).toEqual([
+			"",
+			"rows",
+			"rows icons",
+			"rows icons all",
+			"rows icons all tight",
+		]);
+	});
+
+	test("nothing fits: the tightest stays; hidden, it is left as it is", () => {
+		const bar = overlay.toolbar;
+		Object.defineProperty(bar, "scrollWidth", {
+			configurable: true,
+			get: () => 900,
+		});
+		bar.replaceChildren(
+			button(() => 5),
+			button(() => 35),
+		);
+		overlay.fitToolbar();
+		expect<string | undefined>(bar.dataset["fit"]).toBe("rows icons all tight");
+		overlay.setAnnotating(false);
+		bar.dataset["fit"] = "rows";
+		overlay.fitToolbar();
+		expect<string | undefined>(bar.dataset["fit"]).toBe("rows");
+	});
+
+	test("a wider page lays it out again", () => {
+		overlay.setAnnotating(true);
+		withRoomFrom("rows icons");
+		overlay.fitToolbar();
+		expect<string | undefined>(overlay.toolbar.dataset["fit"]).toBe(
+			"rows icons",
+		);
+		withRoomFrom("");
+		window.dispatchEvent(new window.Event("resize"));
+		expect<string | undefined>(overlay.toolbar.dataset["fit"]).toBe("");
+		overlay.setAnnotating(false);
 	});
 });

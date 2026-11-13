@@ -66,17 +66,20 @@ export const RESOLVED_OPACITY = 0.35;
 /** How much wider than its stroke a shape's casing is. */
 export const CASING_EXTRA = 3;
 /**
- * Under this page width the toolbar's status goes to a second, centred row,
- * and under the next ones the buttons with an icon lose their words (the
- * tools first), so the tools never wrap in the middle. Measured: the tools
- * with their words are about 740 px wide, as icons 550, all as icons 470, close 390; the
- * status takes up to 300.
+ * How the toolbar is laid out, from the roomiest to the tightest: one row
+ * with the status beside the tools; the status on a second, centred row;
+ * the tools as icons; every button with an icon as an icon; the buttons
+ * closer. `fitToolbar` takes the first that fits the page, measured, so no
+ * font's width and no scrollbar decides it, and the tools never wrap in the
+ * middle (on a page narrower than about 400 px they still do).
  */
-export const TWO_ROWS_BELOW = 960;
-export const TOOL_ICONS_BELOW = 820;
-export const ALL_ICONS_BELOW = 620;
-/** Under this the buttons stand closer; a narrower page than about 400 px wraps them. */
-export const TIGHT_BELOW = 540;
+export const TOOLBAR_FITS = [
+	"",
+	"rows",
+	"rows icons",
+	"rows icons all",
+	"rows icons all tight",
+] as const;
 const SVG = "http://www.w3.org/2000/svg";
 const L = PAGE_LOOK;
 /** The bars' edge on a dark page, then their shadow. */
@@ -111,8 +114,9 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 }
 .toolbar.top { top: 16px; bottom: auto; }
 .ring { flex: none; width: 20px; height: 20px; margin: 0 6px; fill: none; stroke: ${L.amber}; stroke-width: 3.5; }
+/* Beside the tools it keeps its width (and wraps inside it): what does not fit shows as overflow, which fitToolbar reads. */
 .toolbar .status {
-	min-width: 0; max-width: 300px; padding: 0 8px;
+	flex: none; max-width: 300px; padding: 0 8px;
 	color: ${L.barMuted}; font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
 }
 .toolbar .sep { flex: none; width: 1px; align-self: stretch; margin: 4px; background: rgba(255, 255, 255, 0.28); }
@@ -140,26 +144,18 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 }
 .toolbar input:focus-visible { outline: 2px solid ${L.amber}; outline-offset: 1px; }
 /* Two rows on purpose: the tools on the first, what they are at under them. */
-@media (max-width: ${TWO_ROWS_BELOW - 1}px) {
-	.toolbar { flex-wrap: wrap; row-gap: 0; }
-	/* No width of its own, then all of the row: the bar is as wide as its tools. */
-	.toolbar .status {
-		order: 1; flex: none; box-sizing: border-box; width: 0; min-width: 100%; max-width: none;
-		padding: 3px 8px 2px; text-align: center;
-	}
+.toolbar[data-fit~="rows"] { flex-wrap: wrap; row-gap: 0; }
+/* No width of its own, then all of the row: the bar is as wide as its tools. */
+.toolbar[data-fit~="rows"] .status {
+	order: 1; box-sizing: border-box; width: 0; min-width: 100%; max-width: none;
+	padding: 3px 8px 2px; text-align: center;
 }
-@media (max-width: ${TOOL_ICONS_BELOW - 1}px) {
-	.toolbar button[aria-pressed] .word { ${NO_WORD} }
-}
-@media (max-width: ${ALL_ICONS_BELOW - 1}px) {
-	.toolbar button:has(.icon) .word { ${NO_WORD} }
-}
-@media (max-width: ${TIGHT_BELOW - 1}px) {
-	.toolbar button { padding-inline: 6px; }
-	.toolbar button.primary { padding-inline: 9px; }
-	.toolbar .ring { margin: 0 2px; }
-	.toolbar .sep { display: none; }
-}
+.toolbar[data-fit~="icons"] button[aria-pressed] .word { ${NO_WORD} }
+.toolbar[data-fit~="all"] button:has(.icon) .word { ${NO_WORD} }
+.toolbar[data-fit~="tight"] button { padding-inline: 6px; }
+.toolbar[data-fit~="tight"] button.primary { padding-inline: 9px; }
+.toolbar[data-fit~="tight"] .ring { margin: 0 2px; }
+.toolbar[data-fit~="tight"] .sep { display: none; }
 .popover {
 	box-sizing: border-box; position: fixed; width: 296px; padding: 10px; border-radius: 12px;
 	/* A dark page does not restyle the field. */
@@ -441,6 +437,8 @@ export class Overlay {
 				true,
 			);
 		doc.addEventListener("fullscreenchange", () => this.#place());
+		// The page's width changed (a resize, the side panel, zoom).
+		doc.defaultView?.addEventListener("resize", () => this.fitToolbar());
 		doc.documentElement.append(this.host);
 		this.#update();
 	}
@@ -513,6 +511,33 @@ export class Overlay {
 			clearInterval(this.#timer);
 			this.#timer = undefined;
 		}
+		// Hidden, it has no size to measure: laid out again once it shows.
+		this.fitToolbar();
+	}
+
+	/**
+	 * Lay the toolbar out for the room it has: the first of `TOOLBAR_FITS`
+	 * whose buttons stand in one row within the page (with the status beside
+	 * them, in the first). Called when the toolbar's parts change, when it
+	 * shows and when the page's width changes.
+	 */
+	fitToolbar(): void {
+		const bar = this.toolbar;
+		if (this.layer.hidden || bar.hidden) return;
+		for (const fit of TOOLBAR_FITS) {
+			bar.dataset["fit"] = fit;
+			if (this.#toolbarFits(fit === "")) return;
+		}
+	}
+
+	/** One row that does not overflow (`beside`), or no button on a second row. */
+	#toolbarFits(beside: boolean): boolean {
+		const bar = this.toolbar;
+		if (beside) return bar.scrollWidth <= bar.clientWidth;
+		const tops = [...bar.querySelectorAll<HTMLElement>("button, input")].map(
+			(b) => b.offsetTop,
+		);
+		return Math.max(...tops) - Math.min(...tops) < 8;
 	}
 
 	/**

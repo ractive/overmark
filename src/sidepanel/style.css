@@ -623,6 +623,7 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 #back {
 	justify-content: center;
 	gap: var(--s1);
+	white-space: nowrap;
 	margin-right: auto;
 	min-width: 112px;
 	min-height: 32px;
@@ -638,14 +639,26 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	stroke-linejoin: round;
 }
 
-/* The connection in a few words, and a click away from changing it. */
-.ai-pill {
+/*
+ * The connection in a few words, and a click away from changing it. In the
+ * narrowest panel with a scrollbar beside it (345 px) it gives way first: its
+ * words end in "…", the way back and Stop keep theirs.
+ */
+:where(#bar) .ai-pill {
+	flex: 0 1 auto;
 	gap: 6px;
 	min-width: 0;
 	min-height: 28px;
-	padding: 0 var(--s3) 0 10px;
+	padding: 0 10px 0 var(--s2);
 	font-size: 12px;
 	line-height: 16px;
+	white-space: nowrap;
+}
+
+#ai-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .ai-pill .dot,
@@ -680,7 +693,7 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 
 #stop-ai {
 	min-height: 28px;
-	padding: 0 var(--s3);
+	padding: 0 10px;
 	font-size: 12px;
 	line-height: 16px;
 }

@@ -1016,6 +1016,8 @@ export class Annotator {
 		alertEl.hidden = alert === "";
 		statusEl.before(...before);
 		alertEl.after(...after);
+		// Other parts, other widths: laid out for the room there is.
+		this.overlay.fitToolbar();
 		if (action !== undefined)
 			bar
 				.querySelector<HTMLElement>(`[data-action="${CSS.escape(action)}"]`)

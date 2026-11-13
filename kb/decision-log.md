@@ -838,10 +838,15 @@ shape.
   rail: its colour the status, its fill the match.
 - System fonts only; the extension loads nothing.
 
-As built (PR d), where the review's figures did not hold on the real toolbar: its tools
-with their words are about 740 px wide, so the status moves to a second row under 960 px
-of page width (the review said 720), and the tools become icons under 820, Undo and
-Close under 620; their words stay as accessible names. The found line keeps "3 of 4
+As built (PR d), where the review's figures did not hold on the real toolbar: no page
+width decides its layout (the review said 720 px; on macOS the tools with their words
+measure about 740 px, another system's font gives another width, and a classic
+scrollbar takes 15 px of the page). The toolbar
+measures itself when its parts change, when it shows and when the page is resized, and
+takes the first layout that fits: the status beside the tools; the status on a second
+row; the tools as icons; Undo and Close as icons too; the buttons closer. Their words
+stay as accessible names. The side panel holds at 345 px of content (Chrome's 360 px
+less a classic scrollbar): there the AI pill's words give way first. The found line keeps "3 of 4
 marks found on …" and adds "Dashed: unsure." only when a dashed mark is drawn. The AI
 pill also says "AI connecting…", and shows a red dot when AI access is off with a
 problem to tell; the whole status stays in the pill's name and tooltip. The rail is a
