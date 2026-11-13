@@ -77,6 +77,15 @@ is what a case is about, and finding the element again is a best-effort extra:
 | Side panel (`src/sidepanel/`) | Three views under one top bar (back button, AI pill): Home (this page, the case list, files and the sync's choice), a case (its marks follow the tab in front, `follow.ts`; summary for the developer, AI findings, export) and Settings (the AI connection's card: status, pairing; the options). The questions, and the sync's banner while it is paused or failed, show above every view |
 | Library (`src/lib/`) | Case format, element details, matching, zip, export, IndexedDB store, images |
 
+The look (DEC-024): the side panel is paper with ink on it, in light and dark, from one
+token block in `style.css`; amber is a view's one action that starts drawing, the other
+main actions are ink, and a mark's colour is its status (open, to verify, verified,
+closed). The marks list has a margin with each mark's pin on a rail: the pin's colour is
+the status, its fill the match. The page's overlay has one fixed
+look on every page and in both schemes: ink bars with a white ring, every stroke over a
+white casing, solid when the mark's element is found and dashed when it is unsure.
+`test/contrast.test.ts` holds every colour pair to its WCAG ratio.
+
 Storage is IndexedDB in the extension's origin (database `overmark`, stores `cases` and
 `images`), shared by the service worker and the side panel. A content script runs in
 the page's origin and never touches it directly.

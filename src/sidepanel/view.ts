@@ -32,7 +32,7 @@ import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
 import { noneFound } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
-import type { AiCall, Exported, PanelState } from "./state.ts";
+import type { AiCall, AiProblem, Exported, PanelState } from "./state.ts";
 import {
 	renderSyncBanner,
 	renderSyncSection,
@@ -105,9 +105,13 @@ const annotateTitle = annotate.title;
 const casesList = byId<HTMLDivElement>("cases");
 const allSites = byId<HTMLInputElement>("all-sites");
 const aiStatus = byId<HTMLSpanElement>("ai-status");
+const aiLabel = byId<HTMLSpanElement>("ai-label");
+const backLabel = byId<HTMLSpanElement>("back-label");
 const aiButton = byId<HTMLButtonElement>("ai-button");
 const aiAction = byId<HTMLSpanElement>("ai-action");
 const aiCall = byId<HTMLParagraphElement>("ai-call");
+const aiProblem = byId<HTMLDivElement>("ai-problem");
+const aiProblemText = byId<HTMLParagraphElement>("ai-problem-text");
 const stopAi = byId<HTMLButtonElement>("stop-ai");
 const keepOn = byId<HTMLInputElement>("keep-on");
 const importError = byId<HTMLDivElement>("import-error");
@@ -855,7 +859,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			"button",
 			{
 				type: "button",
-				class: "small",
+				class: "small strong",
 				id: "save-verdict",
 				hidden: true,
 				onclick: () => actions.saveVerdict(c.id, verdict.value),
@@ -958,7 +962,7 @@ export function leavingText(
 	if (leaving === undefined) return undefined;
 	if (leaving.phase === "finishing") return "Finishing the marks…";
 	const one = leaving.left === 1;
-	return `${leaving.left} mark${one ? " is" : "s are"} not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without ${one ? "it" : "them"}.`;
+	return `${leaving.left} mark${one ? " is" : "s are"} not in the case yet; the toolbar on the page says why. Click All cases again to leave without ${one ? "it" : "them"}.`;
 }
 
 // --- a mark's status and its actions ---------------------------------------
@@ -1309,7 +1313,7 @@ function resolveForm(
 				"button",
 				{
 					type: "button",
-					class: "primary small",
+					class: "strong small",
 					"data-mark-action": "resolve-done",
 					onclick: submit,
 				},
@@ -1363,7 +1367,7 @@ function commentForm(
 				"button",
 				{
 					type: "button",
-					class: "primary small",
+					class: "strong small",
 					"data-mark-action": "comment-done",
 					onclick: save,
 				},
@@ -1918,23 +1922,78 @@ function callText(call: AiCall): string {
 	return `Last AI call: ${call.tool}, by ${call.app}, at ${time}`;
 }
 
+/** `text` as a sentence another can follow. */
+const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
+/** A problem in the pill's two or three words; the sentence is under the bar. */
+const PROBLEM_LABEL: Record<AiProblem, string> = {
+	tab: "AI: side panel only",
+	updated: "AI: reopen panel",
+	unavailable: "AI unavailable",
+	connection: "AI problem",
+};
+
+/**
+ * The top bar's pill (DEC-023, DEC-024): the connection in two or three
+ * words, a dot in its colour, and in the tooltip the whole of it and what a
+ * click does. A problem is red and named; its sentence shows under the bar
+ * (`renderAi`), so nobody has to hover to learn of it.
+ */
+export function aiPill(ai: PanelState["ai"]): {
+	label: string;
+	dot: "off" | "problem" | "waiting" | "connected";
+	title: string;
+} {
+	if (ai.problem !== undefined) {
+		const retrying = ai.problem === "connection" && ai.active;
+		return {
+			label: retrying ? "AI retrying…" : PROBLEM_LABEL[ai.problem],
+			dot: "problem",
+			title:
+				ai.problem === "connection"
+					? `${sentence(ai.status)} Click for the AI app card.`
+					: sentence(ai.status),
+		};
+	}
+	if (ai.connected && ai.apps > 0)
+		return {
+			label: `AI on · ${ai.apps} app${ai.apps === 1 ? "" : "s"}`,
+			dot: "connected",
+			title: `${sentence(ai.status)} Click to manage ${ai.apps === 1 ? "it" : "them"}.`,
+		};
+	if (ai.connected)
+		return {
+			label: "AI on, no app yet",
+			dot: "waiting",
+			title: `${sentence(ai.status)} Click for the address and code.`,
+		};
+	if (ai.active)
+		return {
+			label: "AI connecting…",
+			dot: "waiting",
+			title: `${sentence(ai.status)} Click for the AI app card.`,
+		};
+	return {
+		label: "AI off",
+		dot: "off",
+		title: "AI access is off. Click to turn it on and set it up.",
+	};
+}
+
 function renderAi({ ai }: PanelState): void {
+	const pill = aiPill(ai);
+	aiLabel.textContent = pill.label;
+	// The whole status in the pill's name, for a screen reader; the pill shows the label.
 	aiStatus.textContent = ai.status;
-	// A long problem is cut to one line: then its whole is the button's title.
-	aiButton.title =
-		aiStatus.scrollWidth > aiStatus.clientWidth
-			? ai.status
-			: ai.active
-				? "Go to the AI app card: the paired apps and what they may do"
-				: "Turn AI access on and go to the AI app card";
+	aiButton.title = pill.title;
 	// Waiting for an app to pair: nothing to do but wait (a click shows how).
-	aiAction.hidden = ai.active && !ai.connected;
+	aiAction.hidden = (ai.active && !ai.connected) || ai.problem !== undefined;
 	aiAction.textContent = ai.connected ? "Manage" : "Turn on";
-	bar.dataset["ai"] = ai.connected
-		? "connected"
-		: ai.active
-			? "waiting"
-			: "off";
+	bar.dataset["ai"] = pill.dot;
+	// What is wrong, in words, on every view (DEC-024).
+	aiProblem.hidden = ai.problem === undefined;
+	aiProblemText.textContent =
+		ai.problem === undefined ? "" : sentence(ai.status);
 	stopAi.hidden = !ai.active;
 	keepOn.checked = ai.keepOn;
 	setHint(aiCall, ai.lastCall && callText(ai.lastCall));
@@ -1950,8 +2009,8 @@ export const BACK_CLICK_GAP_MS = 500;
 let lastBack: { at: number; role: string } | undefined;
 
 /**
- * The top bar's back button (DEC-023): "← All cases" closes the open case,
- * "← Back" leaves Settings for the view underneath; none on Home. One button
+ * The top bar's back button (DEC-023): "All cases" closes the open case,
+ * "Back" leaves Settings for the view underneath; none on Home. One button
  * that changes its meaning under the pointer: the second click of a double
  * click does nothing (as Delete's).
  */
@@ -1975,7 +2034,7 @@ function renderBack(state: PanelState, actions: Actions): void {
 	};
 	back.hidden = !state.settings && !onCase;
 	if (state.settings) {
-		back.textContent = "← Back";
+		backLabel.textContent = "Back";
 		back.setAttribute(
 			"aria-label",
 			onCase ? "Back to the case" : "Back to all cases",
@@ -1985,7 +2044,7 @@ function renderBack(state: PanelState, actions: Actions): void {
 		back.onclick = click(() => actions.closeSettings());
 		return;
 	}
-	back.textContent = "← All cases";
+	backLabel.textContent = "All cases";
 	back.setAttribute("aria-label", "All cases: close this case");
 	back.title =
 		"Close this case: the toolbar stops adding to it, and its marks leave this tab";

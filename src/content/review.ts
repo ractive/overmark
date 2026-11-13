@@ -1,8 +1,8 @@
 /**
  * Loading a case onto the page in front: each annotation's element is looked
  * for by its details (match.ts) and its mark drawn again on that element, moved
- * and scaled with it: green when found, amber and dashed when only probable or
- * tied. A mark without an element goes where it was. An element that a
+ * and scaled with it: solid when found, dashed when only probable or tied; its
+ * colour is its status (DEC-024). A mark without an element goes where it was. An element that a
  * re-render replaced afterwards is looked for again.
  */
 

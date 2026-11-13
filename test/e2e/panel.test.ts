@@ -1366,7 +1366,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				expect(box.height).toBeGreaterThanOrEqual(32);
 				expect(box.width).toBeGreaterThanOrEqual(112);
 				expect(await h.control.eval<string>(`${back}.textContent`)).toBe(
-					"← All cases",
+					"All cases",
 				);
 				// It stays in view while the case scrolls.
 				await h.control.eval(`window.scrollTo(0, 400)`);
@@ -1703,7 +1703,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 
 					await panel.eval(`${id("ai-button")}.click()`);
 					await panel.waitFor(
-						`!${id("settings")}.hidden && ${id("case-view")}.hidden && ${back}.textContent === "← Back"`,
+						`!${id("settings")}.hidden && ${id("case-view")}.hidden && ${back}.textContent === "Back"`,
 					);
 					// A real click in the AI app card reaches it now. The card
 					// grows while AI access comes on (the pairing box, above the
@@ -1773,7 +1773,8 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 						`chrome.runtime.sendMessage({ type: "cases:changed", caseId: "c_ai" })`,
 					);
 					await openCase("c_ai", panel);
-					for (const part of ["ai-status", "ai-call", "stop-ai"])
+					// What the user sees of the connection: the pill's words.
+					for (const part of ["ai-label", "ai-call", "stop-ai"])
 						expect(await visible(panel, part)).toBe(true);
 
 					await panel.eval(`${id("stop-ai")}.click()`);

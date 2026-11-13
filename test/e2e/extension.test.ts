@@ -380,7 +380,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 		expect(points).toBeGreaterThan(2);
 		// All of a mark says how sure the match is, an arrow's head too.
 		const arrow = await v2.page.eval<(string | null)[]>(
-			`(() => { const g = ${shadow('[data-review="3"]')}; return [g.querySelector("line").getAttribute("stroke"), g.querySelector("polygon").getAttribute("fill")]; })()`,
+			`(() => { const g = ${shadow('[data-review="3"]')}; return [g.querySelector("line:not([data-casing])").getAttribute("stroke"), g.querySelector("polygon:not([data-casing])").getAttribute("fill")]; })()`,
 		);
 		expect(arrow[1]).toBe(arrow[0]);
 		await v1.page.send("Page.close");

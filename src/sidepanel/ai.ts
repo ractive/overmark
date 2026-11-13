@@ -99,6 +99,21 @@ export function statusText(a: AiState): string {
 }
 
 /**
+ * Whether `statusText(a)` tells of something wrong: the connection failed, was
+ * lost or was taken over, or the saved relay cannot be used. Connected or
+ * connecting, all is well.
+ */
+export function problemOf(a: AiState): "connection" | undefined {
+	if (a.state === "connected" || a.state === "connecting") return undefined;
+	return a.reconnecting ||
+		a.problem !== undefined ||
+		a.replaced !== undefined ||
+		a.relayNote !== undefined
+		? "connection"
+		: undefined;
+}
+
+/**
  * The settings and address secrets this panel kept in `localStorage`, for
  * the worker to take over once; `undefined` if there are none. Until
  * 2026-11-09 the default relay was one on this computer, and nothing was
@@ -180,6 +195,7 @@ export async function startAi(
 				(s.ai = {
 					...s.ai,
 					status: "Open the side panel from the Overmark icon for AI access",
+					problem: "tab",
 				}),
 		);
 		for (const b of buttons) b.disabled = true;
@@ -235,6 +251,11 @@ export async function startAi(
 					(s.ai = {
 						...s.ai,
 						status: "Overmark was updated: close and open this panel again.",
+						// Nothing it showed before holds: it can reach nothing.
+						problem: "updated",
+						connected: false,
+						apps: 0,
+						active: false,
 					}),
 			);
 			return;
@@ -275,6 +296,10 @@ export async function startAi(
 				(s.ai = {
 					...s.ai,
 					status: `AI access is not available: ${problem}`,
+					problem: "unavailable",
+					connected: false,
+					apps: 0,
+					active: false,
 				}),
 		);
 	}
@@ -289,7 +314,9 @@ export async function startAi(
 			s.ai = {
 				...s.ai,
 				status: statusText(a),
+				problem: problemOf(a),
 				connected,
+				apps: connected ? a.grants.length : 0,
 				active: a.state !== "disconnected" || a.reconnecting || a.retrying,
 				keepOn: a.keepOn,
 				lastCall: a.lastCall,
@@ -665,7 +692,8 @@ export async function startAi(
 					type: "button",
 					"data-answer": value,
 					title: titles[value],
-					class: primary ? "primary" : false,
+					// Not amber: that is the view's one action that starts drawing.
+					class: primary ? "strong" : false,
 					// Allow and Always allow only once the panel has been in front a
 					// while: the click that brings it forward cannot approve.
 					disabled: value !== "deny",

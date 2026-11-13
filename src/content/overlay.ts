@@ -6,7 +6,13 @@
  * block, and neither leak in nor out.
  */
 
-import type { MarkStatus, Rect, Shape } from "../lib/case.ts";
+import {
+	GROUP_OF,
+	type MarkStatus,
+	type Rect,
+	type Shape,
+	type StatusGroup,
+} from "../lib/case.ts";
 import {
 	arrowHead,
 	badgePosition,
@@ -19,19 +25,69 @@ declare const OVERMARK_TEST_BUILD: boolean | undefined;
 
 export const HOST_ID = "overmark-root";
 export const HOVER_COLOUR = "#1f6feb";
-/** Both carry a mark's white number, here and in the side panel's list. */
-export const FOUND_COLOUR = "#1a7f37";
-export const PROBABLE_COLOUR = "#b45f06";
+/**
+ * The overlay's one look (DEC-024): it sits on pages Overmark knows nothing
+ * about, so it is the same on each of them and in both colour schemes. A unit
+ * test holds every pair of these to its contrast.
+ */
+export const PAGE_LOOK = {
+	/** The toolbar and the review bar. */
+	bar: "#1b2130",
+	barText: "#ffffff",
+	barMuted: "#c5cbd8",
+	barHover: "#2f384c",
+	/** The pressed tool and the bar's one main action; ink on it. */
+	amber: "#ffb000",
+	amberHover: "#f0a400",
+	/** Under every stroke and around every pin: the edge on a dark page. */
+	casing: "#ffffff",
+	/** The comment's popover: white, whatever the page's scheme. */
+	popover: "#ffffff",
+	popoverText: "#1b2130",
+	popoverMuted: "#535c6e",
+	popoverEdge: "#7b8291",
+	/** The edge of an amber button on the popover's white. */
+	amberEdge: "#a06c00",
+} as const;
+/**
+ * A loaded mark's colour is its status, by the group it counts in. Open is
+ * the colour of the mark on its screenshot; each carries the pin's white number.
+ */
+export const STATUS_COLOUR: Record<StatusGroup, string> = {
+	open: MARK_COLOUR,
+	toVerify: "#4f53e0",
+	verified: "#1a7f37",
+	closed: "#667085",
+};
 /** A mark fixed and waiting to be verified: drawn in full, to be checked (DEC-023). */
-export const TO_VERIFY_COLOUR = "#4f53e0";
-/** A verified or closed mark: grey and faded, so the others stand out. */
-export const RESOLVED_COLOUR = "#6b7385";
-/** How much of a resolved mark's outline shows; its pin stays solid to be found. */
-export const RESOLVED_OPACITY = 0.3;
+export const TO_VERIFY_COLOUR = STATUS_COLOUR.toVerify;
+/** How much of a verified or closed mark's shape shows; its pin stays solid to be found. */
+export const RESOLVED_OPACITY = 0.35;
+/** How much wider than its stroke a shape's casing is. */
+export const CASING_EXTRA = 3;
+/**
+ * How the toolbar is laid out, from the roomiest to the tightest: one row
+ * with the status beside the tools; the status on a second, centred row;
+ * the tools as icons; every button with an icon as an icon; the buttons
+ * closer. `fitToolbar` takes the first that fits the page, measured, so no
+ * font's width and no scrollbar decides it, and the tools never wrap in the
+ * middle (on a page narrower than about 400 px they still do).
+ */
+export const TOOLBAR_FITS = [
+	"",
+	"rows",
+	"rows icons",
+	"rows icons all",
+	"rows icons all tight",
+] as const;
 const SVG = "http://www.w3.org/2000/svg";
-const INK = "#1d2433";
-const AMBER = "#ffb000";
-const SHADOW = "0 6px 24px rgba(13, 18, 30, 0.35)";
+const L = PAGE_LOOK;
+/** The bars' edge on a dark page, then their shadow. */
+const RING = "0 0 0 1px rgba(255, 255, 255, 0.75)";
+const SHADOW = `${RING}, 0 6px 24px rgba(13, 18, 30, 0.35)`;
+/** A word that stays the button's name while only its icon shows. */
+const NO_WORD =
+	"position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;";
 
 const STYLE = `
 /* Important: a page's own rule on the host would beat this otherwise. */
@@ -40,8 +96,8 @@ const STYLE = `
 	direction: ltr;
 	position: fixed; inset: 0; z-index: 2147483647;
 	pointer-events: none;
-	font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
-	color: #1d2433;
+	font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	color: ${L.popoverText};
 }
 svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .capture { position: fixed; inset: 0; pointer-events: none; cursor: crosshair; }
@@ -49,81 +105,131 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .capture.element { cursor: default; }
 .toolbar {
 	position: fixed; left: 16px; right: 16px; bottom: 16px; margin-inline: auto;
-	width: fit-content; max-width: calc(100vw - 32px);
-	display: flex; gap: 2px; align-items: center; flex-wrap: wrap; justify-content: center;
+	box-sizing: border-box; width: fit-content; max-width: calc(100vw - 32px);
+	display: flex; gap: 2px; align-items: center; justify-content: center;
 	padding: 5px; border-radius: 12px;
-	background: ${INK}; color: #fff;
+	background: ${L.bar}; color: ${L.barText};
 	box-shadow: ${SHADOW};
 	pointer-events: auto;
 }
 .toolbar.top { top: 16px; bottom: auto; }
-.ring { flex: none; width: 20px; height: 20px; margin: 0 6px; fill: none; stroke: ${AMBER}; stroke-width: 3.5; }
-.toolbar .status { padding: 0 8px; color: #b8c0d0; max-width: 340px; font-variant-numeric: tabular-nums; }
-.toolbar .sep { width: 1px; align-self: stretch; margin: 4px; background: #3a4560; }
+.ring { flex: none; width: 20px; height: 20px; margin: 0 6px; fill: none; stroke: ${L.amber}; stroke-width: 3.5; }
+/* Beside the tools it keeps its width (and wraps inside it): what does not fit shows as overflow, which fitToolbar reads. */
+.toolbar .status {
+	flex: none; max-width: 300px; padding: 0 8px;
+	color: ${L.barMuted}; font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.toolbar .sep { flex: none; width: 1px; align-self: stretch; margin: 4px; background: rgba(255, 255, 255, 0.28); }
 .toolbar button {
-	all: unset; cursor: pointer; padding: 6px 9px; border-radius: 8px;
-	display: inline-flex; gap: 6px; align-items: center;
-	color: #fff; font: inherit;
+	all: unset; box-sizing: border-box; flex: none; cursor: pointer;
+	position: relative; min-width: 28px; min-height: 30px; padding: 4px 9px; border-radius: 8px;
+	display: inline-flex; gap: 6px; align-items: center; justify-content: center;
+	color: ${L.barText}; font: inherit; white-space: nowrap;
 }
 .icon {
 	flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor;
 	stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
 }
-.toolbar button:hover, .toolbar button:focus-visible { background: #34405a; }
-.toolbar button[aria-pressed="true"] { background: ${AMBER}; color: ${INK}; }
-.toolbar button.primary { background: ${AMBER}; color: ${INK}; font-weight: 600; }
-.toolbar button.primary:hover, .toolbar button.primary:focus-visible { background: #eea400; }
-.toolbar button:disabled { opacity: 0.5; cursor: default; background: none; }
-.toolbar button:focus-visible, .reviewbar button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.toolbar button:hover, .toolbar button:focus-visible { background: ${L.barHover}; }
+.toolbar button[aria-pressed="true"] { background: ${L.amber}; color: ${L.bar}; }
+.toolbar button.primary { background: ${L.amber}; color: ${L.bar}; font-weight: 600; padding-inline: 12px; }
+.toolbar button.primary:hover, .toolbar button.primary:focus-visible { background: ${L.amberHover}; }
+/* Not opacity alone: muted, and nothing answers the pointer. */
+.toolbar button:disabled { color: ${L.barMuted}; opacity: 0.6; cursor: default; background: none; }
+.toolbar button:focus-visible, .reviewbar button:focus-visible { outline: 2px solid ${L.barText}; outline-offset: 1px; }
 .toolbar input {
-	font: inherit; padding: 5px 8px; border-radius: 8px; border: 0; margin-right: 4px;
-	min-width: 220px; color: ${INK}; background: #fff;
+	box-sizing: border-box; min-height: 30px; flex: 0 1 auto; width: 220px; min-width: 120px;
+	font: inherit; padding: 4px 8px; border-radius: 8px; border: 0; margin-right: 4px;
+	color: ${L.popoverText}; background: #fff; color-scheme: light;
 }
+.toolbar input:focus-visible { outline: 2px solid ${L.amber}; outline-offset: 1px; }
+/* Two rows on purpose: the tools on the first, what they are at under them. */
+.toolbar[data-fit~="rows"] { flex-wrap: wrap; row-gap: 0; }
+/* No width of its own, then all of the row: the bar is as wide as its tools. */
+.toolbar[data-fit~="rows"] .status {
+	order: 1; box-sizing: border-box; width: 0; min-width: 100%; max-width: none;
+	padding: 3px 8px 2px; text-align: center;
+}
+.toolbar[data-fit~="icons"] button[aria-pressed] .word { ${NO_WORD} }
+.toolbar[data-fit~="all"] button:has(.icon) .word { ${NO_WORD} }
+.toolbar[data-fit~="tight"] button { padding-inline: 6px; }
+.toolbar[data-fit~="tight"] button.primary { padding-inline: 9px; }
+.toolbar[data-fit~="tight"] .ring { margin: 0 2px; }
+.toolbar[data-fit~="tight"] .sep { display: none; }
 .popover {
 	box-sizing: border-box; position: fixed; width: 296px; padding: 10px; border-radius: 12px;
-	background: #fff; color: ${INK};
-	box-shadow: ${SHADOW}; border: 1px solid #dfe3ea;
+	/* A dark page does not restyle the field. */
+	color-scheme: light;
+	background: ${L.popover}; color: ${L.popoverText};
+	box-shadow: ${SHADOW};
 	pointer-events: auto;
 }
 .popover textarea {
 	box-sizing: border-box; display: block; width: 100%; min-height: 72px; resize: vertical;
-	font: inherit; padding: 6px 8px; border: 1px solid #c8cdd8; border-radius: 8px;
-	color: ${INK}; background: #fff;
+	font: inherit; padding: 6px 8px; border: 1px solid ${L.popoverEdge}; border-radius: 6px;
+	color: ${L.popoverText}; background: ${L.popover};
 }
-.popover textarea:focus { outline: 2px solid ${HOVER_COLOUR}; outline-offset: -1px; border-color: transparent; }
+.popover textarea::placeholder { color: ${L.popoverMuted}; opacity: 1; }
+.popover textarea:focus-visible, .popover button:focus-visible { outline: 2px solid ${HOVER_COLOUR}; outline-offset: 1px; }
 .popover .row { display: flex; gap: 6px; justify-content: space-between; margin-top: 8px; }
 .popover button {
-	font: inherit; padding: 4px 10px; border-radius: 8px; cursor: pointer;
-	border: 1px solid #c8cdd8; background: #fff; color: ${INK};
+	box-sizing: border-box; min-height: 28px; font: inherit; font-weight: 600;
+	padding: 3px 12px; border-radius: 6px; cursor: pointer;
+	border: 1px solid ${L.popoverEdge}; background: ${L.popover}; color: ${L.popoverText};
 }
-.popover button:hover { background: #f2f4f7; }
-.popover button.primary { background: ${AMBER}; border-color: ${AMBER}; font-weight: 600; }
-.popover button.primary:hover { background: #eea400; border-color: #eea400; }
+.popover button:hover { background: #eef0f4; }
+.popover button.primary { background: ${L.amber}; border-color: ${L.amberEdge}; }
+.popover button.primary:hover { background: ${L.amberHover}; }
 .popover .label { display: flex; gap: 8px; align-items: center; font-weight: 600; margin-bottom: 8px; }
 .popover .pin {
 	display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding-inline: 4px;
 	box-sizing: border-box; border-radius: 11px; background: ${MARK_COLOUR}; color: #fff;
-	font: 700 12px/1 ui-rounded, system-ui, sans-serif;
+	font: 700 12px/1 ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
 }
 .reviewbar {
 	position: fixed; right: 16px; top: 16px;
-	display: flex; gap: 8px; align-items: center;
+	box-sizing: border-box; display: flex; gap: 8px; align-items: center;
 	padding: 5px 5px 5px 2px; border-radius: 12px;
-	background: ${INK}; color: #fff;
+	background: ${L.bar}; color: ${L.barText};
 	box-shadow: ${SHADOW};
 	pointer-events: auto; max-width: min(440px, calc(100vw - 32px));
 }
-/* Under a toolbar at the top: it would cover the toolbar's last buttons. */
-.toolbar.top:not([hidden]) ~ .reviewbar { top: 64px; }
+/* Under a toolbar at the top, whatever its height (fitToolbar measures it): it would cover the toolbar's last buttons, or its status row. */
+.toolbar.top:not([hidden]) ~ .reviewbar { top: var(--under-toolbar, 64px); }
 /* The count says what the bar is for: a long title gives way. */
 .reviewbar .text { display: flex; gap: 8px; min-width: 0; }
-.reviewbar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b8c0d0; }
-.reviewbar .sep { flex: none; color: #b8c0d0; }
+.reviewbar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${L.barMuted}; }
+.reviewbar .sep { flex: none; color: ${L.barMuted}; }
 .reviewbar .count { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; }
 .reviewbar button {
-	all: unset; cursor: pointer; padding: 4px 10px; border-radius: 8px; color: #fff; font: inherit;
+	all: unset; box-sizing: border-box; flex: none; cursor: pointer;
+	min-height: 28px; padding: 3px 11px; border-radius: 8px;
+	display: inline-flex; align-items: center;
+	border: 1px solid rgba(255, 255, 255, 0.5);
+	color: ${L.barText}; font: inherit; font-weight: 600;
 }
-.reviewbar button:hover, .reviewbar button:focus-visible { background: #34405a; }
+.reviewbar button:hover, .reviewbar button:focus-visible { background: ${L.barHover}; border-color: ${L.barText}; }
+/* The user's own colours: the system's, with every edge drawn. */
+@media (forced-colors: active) {
+	.toolbar, .reviewbar, .popover {
+		background: Canvas; color: CanvasText; border: 1px solid CanvasText; box-shadow: none;
+	}
+	.toolbar .status, .reviewbar .title { color: CanvasText; }
+	.toolbar .sep { background: CanvasText; }
+	.toolbar button, .reviewbar button, .popover button {
+		border: 1px solid CanvasText; background: Canvas; color: CanvasText;
+	}
+	/* Also hovered and focused: no state brings amber back under the system's text colour. */
+	.toolbar button[aria-pressed="true"], .toolbar button[aria-pressed="true"]:hover, .toolbar button[aria-pressed="true"]:focus-visible,
+	.toolbar button.primary, .toolbar button.primary:hover, .toolbar button.primary:focus-visible,
+	.popover button.primary, .popover button.primary:hover, .popover button.primary:focus-visible {
+		forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight;
+	}
+	.toolbar button:disabled { border-color: GrayText; color: GrayText; opacity: 1; }
+	.toolbar button:focus-visible, .reviewbar button:focus-visible, .toolbar input:focus-visible { outline-color: Highlight; }
+	.toolbar input, .popover textarea { border: 1px solid CanvasText; }
+	.ring { stroke: CanvasText; }
+}
 /* Screenshots show the page alone. Invisible, not gone: a field keeps its focus. */
 .capturing { opacity: 0 !important; }
 /* An AI app's screenshot of one element: only its temporary mark shows. */
@@ -208,6 +314,24 @@ export interface ReviewItem {
 /** Drawn faded: nothing more to do about it. */
 export const isSettled = (status: MarkStatus): boolean =>
 	status === "verified" || status === "wontfix" || status === "cantreproduce";
+
+/** A loaded mark's colour: its status (open, to verify, verified, closed). */
+export function reviewColour(item: Pick<ReviewItem, "status">): string {
+	return STATUS_COLOUR[GROUP_OF[item.status]];
+}
+
+/** A loaded mark's stroke: solid when its element is found, dashed when unsure. */
+export function reviewStroke(
+	item: Pick<ReviewItem, "found" | "focused">,
+): Record<string, string | number> {
+	return {
+		"stroke-width": item.focused ? 4 : 3,
+		// Round caps would close the gaps.
+		...(item.found
+			? {}
+			: { "stroke-dasharray": "8 5", "stroke-linecap": "butt" }),
+	};
+}
 
 /** What the page must not see: a click on the overlay is no click outside its menu. */
 const OWN_EVENTS = [
@@ -316,6 +440,8 @@ export class Overlay {
 				true,
 			);
 		doc.addEventListener("fullscreenchange", () => this.#place());
+		// The page's width changed (a resize, the side panel, zoom).
+		doc.defaultView?.addEventListener("resize", () => this.fitToolbar());
 		doc.documentElement.append(this.host);
 		this.#update();
 	}
@@ -388,6 +514,39 @@ export class Overlay {
 			clearInterval(this.#timer);
 			this.#timer = undefined;
 		}
+		// Hidden, it has no size to measure: laid out again once it shows.
+		this.fitToolbar();
+	}
+
+	/**
+	 * Lay the toolbar out for the room it has: the first of `TOOLBAR_FITS`
+	 * whose buttons stand in one row within the page (with the status beside
+	 * them, in the first). Called when the toolbar's parts change, when it
+	 * shows and when the page's width changes.
+	 */
+	fitToolbar(): void {
+		const bar = this.toolbar;
+		if (this.layer.hidden || bar.hidden) return;
+		for (const fit of TOOLBAR_FITS) {
+			bar.dataset["fit"] = fit;
+			if (this.#toolbarFits(fit === "")) break;
+		}
+		// The review bar's place under a toolbar at the top: 16 px above the
+		// toolbar, its one or two rows, 8 px between the two.
+		this.layer.style.setProperty(
+			"--under-toolbar",
+			`${16 + bar.offsetHeight + 8}px`,
+		);
+	}
+
+	/** One row that does not overflow (`beside`), or no button on a second row. */
+	#toolbarFits(beside: boolean): boolean {
+		const bar = this.toolbar;
+		if (beside) return bar.scrollWidth <= bar.clientWidth;
+		const tops = [...bar.querySelectorAll<HTMLElement>("button, input")].map(
+			(b) => b.offsetTop,
+		);
+		return Math.max(...tops) - Math.min(...tops) < 8;
 	}
 
 	/**
@@ -417,13 +576,23 @@ export class Overlay {
 		const doc = this.doc;
 		const children: SVGElement[] = [];
 		if (hover !== null) {
+			const box = {
+				class: "hover",
+				x: hover.x - 2,
+				y: hover.y - 2,
+				width: hover.width + 4,
+				height: hover.height + 4,
+			};
 			children.push(
 				svg(doc, "rect", {
-					class: "hover",
-					x: hover.x - 2,
-					y: hover.y - 2,
-					width: hover.width + 4,
-					height: hover.height + 4,
+					...box,
+					"data-casing": "",
+					fill: "none",
+					stroke: L.casing,
+					"stroke-width": 2 + CASING_EXTRA,
+				}),
+				svg(doc, "rect", {
+					...box,
 					fill: "rgba(31, 111, 235, 0.08)",
 					stroke: HOVER_COLOUR,
 					"stroke-width": 2,
@@ -444,45 +613,46 @@ export class Overlay {
 	}
 
 	/**
-	 * Draw a loaded case's marks (window coordinates). The focused one also
-	 * shows the element it belongs to; an element's mark is that outline.
+	 * Draw a loaded case's marks (window coordinates): the colour is the
+	 * mark's status, the dash its match (DEC-024). The focused one also shows
+	 * the element it belongs to; an element's mark is that outline.
 	 */
 	renderReview(items: readonly ReviewItem[]): void {
 		const doc = this.doc;
 		const groups = items.map((item) => {
 			const settled = isSettled(item.status);
-			const colour = settled
-				? RESOLVED_COLOUR
-				: item.status === "fixed"
-					? TO_VERIFY_COLOUR
-					: item.found
-						? FOUND_COLOUR
-						: PROBABLE_COLOUR;
-			const look = {
-				"stroke-width": item.focused ? 4 : 3,
-				// Round caps would close the gaps.
-				...(item.found
-					? {}
-					: { "stroke-dasharray": "8 5", "stroke-linecap": "butt" }),
-			};
+			const colour = reviewColour(item);
+			const look = reviewStroke(item);
 			const group = svg(doc, "g", {
 				"data-review": item.number,
 				"data-status": item.status,
 				...(settled ? { "data-resolved": "" } : {}),
 			});
-			if (item.focused && item.rect !== null)
+			if (item.focused && item.rect !== null) {
+				const box = {
+					x: item.rect.x - 3,
+					y: item.rect.y - 3,
+					width: item.rect.width + 6,
+					height: item.rect.height + 6,
+					rx: 4,
+				};
 				group.append(
 					svg(doc, "rect", {
-						x: item.rect.x - 3,
-						y: item.rect.y - 3,
-						width: item.rect.width + 6,
-						height: item.rect.height + 6,
-						rx: 4,
+						...box,
+						"data-casing": "",
+						fill: "none",
+						stroke: L.casing,
+						"stroke-width": 1 + CASING_EXTRA,
+					}),
+					svg(doc, "rect", {
+						...box,
+						"data-element": "",
 						fill: "rgba(229, 25, 95, 0.08)",
 						stroke: colour,
 						"stroke-width": 1,
 					}),
 				);
+			}
 			const shape = this.#shape(item.shape, colour, look);
 			// A focused one is looked for: it shows fully.
 			if (settled && !item.focused) {
@@ -499,9 +669,14 @@ export class Overlay {
 		this.#review.replaceChildren(...groups);
 	}
 
+	/**
+	 * A mark's shape, each part drawn twice: a white casing (`data-casing`),
+	 * wider and never dashed, then the coloured stroke, so the mark has an
+	 * edge on a page of its own colour and on a dark one.
+	 */
 	#shape(
 		shape: Shape,
-		colour = MARK_COLOUR,
+		colour: string = MARK_COLOUR,
 		look: Record<string, string | number> = {},
 	): SVGElement[] {
 		const doc = this.doc;
@@ -513,49 +688,58 @@ export class Overlay {
 			"stroke-linejoin": "round",
 			...look,
 		};
+		const casing = {
+			"data-casing": "",
+			fill: "none",
+			stroke: L.casing,
+			"stroke-width": Number(stroke["stroke-width"]) + CASING_EXTRA,
+			"stroke-linecap": "round",
+			"stroke-linejoin": "round",
+		};
+		const twice = <K extends keyof SVGElementTagNameMap>(
+			tag: K,
+			geometry: Record<string, string | number>,
+		): SVGElement[] => [
+			svg(doc, tag, { ...geometry, ...casing }),
+			svg(doc, tag, { ...geometry, ...stroke }),
+		];
 		switch (shape.kind) {
 			case "element":
 			case "box":
-				return [
-					svg(doc, "rect", {
-						x: shape.rect.x,
-						y: shape.rect.y,
-						width: shape.rect.width,
-						height: shape.rect.height,
-						rx: 4,
-						...stroke,
-					}),
-				];
+				return twice("rect", {
+					x: shape.rect.x,
+					y: shape.rect.y,
+					width: shape.rect.width,
+					height: shape.rect.height,
+					rx: 4,
+				});
 			case "arrow": {
 				const { from, to } = shape;
 				const [l, r] = arrowHead(from, to);
+				const line = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+				const points = `${to.x},${to.y} ${l.x},${l.y} ${r.x},${r.y}`;
 				return [
-					svg(doc, "line", {
-						x1: from.x,
-						y1: from.y,
-						x2: to.x,
-						y2: to.y,
-						...stroke,
-					}),
+					svg(doc, "line", { ...line, ...casing }),
 					svg(doc, "polygon", {
-						points: `${to.x},${to.y} ${l.x},${l.y} ${r.x},${r.y}`,
-						fill: colour,
+						points,
+						...casing,
+						fill: L.casing,
+						"stroke-width": CASING_EXTRA,
 					}),
+					svg(doc, "line", { ...line, ...stroke }),
+					svg(doc, "polygon", { points, fill: colour }),
 				];
 			}
 			case "pen":
-				return [
-					svg(doc, "polyline", {
-						points: shape.points.map((p) => `${p.x},${p.y}`).join(" "),
-						...stroke,
-					}),
-				];
+				return twice("polyline", {
+					points: shape.points.map((p) => `${p.x},${p.y}`).join(" "),
+				});
 			case "note":
 				return [];
 		}
 	}
 
-	#badge(mark: RenderedMark, colour = MARK_COLOUR): SVGElement {
+	#badge(mark: RenderedMark, colour: string = MARK_COLOUR): SVGElement {
 		const doc = this.doc;
 		const at = badgePosition(mark.shape);
 		const g = svg(doc, "g", { "data-number": mark.number });
@@ -565,7 +749,7 @@ export class Overlay {
 				cy: at.y,
 				r: badgeRadius(mark.shape),
 				fill: colour,
-				stroke: "#fff",
+				stroke: L.casing,
 				"stroke-width": 2,
 			}),
 		);

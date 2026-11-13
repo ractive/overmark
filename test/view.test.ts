@@ -7,15 +7,8 @@ import {
 	test,
 } from "bun:test";
 import { Window } from "happy-dom";
-import {
-	FOUND_COLOUR,
-	PROBABLE_COLOUR,
-	RESOLVED_COLOUR,
-	TO_VERIFY_COLOUR,
-} from "../src/content/overlay.ts";
 import type { Annotation, Case } from "../src/lib/case.ts";
 import { summarize } from "../src/lib/element.ts";
-import { MARK_COLOUR } from "../src/lib/marks.ts";
 import type { AnnotationMatch } from "../src/lib/messages.ts";
 import { initialState, type PanelState } from "../src/sidepanel/state.ts";
 import type { Actions } from "../src/sidepanel/view.ts";
@@ -575,14 +568,6 @@ describe("a mark's status and actions", () => {
 			["open", "flex-grow: 1"],
 			["closed", "flex-grow: 1"],
 		]);
-	});
-
-	test("the panel's resolved and to-verify colours are the page's", async () => {
-		const css = await Bun.file(
-			new URL("../src/sidepanel/style.css", import.meta.url),
-		).text();
-		expect(css).toContain(`--resolved: ${RESOLVED_COLOUR};`);
-		expect(css).toContain(`--to-verify: ${TO_VERIFY_COLOUR};`);
 	});
 });
 
@@ -1555,11 +1540,137 @@ describe("the AI app", () => {
 			noActions,
 		);
 		expect(el("home").hidden).toBe(true);
-		expect(el("ai-status").closest("[hidden]")).toBeNull();
+		// What the user sees of it: the pill's label, beside Stop.
+		expect(el("ai-label").closest("[hidden], .visually-hidden")).toBeNull();
+		expect(el("ai-label").textContent).toBe("AI connecting…");
+		// The whole sentence is the pill's name, for a screen reader.
 		expect(el("ai-status").textContent).toBe("Connected: Claude");
 		expect(el("stop-ai").closest("[hidden]")).toBeNull();
 		render(caseState(c, ai({ status: "Not connected" })), noActions);
 		expect(el("stop-ai").hidden).toBe(true);
+	});
+
+	test("a problem is said in words without hovering: a red dot, its name in the pill, its sentence under the bar on every view (DEC-024)", () => {
+		const c = sampleCase("c_problem");
+		const seen = () => ({
+			label: el("ai-label").textContent,
+			dot: el("bar").dataset["ai"],
+			line: el("ai-problem").hidden
+				? undefined
+				: el("ai-problem-text").textContent,
+			title: el("ai-button").title,
+		});
+		const off = { connected: false, apps: 0, active: false };
+		for (const [change, want] of [
+			[
+				// The panel's page in a tab.
+				{
+					...off,
+					problem: "tab",
+					status: "Open the side panel from the Overmark icon for AI access",
+				},
+				{
+					label: "AI: side panel only",
+					line: "Open the side panel from the Overmark icon for AI access.",
+					title: "Open the side panel from the Overmark icon for AI access.",
+				},
+			],
+			[
+				// The extension was updated under an open panel.
+				{
+					...off,
+					problem: "updated",
+					status: "Overmark was updated: close and open this panel again.",
+				},
+				{
+					label: "AI: reopen panel",
+					line: "Overmark was updated: close and open this panel again.",
+					title: "Overmark was updated: close and open this panel again.",
+				},
+			],
+			[
+				// The worker's connection could not start.
+				{
+					...off,
+					problem: "unavailable",
+					status: "AI access is not available: no storage",
+				},
+				{
+					label: "AI unavailable",
+					line: "AI access is not available: no storage.",
+					title: "AI access is not available: no storage.",
+				},
+			],
+			[
+				// A connect that failed, or an address taken over.
+				{
+					...off,
+					problem: "connection",
+					status: "Not connected: the address is in use elsewhere.",
+				},
+				{
+					label: "AI problem",
+					line: "Not connected: the address is in use elsewhere.",
+					title:
+						"Not connected: the address is in use elsewhere. Click for the AI app card.",
+				},
+			],
+			[
+				// Lost, and trying again by itself: still a problem, and Stop ends it.
+				{
+					...off,
+					active: true,
+					problem: "connection",
+					status: "Connection lost, retrying…",
+				},
+				{
+					label: "AI retrying…",
+					line: "Connection lost, retrying…",
+					title: "Connection lost, retrying… Click for the AI app card.",
+				},
+			],
+		] as [Partial<PanelState["ai"]>, Record<string, string>][]) {
+			// In a case, at home and in Settings alike.
+			for (const state of [
+				caseState(c, ai(change)),
+				(() => {
+					const s = initialState();
+					ai(change)(s);
+					return s;
+				})(),
+				caseState(c, (s) => {
+					ai(change)(s);
+					s.settings = true;
+				}),
+			]) {
+				render(state, noActions);
+				expect(seen()).toEqual({ ...want, dot: "problem" } as never);
+				// Above the views, under the top bar.
+				expect(el("ai-problem").previousElementSibling).toBe(el("bar"));
+				expect(el("ai-problem").getAttribute("role")).toBe("status");
+			}
+		}
+		// After an update the pill no longer says what was true before it.
+		render(
+			caseState(
+				c,
+				ai({
+					status: "Connected: Claude",
+					connected: true,
+					apps: 1,
+					active: true,
+				}),
+			),
+			noActions,
+		);
+		expect(seen()).toMatchObject({ label: "AI on · 1 app", line: undefined });
+		// The problem gone, the line goes.
+		render(caseState(c), noActions);
+		expect(seen()).toMatchObject({
+			label: "AI off",
+			dot: "off",
+			line: undefined,
+		});
 	});
 
 	test("its last call shows once there is one", () => {
@@ -1579,6 +1690,69 @@ describe("the AI app", () => {
 		expect(el("ai-action").textContent).toBe("Turn on");
 		render(caseState(sampleCase("c_b1"), ai({ connected: true })), noActions);
 		expect(el("ai-action").textContent).toBe("Manage");
+	});
+
+	test("the pill: a few words, a dot in the state's colour, and the rest in its name and tooltip (DEC-024)", () => {
+		const c = sampleCase("c_pill");
+		const pill = () => [
+			el("ai-label").textContent,
+			el("bar").dataset["ai"],
+			el("ai-button").title,
+		];
+		render(caseState(c), noActions);
+		expect(pill()).toEqual([
+			"AI off",
+			"off",
+			"AI access is off. Click to turn it on and set it up.",
+		]);
+		// The whole status stays in the button, for a screen reader.
+		expect(el("ai-status").textContent).toBe("Not connected");
+		expect(el("ai-status").classList.contains("visually-hidden")).toBe(true);
+		render(
+			caseState(
+				c,
+				ai({
+					status: "Waiting for an AI app to pair",
+					connected: true,
+					active: true,
+				}),
+			),
+			noActions,
+		);
+		expect(pill()).toEqual([
+			"AI on, no app yet",
+			"waiting",
+			"Waiting for an AI app to pair. Click for the address and code.",
+		]);
+		const on = (apps: number, status: string) =>
+			caseState(c, ai({ status, connected: true, active: true, apps }));
+		render(on(1, "Connected: Claude"), noActions);
+		expect(pill()).toEqual([
+			"AI on · 1 app",
+			"connected",
+			"Connected: Claude. Click to manage it.",
+		]);
+		render(on(2, "Connected: Claude, ChatGPT"), noActions);
+		expect(pill()).toEqual([
+			"AI on · 2 apps",
+			"connected",
+			"Connected: Claude, ChatGPT. Click to manage them.",
+		]);
+		render(
+			caseState(c, ai({ status: "Connecting…", active: true })),
+			noActions,
+		);
+		expect(pill()).toEqual([
+			"AI connecting…",
+			"waiting",
+			"Connecting… Click for the AI app card.",
+		]);
+		// Healthy in each of these: nothing is said under the bar.
+		expect(el("ai-problem").hidden).toBe(true);
+		expect(el("ai-problem-text").textContent).toBe("");
+		// Stop is short beside the pill; its name says what it stops.
+		expect(el("stop-ai").textContent).toBe("Stop");
+		expect(el("stop-ai").getAttribute("aria-label")).toBe("Stop AI access");
 	});
 });
 
@@ -1715,7 +1889,7 @@ describe("the annotate button (DEC-023)", () => {
 });
 
 describe("the top bar and Settings (DEC-023)", () => {
-	test("Home: no back button; a case: ← All cases, which closes it", () => {
+	test("Home: no back button; a case: All cases with a chevron, which closes it", () => {
 		const called: string[] = [];
 		const actions = actionsWith({
 			closeCase: () => void called.push("close"),
@@ -1724,7 +1898,8 @@ describe("the top bar and Settings (DEC-023)", () => {
 		expect(el("back").hidden).toBe(true);
 		render(caseState(sampleCase("c_top")), actions);
 		expect(el("back").hidden).toBe(false);
-		expect(el("back").textContent).toBe("← All cases");
+		expect(el("back").textContent).toBe("All cases");
+		expect(el("back").querySelector("svg[aria-hidden=true]")).not.toBeNull();
 		expect(el("back").getAttribute("aria-label")).toBe(
 			"All cases: close this case",
 		);
@@ -1785,7 +1960,7 @@ describe("the top bar and Settings (DEC-023)", () => {
 		);
 		expect(el<HTMLButtonElement>("back").disabled).toBe(false);
 		expect(el("leave-hint").textContent).toBe(
-			"1 mark is not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without it.",
+			"1 mark is not in the case yet; the toolbar on the page says why. Click All cases again to leave without it.",
 		);
 		render(caseState(c), noActions);
 		expect(el("leave-hint").hidden).toBe(true);
@@ -1808,7 +1983,7 @@ describe("the top bar and Settings (DEC-023)", () => {
 		expect(el("settings").hidden).toBe(false);
 		expect(el("case-view").hidden).toBe(true);
 		expect(el("home").hidden).toBe(true);
-		expect(el("back").textContent).toBe("← Back");
+		expect(el("back").textContent).toBe("Back");
 		el("back").click();
 		expect(called).toEqual(["back"]);
 		// The case stays open underneath: its view is there when Back returns.
@@ -1820,7 +1995,7 @@ describe("the top bar and Settings (DEC-023)", () => {
 		home.settings = true;
 		render(home, actions);
 		expect(el("home").hidden).toBe(true);
-		expect(el("back").textContent).toBe("← Back");
+		expect(el("back").textContent).toBe("Back");
 		home.settings = false;
 		render(home, actions);
 		expect(el("settings").hidden).toBe(true);
@@ -1974,15 +2149,6 @@ describe("the case view's actions and this tab (DEC-023)", () => {
 	});
 });
 
-test("the panel's mark colours are the page's", async () => {
-	const css = await Bun.file(
-		new URL("../src/sidepanel/style.css", import.meta.url),
-	).text();
-	expect(css).toContain(`--mark: ${MARK_COLOUR};`);
-	expect(css).toContain(`--mark-found: ${FOUND_COLOUR};`);
-	expect(css).toContain(`--mark-unsure: ${PROBABLE_COLOUR};`);
-});
-
 describe("a loaded mark", () => {
 	const element = {
 		tag: "button",
@@ -2056,6 +2222,103 @@ describe("a loaded mark", () => {
 	test("says nothing more about the element it expected", () => {
 		render(shownAs(summarize(element)), noActions);
 		expect(said()).toBeUndefined();
+	});
+
+	test("the pin: its colour is the status, its fill the match (DEC-024)", async () => {
+		const at = "2026-11-14T09:00:00Z";
+		const marks: Annotation[] = [
+			{ ...mark, id: "a1", number: 1 },
+			{ ...mark, id: "a2", number: 2, resolution: { kind: "fixed", at } },
+			{
+				...mark,
+				id: "a3",
+				number: 3,
+				resolution: { kind: "fixed", at, verified: { at } },
+			},
+			{ ...mark, id: "a4", number: 4, resolution: { kind: "wontfix", at } },
+		];
+		const candidate = (found: boolean) => ({
+			score: found ? 1 : 0.6,
+			summary: "button",
+			selector: "b",
+			visible: true,
+			found,
+		});
+		const match = (
+			n: number,
+			status: AnnotationMatch["status"],
+			candidates: ReturnType<typeof candidate>[],
+		): [string, AnnotationMatch] => [
+			`a${n}`,
+			{
+				annotationId: `a${n}`,
+				number: n,
+				status,
+				score: candidates[0]?.score ?? 0,
+				current: 0,
+				candidates,
+			},
+		];
+		render(
+			caseState({ ...sampleCase("c_pin"), annotations: marks }, (s) => {
+				s.loaded = {
+					caseId: "c_pin",
+					tabId: 1,
+					matches: new Map([
+						match(1, "found", [candidate(true)]),
+						match(2, "probable", [candidate(false)]),
+						match(3, "lost", []),
+						// The fourth mark was not looked for: no match at all.
+					]),
+				};
+			}),
+			noActions,
+		);
+		const pins = [...document.querySelectorAll<HTMLElement>(".annotation")].map(
+			(li) => [
+				li.querySelector(".number")?.textContent,
+				li.dataset["status"],
+				li.dataset["colour"],
+			],
+		);
+		expect(pins).toEqual([
+			["1", "open", "found"],
+			["2", "fixed", "unsure"],
+			["3", "verified", "lost"],
+			["4", "wontfix", undefined],
+		]);
+		// The style sheet turns the two into the pin's look.
+		const css = await Bun.file(
+			new URL("../src/sidepanel/style.css", import.meta.url),
+		).text();
+		const rule = (selector: string) => {
+			const from = css.indexOf(`${selector} {`);
+			expect(from).toBeGreaterThanOrEqual(0);
+			return css.slice(from, css.indexOf("}", from)).replace(/\s+/g, " ");
+		};
+		for (const [selector, tone] of [
+			['[data-status="open"],\n[data-group="open"]', "--st-open"],
+			['[data-status="fixed"],\n[data-group="toVerify"]', "--st-verify"],
+			['[data-status="verified"],\n[data-group="verified"]', "--st-verified"],
+			[
+				'[data-status="wontfix"],\n[data-status="cantreproduce"],\n[data-group="closed"]',
+				"--st-closed",
+			],
+		] as const)
+			expect(rule(selector)).toContain(`--tone: var(${tone});`);
+		// Found, or not looked for: filled, with a ring of paper on the rail.
+		expect(rule(".number")).toContain(
+			"background: var(--tone, var(--st-open));",
+		);
+		expect(rule(".number")).toContain("box-shadow: 0 0 0 2px var(--paper);");
+		// Unsure: a dashed ring outside it. Not found: hollow.
+		expect(rule('.annotation[data-colour="unsure"] .number')).toContain(
+			"outline: 1.5px dashed var(--tone, var(--st-open));",
+		);
+		const hollow = rule('.annotation[data-colour="lost"] .number');
+		expect(hollow).toContain("background: var(--paper);");
+		expect(hollow).toContain("inset 0 0 0 2px var(--tone, var(--st-open))");
+		expect(hollow).toContain("color: var(--tone, var(--st-open));");
 	});
 
 	test("names another element, and says when one is hidden", () => {
@@ -2261,8 +2524,9 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			["Sync to Downloads", true],
 			["Choose a folder…", true],
 		]);
+		// Ink, not amber: amber is Home's Annotate this page alone (DEC-024).
 		expect(box.querySelector('[data-action="sync-downloads"]')?.className).toBe(
-			"primary",
+			"strong",
 		);
 		expect(box.querySelector(".sync-note")?.textContent).toContain(
 			"works with this panel closed",
@@ -2471,4 +2735,27 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		draw(pausedFolder);
 		expect(banner().querySelector("button")).toBe(bannerButton);
 	});
+});
+
+test("every mask in the panel's style sheet has its -webkit- form beside it: Chrome 116 to 119 know no other", async () => {
+	const css = await Bun.file(
+		new URL("../src/sidepanel/style.css", import.meta.url),
+	).text();
+	const masks = [
+		...css.matchAll(/^\s*(-webkit-)?mask(-[a-z]+)?:\s*([^;]+);/gm),
+	];
+	expect(masks.length).toBeGreaterThan(0);
+	const plain = masks.filter((m) => m[1] === undefined);
+	const prefixed = masks.filter((m) => m[1] !== undefined);
+	expect(plain.map((m) => [m[2], m[3]])).toEqual(
+		prefixed.map((m) => [m[2], m[3]]),
+	);
+	// The prefixed one first: where both are known, the standard one wins.
+	for (const m of plain)
+		expect(
+			css
+				.slice(0, m.index)
+				.trimEnd()
+				.endsWith(`-webkit-mask${m[2] ?? ""}: ${m[3]};`),
+		).toBe(true);
 });
