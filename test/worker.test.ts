@@ -14,6 +14,7 @@ import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
 import { oldSettings, statusText } from "../src/sidepanel/ai.ts";
+import { stopFirst } from "../src/worker/connection.ts";
 import {
 	DATABASE,
 	memoryKv,
@@ -504,6 +505,35 @@ describe("questions", () => {
 		expect(view?.app).toBe("Cl\\u200Baude (claude.ai)");
 		expect(view?.lines).toEqual(["Case: “x\\u202E”"]);
 		expect(view?.args).toContain("c\\u202E1");
+	});
+});
+
+describe("Stop AI access (CR-08)", () => {
+	test("disconnects first; a write that fails still lets the others run, and is reported after", async () => {
+		const done: string[] = [];
+		const write =
+			(name: string, fails = false) =>
+			async () => {
+				await Bun.sleep(1);
+				done.push(name);
+				if (fails) throw new Error(`${name} failed`);
+			};
+		const stopped = stopFirst(
+			() => done.push("disconnect"),
+			[write("keep-on", true), write("session", true)],
+		);
+		// Before any write has even started to finish.
+		expect(done).toEqual(["disconnect"]);
+		await expect(stopped).rejects.toThrow(
+			"AI access is off now, but the setting could not be saved (keep-on failed)",
+		);
+		expect(done).toEqual(["disconnect", "keep-on", "session"]);
+		const fine: string[] = [];
+		await stopFirst(
+			() => fine.push("disconnect"),
+			[async () => void fine.push("keep-on")],
+		);
+		expect(fine).toEqual(["disconnect", "keep-on"]);
 	});
 });
 

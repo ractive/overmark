@@ -132,6 +132,28 @@ async function broadcast(news: Broadcast): Promise<void> {
 	}
 }
 
+/**
+ * "Stop AI access": `disconnect` first, whatever the writes after it do
+ * (CR-08). Every write is tried; the first that failed is reported after.
+ */
+export async function stopFirst(
+	disconnect: () => void,
+	writes: (() => Promise<unknown>)[],
+): Promise<void> {
+	disconnect();
+	let failed: { error: unknown } | undefined;
+	for (const write of writes)
+		try {
+			await write();
+		} catch (error) {
+			failed ??= { error };
+		}
+	if (failed !== undefined)
+		throw new Error(
+			`AI access is off now, but the setting could not be saved (${message(failed.error)}): it may come on again the next time Chrome starts Overmark in the background.`,
+		);
+}
+
 export class Connection {
 	readonly #deps: ConnectionDeps;
 	readonly #tab: TabBridge;
@@ -557,12 +579,22 @@ export class Connection {
 				return;
 			case "stop":
 				// Ends the session, not the pairing: the AI app works again after
-				// the next connect. "Keep AI access on" would undo that.
-				await this.#setKeepOn(false);
-				await this.#setSessionOn(false);
-				this.#keep.stop();
-				this.#mcp.disconnect();
-				this.#changed();
+				// the next connect. "Keep AI access on" would undo that, so it is
+				// off in memory at once, before the store has it: neither KeepOn
+				// nor the alarm connects again in this worker's life (CR-08).
+				this.#settings = { ...this.#settings, keepOn: false };
+				try {
+					await stopFirst(() => {
+						this.#keep.stop();
+						this.#mcp.disconnect();
+					}, [
+						() => this.#kv.set({ [KEYS.keepOn]: false }),
+						() => this.#setSessionOn(false),
+					]);
+				} finally {
+					await this.#syncAlarm();
+					this.#changed();
+				}
 				return;
 			case "keep-on":
 				await this.#setKeepOn(command.on);
