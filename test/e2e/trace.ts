@@ -4,6 +4,11 @@
  * (its last line has no "done") instead of only that it timed out.
  */
 
+/** A step that did not finish within its limit. */
+export class StepTimeout extends Error {
+	override name = "StepTimeout";
+}
+
 const origin = Date.now();
 const at = () => `+${((Date.now() - origin) / 1000).toFixed(1)}s`;
 
@@ -21,7 +26,10 @@ export async function step<T>(
 			run(),
 			new Promise<never>((_, reject) => {
 				timer = setTimeout(
-					() => reject(new Error(`${name}: did not finish in ${timeoutMs} ms`)),
+					() =>
+						reject(
+							new StepTimeout(`${name}: did not finish in ${timeoutMs} ms`),
+						),
 					timeoutMs,
 				);
 			}),

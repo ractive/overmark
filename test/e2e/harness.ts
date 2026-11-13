@@ -14,7 +14,7 @@ import {
 	build,
 } from "../../scripts/build.ts";
 import { Browser, findBrowser, type Page } from "./browser.ts";
-import { step } from "./trace.ts";
+import { StepTimeout, step } from "./trace.ts";
 
 // A timed-out test also loses the browser, and with it the rest of its file:
 // on a busy machine a first screenshot alone can take longer than Bun's default.
@@ -131,6 +131,8 @@ async function start(binary: string, launch: Launch): Promise<Harness> {
 		const control = await step("open the control page", () =>
 			openControl(launched, extensionId),
 		).catch((error: unknown) => {
+			// Too slow is no wrong binary: the step's own message says which.
+			if (error instanceof StepTimeout) throw error;
 			throw new Error(
 				`the extension did not load (${error instanceof Error ? error.message : String(error)}); is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
 				{ cause: error },
