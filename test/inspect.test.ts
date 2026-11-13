@@ -746,6 +746,28 @@ describe("a selector cannot ask about form state (CR-01)", () => {
 		]);
 	});
 
+	test("a selector names nothing inside a hidden subtree", () => {
+		page(
+			`<main><div class="menu" style="display:none"><p class="secret">hidden <b>inside</b></p></div><p class="shown">shown</p></main>`,
+		);
+		const main = $("main");
+		for (const selector of [".menu > p", ".secret", "b"])
+			expect(refusal(main, selector)).toStartWith(
+				"Nothing around the mark's element matches",
+			);
+		// The hidden element itself is still named, as before: its content is left out.
+		const menu = resolveSelector(doc, main, ".menu");
+		expect("element" in menu && markupOf(menu.element).html).not.toContain(
+			"inside",
+		);
+		expect(
+			resolveSelector(doc, undefined, ".secret", { pageWide: true }),
+		).toEqual({ error: "No element of this page's content matches .secret." });
+		// From inside it, past the hidden ancestors.
+		const up = resolveSelector(doc, $("b"), "main");
+		expect("element" in up && up.element).toBe(main);
+	});
+
 	test("substring operators only on id, class and test ids: the markup cuts the rest", () => {
 		page(
 			`<main><button aria-label="Copy invite link https://app.example/invite?token=s3cr3t" data-testid="copy-link">Copy</button><img alt="https://app.example/a.png?sig=abc"></main>`,

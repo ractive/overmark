@@ -1094,6 +1094,13 @@ const NOT_CONTENT = new Set([
 	"template",
 ]);
 
+/** Inside a hidden element: the markup leaves such content out, so no selector names it. */
+function inHidden(el: Element): boolean {
+	for (let at = parentOf(el); at !== null; at = parentOf(at))
+		if (isHidden(at)) return true;
+	return false;
+}
+
 /** An element `get_mark_element` never reads: the head and what is not content. */
 export function isOffLimits(el: Element): boolean {
 	return NOT_CONTENT.has(el.localName) || el.closest("head") !== null;
@@ -1166,6 +1173,7 @@ export function resolveSelector(
 	const ok = (e: Element) =>
 		!isOffLimits(e) &&
 		!insideInput(e) &&
+		!inHidden(e) &&
 		(skip === undefined || !skip.contains(e));
 	const shown = cut(selector, 200);
 	if (base !== undefined) {
