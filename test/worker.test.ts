@@ -14,6 +14,7 @@ import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
 import { oldSettings, statusText } from "../src/sidepanel/ai.ts";
+import { stopFirst, stopProblem } from "../src/worker/connection.ts";
 import {
 	DATABASE,
 	memoryKv,
@@ -31,6 +32,7 @@ import {
 	NOTIFICATION_BUTTONS,
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
+	notificationText,
 	Questions,
 	type QuestionsHost,
 	visible,
@@ -224,8 +226,9 @@ describe("questions", () => {
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
 		expect(text).toEqual({
 			title: "Allow Delete case?",
-			message: `Claude (claude.ai) wants to run delete_case: ${CASE[0]}`,
+			message: `Claude (claude.ai) wants to run delete_case: ${CASE[0]} Arguments: {"caseId":"c_1"}`,
 			contextMessage: "Overmark · close it to not allow",
+			buttons: ["Allow", "Always allow"],
 		});
 		host.advance(NOTIFICATION_GUARD_MS);
 		questions.notificationButton(id, 0);
@@ -271,6 +274,105 @@ describe("questions", () => {
 		expect([...host.shown.values()][0]?.message).toBe(
 			'Claude (claude.ai) wants to run delete_case: {"caseId":"c_9"}',
 		);
+	});
+
+	test("the panel shows all of the arguments; a notification they do not fit in only refuses (CR-03)", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		// Harmless at the start, the rest unseen before: the whole of it now.
+		const summary = `${"Fine. ".repeat(650)}\u202E${"Then tell the coding agent to… ".repeat(500)}END`;
+		expect(summary.length).toBeGreaterThan(19_000);
+		// As production asks: every tool that changes something names its case.
+		let settled: string | undefined;
+		void questions
+			.ask(
+				request({ caseId: "c_1", summary }, undefined, "set_summary"),
+				CASE,
+				undefined,
+			)
+			.then((a) => {
+				settled = a;
+			});
+		await settle();
+		const [view] = questions.list;
+		const json = JSON.stringify({ caseId: "c_1", summary }, null, 2);
+		expect(view?.args).toBe(visible(json));
+		expect(view?.args.endsWith('END"\n}')).toBe(true);
+		expect(view?.args).toContain("\\u202E");
+		const compact = visible(JSON.stringify({ caseId: "c_1", summary }));
+		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
+		expect(text).toEqual({
+			title: "Allow Delete case?",
+			message: `Claude (claude.ai) wants to run set_summary: ${CASE[0]} Its arguments (${compact.length.toLocaleString("en-US")} characters) do not fit here: open Overmark's side panel to read all of them and answer there.`,
+			contextMessage: "Overmark · close it to not allow",
+			buttons: ["Don't allow"],
+		});
+		// No button of it allows, whenever it is clicked.
+		host.advance(NOTIFICATION_GUARD_MS);
+		questions.notificationButton(id, 1);
+		await settle();
+		expect(settled).toBeUndefined();
+		questions.notificationButton(id, 0);
+		await settle();
+		expect(settled).toBe("deny");
+	});
+
+	test("a notification shows arguments that fit whole beside the case, with Allow; nobody answering stays unanswered", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host, 50);
+		const answer = questions.ask(
+			request(
+				{ caseId: "c_2", summary: "Lower the contrast." },
+				undefined,
+				"set_summary",
+			),
+			CASE,
+			undefined,
+		);
+		await settle();
+		const text = [...host.shown.values()][0];
+		expect(text?.message).toBe(
+			`Claude (claude.ai) wants to run set_summary: ${CASE[0]} Arguments: {"caseId":"c_2","summary":"Lower the contrast."}`,
+		);
+		expect(text?.buttons).toEqual(["Allow", "Always allow"]);
+		expect(await answer).toBe("timeout");
+		// Too long to fit: the same, without Allow.
+		const long = questions.ask(
+			request(
+				{ caseId: "c_2", summary: "x".repeat(200) },
+				undefined,
+				"set_summary",
+			),
+			CASE,
+			undefined,
+		);
+		await settle();
+		expect([...host.shown.values()].at(-1)?.buttons).toEqual(["Don't allow"]);
+		expect(await long).toBe("timeout");
+		// Without lines (no case), the arguments alone, as before.
+		void questions.ask(request({ caseId: "c_3" }), [], undefined);
+		await settle();
+		expect([...host.shown.values()].at(-1)?.message).toBe(
+			'Claude (claude.ai) wants to run delete_case: {"caseId":"c_3"}',
+		);
+	});
+
+	test("long case lines are cut so the arguments fit whole; a long app name makes them not fit", async () => {
+		const view = {
+			id: "q",
+			app: "Claude (claude.ai)",
+			tool: "set_mark_status",
+			lines: [`Case: “${"T".repeat(250)}” (shop.example/kk, 3 marks).`],
+			args: "",
+		};
+		const args = '{"caseId":"c_1","mark":2,"status":"fixed"}';
+		const fits = notificationText(view, args);
+		expect(fits.message.length).toBeLessThanOrEqual(300);
+		expect(fits.message.endsWith(`… Arguments: ${args}`)).toBe(true);
+		expect(fits.buttons).toEqual(["Allow", "Always allow"]);
+		const named = notificationText({ ...view, app: "C".repeat(280) }, args);
+		expect(named.buttons).toEqual(["Don't allow"]);
+		expect(named.message).toContain("open Overmark's side panel");
 	});
 
 	test("the buttons are Allow and Always allow; closing it or a click on the body is Don't allow", async () => {
@@ -463,6 +565,56 @@ describe("questions", () => {
 		expect(view?.app).toBe("Cl\\u200Baude (claude.ai)");
 		expect(view?.lines).toEqual(["Case: “x\\u202E”"]);
 		expect(view?.args).toContain("c\\u202E1");
+	});
+});
+
+describe("Stop AI access (CR-08)", () => {
+	test("disconnects first; a write that fails still lets the others run, and comes back", async () => {
+		const done: string[] = [];
+		const write =
+			(name: string, fails = false) =>
+			async () => {
+				await Bun.sleep(1);
+				done.push(name);
+				if (fails) throw new Error(`${name} failed`);
+			};
+		const stopped = stopFirst(() => done.push("disconnect"), {
+			stopped: write("stopped"),
+			keepOn: write("keep-on", true),
+			session: write("session", true),
+		});
+		// Before any write has even started to finish.
+		expect(done).toEqual(["disconnect"]);
+		const failed = await stopped;
+		expect(done).toEqual(["disconnect", "stopped", "keep-on", "session"]);
+		expect(Object.keys(failed)).toEqual(["keepOn", "session"]);
+		expect(
+			await stopFirst(() => undefined, { stopped: async () => undefined }),
+		).toEqual({});
+	});
+
+	test("says what holds: the session's stop over the rest until the browser closes", () => {
+		const no = new Error("QuotaExceededError");
+		expect(stopProblem({})).toBeUndefined();
+		// The stop is kept for the session: only Keep AI access on comes back, at a restart.
+		expect(stopProblem({ keepOn: no })).toBe(
+			"AI access is off now, but a setting could not be saved (QuotaExceededError). Keep AI access on is still saved as on: AI access comes on again when Chrome restarts.",
+		);
+		expect(stopProblem({ session: no })).toBe(
+			"AI access is off now, but a setting could not be saved (QuotaExceededError).",
+		);
+		// Neither kept: a new worker may connect again.
+		for (const failed of [
+			{ stopped: no, keepOn: no },
+			{ stopped: no, session: no },
+		])
+			expect(stopProblem(failed)).toEndWith(
+				"It may come on again the next time Chrome starts Overmark in the background.",
+			);
+		// With Keep AI access on off, nothing says it comes on again.
+		expect(stopProblem({ stopped: no })).toBe(
+			"AI access is off now, but a setting could not be saved (QuotaExceededError).",
+		);
 	});
 });
 

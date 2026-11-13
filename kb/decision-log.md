@@ -153,8 +153,36 @@ inside it: a page-wide lookup would let the AI app read anything on whatever tab
 front, hidden content included. For a mark without an element (box, arrow, pen, note)
 there is nothing to start from, so the selector is looked for on the whole page, and only
 when the tab in front shows the case's page (`isPageUrl`). Selectors that name only `*`
-or use `:has()` more than once are refused; the whole page is queried only for such a
-mark, and the first visible match wins.
+are refused; the whole page is queried only for such a mark, and the first visible match
+wins.
+
+Whether a selector matches is itself an answer, so a selector may name only what the
+markup shows (`src/lib/selector.ts`, from the November 2026 code review, CR-01): an
+allow-list of tags, classes, ids, attributes that hold no field value (`id`, `class`,
+`role`, `name`, `type`, `aria-label`, the test ids and the other markup attributes a
+field keeps, but not `style` or `title`), the structural pseudo-classes and `:is()`,
+`:where()`, `:not()`, the markup ones (`:required`, `:optional`, `:disabled`,
+`:enabled`, `:read-only`, `:read-write`) and the combinators. Refused: pseudo-classes of
+form or page state (`:checked`, `:placeholder-shown`, `:autofill`, `:valid`, `:focus`,
+`:target`, `:visited`, …), `:has()` and `:empty`, which look inside an element and so
+into fields and editors, `[value]`, `[checked]`, `[selected]`, `aria-value*`, `href`,
+`src` and other `data-*` than a test id, pseudo-elements, namespaces and comments. The
+selector is read as CSS tokenizes it (escapes decoded, any case). A match inside a
+select, a text area or an editor counts as none, and an `option` keeps neither `value`
+nor `selected`. The same rules hold for `add_annotation`'s selector.
+
+The answer follows the same line (the review of PR 45): a page's own style rule whose
+selector says a state (`:checked`, `:hover`, `:has()`, `:empty`, `[checked]`, …) is
+never listed among the matching rules, matched or not, and not counted; the tool's
+description says so. An editor, a select or a text area is read without its children,
+and its markup always carries the left-out note, empty or not; an element inside a
+hidden one is not named by a selector, substring operators (`^=`, `$=`, `*=`) only test
+`id`, `class` and the test ids, and the ancestors listed for an element inside an editor
+start at the editor. The markup and the rules never carry what was typed or chosen; the
+computed styles and the position of an element can reflect a field's state where the
+page's own CSS styles it by state (a ticked checkbox's colour, an autofilled field's
+background), as a screenshot does. Closing that would leave the tool without the styles
+it is for.
 
 Nothing of it is stored, so DEC-009's allow-list of recorded details does not apply, but
 its reasons do: the HTML is written by Overmark's own serializer (`src/lib/inspect.ts`),
@@ -390,7 +418,12 @@ that on knowingly, for one app and one tool at a time, or for all of one app's c
   <app>, until you disconnect it." Always allow arms with Allow (the panel visible and
   focused for 750 ms). A notification has "Allow" and "Always allow" (Chrome allows two
   buttons); closing it or a click on its body is Don't allow, and either button within
-  500 ms of showing does not count, as before. The app is the grant (one pairing), not
+  500 ms of showing does not count, as before. The exception (the review of PR 45): a
+  notification shows the case and the arguments whole, and where the arguments do not
+  fit (over 150 characters, or the message over 300), it offers only "Don't allow" and
+  says to open Overmark's side panel to read all of them and answer there, since the
+  user would otherwise allow text they were not shown. Nobody answering ends as
+  unanswered, as before; the notification does not open the side panel. The app is the grant (one pairing), not
   its name: an app paired again, or another app with the same name, is asked again.
   Unlike the tab-mcp extension's Always allow, it is not tied to the page: Overmark's
   tools are fixed and act on cases, not on a page's own tools.
