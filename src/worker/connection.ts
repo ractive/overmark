@@ -75,6 +75,8 @@ export interface ConnectionDeps {
 	capture: Capture;
 	/** A tool changed or deleted a case (the sync writes it, DEC-021). */
 	changed?: (caseId: string) => void;
+	/** The settings database: `openKv()` unless given (a memory one in tests). */
+	kv?: Kv;
 }
 
 /** Clear every notification of the extension: a previous worker's questions died with it. */
@@ -303,7 +305,7 @@ export class Connection {
 		// The settings live in IndexedDB, out of content scripts' reach. An
 		// unreleased build kept them in chrome.storage.local: removed there at
 		// every start, never taken over (DEC-016).
-		const kv = await openKv();
+		const kv = deps.kv ?? (await openKv());
 		await removeOldSettings(chrome.storage.local).catch((error: unknown) =>
 			console.warn("Overmark: removing the old settings", error),
 		);
