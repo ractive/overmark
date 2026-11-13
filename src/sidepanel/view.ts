@@ -1791,6 +1791,8 @@ export function render(state: PanelState, actions: Actions): void {
 	} else {
 		parts = undefined;
 		caseView.replaceChildren();
-		renderHome(state, actions);
 	}
+	// Under an open case and Settings too: Home is as it is when it shows
+	// again ("← All cases", or a case the panel opened from the page).
+	renderHome(state, actions);
 }
