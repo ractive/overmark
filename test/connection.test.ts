@@ -251,8 +251,10 @@ describe("the worker's connection with client 0.16", () => {
 				listener: EventListenerOrEventListenerObject,
 				options?: boolean | AddEventListenerOptions,
 			): void {
-				if (type !== "message" || typeof listener !== "function")
-					return super.addEventListener(type, listener, options);
+				if (type !== "message" || typeof listener !== "function") {
+					super.addEventListener(type, listener, options);
+					return;
+				}
 				super.addEventListener(
 					type,
 					(event) => {
