@@ -11,13 +11,24 @@ import { join } from "node:path";
 interface Step {
 	id?: string;
 	name?: string;
+	if?: string;
+	uses?: string;
+	with?: Record<string, string>;
 	env?: Record<string, string>;
 	run?: string;
 }
 
 interface Workflow {
 	on: { workflow_dispatch?: { inputs: Record<string, unknown> } };
-	jobs: Record<string, { outputs?: Record<string, string>; steps: Step[] }>;
+	permissions?: Record<string, string>;
+	jobs: Record<
+		string,
+		{
+			permissions?: Record<string, string>;
+			outputs?: Record<string, string>;
+			steps: Step[];
+		}
+	>;
 }
 
 const workflow = async (name: string) =>
@@ -178,6 +189,42 @@ describe("release.yml", () => {
 			{ PATH: PATH_WITH(gh) },
 		);
 		expect(result.code).not.toBe(0);
+	});
+
+	test("the zips are attested before the release, by the job that runs no third-party code, and only in a public repository", async () => {
+		const w = await workflow("release.yml");
+		const steps = w.jobs["release"]?.steps ?? [];
+		const names = steps.map((s) => s.name);
+		const attest = "Attest both zips (a public repository only)";
+		// After the tag was checked, before anything is published: a failed
+		// attestation leaves no release.
+		expect(names.indexOf(still)).toBeLessThan(names.indexOf(attest));
+		expect(names.indexOf(attest)).toBeLessThan(
+			names.indexOf("Create the release with both zips"),
+		);
+		const step = stepOf(w, "release", attest);
+		// GitHub has no attestations for a private repository on this plan:
+		// there the step is skipped and the release is made without them.
+		expect(step.if).toBe("${{ !github.event.repository.private }}");
+		// Pinned to a commit, as every action that gets a token is.
+		expect(step.uses).toMatch(/^actions\/attest@[0-9a-f]{40}$/);
+		// Both zips the release then attaches.
+		expect(step.with?.["subject-path"]).toBe("overmark-*.zip");
+		const create = stepOf(w, "release", "Create the release with both zips");
+		expect(create.run).toContain('gh release create "$TAG" overmark-*.zip');
+		// What signing and storing an attestation need, and only where no
+		// third-party code runs: the build job keeps the read-only token.
+		expect(w.jobs["release"]?.permissions).toEqual({
+			contents: "write",
+			"id-token": "write",
+			attestations: "write",
+			"artifact-metadata": "write",
+		});
+		expect(w.permissions).toEqual({ contents: "read" });
+		expect(w.jobs["build"]?.permissions).toBeUndefined();
+		expect(
+			w.jobs["build"]?.steps.some((s) => s.uses?.startsWith("actions/attest")),
+		).toBe(false);
 	});
 
 	test("the build job hands on the commit of an annotated tag, not the tag object", async () => {

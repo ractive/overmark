@@ -42,6 +42,12 @@ timestamp: 2026-11-05T08:00:00+01:00
   `git tag vX.Y.Z <merge commit> && git push origin vX.Y.Z`. The release workflow
   checks the tag, runs `verify`, and creates the GitHub release with both zips. It stops
   if the tag has moved off the commit it built.
+- **Attestations:** once the repository is public, the release workflow attests both
+  zips before it creates the release (build provenance, signed through Sigstore): that
+  this workflow built a file with that digest from that commit. Check a downloaded zip
+  with `gh attestation verify overmark-X.Y.Z.zip --repo ractive/overmark`. While the
+  repository is private the step is skipped: GitHub has attestations for private
+  repositories only on Enterprise Cloud.
 
 Every build, and so every zip, holds `LICENSES.txt`: Overmark's licence and those of the
 packages in its bundles. A bundled package whose licence the build does not know stops
