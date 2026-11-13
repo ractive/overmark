@@ -143,8 +143,8 @@ Merge PR 42 first; iteration 17 builds on it.
 - [x] PR 42 review findings fixed, CI green, merged
 - [x] UX review written (`kb/design/ux-review-2026-11.md`)
 - [x] DEC-023..025 recorded
-- [ ] Flow PR merged
-- [ ] Verify PR merged
-- [ ] Sync PR merged
+- [x] Flow PR merged
+- [x] Verify PR merged
+- [x] Sync PR merged
 - [ ] New look PR merged
 - [ ] `~/overmark-extension` rebuilt from main; morning report
