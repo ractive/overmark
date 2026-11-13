@@ -1,30 +1,52 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import type { ConnectOptions } from "@ractive-ch/tab-mcp-client";
+import type {
+	ConnectionState,
+	ConnectOptions,
+	DisconnectReason,
+	StateChangeDetail,
+} from "@ractive-ch/tab-mcp-client";
 import { KeepOn, type KeptConnection } from "../src/worker/keep-on.ts";
 
-/** What `TabMcp` does for `KeepOn`, with connects that fail on demand. */
+/**
+ * What `TabMcp` 0.16 does for `KeepOn`, with connects that fail on demand:
+ * every change of state is a `statechange` with the reason where the library
+ * gives one (`client.test.ts` checks these against the library itself).
+ * Nothing else is sent, so a listener for an event the library no longer
+ * has (`connected`, `disconnected`, `reconnecting`) hears nothing here either.
+ */
 class FakeConnection extends EventTarget implements KeptConnection {
 	state: KeptConnection["state"] = "disconnected";
-	reconnecting: KeptConnection["reconnecting"];
 	/** The errors of the next connects; none left: it works. */
 	errors: Error[] = [];
 	calls: ConnectOptions[] = [];
 	async connect(options: ConnectOptions = {}) {
 		this.calls.push(options);
-		this.state = "connecting";
+		this.set("connecting");
 		await Bun.sleep(0);
 		const error = this.errors.shift();
 		if (error !== undefined) {
-			this.state = "disconnected";
+			this.set("disconnected");
 			throw error;
 		}
-		this.state = "connected";
-		this.dispatchEvent(new CustomEvent("connected"));
+		this.set("connected");
 		return {} as Awaited<ReturnType<KeptConnection["connect"]>>;
 	}
-	end(reason: string) {
+	set(state: ConnectionState, reason?: DisconnectReason) {
+		this.state = state;
+		this.dispatchEvent(
+			new CustomEvent<StateChangeDetail>("statechange", {
+				detail: reason === undefined ? { state } : { state, reason },
+			}),
+		);
+	}
+	end(reason: DisconnectReason) {
+		this.set("disconnected", reason);
+	}
+	/** The relay refused an attempt while reconnecting: `error` first, already `disconnected`. */
+	refuse(error: Error) {
 		this.state = "disconnected";
-		this.dispatchEvent(new CustomEvent("disconnected", { detail: { reason } }));
+		this.dispatchEvent(new CustomEvent("error", { detail: { error } }));
+		this.set("disconnected");
 	}
 }
 
@@ -55,7 +77,7 @@ describe("KeepOn", () => {
 		expect(connection.calls).toEqual([{ resume: true }]);
 	});
 
-	test.each(["idle", "expired"])(
+	test.each(["idle", "expired"] as const)(
 		"connects again after a session ended as %s",
 		(reason) => {
 			connection.state = "connected";
@@ -71,14 +93,57 @@ describe("KeepOn", () => {
 		expect(connection.calls).toEqual([]);
 	});
 
-	test.each(["user", "replaced", "new_address", "network", "policy"])(
+	test.each(["user", "replaced", "new_address"] as const)(
 		"leaves a session that ended as %s alone",
 		(reason) => {
 			connection.state = "connected";
 			connection.end(reason);
 			expect(connection.calls).toEqual([]);
+			expect(keep.problem).toBeUndefined();
+			expect(keep.retrying).toBe(false);
 		},
 	);
+
+	test.each([
+		[
+			"rate_limited",
+			"The relay ended the connection: Overmark sent it too many messages at once.",
+		],
+		[
+			"too_large",
+			"The relay ended the connection: a message was too large for it.",
+		],
+		["policy", "The relay ended the connection: it refused a message."],
+		["closed", "The relay closed the connection."],
+		// Only without the library's reconnecting, which Overmark leaves on.
+		["shutdown", "The relay shut down."],
+		["heartbeat", "The relay stopped answering."],
+		["network", "The network connection to the relay broke."],
+	] as const)(
+		"a session the relay ended as %s: says why and tries again later",
+		async (reason, why) => {
+			connection.state = "connected";
+			connection.end(reason);
+			// Not at once: a relay that ends every session gets no tight loop.
+			expect(connection.calls).toEqual([]);
+			expect(keep.problem).toBe(why);
+			expect(keep.retrying).toBe(true);
+			while (connection.state !== "connected") await Bun.sleep(1);
+			expect(keep.problem).toBeUndefined();
+		},
+	);
+
+	test("not wanted, a session the relay ended still says why, and stays off", async () => {
+		wanted = false;
+		connection.state = "connected";
+		connection.end("rate_limited");
+		expect(keep.problem).toBe(
+			"The relay ended the connection: Overmark sent it too many messages at once.",
+		);
+		expect(keep.retrying).toBe(false);
+		await Bun.sleep(10);
+		expect(connection.calls).toEqual([]);
+	});
 
 	test("says why a connect failed and tries again until it works", async () => {
 		connection.errors = [new Error("relay down"), new Error("still down")];
@@ -143,11 +208,13 @@ describe("KeepOn", () => {
 	});
 
 	test("takes over when the library gave up reconnecting", async () => {
-		connection.dispatchEvent(
-			new CustomEvent("error", { detail: { error: new Error("refused") } }),
-		);
+		connection.set("connected");
+		connection.set("reconnecting", "network");
+		connection.refuse(new Error("refused"));
 		expect(keep.problem).toBe("refused");
+		expect(keep.retrying).toBe(true);
 		while (connection.state !== "connected") await Bun.sleep(1);
+		expect(connection.calls).toEqual([{ resume: true }]);
 	});
 
 	test("an error while connected is no failed connect", () => {
@@ -160,9 +227,13 @@ describe("KeepOn", () => {
 	});
 
 	test("leaves connecting to the library while it reconnects", () => {
-		connection.reconnecting = { reason: "network", attempt: 1, at: 0 };
+		connection.set("connected");
+		// The connection broke; the library schedules attempt 1, then 2.
+		connection.set("reconnecting", "network");
+		connection.set("reconnecting");
 		keep.connect();
 		expect(connection.calls).toEqual([]);
+		expect(keep.retrying).toBe(false);
 	});
 
 	test("a connect the panel started failing counts as well", async () => {

@@ -16,10 +16,9 @@
 import {
 	type ConfirmAnswer,
 	type ConfirmRequest,
-	type DisconnectDetail,
-	type ReplacedDetail,
+	type ConnectionState,
+	type StateChangeDetail,
 	TabMcp,
-	type ToolCallStart,
 } from "@ractive-ch/tab-mcp-client";
 import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
@@ -27,7 +26,7 @@ import type { CaseStore } from "../lib/store.ts";
 import { AlwaysAllowed } from "./always.ts";
 import { badge } from "./badge.ts";
 import { decide } from "./decide.ts";
-import { KeepOn } from "./keep-on.ts";
+import { endedProblem, KeepOn } from "./keep-on.ts";
 import { type Kv, openKv, removeOldSettings } from "./kv.ts";
 import {
 	type AiState,
@@ -76,6 +75,8 @@ export interface ConnectionDeps {
 	capture: Capture;
 	/** A tool changed or deleted a case (the sync writes it, DEC-021). */
 	changed?: (caseId: string) => void;
+	/** The settings database: `openKv()` unless given (a memory one in tests). */
+	kv?: Kv;
 }
 
 /** Clear every notification of the extension: a previous worker's questions died with it. */
@@ -165,6 +166,63 @@ export function stopProblem(
 	return said;
 }
 
+/**
+ * AI access on for this browser session after a change of the library's
+ * state: on once connected; off after the user's `disconnect()`, and after
+ * the relay ended a session (idle, old, or for a reason `KeepOn` names)
+ * unless "Keep AI access on" connects again. `undefined`: unchanged, as
+ * while reconnecting.
+ */
+export function sessionOnAfter(
+	{ state, reason }: StateChangeDetail,
+	keepOn: boolean,
+): boolean | undefined {
+	if (state === "connected") return true;
+	if (state !== "disconnected") return undefined;
+	if (reason === "user") return false;
+	const ended =
+		reason === "idle" ||
+		reason === "expired" ||
+		endedProblem(reason) !== undefined;
+	if (ended && !keepOn) return false;
+	return undefined;
+}
+
+/** The icon's part of the connection: "…" while connecting or reconnecting. */
+export function badgeOf(
+	state: ConnectionState,
+): "connected" | "connecting" | "off" {
+	if (state === "connected") return "connected";
+	if (state === "connecting" || state === "reconnecting") return "connecting";
+	return "off";
+}
+
+/**
+ * What the card says when Disconnect for `app` did not work: `revoke()`
+ * rejected with `error`; `sent`: it was sent while connected, so the relay
+ * may have done it before the session ended.
+ */
+export function revokeProblem(
+	error: unknown,
+	app: string,
+	sent = false,
+): string {
+	const not = `${app} was not disconnected`;
+	const code = (error as { code?: unknown } | undefined)?.code;
+	if (code === "store_unavailable")
+		return `${not}: the relay could not save this. Try again.`;
+	if (code === "unknown_id")
+		return `The relay no longer knows ${app}, so it cannot reach Overmark any more. It leaves this list when AI access next connects.`;
+	const name = (error as { name?: unknown } | undefined)?.name;
+	if (name === "InvalidStateError")
+		return sent
+			? `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`
+			: `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
+	if (name === "TimeoutError")
+		return `${not}: the relay did not answer. Try again.`;
+	return `${not}: ${message(error)}`;
+}
+
 export class Connection {
 	readonly #deps: ConnectionDeps;
 	readonly #tab: TabBridge;
@@ -186,9 +244,17 @@ export class Connection {
 	#listening = new AbortController();
 	/** Why the last command failed, until the next connection. */
 	#problem: string | undefined;
-	/** The takeover happened in this worker's life: the library knows of it. */
-	#replacedHere = false;
 	#lastCall: CallView | undefined;
+	/** Why Disconnect did not work, by grant: until it goes, or connected again. */
+	readonly #revokeProblems = new Map<
+		string,
+		{ error: unknown; sent: boolean }
+	>();
+	/**
+	 * Disconnects, one at a time: the relay's error does not say which
+	 * revoke it answers, so the library rejects every revoke waiting for it.
+	 */
+	#revokes: Promise<void> = Promise.resolve();
 	/** Panel commands, one after the other. */
 	#commands: Promise<void> = Promise.resolve();
 	#sending = false;
@@ -239,7 +305,7 @@ export class Connection {
 		// The settings live in IndexedDB, out of content scripts' reach. An
 		// unreleased build kept them in chrome.storage.local: removed there at
 		// every start, never taken over (DEC-016).
-		const kv = await openKv();
+		const kv = deps.kv ?? (await openKv());
 		await removeOldSettings(chrome.storage.local).catch((error: unknown) =>
 			console.warn("Overmark: removing the old settings", error),
 		);
@@ -300,7 +366,11 @@ export class Connection {
 			blurForms: () => this.#settings.blurForms,
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
 		});
-		for (const tool of tools) void mcp.registerTool(tool);
+		// AI apps through the relay only: no WebMCP (off anyway, and a worker
+		// has no document) and no served port. `tools.ts` refuses other
+		// callers too.
+		for (const tool of tools)
+			void mcp.registerTool(tool, { callers: ["relay"] });
 		this.#titles = new Map(tools.map((t) => [t.name, t.title ?? t.name]));
 		return mcp;
 	}
@@ -357,23 +427,23 @@ export class Connection {
 		this.#listening = new AbortController();
 		const { signal } = this.#listening;
 		const changed = () => this.#changed();
-		for (const type of [
-			"statechange",
-			"reconnecting",
-			"pairingcode",
-			"grantschange",
-		] as const)
+		for (const type of ["pairingcode", "grantschange"] as const)
 			mcp.addEventListener(type, changed, { signal });
 		// The relay's list of the apps connected to this address: only it, so
 		// a start or a lost connection (no list yet) forgets nothing.
-		mcp.addEventListener("grantschange", () => this.#keepGrants(mcp.grants), {
-			signal,
-		});
+		mcp.addEventListener(
+			"grantschange",
+			({ detail: { grants } }) => {
+				this.#keepGrants(grants);
+				for (const id of this.#revokeProblems.keys())
+					if (!grants.some((g) => g.grantId === id))
+						this.#revokeProblems.delete(id);
+			},
+			{ signal },
+		);
 		mcp.addEventListener(
 			"toolcall",
-			(event) => {
-				const { tool, title, client } = (event as CustomEvent<ToolCallStart>)
-					.detail;
+			({ detail: { tool, title, client } }) => {
 				this.#lastCall = {
 					tool: title ?? tool,
 					// As the questions name it: the declared name escaped, the
@@ -385,37 +455,26 @@ export class Connection {
 			},
 			{ signal },
 		);
+		// Every change of state (and each attempt scheduled while
+		// reconnecting) redraws.
 		mcp.addEventListener(
-			"connected",
-			() => {
-				this.#problem = undefined;
-				void this.#setReplaced(undefined);
-				void this.#setSessionOn(true);
-				this.#changed();
-			},
-			{ signal },
-		);
-		mcp.addEventListener(
-			"disconnected",
-			(event) => {
-				const { reason } = (event as CustomEvent<DisconnectDetail>).detail;
-				// The relay ended an idle or old session: with "Keep AI access
-				// on" `KeepOn` connects again, without it AI access is off.
-				if (
-					reason === "user" ||
-					((reason === "idle" || reason === "expired") &&
-						!this.#settings.keepOn)
-				)
-					void this.#setSessionOn(false);
+			"statechange",
+			({ detail }) => {
+				if (detail.state === "connected") {
+					this.#problem = undefined;
+					// "Not connected" no longer holds.
+					this.#revokeProblems.clear();
+					void this.#setReplaced(undefined);
+				}
+				const on = sessionOnAfter(detail, this.#settings.keepOn);
+				if (on !== undefined) void this.#setSessionOn(on);
 				this.#changed();
 			},
 			{ signal },
 		);
 		mcp.addEventListener(
 			"replaced",
-			(event) => {
-				const { sibling } = (event as CustomEvent<ReplacedDetail>).detail;
-				this.#replacedHere = true;
+			({ detail: { sibling } }) => {
 				void this.#setReplaced({ sibling });
 				void this.#setSessionOn(false);
 				this.#changed();
@@ -437,7 +496,6 @@ export class Connection {
 
 	async #setReplaced(replaced: Replaced | undefined): Promise<void> {
 		this.#settings = { ...this.#settings, replaced };
-		if (replaced === undefined) this.#replacedHere = false;
 		await saveReplaced(this.#kv, replaced);
 		await this.#syncAlarm();
 	}
@@ -531,8 +589,9 @@ export class Connection {
 		void this.#syncAlarm();
 		if (this.#settings.replaced !== undefined) return;
 		if (this.#settings.keepOn) this.#keep.connect();
-		else if (this.#sessionOn && this.#mcp.reconnecting === undefined)
-			this.#connect();
+		// Not while the library reconnects by itself: `#connect` waits for
+		// `disconnected`.
+		else if (this.#sessionOn) this.#connect();
 	}
 
 	notificationButton(id: string, index: number): void {
@@ -640,7 +699,9 @@ export class Connection {
 				this.#changed();
 				return;
 			case "revoke":
-				this.#mcp.revoke(command.grantId);
+				// Not awaited: the commands after it (a Stop) must not wait for
+				// the relay's answer, up to 15 s.
+				this.#revoke(command.grantId);
 				return;
 			case "allow-all":
 				// Only for an app the card shows.
@@ -726,27 +787,51 @@ export class Connection {
 	}
 
 	/**
-	 * A new address. After a takeover the library first takes the old address
-	 * back, so the relay disconnects the AI apps that now talk to whoever took
-	 * it, but only if the takeover happened in this worker's life: a new
-	 * worker's library knows nothing of it. Then the extension connects with
-	 * the old address itself, and the new address is made while connected,
-	 * which revokes every grant of the old one.
+	 * A new address. The library first takes the old address back, connected
+	 * or not, taken over or not (since client 0.16), so the relay revokes
+	 * every grant of it and disconnects the AI apps that may now talk to
+	 * whoever took it; then it connects with the new one if it was on. After
+	 * a takeover AI access is off, and a new worker's library knows nothing
+	 * of the takeover: the new address connects, so the card shows it to
+	 * pair again.
 	 */
 	async #newAddress(): Promise<void> {
-		const takeBack =
-			this.#settings.replaced !== undefined && !this.#replacedHere;
+		const replaced = this.#settings.replaced !== undefined;
 		this.#problem = undefined;
 		this.#changed();
 		try {
-			if (takeBack) await this.#mcp.connect({ resume: true });
-			// It connects again if it was connected: "connected" turns AI access on.
+			// "connected" turns AI access on.
 			await this.#mcp.newAddress();
+			// The address is new: no longer the one taken over, also should
+			// the connect after it fail.
 			await this.#setReplaced(undefined);
+			if (replaced) await this.#mcp.connect({ resume: true });
 		} catch (error) {
 			this.#problem = message(error);
 		}
 		this.#changed();
+	}
+
+	/**
+	 * Disconnect one AI app (DEC-017). Its Always allow goes with the grant,
+	 * once the relay's list no longer has it (`#keepGrants`, DEC-018), or
+	 * when the relay says it does not know the grant at all.
+	 */
+	#revoke(grantId: string): void {
+		const mcp = this.#mcp;
+		this.#revokeProblems.delete(grantId);
+		this.#changed();
+		this.#revokes = this.#revokes.then(() => {
+			if (mcp !== this.#mcp) return;
+			const sent = mcp.state === "connected";
+			return mcp.revoke(grantId).catch((error: unknown) => {
+				if (mcp !== this.#mcp) return;
+				this.#revokeProblems.set(grantId, { error, sent });
+				if ((error as { code?: unknown }).code === "unknown_id")
+					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
+				this.#changed();
+			});
+		});
 	}
 
 	/** Pairing stops once no panel's pairing view is open. */
@@ -793,7 +878,7 @@ export class Connection {
 	get state(): AiState {
 		const mcp = this.#mcp;
 		const problem = this.#keep.problem ?? this.#problem;
-		const address = mcp.address;
+		const address = mcp.session?.address;
 		const code = mcp.pairingCode?.code;
 		const replaced = this.#settings.replaced;
 		return {
@@ -802,12 +887,20 @@ export class Connection {
 			keepOn: this.#settings.keepOn,
 			blurForms: this.#settings.blurForms,
 			state: mcp.state,
-			reconnecting: mcp.reconnecting !== undefined,
 			retrying: this.#keep.retrying,
 			...(problem !== undefined ? { problem } : {}),
 			...(address !== undefined ? { address } : {}),
 			grants: mcp.grants.map((g) => {
 				const always = this.#always.entry(g.grantId);
+				const failed = this.#revokeProblems.get(g.grantId);
+				const problem =
+					failed === undefined
+						? undefined
+						: revokeProblem(
+								failed.error,
+								g.client.name || g.client.host,
+								failed.sent,
+							);
 				return {
 					grantId: g.grantId,
 					name: g.client.name,
@@ -817,6 +910,7 @@ export class Connection {
 						tool,
 						title: this.#titles.get(tool) ?? tool,
 					})),
+					...(problem !== undefined ? { problem } : {}),
 				};
 			}),
 			pairing: [...this.#panels].some((p) => p.pairing),
@@ -856,15 +950,9 @@ export class Connection {
 	 * spark in the icon, no badge); the sync's "!" comes in between (badge.ts).
 	 */
 	#showBadge(): void {
-		const mcp = this.#mcp;
 		badge.ai({
 			questions: this.#questions.list.length,
-			ai:
-				mcp.state === "connected"
-					? "connected"
-					: mcp.state === "connecting" || mcp.reconnecting
-						? "connecting"
-						: "off",
+			ai: badgeOf(this.#mcp.state),
 		});
 	}
 }

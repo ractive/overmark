@@ -754,7 +754,6 @@ describe("the panel's status line", () => {
 		keepOn: false,
 		blurForms: false,
 		state: "disconnected",
-		reconnecting: false,
 		retrying: false,
 		grants: [],
 		pairing: false,
@@ -776,7 +775,12 @@ describe("the panel's status line", () => {
 			},
 			"Connected: Claude, chatgpt.com",
 		],
-		[{ reconnecting: true }, "Connection lost, retrying…"],
+		// Between attempts and during one: the library's state is the same.
+		[{ state: "reconnecting" }, "Connection lost, retrying…"],
+		[
+			{ state: "reconnecting", problem: "Could not connect" },
+			"Connection lost, retrying…",
+		],
 		[
 			{ problem: "Could not connect", retrying: true },
 			"Not connected: Could not connect Trying again…",
@@ -806,7 +810,7 @@ describe("the panel's status line", () => {
 			"connection",
 		);
 		// Lost and reconnecting; taken over; the saved relay refused.
-		expect(problem({ reconnecting: true })).toBe("connection");
+		expect(problem({ state: "reconnecting" })).toBe("connection");
 		expect(problem({ replaced: { sibling: false } })).toBe("connection");
 		expect(problem({ relayNote: "The saved relay x cannot be used." })).toBe(
 			"connection",

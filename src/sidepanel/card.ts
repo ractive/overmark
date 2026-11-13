@@ -23,7 +23,7 @@ export function cardStatus(a: AiState): CardStatus {
 	if (a.state === "connected") return a.grants.length > 0 ? "on" : "waiting";
 	if (a.state === "connecting") return "connecting";
 	// The library reconnecting, or "Keep AI access on" waiting to try again.
-	if (a.reconnecting || a.retrying) return "retrying";
+	if (a.state === "reconnecting" || a.retrying) return "retrying";
 	return "off";
 }
 
