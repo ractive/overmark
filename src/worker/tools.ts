@@ -1066,7 +1066,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		name: "set_mark_status",
 		title: "Set a mark's status",
 		description:
-			"Set a mark's status. fixed: the change is in, and the mark waits for the tester to verify it. verified: the user checked the fix on the new build and it holds; set it only when the user says so, never for a fix of your own, and only on a mark that is fixed. A verified mark changes only by a reopen: fixed, wontfix, cantreproduce and verified leave it as it is. wontfix: left as it is on purpose. cantreproduce: could not be seen. open: reopens a resolved mark; say in note what is still wrong, in at most 2,000 characters. note is kept with the status. The user is asked first.",
+			"Set a mark's status. fixed: the change is in, and the mark waits for the tester to verify it. verified: the user checked the fix on the new build and it holds; set it only when the user says so, never for a fix of your own, and only on a mark that is fixed. A verified mark changes only by a reopen: fixed, wontfix, cantreproduce and verified leave it as it is. wontfix: left as it is on purpose. cantreproduce: could not be seen. open: reopens a resolved mark; say in note what is still wrong. note goes with fixed, wontfix and cantreproduce (at most 20,000 characters) and with open (at most 2,000); verified takes none. The user is asked first.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -1100,6 +1100,16 @@ export function createTools(deps: ToolDeps): Tool[] {
 					result = said;
 					return { value };
 				};
+				// A note is never dropped or cut without a word.
+				if (status === "verified" && note !== undefined)
+					throw new CaseError(
+						"verified takes no note; add a finding to say more.",
+					);
+				const length = note === undefined ? 0 : textLength(note.trim());
+				if (status === "open" && length > MAX_REOPEN_NOTE)
+					throw new CaseError(
+						`A reopen's note is at most ${MAX_REOPEN_NOTE.toLocaleString("en-US")} characters; this one has ${length.toLocaleString("en-US")}.`,
+					);
 				// A verified mark changes only by a reopen, which keeps the
 				// user's check in its history (DEC-023).
 				if (was === "verified" && status !== "open")
@@ -1128,7 +1138,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 										},
 										now,
 									),
-									`Mark ${mark} is open again (it was ${WAS_LABEL[was]}).${note !== undefined && textLength(note.trim()) > MAX_REOPEN_NOTE ? ` The note was cut to ${MAX_REOPEN_NOTE.toLocaleString("en-US")} characters.` : ""}`,
+									`Mark ${mark} is open again (it was ${WAS_LABEL[was]}).`,
 								);
 					case "verified":
 						if (was !== "fixed" && was !== "verified")
@@ -1137,7 +1147,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 							);
 						return set(
 							withVerified(c, a.id, app, now),
-							`Mark ${mark} is verified.${note === undefined ? "" : " A note is not kept with verified."}`,
+							`Mark ${mark} is verified.`,
 						);
 					case "fixed":
 						return set(

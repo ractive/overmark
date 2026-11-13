@@ -869,22 +869,24 @@ describe("tools", () => {
 			);
 		});
 
-		test("a note that is not kept, or kept cut, is said so", async () => {
+		test("a note is never dropped or cut unsaid: verified takes none, a reopen's is at most 2,000", async () => {
 			await seed();
 			expect(await status(2, "open", "x")).toBe(
 				"Mark 2 is open already; the note was not kept.",
 			);
 			await status(2, "fixed");
-			expect(await status(2, "verified", "Checked on build 412")).toBe(
-				"Mark 2 is verified. A note is not kept with verified.",
+			await expect(
+				status(2, "verified", "Checked on build 412"),
+			).rejects.toThrow("verified takes no note; add a finding to say more.");
+			expect((await stored())?.resolution?.verified).toBeUndefined();
+			await expect(status(2, "open", "y".repeat(2001))).rejects.toThrow(
+				"A reopen's note is at most 2,000 characters; this one has 2,001.",
 			);
-			expect((await stored())?.resolution?.note).toBeUndefined();
-			expect(await status(2, "open", "y".repeat(5000))).toBe(
-				"Mark 2 is open again (it was Verified). The note was cut to 2,000 characters.",
-			);
+			expect((await stored())?.resolution).toBeDefined();
+			await status(2, "open", "y".repeat(2000));
 			expect((await stored())?.reopens?.[0]?.note?.length).toBe(2000);
 			expect(tools.get("set_mark_status")?.description).toContain(
-				"say in note what is still wrong, in at most 2,000 characters.",
+				"note goes with fixed, wontfix and cantreproduce (at most 20,000 characters) and with open (at most 2,000); verified takes none.",
 			);
 		});
 
