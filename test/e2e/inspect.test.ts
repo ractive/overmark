@@ -144,14 +144,14 @@ describe.skipIf(browserBinary === undefined)("get_mark_element", () => {
 				const button = form.querySelector("button");
 				const select = document.createElement("select");
 				select.name = "country";
-				select.innerHTML = '<option value="DE">Deutschland</option><option value="CH">Schweiz</option>';
+				// The choice and the tick as the page's markup carries them.
+				select.innerHTML = '<option value="DE">Deutschland</option><option value="CH" selected>Schweiz</option>';
 				form.insertBefore(select, button);
-				select.value = "CH";
 				const box = document.createElement("input");
 				box.type = "checkbox";
 				box.name = "terms";
+				box.setAttribute("checked", "");
 				form.insertBefore(box, button);
-				box.checked = true;
 				// The page's own rules for the state.
 				const style = document.createElement("style");
 				style.textContent = "form:has(:checked) { gap: 9px } input:checked { outline: 1px solid red } [checked] { margin: 1px } .Form_root__k3L9m:not(:invalid) { color: #111 }";
