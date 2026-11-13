@@ -210,9 +210,26 @@ export function kvSyncStore(kv: Kv): SyncStore {
 	};
 }
 
-/** Sync to Downloads from now on (the panel, once Chrome allowed downloads). */
-export const chooseDownloads = (kv: Kv): Promise<void> =>
-	kv.set({ [TARGET_KEY]: "downloads", [FOLDER_KEY]: undefined });
+/**
+ * Sync to Downloads from now on (the panel, once Chrome allowed downloads).
+ * Every case is written again, into the file it had: nothing is read from
+ * the downloads, so this is the way to bring back files deleted there.
+ */
+export async function chooseDownloads(kv: Kv): Promise<void> {
+	const record = (await kv.get(filesKey(DOWNLOADS_ID))) as
+		| SyncedFiles
+		| undefined;
+	const byCase: Record<string, SyncedFile> = {};
+	for (const [id, f] of Object.entries(record?.byCase ?? {}))
+		byCase[id] = { version: "", file: f.file };
+	await kv.set({
+		[TARGET_KEY]: "downloads",
+		[FOLDER_KEY]: undefined,
+		...(record === undefined
+			? {}
+			: { [filesKey(DOWNLOADS_ID)]: { folderId: DOWNLOADS_ID, byCase } }),
+	});
+}
 
 /**
  * Sync to `handle` from now on (the side panel, after the picker). A folder

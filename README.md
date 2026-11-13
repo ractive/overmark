@@ -101,7 +101,8 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
      it writes with the side panel closed too, also after a browser restart. Each write
      shows in Chrome's download list; Overmark keeps only its newest entry there, for
      "Show in folder". A case whose title changed gets a file of the new name and the old
-     one stays. With Chrome's "Ask where to save each file before downloading" on, Chrome
+     one stays. Files deleted there are written again at their case's next change, or
+     all at once with Change… and Sync to Downloads. With Chrome's "Ask where to save each file before downloading" on, Chrome
      would ask at every write: the sync then says so and fails until it is off.
    - **Choose a folder…** writes to any folder (one in iCloud Drive or Dropbox, say). A
      renamed case's old file goes there, and a file Overmark did not write is never

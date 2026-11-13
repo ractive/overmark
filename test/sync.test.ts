@@ -777,6 +777,26 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(store.current?.state).toBe("failed");
 	});
 
+	test("Sync to Downloads again writes every case again, into the files it had", async () => {
+		const kv = referenceKv();
+		sync = new Sync({
+			cases,
+			store: kvSyncStore(kv),
+			downloads: downloadsTarget(api),
+		});
+		await add("c_1", "Login");
+		await chooseDownloads(kv);
+		await sync.request();
+		// The user emptied Downloads/Overmark; then Stop syncing, Sync to Downloads.
+		api.files.clear();
+		await stopSyncing(kv);
+		await sync.request();
+		await chooseDownloads(kv);
+		await sync.request();
+		expect([...api.files.keys()]).toEqual(["Overmark/login.overmark.zip"]);
+		expect(api.downloads).toHaveLength(2);
+	});
+
 	test("from a folder to Downloads: a record of its own, written afresh", async () => {
 		await add("c_1", "Login");
 		const folder = new FakeFolder();
