@@ -183,6 +183,9 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 			15_000,
 		);
 
+		// A page with the toolbar, for a save once the worker is a new one.
+		const later = await h.open("v1");
+		await showToolbar(h, later.page, later.tabId);
 		// No extension page open: the panel closed, the control page elsewhere.
 		await (await h.open("v2")).page.activate();
 		await closeSidePanel(h, panel);
@@ -218,12 +221,34 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		expect(written?.id).toBe(caseId);
 		expect(await extensionPages()).toEqual([]);
 
+		// The worker stopped, as Chrome stops an idle one; a save on the page
+		// starts a new one, which writes with no extension page open either.
+		await h.browser.send("Target.closeTarget", { targetId });
+		await until(
+			() => h.browser.targets(),
+			(targets) => !targets.some((t) => t.targetId === targetId),
+		);
+		await later.page.activate();
+		await markElement(later.page, "[data-truth=submit]", "Fresh worker");
+		await saveAs(later.page, "Fresh worker");
+		const fresh = await until(
+			() => caseIn("fresh-worker.overmark.zip"),
+			(c) => c !== undefined,
+			20_000,
+		);
+		expect(fresh?.title).toBe("Fresh worker");
+		expect(await extensionPages()).toEqual([]);
+		await later.page.send("Page.close");
+
 		await h.control.goto(PANEL_PAGE(h));
-		// Overwritten in place, no "(1)" copy; one entry left in the list.
+		// Overwritten in place, no "(1)" copy; one entry left in the list, the newest.
 		await until(downloadList, (list) => list.length === 1);
-		expect(await downloadList()).toEqual([downloaded(FILE)]);
+		expect(await downloadList()).toEqual([
+			downloaded("fresh-worker.overmark.zip"),
+		]);
+		expect((await caseIn(FILE))?.verdict).toBe("Written with the panel closed");
 		panel = await openSidePanel(h);
-	}, 60_000);
+	}, 90_000);
 
 	test("a paused folder shows the banner on Home and in the case, and “!” on the icon", async () => {
 		await panel.eval(SYNC_KV("test:access", "prompt"));
@@ -282,7 +307,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 			`${SYNC_STATE} === "Syncing to Downloads/Overmark"`,
 			10_000,
 		);
-		expect(await panel.eval(FOLDER_FILES)).toEqual([FILE]);
+		expect(await panel.eval<string[]>(FOLDER_FILES)).toContain(FILE);
 		await panel.eval(SYNC_KV("test:access"));
 	}, 60_000);
 
@@ -296,7 +321,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await h.control.click(del);
 		await until(
 			() => h.control.eval<Db>(READ_DB),
-			(db) => db.cases.length === 0,
+			(db) => !db.cases.some((c) => c.title === "Synced case"),
 		);
 		await Bun.sleep(1000);
 		expect((await caseIn(FILE))?.verdict).toBe("Written with the panel closed");
