@@ -11,6 +11,7 @@ import type { Draw } from "../src/lib/save.ts";
 import {
 	type AnnotationDraft,
 	type Crop,
+	fromPage,
 	numberFree,
 	type SaveRequest,
 	saveCase,
@@ -302,6 +303,76 @@ describe("saveCase", () => {
 		expect(drawn).toEqual([[1, 2]]);
 		expect(store.images.has("c_session/pending/p_a.webp")).toBe(false);
 		expect(store.images.has("c_1/shots/s1.webp")).toBe(true);
+	});
+
+	test("a mark is stored with a mark's fields only: no resolution, findings or anything else the draft carries (CR-07)", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_1", "p_a");
+		const forged = {
+			...draft(1, "p_a"),
+			resolution: { kind: "fixed", at: "2026-11-04T10:00:00Z" },
+			findings: [
+				{
+					id: "f1",
+					text: "Invented",
+					app: { id: "https://claude.ai/oauth", host: "claude.ai" },
+					at: "2026-11-04T10:00:00Z",
+				},
+			],
+			crop: "crops/other.webp",
+			extra: "kept?",
+		} as unknown as AnnotationDraft;
+		const saved = await saveCase(
+			store,
+			request("c_1", true, [shot("p_a")], [forged]),
+			crop,
+		);
+		const stored = saved.annotations[0] as unknown as Record<string, unknown>;
+		expect(Object.keys(stored).sort()).toEqual(
+			[
+				"author",
+				"comment",
+				"crop",
+				"element",
+				"id",
+				"number",
+				"shape",
+				"shot",
+			].sort(),
+		);
+		expect(stored["crop"]).toBe("crops/a1.webp");
+		expect((await store.getCase("c_1"))?.annotations[0]).toEqual(
+			saved.annotations[0] as never,
+		);
+	});
+
+	test("a save from the page is the user's: an AI author in its draft does not count (CR-07)", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_1", "p_a");
+		const ai = { ...draft(1, "p_a"), author: "ai" as const };
+		const saved = await saveCase(
+			store,
+			fromPage(request("c_1", true, [shot("p_a")], [ai, draft(2, "p_a")])),
+			crop,
+		);
+		expect(saved.annotations.map((a) => a.author)).toEqual(["user", "user"]);
+		// An AI app's own mark (add_annotation) is still its own.
+		await captured(store, "c_1", "p_b");
+		const added = await saveCase(
+			store,
+			request(
+				"c_1",
+				false,
+				[shot("p_b")],
+				[{ ...draft(3, "p_b"), author: "ai" }],
+			),
+			crop,
+		);
+		expect(added.annotations.map((a) => a.author)).toEqual([
+			"user",
+			"user",
+			"ai",
+		]);
 	});
 
 	test("a missing screenshot fails the save", async () => {

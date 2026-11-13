@@ -61,6 +61,18 @@ export interface SaveRequest {
 	alsoDrawn?: (RenderedMark & { shot: string })[];
 }
 
+/**
+ * A save the content script sent (`case:save`): its marks are the user's,
+ * whatever the draft says. Only an AI app's `add_annotation`, in the worker,
+ * stores a mark of an AI app (CR-07).
+ */
+export function fromPage(request: SaveRequest): SaveRequest {
+	return {
+		...request,
+		annotations: request.annotations.map((a) => ({ ...a, author: "user" })),
+	};
+}
+
 /** The most marks drawn on a screenshot besides its own (`alsoDrawn`). */
 export const MAX_ALSO_DRAWN = 100;
 
@@ -166,13 +178,18 @@ export async function saveCase(
 					`mark ${draft.number} exists in the case already: the case changed meanwhile. Adding it again gives it the next free number.`,
 				);
 			taken.add(draft.number);
-			const { cropRect: _, ...rest } = draft;
 			const id = `a${draft.number}`;
+			// A new mark's fields, and nothing else of the draft: it is open and
+			// has no findings, whatever the sender put in (CR-07).
 			annotations.push({
-				...rest,
 				id,
+				number: draft.number,
 				shot: finalIds.get(draft.shot) ?? draft.shot,
+				comment: draft.comment,
+				author: draft.author,
+				shape: draft.shape,
 				crop: cropImage(id),
+				element: draft.element,
 			});
 			const image = crops.get(draft);
 			if (image !== undefined) images.set(cropImage(id), image);
