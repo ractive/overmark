@@ -301,3 +301,85 @@ describe("addresses and paths in case.md link only where they are what they say"
 		expect(md).toContain("![Screenshot s1, scrolled to 0, 0](shots/s1.webp)");
 	});
 });
+
+describe("every value on one line of case.md shows as written and stays there", () => {
+	/** `v` as an app's name and host, every date, a note, the page and the element. */
+	function everywhere(v: string): string {
+		const app = { id: "https://x.example/oauth", name: v, host: v };
+		const c = caseWith("plain");
+		const a = c.annotations[0] as Case["annotations"][number];
+		return caseMarkdown({
+			...c,
+			createdAt: v,
+			updatedAt: v,
+			page: { ...c.page, title: v, lang: v },
+			annotations: [
+				{
+					...a,
+					resolution: { kind: "fixed", note: v, at: v, app },
+					reopens: [{ at: v, app, was: { kind: "fixed", note: v, at: "t" } }],
+					findings: [{ id: "f_1", text: "plain", app, at: v, editedAt: v }],
+					element: {
+						tag: "button",
+						text: v,
+						testId: v,
+						classes: [v],
+						heading: v,
+						landmark: v,
+						attributes: {},
+						ancestors: [],
+						rect: { x: 0, y: 0, width: 1, height: 1 },
+						page: { width: 1, height: 1 },
+						selector: v,
+					},
+				},
+			],
+		});
+	}
+
+	// The value, what inline() shows of it, and what the selector's code span does.
+	test.each([
+		[
+			"![x](https://evil.example/)",
+			"!\\[x\\](https://evil.example/)",
+			"`![x](https://evil.example/)`",
+		],
+		[
+			"<b>&lt;i&gt; ~~s~~ $m$ *e*",
+			"\\<b\\>\\&lt;i\\&gt; \\~\\~s\\~\\~ \\$m\\$ \\*e\\*",
+			"`<b>&lt;i&gt; ~~s~~ $m$ *e*`",
+		],
+		[
+			"x\n\n## Marks | `y` [^1]: _z_",
+			"x \\#\\# Marks \\| \\`y\\` \\[^1\\]: \\_z\\_",
+			"`x ## Marks | 'y' [^1]: _z_`",
+		],
+	])("%p", (v, s, selector) => {
+		const md = everywhere(v);
+		const lines = md.split("\n");
+		for (const line of [
+			`# Button contrast`,
+			`- Page title: ${s}`,
+			`- Window: 1280×800 CSS pixels, device pixel ratio 2, language ${s}`,
+			`- Created: ${s}, updated: ${s}`,
+			`- Status: Fixed, to verify (${s}, by ${s} (${s}))`,
+			`- Note: ${s}`,
+			`- Reopened ${s} by ${s} (${s}), was Fixed (${s})`,
+			`- Element: button "${s}" · test id ${s} · ${s} · under "${s}"`,
+			`- Selector: ${selector}`,
+			`- In: ${s}`,
+			`By ${s} (${s}), ${s}, edited ${s}:`,
+		])
+			expect(lines).toContain(line);
+		// Nothing of the value made a line, or a heading, of its own.
+		expect(lines.filter((l) => l.startsWith("#"))).toEqual([
+			"# Button contrast",
+			"## Summary for the developer",
+			"## Marks (1)",
+			"### 1. box",
+			"#### AI findings on mark 1 (1)",
+			"## Screenshots",
+		]);
+	});
+	// The page's address: see "addresses and paths" above.
+});
