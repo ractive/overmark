@@ -1080,7 +1080,7 @@ async function renameCase(caseId: string, text: string): Promise<void> {
 		});
 		announce(caseId);
 		void refreshCases();
-		await retitleToolbars(saved);
+		void retitleToolbars(saved);
 	} catch (error) {
 		update((s) => {
 			if (s.renaming?.caseId === caseId)
@@ -1093,24 +1093,31 @@ async function renameCase(caseId: string, text: string): Promise<void> {
 	}
 }
 
-/** Toolbars adding to the case say its new title (`overlay:title`). */
+/**
+ * Toolbars adding to the case say its new title (`overlay:title`): on every
+ * tab, also one this panel did not start (opened again, another window).
+ * A toolbar adding to another case ignores it.
+ */
 async function retitleToolbars(c: Case): Promise<void> {
-	const front = (await activeTab())?.id;
-	const tabs = new Set(toolbarOn);
-	if (front !== undefined) tabs.add(front);
-	for (const tabId of tabs) {
-		const now = (await chrome.tabs
-			.sendMessage(tabId, {
-				type: "overlay:title",
-				caseId: c.id,
-				title: c.title,
-			})
-			.catch(() => undefined)) as OverlayState | undefined;
-		if (now !== undefined)
-			update((s) => {
-				if (s.tab?.id === tabId) s.overlay = now;
-			});
-	}
+	const tabs = (await chrome.tabs.query({}).catch(() => [])).flatMap((t) =>
+		t.id === undefined ? [] : [t.id],
+	);
+	// Each on its own: a tab that does not answer holds up no other.
+	await Promise.all(
+		tabs.map(async (tabId) => {
+			const now = (await chrome.tabs
+				.sendMessage(tabId, {
+					type: "overlay:title",
+					caseId: c.id,
+					title: c.title,
+				})
+				.catch(() => undefined)) as OverlayState | undefined;
+			if (now !== undefined)
+				update((s) => {
+					if (s.tab?.id === tabId) s.overlay = now;
+				});
+		}),
+	);
 }
 
 /** "Annotate this page" is creating its case: a second click waits for it. */

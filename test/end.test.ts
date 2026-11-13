@@ -359,3 +359,26 @@ test("what a new case records of the page: address, title, language, window", as
 	doc.documentElement.lang = "not a tag!";
 	expect(pageInfo(doc).lang).toBe("");
 });
+
+test("a rename while a mark is being added is not reverted (review of PR 57)", async () => {
+	let release: () => void = () => undefined;
+	const held = new Promise<void>((r) => {
+		release = r;
+	});
+	answer = (r) =>
+		r.type === "case:save" ? held.then(() => works(r)) : works(r);
+	const { a, overlay } = annotator();
+	a.show({ target });
+	note(overlay, a);
+	await settle(a, () => asked.some((r) => r.type === "case:save"));
+	a.setTitle("c_open", "Login button");
+	release();
+	await settle(a, () => !a.state().saving && a.state().drafts === 0);
+	expect(a.state().target).toEqual({
+		caseId: "c_open",
+		title: "Login button",
+		nextAnnotation: 4,
+	});
+	const status = overlay.toolbar.querySelector('[data-role="status"]');
+	expect(status?.textContent).toBe("Mark 3 added to “Login button”");
+});

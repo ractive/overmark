@@ -1398,7 +1398,7 @@ export class Annotator {
 				if (!check.free) {
 					// An AI app took the number: the marks not added yet move on.
 					target = { ...target, nextAnnotation: check.next };
-					this.#target = target;
+					this.#advance(target.caseId, check.next);
 					this.#renumber();
 				}
 				// Only marks before it: Undo of a later one leaves no pin behind.
@@ -1435,11 +1435,11 @@ export class Annotator {
 			this.#savedMarks.push(draft);
 			// Undo reaches only what was added while the toolbar is up.
 			if (this.overlay.annotating) this.#added.push(draft);
-			this.#target = {
-				...target,
-				nextAnnotation: Math.max(target.nextAnnotation, draft.number + 1),
-			};
-			this.#message = `Mark ${draft.number} added to “${target.title}”`;
+			this.#advance(
+				target.caseId,
+				Math.max(target.nextAnnotation, draft.number + 1),
+			);
+			this.#message = `Mark ${draft.number} added to “${this.#titleOf(target)}”`;
 			this.#retire();
 			added = true;
 		} catch (error) {
@@ -1448,6 +1448,23 @@ export class Annotator {
 		} finally {
 			this.#afterwards(this.#activity.end("saving"), added);
 		}
+	}
+
+	/**
+	 * The case's next number after an add or an undo, written onto the
+	 * target as it is now: a rename meanwhile (`setTitle`) stays (review of
+	 * PR 57), and a target switched to another case is left alone.
+	 */
+	#advance(caseId: string, nextAnnotation: number): void {
+		if (this.#target?.caseId !== caseId) return;
+		this.#target = { ...this.#target, nextAnnotation };
+	}
+
+	/** The case's title as the toolbar knows it now: renamed meanwhile, perhaps. */
+	#titleOf(target: AnnotateTarget): string {
+		return this.#target?.caseId === target.caseId
+			? this.#target.title
+			: target.title;
 	}
 
 	/** Undo for a mark that was added, or on its way: out of the case again. */
@@ -1476,10 +1493,11 @@ export class Annotator {
 				view.marks = view.marks.filter((d) => d !== draft);
 			this.#retire();
 			// Its number is free again (or another mark took the next one).
-			this.#target = { ...target, nextAnnotation: result.next };
+			this.#advance(target.caseId, result.next);
+			const title = this.#titleOf(target);
 			this.#message = result.removed
-				? `Mark ${draft.number} taken out of “${target.title}”`
-				: `Mark ${draft.number} was deleted from “${target.title}” already`;
+				? `Mark ${draft.number} taken out of “${title}”`
+				: `Mark ${draft.number} was deleted from “${title}” already`;
 		} catch (error) {
 			// It stays in the case, and Undo no longer offers it.
 			this.#added = this.#added.filter((d) => d !== draft);
