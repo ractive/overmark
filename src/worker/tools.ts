@@ -236,11 +236,14 @@ function resolutionView(r: Resolution, compact: boolean) {
 		...(r.note ? { note: compact ? cut(r.note, 1000) : r.note } : {}),
 		at: r.at,
 		...(r.app ? { by: appLabel(r.app) } : {}),
+		// From a file: who and when is what the file says.
+		...(r.imported ? { imported: true } : {}),
 		...(r.verified
 			? {
 					verified: {
 						at: r.verified.at,
 						...(r.verified.app ? { by: appLabel(r.verified.app) } : {}),
+						...(r.verified.imported ? { imported: true } : {}),
 					},
 				}
 			: {}),
@@ -262,6 +265,7 @@ function reopensView(reopens: readonly Reopen[] | undefined, compact: boolean) {
 			at: r.at,
 			was: resolutionStatus(r.was),
 			...(r.app ? { by: appLabel(r.app) } : {}),
+			...(r.imported ? { imported: true } : {}),
 		})),
 		...(shown.length < reopens.length
 			? { reopensLeftOut: reopens.length - shown.length }

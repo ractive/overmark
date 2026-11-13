@@ -206,12 +206,16 @@ export interface Resolution {
 	 * not know, and with it the whole file.
 	 */
 	verified?: Verification;
+	/** Came in from a file: who set it and when is what the file says. */
+	imported?: true;
 }
 
 export interface Verification {
 	at: string;
 	/** The AI app that set it through a tool; none: set in the panel. */
 	app?: FindingApp;
+	/** Came in from a file. */
+	imported?: true;
 }
 
 /** A settled mark opened again, and the resolution that ended (DEC-023). */
@@ -223,6 +227,8 @@ export interface Reopen {
 	app?: FindingApp;
 	/** The resolution it ended, whole: the claimed fix and its note stay. */
 	was: Resolution;
+	/** Came in from a file. */
+	imported?: true;
 }
 
 /** The most reopens a mark keeps; the oldest goes when there are more. */
@@ -843,6 +849,7 @@ function resolution(value: unknown, path: string): Resolution {
 		...(verified === undefined || kind !== "fixed"
 			? {}
 			: { verified: verification(verified, `${path}.verified`) }),
+		...importedOf(o["imported"], `${path}.imported`),
 	};
 }
 
@@ -851,8 +858,23 @@ function verification(value: unknown, path: string): Verification {
 	return {
 		at: str(o["at"], `${path}.at`, 64),
 		...appOf(o["app"], `${path}.app`),
+		...importedOf(o["imported"], `${path}.imported`),
 	};
 }
+
+/** `imported: true`, or nothing; anything else is refused. */
+function importedOf(value: unknown, path: string): { imported?: true } {
+	if (value !== undefined && typeof value !== "boolean")
+		fail(path, "must be true or false");
+	return value === true ? { imported: true } : {};
+}
+
+/** A resolution that came in from a file, its verification too. */
+export const importedResolution = (r: Resolution): Resolution => ({
+	...r,
+	...(r.verified ? { verified: { ...r.verified, imported: true } } : {}),
+	imported: true,
+});
 
 /** The AI app that set something, as a finding records it; none: nothing. */
 function appOf(value: unknown, path: string): { app?: FindingApp } {
@@ -884,6 +906,7 @@ function reopensOf(value: unknown, path: string): { reopens?: Reopen[] } {
 			at: str(r["at"], `${p}.at`, 64),
 			...appOf(r["app"], `${p}.app`),
 			was: resolution(r["was"], `${p}.was`),
+			...importedOf(r["imported"], `${p}.imported`),
 		};
 	});
 	return reopens.length > 0 ? { reopens } : {};

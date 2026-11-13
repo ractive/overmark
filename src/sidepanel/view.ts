@@ -1117,6 +1117,8 @@ interface HistoryLine {
 	at: string;
 	app: FindingApp | undefined;
 	note: string | undefined;
+	/** Came in from a file: who and when is what the file says. */
+	imported: boolean;
 }
 
 /** A resolution as history: how it was settled, then its verification. */
@@ -1128,6 +1130,7 @@ function resolutionHistory(r: Resolution): HistoryLine[] {
 			at: r.at,
 			app: r.app,
 			note: r.note,
+			imported: r.imported === true,
 		},
 		...(r.verified
 			? [
@@ -1137,6 +1140,7 @@ function resolutionHistory(r: Resolution): HistoryLine[] {
 						at: r.verified.at,
 						app: r.verified.app,
 						note: undefined,
+						imported: r.verified.imported === true,
 					},
 				]
 			: []),
@@ -1153,6 +1157,7 @@ function historyList(a: Annotation): HTMLElement | null {
 			at: r.at,
 			app: r.app,
 			note: r.note,
+			imported: r.imported === true,
 		});
 	if (a.resolution) lines.push(...resolutionHistory(a.resolution));
 	if (lines.length === 0) return null;
@@ -1164,7 +1169,7 @@ function historyList(a: Annotation): HTMLElement | null {
 				"li",
 				{ "data-kind": l.kind },
 				h("span", { class: "kind" }, l.label),
-				` ${historyTime(l.at)}${l.app ? ` by ${appLabel(l.app)}` : ""}`,
+				` ${historyTime(l.at)}${l.app ? ` by ${appLabel(l.app)}` : ""}${l.imported ? ", as the file says" : ""}`,
 				l.note ? h("span", { class: "note" }, ` · ${l.note}`) : null,
 			),
 		),

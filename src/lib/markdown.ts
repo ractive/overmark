@@ -55,6 +55,10 @@ function finding(f: Finding): string {
 const by = (app: FindingApp | undefined) =>
 	app ? ` by ${inline(appLabel(app))}` : "";
 
+/** What came in from a file is what the file says. */
+const fromFile = (imported: boolean | undefined) =>
+	imported ? " (as the file says)" : "";
+
 /** What a reopen ended: "Fixed (its note)". */
 function was(r: Resolution): string {
 	const label = `${RESOLUTION_LABEL[r.kind]}${r.verified ? " and verified" : ""}`;
@@ -64,14 +68,18 @@ function was(r: Resolution): string {
 /** A mark's status, its note, its verification and why it came back. */
 function status(a: Annotation): string[] {
 	const r = a.resolution;
-	const when = r ? ` (${inline(r.at)}${r.app ? `,${by(r.app)}` : ""})` : "";
+	const when = r
+		? ` (${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)})`
+		: "";
 	const lines = [`- Status: ${STATUS_LABEL[markStatus(a)]}${when}`];
 	if (r?.note) lines.push(`- Note: ${inline(r.note)}`);
 	if (r?.verified)
-		lines.push(`- Verified: ${inline(r.verified.at)}${by(r.verified.app)}`);
+		lines.push(
+			`- Verified: ${inline(r.verified.at)}${by(r.verified.app)}${fromFile(r.verified.imported)}`,
+		);
 	for (const reopen of a.reopens ?? []) {
 		lines.push(
-			`- Reopened ${inline(reopen.at)}${by(reopen.app)}, was ${was(reopen.was)}${reopen.note ? ":" : ""}`,
+			`- Reopened ${inline(reopen.at)}${by(reopen.app)}${fromFile(reopen.imported)}, was ${was(reopen.was)}${reopen.note ? ":" : ""}`,
 		);
 		if (reopen.note)
 			lines.push(

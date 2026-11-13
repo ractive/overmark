@@ -836,6 +836,35 @@ describe("Verify (DEC-023)", () => {
 		expect(row("a1").querySelector(".mark-sub .reopened")).toBeNull();
 	});
 
+	test("a status from a file says so in the history", () => {
+		const c = fourMarks();
+		const fromFile: Case = {
+			...c,
+			updatedAt: "2026-11-15T10:00:00Z",
+			importedAt: "2026-11-15T10:00:00Z",
+			annotations: [
+				{
+					...(c.annotations[1] as Annotation),
+					resolution: {
+						kind: "fixed",
+						at: "2026-11-14T09:00:00Z",
+						app: CLAUDE,
+						imported: true,
+						verified: { at: "2026-11-14T15:00:00Z", imported: true },
+					},
+				},
+			],
+		};
+		render(caseState(fromFile), noActions);
+		const lines = [...row("a2").querySelectorAll(".history li")].map(
+			(li) => li.textContent,
+		);
+		expect(lines[0]).toMatch(
+			/^Fixed .+ by Claude \(claude\.ai\), as the file says$/,
+		);
+		expect(lines[1]).toMatch(/^Verified .+, as the file says$/);
+	});
+
 	test("the crop of a verified or closed mark is not greyed", async () => {
 		const css = await Bun.file(
 			new URL("../src/sidepanel/style.css", import.meta.url),

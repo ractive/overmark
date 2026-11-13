@@ -274,6 +274,109 @@ describe("statuses in case.md (DEC-023)", () => {
 	});
 });
 
+describe("statuses through a file (DEC-023)", () => {
+	const CLAUDE = {
+		id: "https://claude.ai/oauth",
+		name: "Claude",
+		host: "claude.ai",
+	};
+	/** Mark 1 fixed by Claude and verified, after two reopens. */
+	const verify = (c: Case): Case => ({
+		...c,
+		annotations: [
+			annotation(1, {
+				resolution: {
+					kind: "fixed",
+					note: "Hover state too",
+					at: "2026-11-14T09:00:00Z",
+					app: CLAUDE,
+					verified: { at: "2026-11-14T15:00:00Z" },
+				},
+				reopens: [
+					{
+						note: "Still pale",
+						at: "2026-11-13T16:00:00Z",
+						was: { kind: "fixed", at: "2026-11-13T11:00:00Z", app: CLAUDE },
+					},
+					{
+						at: "2026-11-13T17:00:00Z",
+						app: CLAUDE,
+						was: { kind: "wontfix", at: "2026-11-13T16:30:00Z" },
+					},
+				],
+			}),
+			annotation(2, { author: "ai", element: null }),
+		],
+	});
+
+	test("round trip: statuses and reopens come back, as the file says", async () => {
+		const { store, c } = await stored();
+		const sent = verify(c);
+		await putCase(store, sent);
+		const back = await importCase(
+			new MemoryStore(),
+			await exportCase(store, sent),
+		);
+		const [a] = back.annotations as [Annotation];
+		expect(a.resolution).toEqual({
+			kind: "fixed",
+			note: "Hover state too",
+			at: "2026-11-14T09:00:00Z",
+			app: CLAUDE,
+			imported: true,
+			verified: { at: "2026-11-14T15:00:00Z", imported: true },
+		});
+		expect(a.reopens).toEqual([
+			{
+				note: "Still pale",
+				at: "2026-11-13T16:00:00Z",
+				imported: true,
+				was: {
+					kind: "fixed",
+					at: "2026-11-13T11:00:00Z",
+					app: CLAUDE,
+					imported: true,
+				},
+			},
+			{
+				at: "2026-11-13T17:00:00Z",
+				app: CLAUDE,
+				imported: true,
+				was: { kind: "wontfix", at: "2026-11-13T16:30:00Z", imported: true },
+			},
+		]);
+		expect("resolution" in (back.annotations[1] as object)).toBe(false);
+		// What the file says about it changes nothing.
+		const claimed = JSON.parse(JSON.stringify(sent));
+		claimed.annotations[0].resolution.imported = false;
+		claimed.annotations[0].reopens[0].imported = false;
+		await putCase(store, claimed);
+		const again = await importCase(
+			new MemoryStore(),
+			await exportCase(store, claimed),
+		);
+		expect(again.annotations[0]?.resolution?.imported).toBe(true);
+		expect(again.annotations[0]?.reopens?.[0]?.imported).toBe(true);
+	});
+
+	test("case.md says which statuses came from a file", async () => {
+		const { store, c } = await stored();
+		const sent = verify(c);
+		await putCase(store, sent);
+		const back = await importCase(
+			new MemoryStore(),
+			await exportCase(store, sent),
+		);
+		const md = caseMarkdown(back);
+		expect(md).toContain("by Claude (claude.ai) (as the file says)");
+		expect(md).toContain("- Verified: 2026-11-14T15:00:00Z (as the file says)");
+		expect(md).toContain(
+			"- Reopened 2026-11-13T16:00:00Z (as the file says), was Fixed:",
+		);
+		expect(caseMarkdown(sent)).not.toContain("as the file says");
+	});
+});
+
 /** A finding of Claude's on a mark. */
 const finding = (id: string, extra: Partial<Finding> = {}): Finding => ({
 	id,

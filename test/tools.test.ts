@@ -878,6 +878,52 @@ describe("tools", () => {
 			});
 		});
 
+		test("get_case says which statuses came from a file", async () => {
+			const c = await seed();
+			const app = {
+				id: "https://claude.ai/oauth",
+				name: "Claude",
+				host: "claude.ai",
+			};
+			await putCase(store, {
+				...c,
+				annotations: [
+					{
+						...(c.annotations[0] as Annotation),
+						resolution: {
+							kind: "fixed",
+							at: "t",
+							app,
+							imported: true,
+							verified: { at: "t", imported: true },
+						},
+						reopens: [
+							{
+								note: "n",
+								at: "t",
+								imported: true,
+								was: { kind: "fixed", at: "t" },
+							},
+						],
+					},
+					c.annotations[1] as Annotation,
+				],
+			});
+			const view = json(
+				await call("get_case", { caseId: "c_1", images: false }),
+			);
+			expect(view.marks[0].resolution).toEqual({
+				kind: "fixed",
+				at: "t",
+				by: "Claude (claude.ai)",
+				imported: true,
+				verified: { at: "t", imported: true },
+			});
+			expect(view.marks[0].reopens).toEqual([
+				{ note: "n", at: "t", was: "fixed", imported: true },
+			]);
+		});
+
 		test("a compact get_case shows the newest reopens, their notes cut", async () => {
 			build({ maxMessageBytes: () => 40_000 });
 			await seed(10, "x".repeat(20_000));
