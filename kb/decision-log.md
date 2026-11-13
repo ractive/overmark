@@ -892,11 +892,21 @@ cannot be missed.
   the run's. Choosing Downloads writes every case again into its own file (nothing is
   read back, so this brings deleted files back). The offscreen document failing stops
   the run; a run names at most three failing cases. The worker calls an extension API
-  every 20 s while it waits for a download, so Chrome does not stop it, and closes a
-  document left open at its start. Only an entry this extension wrote into
-  `Overmark/` is erased or shown; Stop syncing forgets its id and, for Downloads, gives
-  the permission back. `Overmark/` is shared by every profile and browser syncing to
-  Downloads (the README says so).
+  every 20 s while it waits for a download, so Chrome does not stop it; should it stop
+  all the same, the download under way is in `downloads:pending` (its id, case,
+  version and name), a top-level `downloads.onChanged` wakes a new worker at its end,
+  and the next run settles it from Chrome's list (complete in `Overmark/`: written;
+  otherwise its entry goes and the case is written again; still under way: waited for)
+  before it closes a document left open. A failure only the user can end (a Save
+  dialog cancelled, the file saved elsewhere) is not tried again until Try again or a
+  new choice. Changes in a row wait 2 s of quiet before a run to Downloads; a folder is
+  written at once. Only an entry this extension wrote into `Overmark/` is erased or
+  shown; Stop syncing forgets its id, and gives the permission back when "Sync to
+  Downloads" asked for it (not when Export had it). Choosing Downloads (again) writes
+  every case into its file, which is the way to bring back files deleted there.
+  **Limit:** `Overmark/` is shared by every profile and browser syncing to Downloads,
+  and nothing there can be looked at, so one install overwrites another's file of the
+  same name: one profile per downloads folder, or choose a folder (the README says so).
 - **The badge, built.** One decision for the icon (`src/worker/badge.ts`): an AI app's
   question "?" first (it waits for an answer now), then the sync's "!" (amber `#ffb000`
   with `#1b2130` paused, red `#b3261e` with white failed, its title saying why and, with

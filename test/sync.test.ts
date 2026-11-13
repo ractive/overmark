@@ -15,6 +15,7 @@ import {
 	FOLDERS_KEY,
 	kvSyncStore,
 	LAST_DOWNLOAD_KEY,
+	type PendingDownload,
 	type PickedFolder,
 	Sync,
 	type SyncChoice,
@@ -556,7 +557,17 @@ class FakeDownloads implements DownloadsApi {
 		return id;
 	}
 	#ends = new Map<number, DownloadEnd | undefined>();
+	/** What was recorded as under way, at each wait. */
+	readonly pendingAtWait: (PendingDownload | undefined)[] = [];
+	#pending: PendingDownload | undefined;
+	async pending() {
+		return this.#pending;
+	}
+	async setPending(p: PendingDownload | undefined) {
+		this.#pending = p;
+	}
 	async finished(id: number): Promise<DownloadEnd> {
+		this.pendingAtWait.push(this.#pending);
 		return (
 			this.#ends.get(id) ?? {
 				state: "complete",
@@ -631,6 +642,73 @@ describe("the sync to Downloads (DEC-025)", () => {
 		// The URL is revoked once the download is over, the document closed after the run.
 		expect(api.revoked).toEqual(["blob:x/1"]);
 		expect(api.ends).toBe(1);
+	});
+
+	test("the download under way is recorded while it is waited for, and cleared after", async () => {
+		const c = await add("c_1", "Login");
+		await sync.request();
+		expect(api.pendingAtWait).toEqual([
+			{
+				id: 1,
+				caseId: "c_1",
+				version: versionOf(c),
+				file: "login.overmark.zip",
+			},
+		]);
+		expect(await api.pending()).toBeUndefined();
+	});
+
+	test("a download a stopped worker waited for is settled at the next run: complete counts as written", async () => {
+		const c = await add("c_1", "Login");
+		// The worker that started it stopped before it ended.
+		await api.url(c);
+		const id = await api.download({
+			url: "blob:x/1",
+			filename: "Overmark/login.overmark.zip",
+			conflictAction: "overwrite",
+			saveAs: false,
+		});
+		await api.setPending({
+			id,
+			caseId: "c_1",
+			version: versionOf(c),
+			file: "login.overmark.zip",
+		});
+		store.current = {
+			folderId: "downloads",
+			state: "syncing",
+			left: 1,
+		};
+		await sync.request();
+		expect(api.downloads).toHaveLength(1);
+		expect(store.records.get("downloads")?.byCase["c_1"]?.file).toBe(
+			"login.overmark.zip",
+		);
+		expect(store.current?.state).toBe("synced");
+		expect(await api.pending()).toBeUndefined();
+		expect(await api.last()).toBe(id);
+	});
+
+	test("one that was interrupted meanwhile: its entry goes, and the case is written again", async () => {
+		const c = await add("c_1", "Login");
+		api.next = [{ state: "interrupted", error: "NETWORK_FAILED" }];
+		await api.url(c);
+		const id = await api.download({
+			url: "blob:x/1",
+			filename: "Overmark/login.overmark.zip",
+			conflictAction: "overwrite",
+			saveAs: false,
+		});
+		await api.setPending({
+			id,
+			caseId: "c_1",
+			version: versionOf(c),
+			file: "login.overmark.zip",
+		});
+		await sync.request();
+		expect(api.erased).toContain(id);
+		expect(api.downloads).toHaveLength(2);
+		expect(store.current?.state).toBe("synced");
 	});
 
 	test("an unchanged case is not written again", async () => {

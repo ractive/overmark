@@ -77,15 +77,29 @@ const changed = (delta: chrome.downloads.DownloadDelta) => {
 };
 
 describe("the offscreen document (DEC-025)", () => {
-	test("one a stopped worker left open goes at the start, before a run opens its own", async () => {
+	test("one a stopped worker left open goes before this worker opens its own, once", async () => {
 		const api = downloads.chromeDownloads(memoryKv());
 		await Bun.sleep(1);
-		expect(fake.log).toEqual(["close"]);
+		// Not at once: a download it serves may still be settled first.
+		expect(fake.log).toEqual([]);
 		// Two at once open it once.
 		await Promise.all([api.url(sampleCase("c_1")), api.url(sampleCase("c_2"))]);
 		expect(fake.log).toEqual(["close", "create"]);
 		await api.end?.();
 		expect(fake.log).toEqual(["close", "create", "close"]);
+		await api.url(sampleCase("c_1"));
+		expect(fake.log).toEqual(["close", "create", "close", "create"]);
+		await api.end?.();
+	});
+
+	test("the download under way is kept in the sync's database, for a new worker", async () => {
+		const kv = memoryKv();
+		const api = downloads.chromeDownloads(kv);
+		const p = { id: 3, caseId: "c_1", version: "v", file: "a.overmark.zip" };
+		await api.setPending(p);
+		expect(await downloads.chromeDownloads(kv).pending()).toEqual(p);
+		await api.setPending(undefined);
+		expect(await api.pending()).toBeUndefined();
 	});
 
 	test("not answering, or not opening, fails the target, not the case", async () => {

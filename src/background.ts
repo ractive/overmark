@@ -45,6 +45,8 @@ import {
 	downloadsTarget,
 	folderTarget,
 	kvSyncStore,
+	PENDING_DOWNLOAD_KEY,
+	type PendingDownload,
 	SYNC_DATABASE,
 	Sync,
 	type SyncTarget,
@@ -105,9 +107,34 @@ const sync = new Sync({
 	},
 });
 void sync.request();
-// The downloads permission taken back (or given) in chrome://extensions.
+
+/**
+ * The end of a download the sync waits for wakes the worker, should it have
+ * stopped meanwhile: its run settles it. At the top level where Overmark has
+ * the (optional) permission, and once it is given.
+ */
+let hearingDownloads = false;
+function hearDownloads(): void {
+	if (hearingDownloads || chrome.downloads?.onChanged === undefined) return;
+	hearingDownloads = true;
+	chrome.downloads.onChanged.addListener((delta) => {
+		if (delta.state === undefined) return;
+		void syncKv.get(PENDING_DOWNLOAD_KEY).then(
+			(p) => {
+				if ((p as PendingDownload | undefined)?.id === delta.id)
+					void sync.request();
+			},
+			() => undefined,
+		);
+	});
+}
+hearDownloads();
+// The downloads permission taken back, or given.
 chrome.permissions.onRemoved.addListener(() => void sync.request());
-chrome.permissions.onAdded.addListener(() => void sync.request());
+chrome.permissions.onAdded.addListener(() => {
+	hearDownloads();
+	void sync.request();
+});
 
 // Screenshots of saves that never finished (the tab was closed or navigated
 // while saving) would otherwise stay in storage unseen.

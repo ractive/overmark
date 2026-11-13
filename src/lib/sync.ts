@@ -89,6 +89,13 @@ export interface SyncTarget {
 	remove?(name: string): Promise<void>;
 	/** The run is over. */
 	end?(): Promise<void>;
+	/**
+	 * A write a stopped worker left under way, settled at the next run: the
+	 * file it wrote, when it was written.
+	 */
+	settle?(): Promise<
+		{ caseId: string; version: string; file: string } | undefined
+	>;
 }
 
 export type SyncTargetKind = "downloads" | "folder";
@@ -182,6 +189,8 @@ export const FOLDERS_KEY = "folders";
 export const STATUS_KEY = "status";
 /** The newest entry the sync left in Chrome's download list, for "Show in folder". */
 export const LAST_DOWNLOAD_KEY = "downloads:last";
+/** The download under way, while the worker waits for it (`PendingDownload`). */
+export const PENDING_DOWNLOAD_KEY = "downloads:pending";
 export const filesKey = (targetId: string) => `files:${targetId}`;
 
 /**
@@ -368,6 +377,14 @@ export type DownloadEnd =
 	| { state: "interrupted"; error: string }
 	| { state: "timeout" };
 
+/** A download the worker waits for: settled at the next run if it stops meanwhile. */
+export interface PendingDownload {
+	id: number;
+	caseId: string;
+	version: string;
+	file: string;
+}
+
 /** What the Downloads target needs of Chrome (`src/worker/downloads.ts`; fakes in the tests). */
 export interface DownloadsApi {
 	/** Whether Overmark has the `downloads` permission now. */
@@ -395,6 +412,9 @@ export interface DownloadsApi {
 	/** The newest entry the sync left in the list. */
 	last(): Promise<number | undefined>;
 	setLast(id: number): Promise<void>;
+	/** The download under way, kept where a new worker finds it. */
+	pending(): Promise<PendingDownload | undefined>;
+	setPending(p: PendingDownload | undefined): Promise<void>;
 	/** The run is over: the offscreen document can go. */
 	end?(): Promise<void>;
 }
@@ -441,6 +461,13 @@ function downloadProblem(error: string, file: string): string {
  * folder".
  */
 export function downloadsTarget(api: DownloadsApi): SyncTarget {
+	/** The newest entry stays in Chrome's list, for Show in folder; the one before goes. */
+	const keepNewest = async (id: number) => {
+		const before = await api.last().catch(() => undefined);
+		await api.setLast(id);
+		if (before !== undefined && before !== id)
+			await api.erase(before).catch(() => undefined);
+	};
 	return {
 		id: DOWNLOADS_ID,
 		kind: "downloads",
@@ -476,6 +503,13 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 						`Chrome would not save it to your downloads: ${message(error)}`,
 					);
 				}
+				// Should the worker stop while it waits, the next run settles it.
+				await api.setPending({
+					id,
+					caseId: c.id,
+					version: versionOf(c),
+					file: name,
+				});
 				end = await api.finished(id, DOWNLOAD_TIMEOUT_MS);
 				if (end.state === "timeout") {
 					await api.cancel(id).catch(() => undefined);
@@ -486,6 +520,7 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 				}
 			} finally {
 				await api.revoke(url).catch(() => undefined);
+				await api.setPending(undefined).catch(() => undefined);
 			}
 			if (end.state === "interrupted") {
 				// A failed write leaves no entry in Chrome's list.
@@ -504,10 +539,27 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 					true,
 				);
 			}
-			const before = await api.last().catch(() => undefined);
-			await api.setLast(id);
-			if (before !== undefined && before !== id)
-				await api.erase(before).catch(() => undefined);
+			await keepNewest(id);
+		},
+		async settle() {
+			const p = await api.pending().catch(() => undefined);
+			if (p === undefined) return undefined;
+			let end: DownloadEnd | undefined;
+			try {
+				end = await api.finished(p.id, DOWNLOAD_TIMEOUT_MS);
+				if (end.state === "timeout")
+					await api.cancel(p.id).catch(() => undefined);
+			} catch {
+				end = undefined;
+			}
+			await api.setPending(undefined).catch(() => undefined);
+			if (end?.state === "complete" && savedAs(end.filename, p.file)) {
+				await keepNewest(p.id);
+				return { caseId: p.caseId, version: p.version, file: p.file };
+			}
+			// Not written: the run writes the case again.
+			await api.erase(p.id).catch(() => undefined);
+			return undefined;
 		},
 		end: async () => api.end?.(),
 	};
@@ -617,6 +669,9 @@ export class Sync {
 	async run(force = false): Promise<void> {
 		const { store, notify } = this.#deps;
 		const choice = await store.choice();
+		// Not to Downloads (any more): a document a stopped worker left open goes.
+		if (choice?.target !== "downloads")
+			await this.#deps.downloads?.end?.().catch(() => undefined);
 		if (choice === undefined) {
 			// Not syncing: no status, no "!" on the icon.
 			if ((await store.status()) !== undefined)
@@ -666,6 +721,13 @@ export class Sync {
 		const byCase: Record<string, SyncedFile> =
 			record?.folderId === target.id ? { ...record.byCase } : {};
 		const files = (): SyncedFiles => ({ folderId: target.id, byCase });
+		// A write a stopped worker left under way.
+		const settled = await target.settle?.().catch(() => undefined);
+		if (settled !== undefined)
+			byCase[settled.caseId] = {
+				version: settled.version,
+				file: settled.file,
+			};
 		const all = await cases.listCases();
 		const todo = all.filter((c) => byCase[c.id]?.version !== versionOf(c));
 		if (todo.length === 0)

@@ -11,6 +11,8 @@ import {
 	type DownloadsApi,
 	isSyncDownload,
 	LAST_DOWNLOAD_KEY,
+	PENDING_DOWNLOAD_KEY,
+	type PendingDownload,
 	TargetFailed,
 } from "../lib/sync.ts";
 import {
@@ -27,7 +29,8 @@ let opening: Promise<void> | undefined;
 
 /**
  * A document left open by a worker that stopped in the middle of a run: it
- * goes at the worker's start, before a run opens one of its own.
+ * goes before this worker's first run opens one of its own (after the run
+ * settled the download it served), or at the end of a run.
  */
 let cleared: Promise<void> | undefined;
 function clearLeftover(): Promise<void> {
@@ -134,8 +137,6 @@ export function finished(
 
 /** Chrome's downloads, for the sync's database `kv`. */
 export function chromeDownloads(kv: Kv): DownloadsApi {
-	// At the worker's start: a document a stopped worker left goes.
-	void clearLeftover();
 	return {
 		granted: () => chrome.permissions.contains(DOWNLOADS),
 		apiMissing: () => typeof chrome.downloads?.download !== "function",
@@ -164,6 +165,9 @@ export function chromeDownloads(kv: Kv): DownloadsApi {
 			return typeof id === "number" ? id : undefined;
 		},
 		setLast: (id) => kv.set({ [LAST_DOWNLOAD_KEY]: id }),
+		pending: async () =>
+			(await kv.get(PENDING_DOWNLOAD_KEY)) as PendingDownload | undefined,
+		setPending: (p) => kv.set({ [PENDING_DOWNLOAD_KEY]: p }),
 		async end() {
 			await opening?.catch(() => undefined);
 			if (await chrome.offscreen.hasDocument())
