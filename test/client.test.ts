@@ -34,8 +34,11 @@ import { KeepOn } from "../src/worker/keep-on.ts";
 /** A memory store whose revocations fail while `failing`, as a store that is down. */
 class FlakyStore extends MemoryTokenStore {
 	failing = false;
-	override revoke(selector: RevokeSelector, options: RevokeOptions) {
-		if (this.failing) return Promise.reject(new Error("store down"));
+	/** How long a revocation takes. */
+	slowMs = 0;
+	override async revoke(selector: RevokeSelector, options: RevokeOptions) {
+		if (this.slowMs > 0) await Bun.sleep(this.slowMs);
+		if (this.failing) throw new Error("store down");
 		return super.revoke(selector, options);
 	}
 }
@@ -139,12 +142,14 @@ describe("the library's state, as the worker reads it", () => {
 				"Claude",
 			),
 		).toBe("Claude was not disconnected: the relay did not answer. Try again.");
-		// Sent while connected, then the session ended: the relay may have done it.
+		// Sent, then the session ended: the relay may have done it.
 		expect(
 			revokeProblem(
-				new DOMException("TabMcp: not connected", "InvalidStateError"),
+				new DOMException(
+					"TabMcp: the session ended before the relay answered",
+					"NetworkError",
+				),
 				"Claude",
-				true,
 			),
 		).toBe(
 			"Overmark could not confirm that Claude was disconnected: the connection ended first. It shows when AI access is next on.",
@@ -250,17 +255,28 @@ describe("tab-mcp client 0.16 with a relay", () => {
 			expect(mcp.grants.some((g) => g.grantId === first)).toBe(false);
 			expect(changes.length).toBeGreaterThan(0);
 
-			// Gone from the relay's store behind the session's back: unknown_id.
+			// Gone from the relay's store behind the session's back: the
+			// relay's unknown_id names it (0.10.2), so the library drops it
+			// from `grants` and the revoke resolves (0.16.1).
 			const second = await named("https://two.example/client.json");
 			await relay.store.revoke(
 				{ grantId: second },
 				{ now: Date.now(), keepUntil: Date.now() },
 			);
-			await expect(mcp.revoke(second)).rejects.toMatchObject({
-				code: "unknown_id",
-			});
+			await expect(mcp.revoke(second)).resolves.toBeUndefined();
+			expect(mcp.grants.some((g) => g.grantId === second)).toBe(false);
+
+			// Sent, and the session ends before the answer: NetworkError (the
+			// relay may have done it); nothing sent is InvalidStateError above.
+			const third = await named("https://three.example/client.json");
+			store.slowMs = 300;
+			const cut = mcp.revoke(third);
+			await Bun.sleep(20);
+			mcp.disconnect();
+			await expect(cut).rejects.toMatchObject({ name: "NetworkError" });
 		} finally {
 			store.failing = false;
+			store.slowMs = 0;
 			mcp.disconnect();
 		}
 	});

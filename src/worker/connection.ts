@@ -199,14 +199,9 @@ export function badgeOf(
 
 /**
  * What the card says when Disconnect for `app` did not work: `revoke()`
- * rejected with `error`; `sent`: it was sent while connected, so the relay
- * may have done it before the session ended.
+ * rejected with `error`.
  */
-export function revokeProblem(
-	error: unknown,
-	app: string,
-	sent = false,
-): string {
+export function revokeProblem(error: unknown, app: string): string {
 	const not = `${app} was not disconnected`;
 	const code = (error as { code?: unknown } | undefined)?.code;
 	if (code === "store_unavailable")
@@ -214,10 +209,12 @@ export function revokeProblem(
 	if (code === "unknown_id")
 		return `The relay no longer knows ${app}, so it cannot reach Overmark any more. It leaves this list when AI access next connects.`;
 	const name = (error as { name?: unknown } | undefined)?.name;
+	// Nothing was sent.
 	if (name === "InvalidStateError")
-		return sent
-			? `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`
-			: `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
+		return `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
+	// Sent, and the session ended before the answer: the relay may have done it.
+	if (name === "NetworkError")
+		return `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`;
 	if (name === "TimeoutError")
 		return `${not}: the relay did not answer. Try again.`;
 	return `${not}: ${message(error)}`;
@@ -246,10 +243,7 @@ export class Connection {
 	#problem: string | undefined;
 	#lastCall: CallView | undefined;
 	/** Why Disconnect did not work, by grant: until it goes, or connected again. */
-	readonly #revokeProblems = new Map<
-		string,
-		{ error: unknown; sent: boolean }
-	>();
+	readonly #revokeProblems = new Map<string, { error: unknown }>();
 	/**
 	 * Disconnects, one at a time. Relays from 0.10.2 name the grant their
 	 * error answers and the library pairs it; an older one (the user may set
@@ -825,10 +819,9 @@ export class Connection {
 		this.#changed();
 		this.#revokes = this.#revokes.then(() => {
 			if (mcp !== this.#mcp) return;
-			const sent = mcp.state === "connected";
 			return mcp.revoke(grantId).catch((error: unknown) => {
 				if (mcp !== this.#mcp) return;
-				this.#revokeProblems.set(grantId, { error, sent });
+				this.#revokeProblems.set(grantId, { error });
 				if ((error as { code?: unknown }).code === "unknown_id")
 					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
 				this.#changed();
@@ -898,11 +891,7 @@ export class Connection {
 				const problem =
 					failed === undefined
 						? undefined
-						: revokeProblem(
-								failed.error,
-								g.client.name || g.client.host,
-								failed.sent,
-							);
+						: revokeProblem(failed.error, g.client.name || g.client.host);
 				return {
 					grantId: g.grantId,
 					name: g.client.name,
