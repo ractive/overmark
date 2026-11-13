@@ -1750,8 +1750,8 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 				x.changed();
 			},
 		},
-		h("span", { class: "chevron", "aria-hidden": "true" }),
 		h("span", { class: "number" }, String(a.number)),
+		h("span", { class: "chevron", "aria-hidden": "true" }),
 		h(
 			"span",
 			{ class: a.comment ? "comment" : "comment none" },

@@ -1257,7 +1257,8 @@ ul.cases .progress {
  * of it. Scanning the rail says what is left.
  */
 ol.annotations {
-	--margin: 52px;
+	/* Where a mark's words begin: after the pin and the chevron. */
+	--margin: 68px;
 	list-style: none;
 	margin: 0;
 	padding: 0;
@@ -1312,8 +1313,7 @@ ol.annotations {
 	display: flex;
 	align-items: flex-start;
 	gap: var(--s2);
-	/* Room for the chevron at the row's end. */
-	padding-right: calc(var(--s4) + 20px);
+	padding-right: var(--s4);
 }
 
 /* The whole head opens and closes the mark; Show sits beside it. */
@@ -1321,10 +1321,10 @@ ol.annotations {
 	flex: 1;
 	min-width: 0;
 	display: grid;
-	/* The pin in the margin, the comment, who wrote it. */
-	grid-template-columns: 24px minmax(0, 1fr) auto;
+	/* The pin in the margin, open or closed, the comment, who wrote it. */
+	grid-template-columns: 24px 12px minmax(0, 1fr) auto;
 	align-items: start;
-	gap: var(--s2) var(--s3);
+	gap: var(--s2);
 	padding: 10px 0 10px var(--s4);
 	border: 0;
 	border-radius: 0;
@@ -1347,13 +1347,13 @@ ol.annotations {
 	outline-offset: -2px;
 }
 
-/* Open or closed: at the end of the row, after Show. */
+/* Open or closed: before the comment, as the Screenshots' heading has it. */
 .chevron {
-	position: absolute;
-	top: 17px;
-	right: calc(var(--s4) + 2px);
+	justify-self: center;
 	width: 7px;
 	height: 7px;
+	/* On the comment's first line, beside the pin. */
+	margin-top: 8px;
 	border-right: 1.75px solid var(--ink-2);
 	border-bottom: 1.75px solid var(--ink-2);
 	transform: rotate(-45deg);
@@ -1361,7 +1361,7 @@ ol.annotations {
 }
 
 .annotation[data-open] .chevron {
-	top: 15px;
+	margin-top: 6px;
 	transform: rotate(45deg);
 }
 
