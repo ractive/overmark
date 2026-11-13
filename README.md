@@ -91,18 +91,30 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    Overmark may manage your downloads (an optional permission): with a yes the side
    panel shows where the file went, with Copy (its full path) and Show in folder; with
    a no the file is saved as before and Chrome asks again only at the next Export.
-8. "Sync to a folder…", under the case list, writes every case to a folder you choose
-   once (one in iCloud Drive or Dropbox, say): each case as its own file, the same
-   `<title>.overmark.zip` as Export writes, and again whenever the case changes, also
-   when an AI app changed it. The folder is a mirror: Overmark never reads from it, and
-   a deleted case keeps its file there, so "Import a case…" can bring it back. A case
-   whose title changed gets a file of the new name and its old file goes; two cases of
-   the same title get `-2`, `-3`, and a file Overmark did not write is never
-   overwritten. The side panel shows "Syncing to <folder>" with when it last synced,
-   "Change folder…" and "Stop syncing" (the files stay). Chrome lets Overmark write to
-   the folder only while its side panel is open, and asks for the folder again after
-   the side panel was closed or the browser restarted: the panel then says "Sync paused:
-   allow access again", and "Allow access" writes what changed meanwhile.
+8. Sync, under the case list, keeps a copy of every case as a file: each case as its own
+   file, the same `<title>.overmark.zip` as Export writes, and again whenever the case
+   changes, also when an AI app changed it. The files are a mirror: Overmark never reads
+   them, and a deleted case keeps its file, so "Import a case…" can bring it back. Two
+   cases of the same title get `-2`, `-3`. Where to:
+   - **Sync to Downloads** (the default) writes to a folder `Overmark` in Chrome's
+     downloads folder. Chrome asks once whether Overmark may manage your downloads; then
+     it writes with the side panel closed too, also after a browser restart. Each write
+     shows in Chrome's download list; Overmark keeps only its newest entry there, for
+     "Show in folder". A case whose title changed gets a file of the new name and the old
+     one stays. With Chrome's "Ask where to save each file before downloading" on, Chrome
+     would ask at every write: the sync then says so and fails until it is off.
+   - **Choose a folder…** writes to any folder (one in iCloud Drive or Dropbox, say). A
+     renamed case's old file goes there, and a file Overmark did not write is never
+     overwritten. Chrome lets Overmark write to it only while its side panel is open, and
+     asks for the folder again after the side panel was closed or the browser restarted.
+   The side panel shows where it syncs with when it last synced, "Change…" and "Stop
+   syncing" (the files stay). When the sync is paused (the folder needs your OK again, or
+   the downloads permission was taken back) or has failed, a banner above every view of
+   the side panel says so with the button that helps (Allow access, Allow downloads, Try
+   again; for a folder also "Use Downloads instead"), and the toolbar icon shows "!"
+   (amber paused, red failed), also before the side panel is opened. Permissions for
+   this: the optional `downloads`, and `offscreen` (no install warning), as a service
+   worker cannot make the file's URL for a download itself.
 
 ## With an AI app
 
