@@ -127,10 +127,12 @@ describe("build", () => {
 			const files = [
 				...new Bun.Glob(`${page}/**/*`).scanSync({ cwd: outdir }),
 			].sort();
+			// Sorted after the hashes are taken out: the order of the names
+			// with them depends on what the hashes happen to be.
 			expect(
-				files.map((f) =>
-					f.slice(page.length + 1).replace(/-[a-z0-9]+\./, "-#."),
-				),
+				files
+					.map((f) => f.slice(page.length + 1).replace(/-[a-z0-9]+\./, "-#."))
+					.sort(),
 			).toEqual(expected);
 			for (const file of files.filter((f) => f.endsWith(".js")))
 				expect(await Bun.file(join(outdir, file)).text()).not.toMatch(
