@@ -1,9 +1,10 @@
 /**
- * The side panel's part of the sync to a folder (DEC-021): choosing the
- * folder (Chrome's picker needs the click), Change folder, Stop syncing, and
- * giving Chrome's permission again ("Allow access"), which also needs a click
- * in a window. The service worker writes the files; the panel reads its
- * status from the sync's database and asks it to run.
+ * The side panel's part of the sync (DEC-021, DEC-025): choosing the target
+ * (Chrome's prompt for downloads and its folder picker each need the click),
+ * Change…, Stop syncing, giving Chrome's permission again ("Allow access",
+ * "Allow downloads"), which also needs a click in a window, and Show in
+ * folder. The service worker writes the files; the panel reads its status
+ * from the sync's database and asks it to run.
  */
 
 import { newId } from "../lib/case.ts";
@@ -11,15 +12,22 @@ import { type Kv, kvWhenOpen, openKv } from "../lib/kv.ts";
 import type { Broadcast } from "../lib/messages.ts";
 import {
 	type ChosenFolder,
+	choiceOf,
+	chooseDownloads,
 	chooseFolder,
 	FOLDER_KEY,
+	LAST_DOWNLOAD_KEY,
 	type PickedFolder,
 	STATUS_KEY,
 	SYNC_DATABASE,
 	type SyncStatus,
 	stopSyncing,
+	TARGET_KEY,
+	targetIdOf,
 } from "../lib/sync.ts";
+import { askForDownloads } from "./download.ts";
 import type { PanelState } from "./state.ts";
+import type { SyncActions } from "./sync-view.ts";
 
 declare const OVERMARK_TEST_BUILD: boolean | undefined;
 
@@ -42,22 +50,30 @@ const message = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
 /** The panel's view of the sync, and its actions. */
-export interface PanelSync {
-	/** Read the folder and the worker's status again. */
+export interface PanelSync extends SyncActions {
+	/** Read the choice and the worker's status again. */
 	refresh(): Promise<void>;
-	/** "Sync to a folder…" and "Change folder…": call in the click. */
-	choose(): void;
-	stop(): void;
-	/** "Allow access": call in the click. */
-	allow(): void;
-	/** "Try again". */
-	retry(): void;
 }
 
-/** Ask the worker to bring the folder up to date. */
+/** Ask the worker to bring the target up to date. */
 function run(): void {
 	const news: Broadcast = { type: "sync:run" };
 	chrome.runtime.sendMessage(news).catch(() => undefined);
+}
+
+/** The actions, for `Actions`, before the panel's sync is started. */
+export function syncActions(sync: () => SyncActions): SyncActions {
+	return {
+		syncDownloads: () => sync().syncDownloads(),
+		syncChoose: () => sync().syncChoose(),
+		syncChange: () => sync().syncChange(),
+		syncCancelChange: () => sync().syncCancelChange(),
+		syncStop: () => sync().syncStop(),
+		syncAllow: () => sync().syncAllow(),
+		syncAllowDownloads: () => sync().syncAllowDownloads(),
+		syncRetry: () => sync().syncRetry(),
+		syncShow: () => sync().syncShow(),
+	};
 }
 
 /** The panel's sync; `kv` is the sync's database (tests pass their own). */
@@ -84,14 +100,27 @@ export function startSync(
 			problem(unreadable);
 			return;
 		}
-		const folder = all[FOLDER_KEY] as typeof current;
+		const choice = choiceOf(
+			all[TARGET_KEY],
+			all[FOLDER_KEY] as ChosenFolder | undefined,
+		);
 		const status = all[STATUS_KEY] as SyncStatus | undefined;
-		current = folder;
+		current =
+			choice?.target === "folder"
+				? (choice.folder as typeof current)
+				: undefined;
+		const id = targetIdOf(choice);
 		const was = unreadable;
 		unreadable = undefined;
 		update((s) => {
-			s.sync.folder = folder?.name;
-			s.sync.status = status?.folderId === folder?.id ? status : undefined;
+			// Another target now: "Change…" is over.
+			if (s.sync.targetId !== id) s.sync.changing = false;
+			s.sync.target = choice?.target;
+			s.sync.targetId = id;
+			s.sync.folder = current?.name;
+			s.sync.status = status?.folderId === id ? status : undefined;
+			// Allowed meanwhile (by the worker's run, say): no "did not allow".
+			if (s.sync.status?.state !== "paused") s.sync.refused = false;
 			// Readable again: that problem is over.
 			if (was !== undefined && s.sync.problem === was)
 				s.sync.problem = undefined;
@@ -101,12 +130,15 @@ export function startSync(
 	/** Use `handle` from now on: a folder synced before keeps what was written there. */
 	async function use(handle: WindowFolder): Promise<void> {
 		await chooseFolder(kv, handle, () => newId("f"));
-		problem(undefined);
+		update((s) => {
+			s.sync.problem = undefined;
+			s.sync.changing = false;
+		});
 		await refresh();
 		run();
 	}
 
-	function choose(): void {
+	function syncChoose(): void {
 		const picker = (window as unknown as { showDirectoryPicker?: Picker })
 			.showDirectoryPicker;
 		if (picker === undefined) {
@@ -134,18 +166,56 @@ export function startSync(
 		);
 	}
 
-	function stop(): void {
-		// The folder stays known: choosing it again keeps what was written there.
+	/**
+	 * "Sync to Downloads" and "Use Downloads instead": Chrome's prompt for
+	 * downloads (only during a click; none where Overmark has it), then the
+	 * worker writes to Downloads.
+	 */
+	function syncDownloads(): void {
+		const allowed = askForDownloads();
+		update((s) => {
+			s.sync.asking = true;
+			s.sync.problem = undefined;
+		});
+		void allowed.then(async (yes) => {
+			update((s) => (s.sync.asking = false));
+			if (!yes) {
+				problem(
+					"Chrome did not allow Overmark to save to your downloads. Click Sync to Downloads to ask again, or choose a folder.",
+				);
+				return;
+			}
+			try {
+				await chooseDownloads(kv);
+			} catch (error) {
+				problem(`Could not sync to Downloads: ${message(error)}`);
+				return;
+			}
+			update((s) => {
+				s.sync.changing = false;
+				s.sync.refused = false;
+			});
+			await refresh();
+			run();
+		});
+	}
+
+	function syncStop(): void {
+		// A folder stays known: choosing it again keeps what was written there.
 		void stopSyncing(kv).then(
 			() => {
-				problem(undefined);
-				return refresh();
+				update((s) => {
+					s.sync.problem = undefined;
+					s.sync.changing = false;
+				});
+				// The worker clears its status, and the icon's "!".
+				return refresh().then(run);
 			},
 			(error: unknown) => problem(`Could not stop syncing: ${message(error)}`),
 		);
 	}
 
-	function allow(): void {
+	function syncAllow(): void {
 		const folder = current;
 		if (folder === undefined) return;
 		// Chrome asks only during a click: nothing is awaited before.
@@ -158,18 +228,42 @@ export function startSync(
 		}
 		asking.then(
 			(answer) => {
-				if (answer === "granted") {
-					problem(undefined);
-					run();
-				} else
-					problem(
-						`Chrome did not allow access to “${folder.name}”. Click Allow access to ask again, or Change folder… to choose another one.`,
-					);
+				const yes = answer === "granted";
+				update((s) => {
+					s.sync.refused = !yes;
+					if (yes) s.sync.problem = undefined;
+				});
+				if (yes) run();
 			},
 			(error: unknown) =>
 				problem(
-					`Could not ask for access to “${folder.name}”: ${message(error)} Click Change folder… to choose it again.`,
+					`Could not ask for access to “${folder.name}”: ${message(error)} Click Change… to choose it again, or use Downloads instead.`,
 				),
+		);
+	}
+
+	function syncAllowDownloads(): void {
+		const allowed = askForDownloads();
+		void allowed.then((yes) => {
+			update((s) => (s.sync.refused = !yes));
+			if (yes) run();
+		});
+	}
+
+	/** The newest file the sync saved, in the system's file manager. */
+	function syncShow(): void {
+		void (async () => {
+			const id = await kv.get(LAST_DOWNLOAD_KEY).catch(() => undefined);
+			if (typeof id === "number") {
+				const [item] = await chrome.downloads.search({ id });
+				if (item?.exists) {
+					chrome.downloads.show(id);
+					return;
+				}
+			}
+			chrome.downloads.showDefaultFolder();
+		})().catch((error: unknown) =>
+			problem(`Could not show the folder: ${message(error)}`),
 		);
 	}
 
@@ -181,12 +275,17 @@ export function startSync(
 	void refresh().then(run);
 	return {
 		refresh,
-		choose,
-		stop,
-		allow,
-		retry: () => {
+		syncDownloads,
+		syncChoose,
+		syncChange: () => update((s) => (s.sync.changing = true)),
+		syncCancelChange: () => update((s) => (s.sync.changing = false)),
+		syncStop,
+		syncAllow,
+		syncAllowDownloads,
+		syncRetry: () => {
 			problem(undefined);
 			run();
 		},
+		syncShow,
 	};
 }
