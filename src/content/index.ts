@@ -231,7 +231,8 @@ function start(): void {
 					break;
 				case "case:load":
 					if (activity.busy !== undefined) {
-						sendResponse({ error: activity.busy });
+						// `busy`: a moment later it may well work (the side panel waits).
+						sendResponse({ error: activity.busy, busy: true });
 						break;
 					}
 					reviewer.load(message.case).then(

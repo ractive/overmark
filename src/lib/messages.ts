@@ -45,7 +45,7 @@ export type ContentRequest =
 	| { type: "overlay:settings"; blurForms: boolean }
 	/**
 	 * Find the case's elements on this page and draw its marks (`LoadResult`, or
-	 * `{ error }`, also while the page is busy). Two loads of the case close
+	 * `{ error }`; `{ error, busy: true }` while the page is busy). Two loads of the case close
 	 * together both answer the newer one's result; one stopped by a clear or
 	 * by another case's load answers `LoadReplacedAnswer`, which is no error.
 	 */

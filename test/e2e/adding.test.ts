@@ -601,6 +601,32 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await b.page.send("Page.close");
 	}, 60_000);
 
+	test("the first mark's draw meeting a busy page is drawn once it is free (review of PR 57)", async () => {
+		const { page } = await h.open("v1");
+		// The page says it is busy at the first draw, as while the next
+		// mark's screenshot is taken.
+		await wrapSend(`(tabId, message, send) => {
+			if (message.type === "case:load" && !globalThis.saidBusy) {
+				globalThis.saidBusy = true;
+				return Promise.resolve({ error: "The user is marking this page right now; try again in a moment.", busy: true });
+			}
+			return send(tabId, message);
+		}`);
+		const panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		await markElement(page, "h1", "Too long");
+		await panel.waitFor(
+			`globalThis.saidBusy && document.getElementById("case-hint").textContent.includes("1 of 1 marks found")`,
+			20_000,
+		);
+		expect(
+			await panel.eval<string>(
+				`document.getElementById("case-hint").textContent`,
+			),
+		).not.toContain("try again in a moment");
+		await page.send("Page.close");
+	}, 60_000);
+
 	test("a page that does not answer: said under the button, which works again (review of PR 57)", async () => {
 		const { page, tabId } = await h.open("v1");
 		await wrapSend(`(tabId, message, send) =>

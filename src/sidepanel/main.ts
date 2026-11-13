@@ -242,12 +242,13 @@ async function loadInto(
 	hint: (text: string | undefined) => void,
 	work: { current: () => boolean },
 	again = false,
-): Promise<{ found: number; total: number } | undefined> {
+	quietWhenBusy = false,
+): Promise<{ found: number; total: number } | "busy" | undefined> {
 	const here = { tabId, caseId: c.id };
 	try {
 		loadsUnderWay++;
 		const result = await sendToTab<
-			LoadResult | LoadReplacedAnswer | { error: string }
+			LoadResult | LoadReplacedAnswer | { error: string; busy?: true }
 		>(tabId, {
 			type: "case:load",
 			case: c,
@@ -261,6 +262,9 @@ async function loadInto(
 			return undefined;
 		}
 		if ("error" in result) {
+			// The page is busy a moment (a mark's screenshot or add): the caller
+			// tries again, and the busy sentence is not left standing.
+			if (result.busy && quietWhenBusy) return "busy";
 			// A stale load's failure is about a tab no longer in question.
 			if (work.current()) hint(result.error);
 			return undefined;
@@ -367,10 +371,15 @@ async function readLoaded(c: Case, tabId: number): Promise<void> {
 		);
 }
 
+/** A page busy with a mark is asked again this often, this many times (20 s). */
+const BUSY_WAIT_MS = 500;
+const BUSY_TRIES = 40;
+
 /**
  * Loads the case onto a page that has just loaded. What a script draws after
  * the load is not there yet: marks not found are looked for twice more, while
- * the panel still shows the case and the tab is in front.
+ * the panel still shows the case and the tab is in front. A page busy with a
+ * mark is asked again until it is free.
  */
 async function loadOnLoaded(
 	c: Case,
@@ -393,13 +402,33 @@ async function loadOnLoaded(
 				if (stored === undefined || !work.current()) return;
 				now = stored;
 			}
-			const result = await loadInto(
+			let result = await loadInto(
 				now,
 				tabId,
 				hint,
 				work,
 				i < waits.length - 1,
+				true,
 			);
+			// The page is busy (the next mark's screenshot or add, review of
+			// PR 57): drawn once it is free, as the searches again are.
+			for (let tries = 0; result === "busy"; tries++) {
+				if (tries >= BUSY_TRIES) return;
+				await sleep(BUSY_WAIT_MS);
+				if (!work.current() || !showing(c.id) || hiddenOn.has(tabId)) return;
+				if ((await activeTab())?.id !== tabId) return;
+				const stored = await store.getCase(c.id);
+				if (stored === undefined || !work.current()) return;
+				now = stored;
+				result = await loadInto(
+					now,
+					tabId,
+					hint,
+					work,
+					i < waits.length - 1,
+					true,
+				);
+			}
 			if (result === undefined || result.found === result.total) return;
 		}
 	} finally {
