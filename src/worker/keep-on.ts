@@ -2,24 +2,61 @@
  * "Keep AI access on", in the service worker (DEC-015): the library
  * reconnects by itself only after a broken connection; this also connects
  * after an idle or expired session, and goes on trying after a connect that
- * failed, while the user wants it.
+ * failed or a session the relay ended (too many messages, say), while the
+ * user wants it.
  */
 
-import type { DisconnectDetail, TabMcp } from "@ractive-ch/tab-mcp-client";
+import type { DisconnectReason, TabMcp } from "@ractive-ch/tab-mcp-client";
 import { Latest } from "../lib/latest.ts";
 
 /** The waits between tries to connect, in ms; the last one repeats. */
 const KEEP_ON_DELAYS_MS = [5000, 10_000, 20_000, 40_000, 60_000];
 
+/**
+ * Why a session ended, in the user's words, for every reason nobody here
+ * chose (`user`, `new_address`, a takeover) that is not the end of an idle
+ * or old session either. The last three come only without the library's
+ * reconnecting, which Overmark leaves on.
+ */
+const ENDED: Record<
+	Exclude<
+		DisconnectReason,
+		"user" | "new_address" | "replaced" | "idle" | "expired"
+	>,
+	string
+> = {
+	rate_limited:
+		"The relay ended the connection: Overmark sent it too many messages at once.",
+	too_large: "The relay ended the connection: a message was too large for it.",
+	policy: "The relay ended the connection: it refused a message.",
+	closed: "The relay closed the connection.",
+	shutdown: "The relay shut down.",
+	heartbeat: "The relay stopped answering.",
+	network: "The network connection to the relay broke.",
+};
+
+/** Why the relay ended a session for `reason`, or `undefined` for one somebody chose or an idle or old session. */
+export function endedProblem(
+	reason: DisconnectReason | undefined,
+): string | undefined {
+	return reason !== undefined && reason in ENDED
+		? ENDED[reason as keyof typeof ENDED]
+		: undefined;
+}
+
 /** The part of `TabMcp` that `KeepOn` uses. */
-export type KeptConnection = EventTarget &
-	Pick<TabMcp, "state" | "reconnecting" | "connect">;
+export type KeptConnection = Pick<
+	TabMcp,
+	"state" | "connect" | "addEventListener"
+>;
 
 /**
  * "Keep AI access on": the library reconnects by itself only after a broken
  * connection. While `wanted` says so, this also connects after an idle or
- * expired session, and goes on trying after a connect that failed. It leaves
- * alone what the user or another tab ended (`disconnect()`, `replaced`).
+ * expired session, and goes on trying after a connect that failed or a
+ * session the relay ended for another reason, saying why (`problem`) also
+ * when not wanted. It leaves alone what the user or another tab ended
+ * (`disconnect()`, `replaced`, `new_address`).
  */
 export class KeepOn {
 	/** Why the last try failed; `undefined` once connected or stopped. */
@@ -57,20 +94,33 @@ export class KeepOn {
 		this.#connection = connection;
 		const { signal } = this.#listening;
 		connection.addEventListener(
-			"disconnected",
-			(event) => {
-				const { reason } = (event as CustomEvent<DisconnectDetail>).detail;
-				if (reason === "idle" || reason === "expired") this.connect();
+			"statechange",
+			({ detail: { state, reason } }) => {
+				if (state === "connected") this.stop();
+				// The relay ended an idle or old session; the library connects
+				// again by itself only after a broken one (state `reconnecting`).
+				else if (
+					state === "disconnected" &&
+					(reason === "idle" || reason === "expired")
+				)
+					this.connect();
+				// Ended by the relay for another reason: say why, and try again
+				// after the waits of a failed connect, never at once (a relay
+				// that ends every session must get no tight loop).
+				else if (state === "disconnected") {
+					const ended = endedProblem(reason);
+					if (ended !== undefined) this.failed(new Error(ended));
+				}
 			},
 			{ signal },
 		);
-		connection.addEventListener("connected", () => this.stop(), { signal });
-		// The library gave up reconnecting: the relay refused an attempt.
+		// The library gave up reconnecting: the relay refused an attempt. It
+		// says so with `error`, its state already `disconnected`, just before
+		// the `statechange` to it.
 		connection.addEventListener(
 			"error",
-			(event) => {
-				if (connection.state === "disconnected")
-					this.failed((event as CustomEvent<{ error: Error }>).detail.error);
+			({ detail: { error } }) => {
+				if (connection.state === "disconnected") this.failed(error);
 			},
 			{ signal },
 		);
@@ -81,11 +131,11 @@ export class KeepOn {
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
 		const connection = this.#connection;
+		// Not while connecting, connected, or reconnecting by itself.
 		if (
 			connection === undefined ||
 			!this.#wanted() ||
-			connection.state !== "disconnected" ||
-			connection.reconnecting !== undefined
+			connection.state !== "disconnected"
 		)
 			return;
 		const attempt = this.#tries.start();

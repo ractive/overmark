@@ -3,11 +3,17 @@
  * a question lets that tool of that AI app run without asking, and no other;
  * Allow all changes in the AI app card lets every tool through; Ask again
  * takes a tool back; the notification's Always allow counts too; it survives
- * a worker restart; Disconnect forgets it.
+ * a worker restart; a Disconnect the relay cannot save says so and keeps
+ * it; Disconnect forgets it.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Client } from "@modelcontextprotocol/client";
+import {
+	MemoryTokenStore,
+	type RevokeOptions,
+	type RevokeSelector,
+} from "@ractive-ch/tab-mcp";
 import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
 import type { Case } from "../../src/lib/case.ts";
 import { sampleCase } from "../fixtures.ts";
@@ -46,6 +52,15 @@ const putCases = (h: Harness, cases: Case[]) =>
 const caseIds = async (h: Harness) =>
 	(await h.control.eval<{ cases: Case[] }>(READ_DB)).cases.map((c) => c.id);
 
+/** A memory store whose revocations fail while `failing`, as a store that is down. */
+class FlakyStore extends MemoryTokenStore {
+	failing = false;
+	override revoke(selector: RevokeSelector, options: RevokeOptions) {
+		if (this.failing) return Promise.reject(new Error("store down"));
+		return super.revoke(selector, options);
+	}
+}
+
 const QUESTION = `document.querySelector("[data-question]")`;
 const GRANT = `document.querySelector("#pair-grants li[data-grant]")`;
 
@@ -57,7 +72,8 @@ describe.skipIf(browserBinary === undefined)(
 		let client: Client;
 		let address: string;
 		let tab: { page: Page; tabId: number };
-		const relay = startTestRelay();
+		const store = new FlakyStore();
+		const relay = startTestRelay({ store });
 
 		const call = (name: string, args: Record<string, unknown> = {}) =>
 			client.callTool({ name, arguments: args }) as Promise<CallResult>;
@@ -256,6 +272,30 @@ describe.skipIf(browserBinary === undefined)(
 			);
 		}, 60_000);
 
+		test("a Disconnect the relay cannot save says so, and keeps the app and its Always allow", async () => {
+			const disconnect = `${GRANT}.querySelector('[data-focus="disconnect"]')`;
+			store.failing = true;
+			try {
+				await panel.eval(`${disconnect}.click()`);
+				await Bun.sleep(800);
+				await panel.eval(`${disconnect}.click()`);
+				await panel.waitFor(`!${byId("pair-problem")}.hidden`, 20_000);
+			} finally {
+				store.failing = false;
+			}
+			expect(
+				await panel.eval<string>(`${byId("pair-problem")}.textContent`),
+			).toBe(
+				"Test client was not disconnected: the relay could not save this. Try again.",
+			);
+			expect(
+				await panel.eval(
+					`${GRANT}.textContent.includes("Always allowed: Record the summary for the developer")`,
+				),
+			).toBe(true);
+			expect(Object.keys((await kept()) ?? {})).toHaveLength(1);
+		}, 60_000);
+
 		test("Disconnect forgets it: the app paired again is asked", async () => {
 			const before = await kept();
 			expect(Object.keys(before ?? {})).toHaveLength(1);
@@ -265,6 +305,8 @@ describe.skipIf(browserBinary === undefined)(
 			await Bun.sleep(800);
 			await panel.eval(`${disconnect}.click()`);
 			await panel.waitFor(`!${GRANT}`, 10_000);
+			// The try that worked takes the last one's text away.
+			expect(await panel.eval(`${byId("pair-problem")}.hidden`)).toBe(true);
 			await until(kept, (k) => k === undefined, 10_000);
 			await client.close();
 			await pairApp();

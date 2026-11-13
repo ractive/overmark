@@ -86,7 +86,7 @@ export function statusText(a: AiState): string {
 			? `Connected: ${a.grants.map((g) => g.name || g.host).join(", ")}`
 			: "Waiting for an AI app to pair";
 	if (a.state === "connecting") return "Connecting…";
-	if (a.reconnecting) return "Connection lost, retrying…";
+	if (a.state === "reconnecting") return "Connection lost, retrying…";
 	const problem =
 		a.problem &&
 		`Not connected: ${a.problem}${a.retrying ? " Trying again…" : ""}`;
@@ -105,7 +105,7 @@ export function statusText(a: AiState): string {
  */
 export function problemOf(a: AiState): "connection" | undefined {
 	if (a.state === "connected" || a.state === "connecting") return undefined;
-	return a.reconnecting ||
+	return a.state === "reconnecting" ||
 		a.problem !== undefined ||
 		a.replaced !== undefined ||
 		a.relayNote !== undefined
@@ -317,7 +317,7 @@ export async function startAi(
 				problem: problemOf(a),
 				connected,
 				apps: connected ? a.grants.length : 0,
-				active: a.state !== "disconnected" || a.reconnecting || a.retrying,
+				active: a.state !== "disconnected" || a.retrying,
 				keepOn: a.keepOn,
 				lastCall: a.lastCall,
 			};
@@ -588,6 +588,8 @@ export async function startAi(
 		const problem = [
 			a.relayNote,
 			a.state === "disconnected" ? a.problem : undefined,
+			// A Disconnect that did not work, named by its app.
+			...a.grants.map((g) => g.problem),
 		]
 			.filter(Boolean)
 			.join(" ");
