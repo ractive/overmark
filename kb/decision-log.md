@@ -839,8 +839,28 @@ cannot be missed.
   downloading" on, `saveAs: false` does not stop the dialog**: headless, the download
   ended `interrupted` with `USER_CANCELED`. The sync then fails with what to do (turn
   the setting off, or choose a folder), and also when Chrome saved the file somewhere
-  other than `Overmark/<name>` (the user answered that dialog). Not tried: a headed
-  Chrome's download bubble on each write, and Edge.
+  other than `Overmark/<name>` (the user answered that dialog, or another extension
+  moved it). Such a failure only the user can end is kept until Try again or a new
+  choice, so no run downloads (and asks) again by itself. **Not shown: the store
+  build's way to the permission**, where the worker starts without `downloads` and the
+  user's yes in the panel must make `chrome.downloads` appear in that running worker.
+  Tried headless with an optional `downloads`: `permissions.request` from a click in
+  an extension page neither resolved nor rejected within 10 s (Chrome's prompt cannot
+  be answered there), so whether the API appears without a worker restart is not
+  known; if it does not, the sync says "paused" until the worker restarts (at most 30 s
+  idle). The e2e tests run with `downloads` at install. Not tried either: a headed
+  Chrome's download bubble on each write (changes in a row now wait 2 s of quiet, so a
+  burst is one download per case), and Edge.
+- **After the review of PR 48.** A title Windows reserves (`con`, `nul`, `com1`…) is
+  written as `_con.overmark.zip`, and a name Chrome refuses is that case's problem, not
+  the run's. Choosing Downloads writes every case again into its own file (nothing is
+  read back, so this brings deleted files back). The offscreen document failing stops
+  the run; a run names at most three failing cases. The worker calls an extension API
+  every 20 s while it waits for a download, so Chrome does not stop it, and closes a
+  document left open at its start. Only an entry this extension wrote into
+  `Overmark/` is erased or shown; Stop syncing forgets its id and, for Downloads, gives
+  the permission back. `Overmark/` is shared by every profile and browser syncing to
+  Downloads (the README says so).
 - **The badge, built.** One decision for the icon (`src/worker/badge.ts`): an AI app's
   question "?" first (it waits for an answer now), then the sync's "!" (amber `#ffb000`
   with `#1b2130` paused, red `#b3261e` with white failed, its title saying why and, with
