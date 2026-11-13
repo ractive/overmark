@@ -68,10 +68,20 @@ function was(r: Resolution): string {
 /** A mark's status, its note, its verification and why it came back. */
 function status(a: Annotation): string[] {
 	const r = a.resolution;
-	const when = r
-		? ` (${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)})`
-		: "";
-	const lines = [`- Status: ${STATUS_LABEL[markStatus(a)]}${when}`];
+	const lines: string[] = [];
+	// A verified fix: who fixed it and when on a line of its own, so the
+	// fixing app never reads as the one that verified.
+	if (r?.verified)
+		lines.push(
+			"- Status: Verified",
+			`- Fixed: ${inline(r.at)}${by(r.app)}${fromFile(r.imported)}`,
+		);
+	else {
+		const when = r
+			? ` (${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)})`
+			: "";
+		lines.push(`- Status: ${STATUS_LABEL[markStatus(a)]}${when}`);
+	}
 	if (r?.note) lines.push(`- Note: ${inline(r.note)}`);
 	if (r?.verified)
 		lines.push(

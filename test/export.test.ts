@@ -237,7 +237,8 @@ describe("statuses in case.md (DEC-023)", () => {
 			}),
 		).toBe(
 			[
-				"- Status: Verified (2026-11-14T09:00:00Z)",
+				"- Status: Verified",
+				"- Fixed: 2026-11-14T09:00:00Z",
 				"- Verified: 2026-11-14T15:00:00Z",
 				"- Reopened 2026-11-13T16:00:00Z, was Fixed (Darker text, 7:1 now):",
 				"  > Still pale on hover",
@@ -368,7 +369,9 @@ describe("statuses through a file (DEC-023)", () => {
 			await exportCase(store, sent),
 		);
 		const md = caseMarkdown(back);
-		expect(md).toContain("by Claude (claude.ai) (as the file says)");
+		expect(md).toContain(
+			"- Status: Verified\n- Fixed: 2026-11-14T09:00:00Z by Claude (claude.ai) (as the file says)\n- Note: Hover state too\n",
+		);
 		expect(md).toContain("- Verified: 2026-11-14T15:00:00Z (as the file says)");
 		expect(md).toContain(
 			"- Reopened 2026-11-13T16:00:00Z (as the file says), was Fixed:",
