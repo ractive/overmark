@@ -244,3 +244,18 @@ test("All cases after the toolbar's Done left a mark out tries it once more, and
 	expect(a.state().drafts).toBe(0);
 	expect(a.state().target).toBeUndefined();
 });
+
+test("a case loaded onto the page leaves Undo its marks, whatever copy it is", async () => {
+	const { a, overlay } = annotator();
+	a.show({ target });
+	note(overlay, a);
+	await settle(a, () => asked.some((r) => r.type === "case:save"));
+	const undo = () =>
+		overlay.toolbar.querySelector<HTMLButtonElement>('[data-action="undo"]');
+	await settle(a, () => undo()?.disabled === false && a.state().drafts === 0);
+	// Loaded with a copy read before mark 3 went in (a draw's retry): the
+	// loaded marks draw the case's own, and Undo still reaches mark 3.
+	a.caseLoaded(target.caseId);
+	expect(undo()?.disabled).toBe(false);
+	expect(undo()?.title).toBe("Take mark 3 out of “Open case”");
+});

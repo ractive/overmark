@@ -315,12 +315,23 @@ async function loadOnLoaded(
 	try {
 		const waits = [0, 1000, 2000];
 		for (const [i, wait] of waits.entries()) {
+			let now = c;
 			if (wait > 0) {
 				await sleep(wait);
 				if (!work.current() || !showing(c.id) || hiddenOn.has(tabId)) return;
 				if ((await activeTab())?.id !== tabId) return;
+				// As stored now: a mark may have gone in meanwhile.
+				const stored = await store.getCase(c.id);
+				if (stored === undefined || !work.current()) return;
+				now = stored;
 			}
-			const result = await loadInto(c, tabId, hint, work, i < waits.length - 1);
+			const result = await loadInto(
+				now,
+				tabId,
+				hint,
+				work,
+				i < waits.length - 1,
+			);
 			if (result === undefined || result.found === result.total) return;
 		}
 	} finally {

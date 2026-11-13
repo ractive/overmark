@@ -739,6 +739,17 @@ export class Annotator {
 	}
 
 	/**
+	 * The case the toolbar adds to was loaded onto the page: its loaded marks
+	 * draw the toolbar's own. Undo keeps what it may take back: the copy
+	 * loaded may be older than a mark just added.
+	 */
+	caseLoaded(caseId: string): void {
+		if (this.#target?.caseId !== caseId) return;
+		this.#savedMarks = [];
+		this.#render();
+	}
+
+	/**
 	 * The case the toolbar adds to changed: deleted marks leave the saved ones
 	 * drawn faintly, and where its marks are loaded those draw them instead.
 	 */

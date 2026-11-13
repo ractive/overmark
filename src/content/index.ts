@@ -233,10 +233,8 @@ function start(): void {
 					reviewer.load(message.case).then(
 						(result) => {
 							// A toolbar adding to the case: the loaded marks draw its own.
-							annotator.caseChanged(
-								message.case,
-								reviewer.caseId === message.case.id,
-							);
+							if (reviewer.caseId === message.case.id)
+								annotator.caseLoaded(message.case.id);
 							sendResponse(result);
 						},
 						(error: unknown) =>
