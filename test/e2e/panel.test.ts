@@ -1020,6 +1020,53 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			return saved;
 		}
 
+		const toolbarUp = (tabId: number) =>
+			h.control.eval<boolean>(
+				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.visible)`,
+			);
+
+		slowTest(
+			"a new case's toolbar on another tab goes when that tab comes to the front under an open case",
+			async () => {
+				await fresh();
+				const { page, tabId, caseId } = await annotated("Toolbar elsewhere");
+				// A new case is being drawn on another tab, the panel on Home.
+				const other = await h.open("v2");
+				await showToolbar(h, other.page, other.tabId);
+				await markElement(other.page, "h1", "A draft");
+				// The case opens on the first tab.
+				await page.activate();
+				await openCase(caseId);
+				await until(
+					async () => (await pageCase(tabId)) === caseId,
+					"the case's marks on the page",
+				);
+				expect(await toolbarUp(other.tabId)).toBe(true);
+				// The case follows to the other tab: a toolbar there would add to
+				// no case the panel shows.
+				await other.page.activate();
+				await until(
+					async () => (await pageCase(other.tabId)) === caseId,
+					"the case's marks on the other tab",
+				);
+				await until(
+					async () => !(await toolbarUp(other.tabId)),
+					"the new case's toolbar to go",
+				);
+				// Its draft stays on the page: Add marks would put it into the case.
+				await h.control.waitFor(
+					`${id("tab-line")}.textContent.startsWith("1 unsaved mark is on this page.")`,
+				);
+				await h.control.eval(`${back}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				// No draft left: it would hold the tab open with "leave this site?".
+				await showToolbar(h, other.page, other.tabId);
+				await other.page.click(shadow('[data-action="undo"]'));
+				await other.page.send("Page.close");
+				await page.send("Page.close");
+			},
+		);
+
 		slowTest(
 			"the back button is a real button in the top bar, 32 px high at least",
 			async () => {

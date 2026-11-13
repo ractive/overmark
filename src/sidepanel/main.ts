@@ -358,14 +358,19 @@ async function follow(): Promise<void> {
 		return;
 	}
 	const front = await frontTab();
-	const pageCase =
+	const page =
 		front === undefined || front.url === ""
 			? undefined
-			: (await overlayState(front.id))?.loadedCase;
+			: await overlayState(front.id);
+	const pageCase = page?.loadedCase;
 	// Still the tab in front, and no newer follow: else that one decides.
 	if ((await frontTab())?.id !== front?.id || !work.current()) return;
 	// The panel went on to another case, or back to the list, meanwhile.
 	if (state.current?.id !== c.id || !showing(c.id)) return;
+	// A toolbar drawing a new case there goes, as opening the case hides it
+	// on the tab in front (DEC-023).
+	if (front !== undefined && page?.visible && page.target === undefined)
+		void hideNewCase(front.id);
 	const step = followStep({
 		caseId: c.id,
 		tab: front,
@@ -615,21 +620,22 @@ function openCase(id: string): void {
 }
 
 /**
- * A toolbar drawing a new case on the tab in front goes when a case opens
- * (DEC-023): it would add to no case the panel shows. Its marks stay on the
- * page, and "Add marks" puts them into the case.
+ * A toolbar drawing a new case on the tab in front (or on `tabId`) goes when
+ * a case opens or the open case follows to that tab (DEC-023): it would add
+ * to no case the panel shows. Its marks stay on the page, and "Add marks"
+ * puts them into the case.
  */
-async function hideNewCase(): Promise<void> {
-	const tab = await activeTab();
-	if (tab?.id === undefined) return;
-	const now = await overlayState(tab.id);
+async function hideNewCase(tabId?: number): Promise<void> {
+	const id = tabId ?? (await activeTab())?.id;
+	if (id === undefined) return;
+	const now = await overlayState(id);
 	if (!now?.visible || now.target !== undefined) return;
 	const after = (await chrome.tabs
-		.sendMessage(tab.id, { type: "overlay:hide" })
+		.sendMessage(id, { type: "overlay:hide" })
 		.catch(() => undefined)) as OverlayState | undefined;
 	if (after !== undefined)
 		update((s) => {
-			if (s.tab?.id === tab.id) s.overlay = after;
+			if (s.tab?.id === id) s.overlay = after;
 		});
 }
 
