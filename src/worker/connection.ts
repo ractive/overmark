@@ -37,12 +37,7 @@ import {
 	SERVER_NAME,
 	type WorkerMessage,
 } from "./protocol.ts";
-import {
-	appName,
-	NOTIFICATION_BUTTONS,
-	Questions,
-	type QuestionsHost,
-} from "./questions.ts";
+import { appName, Questions, type QuestionsHost } from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
@@ -750,7 +745,7 @@ export class Connection {
 					type: "basic",
 					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
 					...text,
-					buttons: NOTIFICATION_BUTTONS.map((title) => ({ title })),
+					buttons: text.buttons.map((title) => ({ title })),
 					requireInteraction: true,
 					priority: 2,
 				});

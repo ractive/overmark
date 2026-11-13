@@ -418,7 +418,12 @@ that on knowingly, for one app and one tool at a time, or for all of one app's c
   <app>, until you disconnect it." Always allow arms with Allow (the panel visible and
   focused for 750 ms). A notification has "Allow" and "Always allow" (Chrome allows two
   buttons); closing it or a click on its body is Don't allow, and either button within
-  500 ms of showing does not count, as before. The app is the grant (one pairing), not
+  500 ms of showing does not count, as before. The exception (the review of PR 45): a
+  notification shows the case and the arguments whole, and where the arguments do not
+  fit (over 150 characters, or the message over 300), it offers only "Don't allow" and
+  says to open Overmark's side panel to read all of them and answer there, since the
+  user would otherwise allow text they were not shown. Nobody answering ends as
+  unanswered, as before; the notification does not open the side panel. The app is the grant (one pairing), not
   its name: an app paired again, or another app with the same name, is asked again.
   Unlike the tab-mcp extension's Always allow, it is not tied to the page: Overmark's
   tools are fixed and act on cases, not on a page's own tools.
