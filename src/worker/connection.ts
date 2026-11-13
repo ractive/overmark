@@ -789,7 +789,8 @@ export class Connection {
 	 * whoever took it; then it connects with the new one if it was on. After
 	 * a takeover AI access is off, and a new worker's library knows nothing
 	 * of the takeover: the new address connects, so the card shows it to
-	 * pair again.
+	 * pair again. Once the address is new, the takeover notice goes, also
+	 * when connecting with it fails (`addressChanged`, client 0.16.1).
 	 */
 	async #newAddress(): Promise<void> {
 		const replaced = this.#settings.replaced !== undefined;
@@ -804,6 +805,10 @@ export class Connection {
 			if (replaced) await this.#mcp.connect({ resume: true });
 		} catch (error) {
 			this.#problem = message(error);
+			// The address changed, and only connecting with it failed (the
+			// library connects itself after a takeover it saw).
+			if ((error as { addressChanged?: unknown }).addressChanged === true)
+				await this.#setReplaced(undefined).catch(() => {});
 		}
 		this.#changed();
 	}

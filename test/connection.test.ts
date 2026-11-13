@@ -13,6 +13,7 @@ import {
 	type RevokeSelector,
 } from "@ractive-ch/tab-mcp";
 import { startTestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { type Kv, memoryKv } from "../src/lib/kv.ts";
 import type { CaseStore } from "../src/lib/store.ts";
 import { Connection } from "../src/worker/connection.ts";
@@ -149,7 +150,9 @@ async function startWorker(kv: Kv): Promise<Worker> {
 
 describe("the worker's connection with client 0.16", () => {
 	const store = new SlowStore();
-	const relay = startTestRelay({ store });
+	// Workers of earlier tests stay connected: more than the 5 sessions a
+	// network may have by default.
+	const relay = startTestRelay({ store, maxSessionsPerIp: 50 });
 	const workers: Worker[] = [];
 	afterAll(async () => {
 		for (const w of workers) w.send({ type: "stop" });
@@ -381,5 +384,50 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "connect" });
 		await until(() => w.last().state === "connected");
 		expect(w.last().address).not.toBe(first.address);
+	});
+
+	test("New address after a takeover this worker saw: a rejection after the address changed clears the takeover", async () => {
+		const { w, kv, address } = await paired([]);
+		// A program with a copy of the address secret takes the address over.
+		const key = `tab-mcp:secret:${relay.url}:overmark`;
+		const secret = (await kv.get(key)) as string;
+		expect(typeof secret).toBe("string");
+		const other = new TabMcp({
+			relay: relay.url,
+			server: { name: "overmark", version: "0.0.0" },
+			storage: {
+				getItem: (k) => (k === key ? secret : null),
+				setItem() {},
+			},
+		});
+		await other.connect();
+		try {
+			await until(() => w.last().replaced !== undefined);
+			// The library takes the address back and connects with the new one
+			// itself (it saw the takeover); that connect cannot.
+			const Real = before.WebSocket as typeof WebSocket;
+			let sockets = 0;
+			globals["WebSocket"] = class extends Real {
+				constructor(url: string | URL, protocols?: string | string[]) {
+					sockets++;
+					super(sockets > 1 ? "ws://127.0.0.1:1/tab" : url, protocols);
+				}
+			};
+			try {
+				w.send({ type: "new-address" });
+				await until(() => w.last().problem !== undefined, 10_000);
+			} finally {
+				globals["WebSocket"] = before.WebSocket;
+			}
+			expect(sockets).toBe(2);
+			// The address is new all the same: no takeover notice for it.
+			expect(w.last().replaced).toBeUndefined();
+			expect(await kv.get("replaced")).toBeUndefined();
+			w.send({ type: "connect" });
+			await until(() => w.last().state === "connected");
+			expect(w.last().address).not.toBe(address);
+		} finally {
+			other.disconnect();
+		}
 	});
 });
