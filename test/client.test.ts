@@ -127,8 +127,11 @@ describe("the library's state, as the worker reads it", () => {
 				{ code },
 				named ? { for: "grant.revoke", grantId: "g" } : {},
 			);
-		const problem = (error: unknown, _state?: string, unattributed = false) =>
-			revokeProblem({ error, unattributed }, "Claude");
+		const problem = (
+			error: unknown,
+			state: ConnectionState = "connected",
+			unattributed = false,
+		) => revokeProblem({ error, state, unattributed }, "Claude");
 		expect(problem(relayError("store_unavailable"))).toBe(
 			"Claude was not disconnected: the relay could not save this. Try again.",
 		);
@@ -142,6 +145,11 @@ describe("the library's state, as the worker reads it", () => {
 		expect(problem(notSent, "disconnected")).toBe(
 			"Claude was not disconnected: Overmark is not connected to the relay. Turn on AI access and try again.",
 		);
+		// AI access is on: the connection is on its way back, or closing.
+		for (const state of ["reconnecting", "connecting", "connected"] as const)
+			expect(problem(notSent, state)).toBe(
+				"Claude was not disconnected: the connection to the relay is being restored. Try again once it is connected.",
+			);
 		expect(
 			problem(
 				new DOMException("TabMcp: the relay did not answer", "TimeoutError"),

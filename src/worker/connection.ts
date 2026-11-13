@@ -200,6 +200,8 @@ export function badgeOf(
 /** What the worker knows when `revoke()` rejected. */
 export interface RevokeFailure {
 	error: unknown;
+	/** The library's state then. */
+	state: ConnectionState;
 	/** The relay's error may answer an earlier revoke (`unattributed`). */
 	unattributed: boolean;
 }
@@ -221,7 +223,7 @@ export function unattributed(error: unknown, timedOut: boolean): boolean {
 
 /** What the card says when Disconnect for `app` did not work. */
 export function revokeProblem(
-	{ error, unattributed }: RevokeFailure,
+	{ error, state, unattributed }: RevokeFailure,
 	app: string,
 ): string {
 	const not = `${app} was not disconnected`;
@@ -233,9 +235,12 @@ export function revokeProblem(
 	if (code === "unknown_id")
 		return `The relay no longer knows ${app}, so it cannot reach Overmark any more. It leaves this list when AI access next connects.`;
 	const name = (error as { name?: unknown } | undefined)?.name;
-	// Nothing was sent.
+	// Nothing was sent: AI access is off, or the connection is on its way
+	// back (or closing, a moment before the state says so).
 	if (name === "InvalidStateError")
-		return `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
+		return state === "disconnected"
+			? `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`
+			: `${not}: the connection to the relay is being restored. Try again once it is connected.`;
 	// Sent, and the session ended before the answer: the relay may have done it.
 	if (name === "NetworkError")
 		return `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`;
@@ -858,6 +863,7 @@ export class Connection {
 				if (mcp !== this.#mcp) return;
 				const failure: RevokeFailure = {
 					error,
+					state: mcp.state,
 					unattributed: unattributed(error, this.#revokeTimedOut),
 				};
 				if ((error as { name?: unknown }).name === "TimeoutError")
