@@ -3,7 +3,14 @@
  * on pages that do what real pages do. See extension.test.ts for the basics.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import type { Annotation, Shot } from "../../src/lib/case.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
@@ -38,6 +45,16 @@ describe.skipIf(browserBinary === undefined)(
 
 		afterAll(async () => {
 			await h?.stop();
+		});
+
+		// The control page is a side panel too: a save opened its case there
+		// (DEC-023), whose marks would follow to the next tab, and whose
+		// toolbar rule hides a new case's toolbar on a tab it follows to.
+		beforeEach(async () => {
+			await h.control.eval(
+				`document.getElementById("back").hidden || document.getElementById("back").click()`,
+			);
+			await h.control.waitFor(`!document.getElementById("home").hidden`);
 		});
 
 		const saved = async (title: string) => {

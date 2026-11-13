@@ -47,6 +47,11 @@ is what a case is about, and finding the element again is a best-effort extra:
   Saving draws the marks onto the screenshots and cuts a crop per annotation.
 - Marks for a case that exists go into it one by one, each as soon as its comment is
   done, with a screenshot of its own (DEC-014); a new case is saved once, with a title.
+- The page's toolbar adds to a case only while that case is open in the side panel
+  (DEC-023): "Annotate this page" on Home always starts a new case, "Save case…" opens
+  the case it saved, "Add marks" adds to the open case, and "← All cases" ends the
+  toolbar (as its Done, then without a case: `overlay:end`) and takes the case's marks
+  off the tab in front. A panel opened again opens the case the tab in front shows.
 - Shapes are stored in the screenshot's own coordinates (CSS pixels of that viewport).
   They never have to follow the live page.
 - Each annotation also stores the details of its element (tag, role, accessible name,
@@ -57,7 +62,8 @@ is what a case is about, and finding the element again is a best-effort extra:
   that is, and highlights each annotation's element where it can be found ("found",
   "probable", "ambiguous" with candidates, or "not found"). While the case is open the
   marks follow the tab in front (another tab, a reload, a navigation); "← All cases"
-  takes them off, and a Hide holds on its tab (DEC-022). When none is found the case
+  takes them off, whoever drew them (DEC-023), and a Hide holds on its tab, also
+  through a reload (DEC-022). When none is found the case
   says it is probably for another page. The side panel always shows the annotated
   screenshots, so a case makes sense even when nothing is found.
 
@@ -68,7 +74,7 @@ is what a case is about, and finding the element again is a best-effort extra:
 | Content script (`src/content/`) | Toolbar and drawing overlay in a shadow DOM, element picker, element details, a screenshot per mark as it is drawn, highlighting a loaded case |
 | Service worker (`src/background.ts`, `src/worker/`) | Opens the side panel and injects the content script on the icon click; `captureVisibleTab`; WebP conversion, drawing the marks and crops at saving; writes cases; `TabMcp` with the tools and their questions (DEC-015); the one writer of the sync, to Downloads or a folder, also with the panel closed, and the icon's badge ("?" a question, "!" the sync paused or failed, "…" connecting; DEC-021, DEC-025) |
 | Offscreen document (`src/offscreen/`) | Opened by the worker for a sync run to Downloads: exports a case and makes the blob URL the worker downloads (a service worker has none, DEC-025) |
-| Side panel (`src/sidepanel/`) | Case list, case viewer (its marks follow the tab in front, `follow.ts`), summary for the developer, AI findings, export and import, the sync's choice and the banner above every view while it is paused or failed; a view of the AI connection (status, pairing, questions) |
+| Side panel (`src/sidepanel/`) | Three views under one top bar (back button, AI pill): Home (this page, the case list, files and the sync's choice), a case (its marks follow the tab in front, `follow.ts`; summary for the developer, AI findings, export) and Settings (the AI connection's card: status, pairing; the options). The questions, and the sync's banner while it is paused or failed, show above every view |
 | Library (`src/lib/`) | Case format, element details, matching, zip, export, IndexedDB store, images |
 
 Storage is IndexedDB in the extension's origin (database `overmark`, stores `cases` and
@@ -98,7 +104,7 @@ the page's origin and never touches it directly.
   DEC-020) or of "Sync to Downloads" (DEC-025), which writes every case to
   `Overmark/` in Chrome's downloads folder through it. The test build has it at install.
 - Optional `<all_urls>`, asked for in the side panel ("Allow on all sites", in the options
-  and in the notice the panel shows on a tab Overmark may not run on yet, DEC-022) only
+  in Settings and in the notice the panel shows on a tab Overmark may not run on yet, DEC-022) only
   when the user wants Overmark without clicking the icon on each tab. `captureVisibleTab` accepts
   `activeTab` or `<all_urls>`, not a single site's permission.
 

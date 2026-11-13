@@ -69,6 +69,14 @@ describe.skipIf(browserBinary === undefined)("web components", () => {
 			await comment(page, `In ${host}`);
 		}
 		await saveAs(page, "Components");
+		// "Save case…" opens the case in the control page, a panel too
+		// (DEC-023): back to the list, so its draw does not meet this one.
+		await h.control.waitFor(
+			`document.querySelector("#case-view h2")?.textContent === "Components"`,
+			10_000,
+		);
+		await h.control.eval(`document.getElementById("back").click()`);
+		await h.control.waitFor(`!document.getElementById("home").hidden`);
 
 		const db = await h.control.eval<{ cases: Stored[] }>(READ_DB);
 		const saved = db.cases.find((c) => c.title === "Components");

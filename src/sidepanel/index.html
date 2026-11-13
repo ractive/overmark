@@ -7,16 +7,18 @@
 		<link rel="stylesheet" href="./style.css" />
 	</head>
 	<body>
-		<!-- Chrome names the panel and shows the icon above it: no brand here. -->
+		<!-- Chrome names the panel and shows the icon above it: no brand here. The
+		     top bar (DEC-023): the way back, and the AI app. -->
 		<header id="bar">
 			<h1 class="visually-hidden">Overmark</h1>
+			<button id="back" type="button" class="back" hidden>← All cases</button>
 			<button id="ai-button" type="button" class="ai-pill">
 				<span id="ai-status">Not connected</span>
 				<span id="ai-action" class="ai-action">Connect</span>
 			</button>
 			<button id="stop-ai" type="button" hidden title="Pause AI access now, from any view: AI apps can no longer reach Overmark, and they stay paired. The same as turning off the AI access switch in the AI app card; both also turn off Keep AI access on.">Stop AI access</button>
-			<p id="ai-call" class="meta" hidden></p>
 		</header>
+		<p id="ai-call" class="meta" hidden></p>
 		<!-- The AI connection lives in the service worker; the questions and the AI app card show it (ai.ts). -->
 		<div id="questions" class="ai-box" aria-live="polite"></div>
 		<!-- The sync paused or failed, above every view (DEC-025): drawn by sync-view.ts. -->
@@ -27,10 +29,12 @@
 				<p id="page" class="page">…</p>
 				<p id="hint" class="hint" hidden></p>
 				<button id="annotate" type="button" class="primary wide">Annotate this page</button>
+				<p id="annotate-hint" class="meta annotate-hint" role="status" hidden></p>
 			</section>
 			<section aria-labelledby="cases-heading">
 				<h2 id="cases-heading">Cases</h2>
 				<div id="cases"></div>
+				<h3 class="group-title">Files</h3>
 				<div class="row import">
 					<button id="import" type="button" title="Choose an Overmark .zip file: one exported case, or a file of all cases. For a case that is here already, Overmark asks first whether to replace it or keep both.">Import a case…</button>
 					<button id="export-all" type="button" title="Save every case in one .zip file, a folder per case with its marks, comments, findings, summary and screenshots. Import a case… reads it back, in this browser or another.">Export all cases</button>
@@ -48,6 +52,10 @@
 					<div id="sync" aria-live="polite"></div>
 				</section>
 			</section>
+		</main>
+		<main id="case-view" hidden></main>
+		<!-- Settings (DEC-023): opened by the AI pill, over Home or an open case. -->
+		<main id="settings" hidden>
 			<section id="ai-card" class="ai-card" aria-labelledby="ai-heading">
 				<div class="card-head">
 					<h2 id="ai-heading">AI app</h2>
@@ -123,7 +131,6 @@
 				</label>
 			</section>
 		</main>
-		<main id="case-view" hidden></main>
 		<script type="module" src="./main.ts"></script>
 	</body>
 </html>

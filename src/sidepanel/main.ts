@@ -173,11 +173,24 @@ let drawing: Drawn | undefined;
 let loadsUnderWay = 0;
 
 /**
- * Tabs the user took the open case's marks off ("Hide marks on this tab"):
- * they are not drawn there again by themselves until "Show marks on this
- * tab", or the case is opened again.
+ * Tabs the user took the open case's marks off ("Hide marks"): they are not
+ * drawn there again by themselves until "Show marks", or the case is opened
+ * again. The state's, so the case view can say so.
  */
-const hiddenOn = new Set<number>();
+const hiddenOn = state.hiddenOn;
+
+/**
+ * Tabs where the panel put the toolbar up for the open case ("Add marks", or
+ * the case opened from the toolbar): "← All cases" ends it there too, as on
+ * the tab in front (DEC-023).
+ */
+const toolbarOn = new Set<number>();
+
+/** A draw by `follow` is under way (or over): the case view says so. */
+function setDrawing(d: Drawn | undefined): void {
+	drawing = d;
+	update((s) => (s.drawing = d?.tabId));
+}
 
 /** The tab `follow` last saw in front: hints about another tab go. */
 let followed: number | undefined;
@@ -254,13 +267,39 @@ async function loadInto(
 		hint(
 			noneFound(result.matches) && !settling
 				? undefined
-				: `${found} of ${result.matches.length} marks found on ${shortUrl(result.url)}. Green: found. Amber, dashed: probable or unsure.`,
+				: foundText(found, result.matches.length, result.url),
 		);
 		return { found, total: result.matches.length };
 	} catch (error) {
 		if (work.current()) hint(describeError(error));
 		return undefined;
 	}
+}
+
+/** What a draw found, under the case's buttons. */
+const foundText = (found: number, total: number, url: string) =>
+	`${found} of ${total} marks found on ${shortUrl(url)}. Green: found. Amber, dashed: probable or unsure.`;
+
+/**
+ * The page shows the case already (the panel opened it from there): what it
+ * found, without a draw again, which would drop the candidates chosen.
+ */
+async function readLoaded(c: Case, tabId: number): Promise<void> {
+	const hint = followHint();
+	const result = (await chrome.tabs
+		.sendMessage(tabId, { type: "case:update", case: c })
+		.catch(() => null)) as LoadResult | null;
+	if (result === null || !showing(c.id) || state.loaded !== undefined) return;
+	const found = result.matches.filter(isFound).length;
+	update((s) => {
+		s.loaded = {
+			caseId: c.id,
+			tabId,
+			matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+		};
+	});
+	if (!noneFound(result.matches))
+		hint(foundText(found, result.matches.length, result.url));
 }
 
 /**
@@ -275,20 +314,31 @@ async function loadOnLoaded(
 ): Promise<void> {
 	const target = { tabId, caseId: c.id };
 	const work = startLoad(target);
-	drawing = target;
+	setDrawing(target);
 	try {
 		const waits = [0, 1000, 2000];
 		for (const [i, wait] of waits.entries()) {
+			let now = c;
 			if (wait > 0) {
 				await sleep(wait);
 				if (!work.current() || !showing(c.id) || hiddenOn.has(tabId)) return;
 				if ((await activeTab())?.id !== tabId) return;
+				// As stored now: a mark may have gone in meanwhile.
+				const stored = await store.getCase(c.id);
+				if (stored === undefined || !work.current()) return;
+				now = stored;
 			}
-			const result = await loadInto(c, tabId, hint, work, i < waits.length - 1);
+			const result = await loadInto(
+				now,
+				tabId,
+				hint,
+				work,
+				i < waits.length - 1,
+			);
 			if (result === undefined || result.found === result.total) return;
 		}
 	} finally {
-		if (drawing === target) drawing = undefined;
+		if (drawing === target) setDrawing(undefined);
 	}
 }
 
@@ -322,14 +372,19 @@ async function follow(): Promise<void> {
 		return;
 	}
 	const front = await frontTab();
-	const pageCase =
+	const page =
 		front === undefined || front.url === ""
 			? undefined
-			: (await overlayState(front.id))?.loadedCase;
+			: await overlayState(front.id);
+	const pageCase = page?.loadedCase;
 	// Still the tab in front, and no newer follow: else that one decides.
 	if ((await frontTab())?.id !== front?.id || !work.current()) return;
 	// The panel went on to another case, or back to the list, meanwhile.
 	if (state.current?.id !== c.id || !showing(c.id)) return;
+	// A toolbar drawing a new case there goes, as opening the case hides it
+	// on the tab in front (DEC-023).
+	if (front !== undefined && page?.visible && page.target === undefined)
+		void hideNewCase(front.id);
 	const step = followStep({
 		caseId: c.id,
 		tab: front,
@@ -417,6 +472,7 @@ async function refreshTab(): Promise<void> {
 				s.hint = undefined;
 			s.tab = next;
 			s.overlay = overlay;
+			unblock(s);
 			// Results describe the tab they came from, with that case loaded.
 			if (
 				s.loaded !== undefined &&
@@ -424,10 +480,87 @@ async function refreshTab(): Promise<void> {
 			)
 				s.loaded = undefined;
 		});
+		// The panel takes over what the page shows (DEC-023).
+		if (firstRead && tab?.id !== undefined) {
+			firstRead = false;
+			void adoptLoaded(tab.id, overlay);
+		}
+		void adopt();
 	} finally {
 		refreshing--;
 	}
 	await refreshCases();
+}
+
+/** The panel has not read the tab in front yet. */
+let firstRead = true;
+
+/** A toolbar's case being checked by `adopt`. */
+let adopting: string | undefined;
+
+/**
+ * On Home, a toolbar on the tab in front that adds to a stored case opens
+ * that case (DEC-023): so "Save case…" opens the new case, and a panel
+ * opened again is in the case the toolbar adds to; one whose case is gone
+ * draws a new case. The page is asked once more, so news older than "← All
+ * cases" opens nothing.
+ */
+async function adopt(): Promise<void> {
+	const tabId = state.tab?.id;
+	const caseId = state.overlay?.visible
+		? state.overlay.target?.caseId
+		: undefined;
+	if (
+		state.view.kind !== "home" ||
+		state.leaving !== undefined ||
+		tabId === undefined ||
+		caseId === undefined ||
+		adopting !== undefined
+	)
+		return;
+	adopting = caseId;
+	try {
+		const [c, now] = await Promise.all([
+			store.getCase(caseId),
+			overlayState(tabId),
+		]);
+		if (!now?.visible || now.target?.caseId !== caseId) return;
+		if (state.view.kind !== "home" || (await activeTab())?.id !== tabId) return;
+		// Its case was deleted meanwhile (elsewhere, the tab not in front): it
+		// draws a new case, its drafts kept, as clearDeleted does.
+		if (c === undefined) return await startAnnotating();
+		toolbarOn.add(tabId);
+		update((s) => {
+			if (s.tab?.id === tabId) s.overlay = now;
+		});
+		// Marks the page shows of the case are the panel's from now on, as
+		// in adoptLoaded: they follow the case (DEC-022).
+		if (now.loadedCase === caseId) drawn = { tabId, caseId };
+		openCase(caseId);
+		if (now.loadedCase === caseId) void readLoaded(c, tabId);
+	} finally {
+		adopting = undefined;
+	}
+}
+
+/**
+ * The panel's first read of the tab in front: a stored case whose marks the
+ * page shows opens (DEC-023), so closing the side panel and opening it again
+ * is no way to leave marks without their case. A toolbar adding to a case
+ * decides instead (`adopt`).
+ */
+async function adoptLoaded(
+	tabId: number,
+	overlay: OverlayState | undefined,
+): Promise<void> {
+	const caseId = overlay?.loadedCase;
+	if (caseId === undefined || (overlay?.visible && overlay.target)) return;
+	const c = await store.getCase(caseId);
+	if (c === undefined || state.view.kind !== "home") return;
+	// The panel's own marks from now on: they follow the case (DEC-022).
+	drawn = { tabId, caseId };
+	openCase(caseId);
+	void readLoaded(c, tabId);
 }
 
 /** Only the size of the tab in front: a window or the panel was resized, or zoomed. */
@@ -502,19 +635,147 @@ function openCase(id: string): void {
 		s.markFilter = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
+		s.leaving = undefined;
 	});
 	followed = undefined;
+	void hideNewCase();
 	void refreshCase();
 }
 
-/** Back to the list: the marks the panel drew leave the page. */
+/**
+ * A toolbar drawing a new case on the tab in front (or on `tabId`) goes when
+ * a case opens or the open case follows to that tab (DEC-023): it would add
+ * to no case the panel shows. Its marks stay on the page, and "Add marks"
+ * puts them into the case.
+ */
+async function hideNewCase(tabId?: number): Promise<void> {
+	const id = tabId ?? (await activeTab())?.id;
+	if (id === undefined) return;
+	const now = await overlayState(id);
+	if (!now?.visible || now.target !== undefined) return;
+	const after = (await chrome.tabs
+		.sendMessage(id, { type: "overlay:hide" })
+		.catch(() => undefined)) as OverlayState | undefined;
+	if (after !== undefined)
+		update((s) => {
+			if (s.tab?.id === id) s.overlay = after;
+		});
+}
+
+/**
+ * A tab's answer to `overlay:end` comes once its marks are in, or not: a mark
+ * may wait for an AI app's screenshot (10 s) and take its own (8 s at most).
+ * A tab that says nothing for longer (frozen by Chrome, a page in an
+ * `alert()`) counts as ended.
+ */
+const END_TIMEOUT_MS = 20_000;
+
+/**
+ * End the toolbar adding to the case (`overlay:end`) on the tab in front and
+ * wherever the panel put it up for the case; answers how many marks are
+ * still not in the case where a toolbar stays up for it, and the state of
+ * the tab in front.
+ */
+async function endToolbars(
+	caseId: string,
+	how: { discard?: boolean; retry?: boolean },
+): Promise<{ left: number; front: OverlayState | undefined }> {
+	const front = (await activeTab())?.id;
+	const tabs = new Set(toolbarOn);
+	if (front !== undefined) tabs.add(front);
+	const answers = await Promise.all(
+		[...tabs].map(async (tabId) => {
+			const answer = (await Promise.race([
+				chrome.tabs
+					.sendMessage(tabId, { type: "overlay:end", caseId, ...how })
+					.catch(() => undefined),
+				sleep(END_TIMEOUT_MS),
+			])) as OverlayState | undefined;
+			return { tabId, answer };
+		}),
+	);
+	let left = 0;
+	for (const { tabId, answer } of answers) {
+		if (answer?.visible && answer.target?.caseId === caseId)
+			left += Math.max(1, answer.drafts);
+		else toolbarOn.delete(tabId);
+	}
+	return {
+		left,
+		front: answers.find((a) => a.tabId === front)?.answer,
+	};
+}
+
+/**
+ * "← All cases" could not leave: it stays so only while the page in front
+ * says that marks of the case are still not in it (its toolbar up, adding to
+ * the case, with drafts); once they are, the line under the actions goes.
+ */
+function unblock(s: PanelState): void {
+	if (s.leaving?.phase !== "blocked" || s.view.kind !== "case") return;
+	const o = s.overlay;
+	s.leaving =
+		o?.visible && o.target?.caseId === s.view.id && o.drafts > 0
+			? { phase: "blocked", left: o.drafts }
+			: undefined;
+}
+
+/** What "← All cases" is at now (read again after an await). */
+const leavingNow = (): PanelState["leaving"] => state.leaving;
+
+/**
+ * "← All cases" (DEC-023): the toolbar adding to the case finishes as its
+ * Done does and adds to no case any more, then the case closes and its marks
+ * leave the tab in front. A mark that could not be added keeps the toolbar
+ * up and the panel in the case, which says so: the first click is no Done
+ * again, so a mark an earlier Done left out is tried once more. The next
+ * click ends it again, and the page decides: a mark its last Done left out
+ * goes then, as with its own Done again; one drawn or tried since is tried
+ * once more (DEC-014).
+ */
+async function leaveCase(): Promise<void> {
+	if (state.view.kind !== "case" || state.leaving?.phase === "finishing")
+		return;
+	const caseId = state.view.id;
+	// The first click tries the marks an earlier Done left out once more;
+	// the second is the page's Done again.
+	const retry = state.leaving?.phase !== "blocked";
+	update((s) => (s.leaving = { phase: "finishing" }));
+	// A refresh read before the end would show the toolbar as it was.
+	tabWork.cancel();
+	try {
+		const { left, front } = await endToolbars(caseId, { retry });
+		// Closed meanwhile (deleted elsewhere), or opened again.
+		if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
+		if (left > 0) {
+			update((s) => {
+				s.leaving = { phase: "blocked", left };
+				if (front !== undefined) s.overlay = front;
+			});
+			return;
+		}
+		closeCase();
+	} finally {
+		// Not left for good when something above failed.
+		if (leavingNow()?.phase === "finishing")
+			update((s) => (s.leaving = undefined));
+	}
+}
+
+/**
+ * Back to the list: the marks the panel drew leave the page, and the case's
+ * marks leave the tab in front whoever drew them (an AI app's load_case
+ * too, DEC-023); another case's stay.
+ */
 function closeCase(): void {
+	const caseId = state.view.kind === "case" ? state.view.id : undefined;
 	caseWork.cancel();
 	imagesWork.cancel();
 	hintWork.cancel();
 	stopLoads();
 	hiddenOn.clear();
 	pendingLoad = undefined;
+	toolbarOn.clear();
 	if (drawn !== undefined) takeOff(drawn);
 	update((s) => {
 		s.view = { kind: "home" };
@@ -522,9 +783,21 @@ function closeCase(): void {
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.loaded = undefined;
+		s.leaving = undefined;
+		// Where the case's export went is the case's.
+		if (s.exported !== undefined && s.exported.of !== "all")
+			s.exported = undefined;
 		releaseImages(s);
 	});
-	void refreshCases();
+	void (async () => {
+		const tab = await activeTab();
+		if (caseId !== undefined && tab?.id !== undefined)
+			await chrome.tabs
+				.sendMessage(tab.id, { type: "case:clear", caseId })
+				.catch(() => undefined);
+		// Home shows the page as it is now.
+		await refreshTab();
+	})();
 }
 
 /**
@@ -586,15 +859,17 @@ function announce(caseId: string): void {
 	chrome.runtime.sendMessage(news).catch(() => undefined);
 }
 
-/** The case the tab's toolbar was adding to, as stored now; it may be gone. */
-async function continued(
-	overlay: OverlayState | undefined,
-): Promise<Case | undefined> {
-	return overlay?.target && store.getCase(overlay.target.caseId);
-}
-
-/** Show the overlay on the tab in front, optionally to add to a case. */
+/**
+ * Show the overlay on the tab in front: to add to the open case, or to draw
+ * a new one ("Annotate this page" never continues a case, DEC-023).
+ */
 async function startAnnotating(target?: Case): Promise<void> {
+	// On Home its outcome goes under This page; in a case under the case's
+	// buttons, and only where there is one (what a draw found stays).
+	const say = (text: string | undefined) => {
+		if (target === undefined) update((s) => (s.hint = text));
+		else if (text !== undefined) caseHintWriter()(text);
+	};
 	const tab = await activeTab();
 	if (tab?.id === undefined) return;
 	tabWork.cancel(); // a refresh still running must not overwrite this
@@ -613,14 +888,15 @@ async function startAnnotating(target?: Case): Promise<void> {
 					}
 				: {}),
 		});
-		update((s) => {
-			s.overlay = overlay;
-			s.hint = overlay.saving
+		if (target !== undefined) toolbarOn.add(tab.id);
+		update((s) => (s.overlay = overlay));
+		say(
+			overlay.saving
 				? "Overmark is still saving the last marks on this page; the toolbar switches once that is done."
-				: undefined;
-		});
+				: undefined,
+		);
 	} catch (error) {
-		update((s) => (s.hint = describeError(error)));
+		say(describeError(error));
 	}
 }
 
@@ -670,8 +946,14 @@ async function finishImport(
 			batch.stored++;
 			return await importRest(batch);
 		}
-		// Its marks are drawn on the tab in front, as for any case opened.
-		openCase(c.id);
+		// Its marks are drawn on the tab in front, as for any case opened;
+		// but not over a case opened meanwhile, whose toolbar may be up
+		// (DEC-023): the list shows it.
+		if (state.view.kind === "home") openCase(c.id);
+		else {
+			update((s) => (s.importDone = `Imported “${c.title}”.`));
+			void refreshCases();
+		}
 	} catch (error) {
 		update(
 			(s) =>
@@ -756,7 +1038,7 @@ const actions: Actions = {
 			// Ask the page: the state may have changed while no panel was listening.
 			const now = await overlayState(tab.id);
 			try {
-				if (!now?.visible) return await startAnnotating(await continued(now));
+				if (!now?.visible) return await startAnnotating();
 				const overlay = await sendToTab<OverlayState>(tab.id, {
 					type: "overlay:hide",
 				});
@@ -768,7 +1050,8 @@ const actions: Actions = {
 	},
 
 	openCase,
-	closeCase,
+	closeCase: () => void leaveCase(),
+	closeSettings: () => update((s) => (s.settings = false)),
 
 	loadOntoTab(c) {
 		// Off while Overmark may not run on the tab (view.ts): the notice
@@ -936,6 +1219,25 @@ const actions: Actions = {
 		void startAnnotating(c);
 	},
 
+	doneAdding(c) {
+		const hint = caseHintWriter();
+		void (async () => {
+			const tab = await activeTab();
+			if (tab?.id === undefined) return;
+			tabWork.cancel();
+			try {
+				// As the toolbar's Done: a mark not in the case keeps it up.
+				const overlay = await sendToTab<OverlayState>(tab.id, {
+					type: "overlay:end",
+					caseId: c.id,
+				});
+				update((s) => (s.overlay = overlay));
+			} catch (error) {
+				hint(describeError(error));
+			}
+		})();
+	},
+
 	exportCase(c) {
 		// Chrome asks only during a click: nothing may be awaited before this.
 		const allowed = askForDownloads();
@@ -983,14 +1285,14 @@ const actions: Actions = {
 		}
 		if (Date.now() - armedAt < DELETE_CLICK_GAP_MS) return;
 		const hint = caseHintWriter();
-		void store.deleteCase(c.id).then(
-			() => {
-				closeCase();
-				void clearDeleted(c.id);
-				announce(c.id);
-			},
-			(error: unknown) => hint(`Could not delete: ${message(error)}`),
-		);
+		void (async () => {
+			// The toolbar adding to it goes first, with the marks not in it yet.
+			await endToolbars(c.id, { discard: true });
+			await store.deleteCase(c.id);
+			closeCase();
+			void clearDeleted(c.id);
+			announce(c.id);
+		})().catch((error: unknown) => hint(`Could not delete: ${message(error)}`));
 	},
 
 	editMark(_c, a, mode) {
@@ -1445,9 +1747,11 @@ async function changeMark(
 	}
 }
 
-// The header's AI pill leaves an open case: the AI app card is on the home view.
+// The top bar's AI pill opens the Settings view, where the AI app card is;
+// an open case stays open underneath (DEC-023).
 void startAi(update, () => {
-	if (state.view.kind === "case") closeCase();
+	update((s) => (s.settings = true));
+	window.scrollTo(0, 0);
 });
 
 // --- news from the pages and the browser -----------------------------------------
@@ -1486,7 +1790,12 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 			void forgetLoaded();
 		// Only the tab the panel shows matters.
 		if (from !== undefined && from === state.tab?.id) {
-			update((s) => (s.overlay = news.state));
+			update((s) => {
+				s.overlay = news.state;
+				unblock(s);
+			});
+			// A toolbar adding to a case: the panel opens it (DEC-023).
+			void adopt();
 			// A refresh may have read the page before this news, or be finding
 			// out that another tab is in front now: it starts over. A tab whose
 			// address Chrome hid lets Overmark in now: the icon was clicked.
@@ -1524,7 +1833,7 @@ chrome.tabs.onUpdated.addListener((id, info) => {
 	if (id === state.loaded?.tabId && info.status === "loading")
 		void forgetLoaded();
 	// A new page: a draw under way was for the old one.
-	if (id === drawing?.tabId && info.status === "loading") drawing = undefined;
+	if (id === drawing?.tabId && info.status === "loading") setDrawing(undefined);
 	if (info.status === "complete" || info.url !== undefined) {
 		void refreshTab();
 		// Loaded, reloaded or navigated: the open case's marks are drawn there

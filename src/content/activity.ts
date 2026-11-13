@@ -99,6 +99,11 @@ export class PageActivity {
 		return afterwards;
 	}
 
+	/** During a save: what is to be done once it is over. */
+	get deferred(): Afterwards | undefined {
+		return this.#now.kind === "saving" ? this.#now.afterwards : undefined;
+	}
+
 	/** During a save: remember what to do once it is over. `false` otherwise. */
 	defer(afterwards: Afterwards): boolean {
 		if (this.#now.kind !== "saving") return false;

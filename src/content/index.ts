@@ -202,6 +202,19 @@ function start(): void {
 					annotator.hide();
 					sendResponse(state());
 					break;
+				case "overlay:end":
+					// Answered once the toolbar is finished: hidden, or up with a
+					// mark that is not in the case yet.
+					annotator
+						.end(message.caseId, {
+							discard: message.discard ?? false,
+							retry: message.retry ?? false,
+						})
+						.then(
+							() => sendResponse(state()),
+							() => sendResponse(state()),
+						);
+					return true; // answers asynchronously
 				case "overlay:state":
 					sendResponse(state());
 					break;
@@ -217,10 +230,17 @@ function start(): void {
 						sendResponse({ error: activity.busy });
 						break;
 					}
-					reviewer.load(message.case).then(sendResponse, (error: unknown) =>
-						sendResponse({
-							error: error instanceof Error ? error.message : String(error),
-						}),
+					reviewer.load(message.case).then(
+						(result) => {
+							// A toolbar adding to the case: the loaded marks draw its own.
+							if (reviewer.caseId === message.case.id)
+								annotator.caseLoaded(message.case.id);
+							sendResponse(result);
+						},
+						(error: unknown) =>
+							sendResponse({
+								error: error instanceof Error ? error.message : String(error),
+							}),
 					);
 					return true; // answers asynchronously
 				case "case:update":

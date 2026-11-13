@@ -166,7 +166,8 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		const panel = await addMarks(page, "Straight in");
 		const shown = await buttons(page);
 		expect(shown).toContain("Done");
-		expect(shown).toContain("New case");
+		// A new case starts with All cases, then Annotate this page (DEC-023).
+		expect(shown).not.toContain("New case");
 		expect(shown.some((b) => b.startsWith("Save"))).toBe(false);
 		expect(shown).not.toContain("Back");
 
@@ -387,7 +388,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await showToolbar(h, page, tabId);
 		expect(await buttons(page)).toContain("Close");
 		await markElement(page, "[data-truth=submit]", "Waits");
-		expect(await page.eval<string>(status)).toBe("1 mark");
+		expect(await page.eval<string>(status)).toBe("New case: 1 mark");
 		await Bun.sleep(1500);
 		expect(
 			(await h.control.eval<Db>(READ_DB)).cases.some((x) =>
@@ -410,9 +411,150 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		expect(c.annotations.map((a) => [a.number, a.comment])).toEqual([
 			[1, "Saved with a title"],
 		]);
-		// From then on the marks go into that case.
+		// From then on the marks go into that case, and the panel shows it.
 		expect(await buttons(page)).toContain("Done");
+		await h.control.waitFor(
+			`!document.getElementById("case-view").hidden && document.querySelector("#case-view h2")?.textContent === "Saved the old way" && document.getElementById("add-marks").textContent === "Done adding"`,
+			10_000,
+		);
 		await page.click(shadow('[data-action="close"]'));
+		await h.control.waitFor(
+			`document.getElementById("add-marks").textContent === "Add marks"`,
+		);
+		await page.send("Page.close");
+	}, 90_000);
+
+	/**
+	 * "← All cases" in the panel, as a person clicks it: a click within half
+	 * a second of one it did something else for counts as that double click.
+	 */
+	const allCases = async (panel: Page) => {
+		await Bun.sleep(600);
+		await panel.eval(`document.getElementById("back").click()`);
+	};
+	const home = (panel: Page) =>
+		panel.waitFor(`!document.getElementById("home").hidden`, 10_000);
+
+	test("Add marks, then All cases: no toolbar, no marks, and the next mark is a new case's", async () => {
+		const { page, tabId } = await savedCase("Closed after adding");
+		const panel = await addMarks(page, "Closed after adding");
+		await markElement(page, "[data-truth=submit]", "Second");
+		await page.waitFor(
+			`${status} === "Mark 2 added to “Closed after adding”"`,
+			20_000,
+		);
+		await drawnAre(page, { drafts: [], saved: ["1", "2"] });
+
+		await allCases(panel);
+		await home(panel);
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		// The case's marks leave the page, its toolbar is no longer its.
+		await drawnAre(page, { drafts: [], saved: [] });
+		await panel.waitFor(
+			`document.getElementById("annotate").textContent === "Annotate this page"`,
+		);
+		expect(
+			await h.control.eval<string | null>(
+				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.target?.caseId ?? null)`,
+			),
+		).toBeNull();
+
+		await panel.eval(`document.getElementById("annotate").click()`);
+		await page.waitFor(`${status} === "New case: choose a tool"`);
+		await markElement(page, "h1", "A new case's");
+		await page.waitFor(`${status} === "New case: 1 mark"`);
+		await drawnAre(page, { drafts: ["1"], saved: [] });
+		await Bun.sleep(1000);
+		expect(
+			(await caseTitled("Closed after adding")).c.annotations,
+		).toHaveLength(2);
+		await panel.waitFor(
+			`document.getElementById("annotate-hint").textContent === "1 mark drawn. Click Save case… on the page's toolbar to keep it."`,
+		);
+		await page.click(shadow('[data-action="undo"]'));
+		await page.click(shadow('[data-action="close"]'));
+		await page.send("Page.close");
+	}, 90_000);
+
+	test("All cases after a blocked one: the page decides, a later mark that fails blocks again", async () => {
+		const { page, tabId } = await savedCase("Blocked once");
+		const panel = await addMarks(page, "Blocked once");
+		const { c } = await caseTitled("Blocked once");
+		const leaveHint = `document.getElementById("leave-hint")`;
+		let stored = await takeOut(c.id);
+		await markElement(page, "[data-truth=submit]", "Second");
+		await page.waitFor(`${alert}?.startsWith("Mark 2 was not added")`, 20_000);
+		await allCases(panel);
+		await panel.waitFor(
+			`!${leaveHint}.hidden && ${leaveHint}.textContent.startsWith("1 mark is not in the case yet")`,
+			20_000,
+		);
+
+		// The mark goes in after all: the panel says nothing more about it.
+		await putBack(stored);
+		await page.click(shadow('[data-action="retry"]'));
+		await page.waitFor(
+			`${status} === "Mark 2 added to “Blocked once”"`,
+			20_000,
+		);
+		await panel.waitFor(`${leaveHint}.hidden`, 10_000);
+
+		// Much later a mark fails again: the first click finishes, it does not
+		// discard.
+		stored = await takeOut(c.id);
+		await markElement(page, "[data-truth=tip]", "Third");
+		await page.waitFor(`${alert}?.startsWith("Mark 3 was not added")`, 20_000);
+		await allCases(panel);
+		await panel.waitFor(
+			`!${leaveHint}.hidden && ${leaveHint}.textContent.startsWith("1 mark is not in the case yet")`,
+			20_000,
+		);
+		expect(await toolbarUp(tabId)).toBe(true);
+		await drawnAre(page, { drafts: ["3"], saved: ["1", "2"] });
+		await putBack(stored);
+		// The second click leaves without it.
+		await allCases(panel);
+		await home(panel);
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		expect(
+			(await caseTitled("Blocked once")).c.annotations.map((a) => a.comment),
+		).toEqual(["First", "Second"]);
+		await page.send("Page.close");
+	}, 120_000);
+
+	test("All cases with a mark not in the case: the panel stays and says so; again leaves without it", async () => {
+		const { page, tabId } = await savedCase("Left behind");
+		const panel = await addMarks(page, "Left behind");
+		const { c } = await caseTitled("Left behind");
+		const stored = await takeOut(c.id);
+		await markElement(page, "[data-truth=submit]", "Not in it");
+		await page.waitFor(`${alert}?.startsWith("Mark 2 was not added")`, 20_000);
+
+		await allCases(panel);
+		await panel.waitFor(
+			`document.getElementById("leave-hint")?.textContent === "1 mark is not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without it."`,
+			20_000,
+		);
+		expect(
+			await panel.eval<boolean>(`document.getElementById("case-view").hidden`),
+		).toBe(false);
+		expect(await toolbarUp(tabId)).toBe(true);
+		await putBack(stored);
+
+		await allCases(panel);
+		await home(panel);
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		await drawnAre(page, { drafts: [], saved: [] });
+		expect((await caseTitled("Left behind")).c.annotations).toHaveLength(1);
 		await page.send("Page.close");
 	}, 90_000);
 });

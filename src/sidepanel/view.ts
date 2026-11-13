@@ -43,7 +43,10 @@ import {
 export interface Actions extends SyncActions {
 	toggleAnnotate(): void;
 	openCase(id: string): void;
+	/** "← All cases": end the toolbar adding to the case, then close it (DEC-023). */
 	closeCase(): void;
+	/** "← Back" from Settings, to the view underneath. */
+	closeSettings(): void;
 	loadOntoTab(c: Case): void;
 	hideFromTab(c: Case): void;
 	/** Open a mark's form: settle it, edit its comment, or reopen it. */
@@ -72,6 +75,8 @@ export interface Actions extends SyncActions {
 	openDetails(): void;
 	matchSize(c: Case): void;
 	addMarks(c: Case): void;
+	/** "Done adding": the toolbar adding to the case finishes, as its Done. */
+	doneAdding(c: Case): void;
 	exportCase(c: Case): void;
 	/** Copy an exported file's path; whether it worked. */
 	copyPath(path: string): Promise<boolean>;
@@ -87,11 +92,14 @@ export interface Actions extends SyncActions {
 }
 
 const bar = byId<HTMLElement>("bar");
+const back = byId<HTMLButtonElement>("back");
 const home = byId<HTMLElement>("home");
 const caseView = byId<HTMLElement>("case-view");
+const settingsView = byId<HTMLElement>("settings");
 const pageText = byId<HTMLParagraphElement>("page");
 const hint = byId<HTMLParagraphElement>("hint");
 const annotate = byId<HTMLButtonElement>("annotate");
+const annotateHint = byId<HTMLParagraphElement>("annotate-hint");
 /** Its title in index.html, for when Overmark may run on the tab. */
 const annotateTitle = annotate.title;
 const casesList = byId<HTMLDivElement>("cases");
@@ -138,7 +146,7 @@ export const CANNOT_RUN_FILES =
 
 /** The title of a button that needs the page, while Overmark may not run there. */
 export const NEEDS_ACCESS =
-	"Overmark may not run on this tab yet: see the notice above.";
+	"Overmark may not run on this tab yet: see the notice.";
 
 /**
  * Whether Overmark may run on the tab in front, as far as the panel knows:
@@ -233,7 +241,7 @@ function accessNotice(id: string, actions: () => Actions): Notice {
 }
 
 const ALLOW_ALL_SITES_TITLE =
-	"Let Overmark run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options below.";
+	"Let Overmark run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options, in Settings (the AI pill at the top).";
 const DETAILS_TITLE =
 	"Open Overmark's page in chrome://extensions, where “Allow access to file URLs” is";
 
@@ -388,7 +396,11 @@ function renderCases(state: PanelState, actions: Actions): void {
 	casesKey = key;
 	if (state.cases.length === 0) {
 		casesList.replaceChildren(
-			h("p", { class: "empty" }, "No cases yet. Annotate a page and save it."),
+			h(
+				"p",
+				{ class: "empty" },
+				"No cases yet. Annotate a page and save it as a case, or import a case someone sent you.",
+			),
 		);
 		return;
 	}
@@ -499,6 +511,23 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 	importPrompt.hidden = false;
 }
 
+/** "3 marks are drawn" and the like: what Annotate this page means now. */
+export function annotateHintText(state: PanelState): string | undefined {
+	const o = state.overlay;
+	if (o === undefined) return undefined;
+	const n = o.drafts;
+	const one = n === 1;
+	const marks = `${n} mark${one ? "" : "s"}`;
+	if (!o.visible)
+		return n === 0
+			? undefined
+			: `${marks} on this page ${one ? "is" : "are"} not saved yet. Annotate this page shows ${one ? "it" : "them"} again.`;
+	if (o.saving) return "Saving…";
+	return n === 0
+		? "Draw on the page with the toolbar at its bottom."
+		: `${marks} drawn. Click Save case… on the page's toolbar to keep ${one ? "it" : "them"}.`;
+}
+
 function renderHome(state: PanelState, actions: Actions): void {
 	const tab = state.tab;
 	// Under "This page": its address, else its title (Chrome tells the
@@ -508,15 +537,14 @@ function renderHome(state: PanelState, actions: Actions): void {
 	renderAccess(homeAccess, state);
 	setHint(hint, state.hint);
 	const ok = access(state) === "yes";
-	annotate.disabled = !ok;
+	// "Annotate this page" always starts a new case (DEC-023).
+	const up = state.overlay?.visible === true;
+	const saving = up && state.overlay?.saving === true;
+	annotate.disabled = !ok || saving;
 	annotate.title = ok ? annotateTitle : NEEDS_ACCESS;
-	const target = state.overlay?.target;
-	annotate.textContent = state.overlay?.visible
-		? "Stop annotating"
-		: state.cases.some((c) => c.id === target?.caseId)
-			? "Continue annotating"
-			: "Annotate this page";
-	allSites.checked = state.allSites;
+	annotate.textContent = up ? "Stop annotating" : "Annotate this page";
+	annotate.classList.toggle("primary", !up);
+	setHint(annotateHint, ok ? annotateHintText(state) : undefined);
 	importError.hidden = state.importError === undefined;
 	importErrorText.textContent = state.importError ?? "";
 	// One import at a time, and no export of all cases while it stores them.
@@ -680,6 +708,9 @@ interface CaseParts {
 	about: HTMLSpanElement;
 	madeAt: HTMLSpanElement;
 	madeOn: HTMLSpanElement;
+	/** Holds the status block: the bar and the chips that filter the marks. */
+	status: HTMLElement;
+	statusKey: string;
 	/** The tab in front, where its size is not the case's. */
 	size: HTMLElement;
 	sizeText: HTMLSpanElement;
@@ -688,16 +719,23 @@ interface CaseParts {
 	access: Notice;
 	/** None of the case's marks were found on the tab in front (DEC-022). */
 	noneFound: Notice;
-	/** Load, or Hide where the case is loaded on the tab in front. */
+	/** What the tab in front shows of the case, in one line. */
+	tabLine: HTMLElement;
+	/** Show, or Hide where the case is loaded on the tab in front. */
 	loadButton: HTMLButtonElement;
 	loadedHere: boolean;
+	/** "Add marks", or "Done adding" while the toolbar adds to the case. */
 	addMarks: HTMLButtonElement;
+	adding: boolean;
+	/** "← All cases" is finishing the marks, or could not (DEC-023). */
+	leaving: HTMLElement;
 	deleteButton: HTMLButtonElement;
 	/** Where Export saved the file. */
 	saved: HTMLElement;
 	hint: HTMLElement;
 	verdict: HTMLTextAreaElement;
 	verdictStatus: HTMLSpanElement;
+	saveVerdict: HTMLButtonElement;
 	marks: HTMLElement;
 	marksKey: string;
 	shots: HTMLElement;
@@ -709,6 +747,7 @@ let parts: CaseParts | undefined;
 function createParts(c: Case, actions: Actions): CaseParts {
 	const verdict: HTMLTextAreaElement = h("textarea", {
 		id: "verdict",
+		rows: "2",
 		placeholder:
 			"What should change, as agreed. Whoever loads this case sees it first.",
 		maxlength: String(MAX_VERDICT),
@@ -729,12 +768,15 @@ function createParts(c: Case, actions: Actions): CaseParts {
 	const sizeText = h("span");
 	const created: CaseParts = {
 		current: c,
-		title: h("h2"),
-		meta: h("p", { class: "meta chips" }, page, about, madeAt, madeOn),
+		title: h("h2", { class: "case-title" }),
+		meta: h("p", { class: "meta case-meta" }, page, about, madeAt, madeOn),
 		page,
 		about,
 		madeAt,
 		madeOn,
+		// Holds the status block (#case-status), drawn in renderCase.
+		status: h("div", { class: "case-status" }),
+		statusKey: "",
 		size: h(
 			"p",
 			{ class: "meta size", id: "case-size", hidden: true },
@@ -768,9 +810,10 @@ function createParts(c: Case, actions: Actions): CaseParts {
 				"Open the case's page",
 			),
 		),
+		tabLine: h("p", { class: "tab-line", id: "tab-line", hidden: true }),
 		loadButton: h("button", {
 			type: "button",
-			class: "primary wide",
+			class: "quiet",
 			id: "load-case",
 			onclick: () =>
 				created.loadedHere
@@ -783,10 +826,21 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			{
 				type: "button",
 				id: "add-marks",
-				onclick: () => actions.addMarks(created.current),
+				class: "primary",
+				onclick: () =>
+					created.adding
+						? actions.doneAdding(created.current)
+						: actions.addMarks(created.current),
 			},
 			"Add marks",
 		),
+		adding: false,
+		leaving: h("p", {
+			class: "hint",
+			id: "leave-hint",
+			role: "status",
+			hidden: true,
+		}),
 		deleteButton: h("button", {
 			type: "button",
 			class: "danger",
@@ -797,6 +851,17 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		hint: h("p", { class: "hint", id: "case-hint", hidden: true }),
 		verdict,
 		verdictStatus,
+		saveVerdict: h(
+			"button",
+			{
+				type: "button",
+				class: "small",
+				id: "save-verdict",
+				hidden: true,
+				onclick: () => actions.saveVerdict(c.id, verdict.value),
+			},
+			"Save summary",
+		),
 		marks: h("section"),
 		marksKey: "",
 		shots: h("section"),
@@ -805,21 +870,13 @@ function createParts(c: Case, actions: Actions): CaseParts {
 	const header = h(
 		"section",
 		{ class: "case-header" },
-		h(
-			"button",
-			{ type: "button", class: "link", onclick: () => actions.closeCase() },
-			"← All cases",
-		),
 		created.title,
 		created.meta,
-		created.size,
 		created.origin,
-		created.access.el,
-		created.loadButton,
-		created.noneFound.el,
+		created.status,
 		h(
 			"div",
-			{ class: "row" },
+			{ class: "row case-actions" },
 			created.addMarks,
 			h(
 				"button",
@@ -832,10 +889,20 @@ function createParts(c: Case, actions: Actions): CaseParts {
 				},
 				"Export",
 			),
-			created.deleteButton,
 		),
+		created.leaving,
 		created.saved,
-		created.hint,
+		// What the tab in front shows of the case (DEC-022, DEC-023).
+		h(
+			"div",
+			{ class: "this-tab", id: "this-tab" },
+			created.access.el,
+			created.noneFound.el,
+			created.tabLine,
+			created.hint,
+			created.size,
+			created.loadButton,
+		),
 		// What the whole case comes to: the case's, not a mark's. Stored as
 		// verdict, its name before (DEC-019).
 		h(
@@ -846,22 +913,52 @@ function createParts(c: Case, actions: Actions): CaseParts {
 				{ class: "verdict-head" },
 				h("label", { for: "verdict" }, "Summary for the developer"),
 				verdictStatus,
-				h(
-					"button",
-					{
-						type: "button",
-						class: "small",
-						id: "save-verdict",
-						onclick: () => actions.saveVerdict(c.id, verdict.value),
-					},
-					"Save summary",
-				),
+				created.saveVerdict,
 			),
 			verdict,
 		),
 	);
-	caseView.replaceChildren(header, created.marks, created.shots);
+	caseView.replaceChildren(
+		header,
+		created.marks,
+		created.shots,
+		h("section", { class: "case-footer" }, created.deleteButton),
+	);
 	return created;
+}
+
+/** One line on what the tab in front shows of the case, where there is one. */
+function tabLineText(
+	state: PanelState,
+	c: Case,
+	adding: boolean,
+): string | undefined {
+	if (adding)
+		return "Adding marks: draw on the page. Each mark is saved into this case when its comment is done.";
+	const o = state.overlay;
+	if (o !== undefined && o.drafts > 0 && o.target === undefined) {
+		const one = o.drafts === 1;
+		return `${o.drafts} unsaved mark${one ? " is" : "s are"} on this page. Add marks puts ${one ? "it" : "them"} into this case; go back to All cases to save ${one ? "it" : "them"} as a new one.`;
+	}
+	const tabId = state.tab?.id;
+	if (tabId === undefined) return undefined;
+	if (state.hiddenOn.has(tabId)) return "Marks are hidden on this tab.";
+	if (
+		state.drawing === tabId &&
+		!(state.loaded?.caseId === c.id && state.loaded.tabId === tabId)
+	)
+		return "Looking for the marks on this tab…";
+	return undefined;
+}
+
+/** Under the action row while "← All cases" waits for the toolbar (DEC-023). */
+export function leavingText(
+	leaving: PanelState["leaving"],
+): string | undefined {
+	if (leaving === undefined) return undefined;
+	if (leaving.phase === "finishing") return "Finishing the marks…";
+	const one = leaving.left === 1;
+	return `${leaving.left} mark${one ? " is" : "s are"} not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without ${one ? "it" : "them"}.`;
 }
 
 // --- a mark's status and its actions ---------------------------------------
@@ -1365,6 +1462,8 @@ function renderCase(state: PanelState, actions: Actions): void {
 	if (p.verdict.value !== verdict) p.verdict.value = verdict;
 	p.verdictStatus.textContent =
 		state.verdictStatus ?? (draft === undefined ? "" : "Not saved yet");
+	// Only while the text differs from what is stored.
+	p.saveVerdict.hidden = draft === undefined;
 
 	p.title.textContent = c.title;
 	const web = isWebPage(c.page.url);
@@ -1383,7 +1482,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		p.origin,
 		c.importedAt === undefined
 			? undefined
-			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, summary and findings are whoever wrote the file's, whatever author or AI app they name.`,
+			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, statuses and reopen notes, summary and findings are as the file says: whoever wrote it, whatever author or AI app it names.`,
 	);
 	// Marks the panel loaded, or an AI app (the page says so).
 	const here =
@@ -1393,25 +1492,33 @@ function renderCase(state: PanelState, actions: Actions): void {
 	p.loadedHere = here !== undefined || state.overlay?.loadedCase === c.id;
 	renderAccess(p.access, state);
 	const ok = access(state) === "yes";
-	p.loadButton.disabled = !ok;
-	p.loadButton.textContent = p.loadedHere
-		? "Hide marks on this tab"
-		: "Show marks on this tab";
-	p.loadButton.title = !ok
+	// The toolbar on the tab in front adds to this case (DEC-023).
+	p.adding =
+		state.overlay?.visible === true && state.overlay.target?.caseId === c.id;
+	p.addMarks.disabled = !ok || state.leaving?.phase === "finishing";
+	p.addMarks.textContent = p.adding ? "Done adding" : "Add marks";
+	p.addMarks.classList.toggle("primary", !p.adding);
+	p.addMarks.title = !ok
 		? NEEDS_ACCESS
-		: p.loadedHere
-			? "Take this case's marks off the page in this tab; they stay off on this tab until you show them again"
-			: "Look for each mark's element on the page in this tab and draw the marks there";
-	p.loadButton.classList.toggle("primary", !p.loadedHere);
-	p.addMarks.disabled = !ok;
-	p.addMarks.title = ok
-		? "Each mark you draw on the page goes into this case when its comment is done"
-		: NEEDS_ACCESS;
+		: p.adding
+			? "Stop adding marks: the toolbar goes once each mark is in the case"
+			: "Each mark you draw on the page goes into this case when its comment is done";
+	setHint(p.leaving, leavingText(state.leaving));
+	setHint(p.tabLine, ok ? tabLineText(state, c, p.adding) : undefined);
 	// The search is over and found none: the case is probably for another page.
 	const none =
 		here !== undefined &&
 		!here.settling &&
 		noneFound([...here.matches.values()]);
+	const looking =
+		state.drawing !== undefined &&
+		state.drawing === state.tab?.id &&
+		here === undefined;
+	p.loadButton.hidden = !ok || none || looking;
+	p.loadButton.textContent = p.loadedHere ? "Hide marks" : "Show marks";
+	p.loadButton.title = p.loadedHere
+		? "Take this case's marks off the page in this tab; they stay off on this tab until you show them again"
+		: "Look for each mark's element on the page in this tab and draw the marks there";
 	p.noneFound.el.hidden = !none;
 	p.noneFound.text.textContent = none ? noneFoundText(c, state.tab?.url) : "";
 	p.noneFound.button.hidden =
@@ -1432,12 +1539,6 @@ function renderCase(state: PanelState, actions: Actions): void {
 	);
 	setHint(p.hint, state.caseHint);
 
-	const images = state.images?.caseId === c.id ? state.images : undefined;
-	const loaded = state.loaded?.caseId === c.id ? state.loaded : undefined;
-	const edit = state.markEdit;
-	if (edit === undefined) focusedForm = undefined;
-	const markArmed = state.markDeleteArmed?.annotationId;
-	const findingArmed = state.findingDeleteArmed;
 	// A filter ends once none of its marks are left (nothing to show), or a
 	// mark was added (it would not show, as if it was not saved).
 	const f = state.markFilter;
@@ -1447,6 +1548,20 @@ function renderCase(state: PanelState, actions: Actions): void {
 		c.annotations.every((a) => a.number <= f.upTo)
 			? f.group
 			: undefined;
+	// The status block: in the header, above the actions (the spec's place).
+	const statusKey = JSON.stringify([filter ?? null, caseCounts(c)]);
+	if (statusKey !== p.statusKey) {
+		p.statusKey = statusKey;
+		const block = statusBlock(c, filter, actions);
+		p.status.replaceChildren(...(block === null ? [] : [block]));
+	}
+
+	const images = state.images?.caseId === c.id ? state.images : undefined;
+	const loaded = state.loaded?.caseId === c.id ? state.loaded : undefined;
+	const edit = state.markEdit;
+	if (edit === undefined) focusedForm = undefined;
+	const markArmed = state.markDeleteArmed?.annotationId;
+	const findingArmed = state.findingDeleteArmed;
 	const marksKey = JSON.stringify([
 		filter ?? null,
 		c.updatedAt,
@@ -1501,7 +1616,6 @@ function renderCase(state: PanelState, actions: Actions): void {
 		const marks = h(
 			"section",
 			{ class: "marks", "aria-labelledby": "marks-heading" },
-			statusBlock(c, filter, actions),
 			h(
 				"div",
 				{ class: "marks-bar" },
@@ -1533,7 +1647,11 @@ function renderCase(state: PanelState, actions: Actions): void {
 			items.length > 0
 				? h("ol", { class: "annotations" }, ...items)
 				: filter === undefined
-					? h("p", { class: "empty" }, "No marks yet.")
+					? h(
+							"p",
+							{ class: "empty" },
+							"No marks yet. Click Add marks and draw on the page.",
+						)
 					: null,
 		);
 		p.marks.replaceWith(marks);
@@ -1822,19 +1940,77 @@ function renderAi({ ai }: PanelState): void {
 	setHint(aiCall, ai.lastCall && callText(ai.lastCall));
 }
 
+/**
+ * A click on the back button this soon after the last one, which it did
+ * something else for, is that double click's second (as Delete's).
+ */
+export const BACK_CLICK_GAP_MS = 500;
+
+/** The back button's last click, and what it did then. */
+let lastBack: { at: number; role: string } | undefined;
+
+/**
+ * The top bar's back button (DEC-023): "← All cases" closes the open case,
+ * "← Back" leaves Settings for the view underneath; none on Home. One button
+ * that changes its meaning under the pointer: the second click of a double
+ * click does nothing (as Delete's).
+ */
+function renderBack(state: PanelState, actions: Actions): void {
+	const onCase = state.view.kind === "case";
+	const role = state.settings
+		? "settings"
+		: `case ${state.leaving?.phase ?? ""}`;
+	const click = (act: () => void) => () => {
+		const at = Date.now();
+		const last = lastBack;
+		lastBack = { at, role };
+		if (
+			last !== undefined &&
+			last.role !== role &&
+			at >= last.at &&
+			at - last.at < BACK_CLICK_GAP_MS
+		)
+			return;
+		act();
+	};
+	back.hidden = !state.settings && !onCase;
+	if (state.settings) {
+		back.textContent = "← Back";
+		back.setAttribute(
+			"aria-label",
+			onCase ? "Back to the case" : "Back to all cases",
+		);
+		back.title = onCase ? "Back to the open case" : "Back to the cases";
+		back.disabled = false;
+		back.onclick = click(() => actions.closeSettings());
+		return;
+	}
+	back.textContent = "← All cases";
+	back.setAttribute("aria-label", "All cases: close this case");
+	back.title =
+		"Close this case: the toolbar stops adding to it, and its marks leave this tab";
+	back.disabled = state.leaving?.phase === "finishing";
+	back.onclick = click(() => actions.closeCase());
+}
+
 /** Draw the panel from `state`. */
 export function render(state: PanelState, actions: Actions): void {
 	lastActions = actions;
 	renderSyncBanner(state, actions);
 	renderAi(state);
+	renderBack(state, actions);
+	allSites.checked = state.allSites;
 	const onCase = state.view.kind === "case";
-	home.hidden = onCase;
-	caseView.hidden = !onCase;
+	home.hidden = onCase || state.settings;
+	caseView.hidden = !onCase || state.settings;
+	settingsView.hidden = !state.settings;
 	if (onCase) {
 		renderCase(state, actions);
 	} else {
 		parts = undefined;
 		caseView.replaceChildren();
-		renderHome(state, actions);
 	}
+	// Under an open case and Settings too: Home is as it is when it shows
+	// again ("← All cases", or a case the panel opened from the page).
+	renderHome(state, actions);
 }

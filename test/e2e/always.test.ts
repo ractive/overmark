@@ -153,6 +153,10 @@ describe.skipIf(browserBinary === undefined)(
 		});
 
 		test("Ask again in the card takes it back: the tool asks again", async () => {
+			// The card is in Settings, which the AI pill opens (DEC-023): focus
+			// stays only in a view that shows.
+			await panel.eval(`document.getElementById("ai-button").click()`);
+			await panel.waitFor(`!document.getElementById("settings").hidden`);
 			await panel.eval(
 				`(() => { const b = ${GRANT}.querySelector('[data-focus="ask-again:set_summary"]'); b.focus(); b.click(); })()`,
 			);

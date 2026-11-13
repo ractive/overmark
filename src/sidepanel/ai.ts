@@ -155,11 +155,12 @@ function forgetOldSettings(): void {
 
 /**
  * Start the panel's side of the connection; `update` changes the panel's
- * state, `showHome` leaves an open case for the home view, where the card is.
+ * state, `showSettings` opens the Settings view, where the card is (an open
+ * case stays open underneath, DEC-023).
  */
 export async function startAi(
 	update: (change: (s: PanelState) => void) => void,
-	showHome: () => void,
+	showSettings: () => void,
 ): Promise<void> {
 	const relayInput = byId<HTMLInputElement>("relay");
 	const keepOn = byId<HTMLInputElement>("keep-on");
@@ -310,12 +311,12 @@ export async function startAi(
 
 	// --- Commands ---
 
-	/** The header's pill: to the card, turning AI access on if it is off. */
+	/** The top bar's pill: to the card in Settings, turning AI access on if it is off. */
 	byId<HTMLButtonElement>("ai-button").addEventListener("click", () => {
 		if (current !== undefined && cardView(current, false).turnOn)
 			send({ type: "connect" });
-		showHome();
-		// After the render that shows the home view.
+		showSettings();
+		// After the render that shows the Settings view.
 		setTimeout(() => byId("ai-card").scrollIntoView({ block: "nearest" }));
 	});
 

@@ -108,6 +108,22 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		).toHaveLength(1);
 	});
 
+	/**
+	 * "Save case…" opened the case (DEC-023), in the side panel and in the
+	 * control page, which is a panel too: both go back to the list, or an
+	 * open case's marks would follow to the next tab in front.
+	 */
+	async function toAllCases(panel: Page, title: string): Promise<void> {
+		for (const page of [panel, h.control]) {
+			await page.waitFor(
+				`document.querySelector("#case-view h2")?.textContent === ${JSON.stringify(title)}`,
+				10_000,
+			);
+			await page.eval(`document.getElementById("back").click()`);
+			await page.waitFor(`!document.getElementById("home").hidden`);
+		}
+	}
+
 	test("a tab nobody clicked the icon on is refused", async () => {
 		const { page, tabId } = await h.open("v2");
 		expect(await inject(tabId)).toContain("Cannot access");
@@ -138,6 +154,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await clicked.page.waitFor(`!${shadow(".toolbar")}.hidden`);
 		await markElement(clicked.page, "[data-truth=submit]", "Too pale");
 		await saveAs(clicked.page, "From the store package");
+		await toAllCases(panel, "From the store package");
 		const db = await h.control.eval<Db>(READ_DB);
 		const saved = db.cases[0];
 		expect(saved?.title).toBe("From the store package");
@@ -195,6 +212,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await first.page.waitFor(`!${shadow(".toolbar")}.hidden`);
 		await markElement(first.page, "[data-truth=tip]", "Say how much");
 		await saveAs(first.page, "Opened from its address");
+		await toAllCases(panel, "Opened from its address");
 		await first.page.send("Page.close");
 		for (;;) {
 			const tabs = await h.browser.targets();
@@ -250,7 +268,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await panel.waitFor(row);
 		await panel.eval(`${row}.click()`);
 		await panel.waitFor(
-			`!document.getElementById("case-access").hidden && document.getElementById("load-case").disabled`,
+			`!document.getElementById("case-access").hidden && document.getElementById("load-case").hidden`,
 		);
 		await h.browser.send("Extensions.triggerAction", {
 			id: h.extensionId,
@@ -280,10 +298,12 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		const first = await h.open("v1?owner=1");
 		await h.browser.clickIcon(h.extensionId, url);
 		const panel = await sidePanel();
-		// It may still show the case of a test before.
-		await panel.goto(
-			`chrome-extension://${h.extensionId}/sidepanel/index.html`,
+		// It may still show the case of a test before, and its marks followed
+		// to this tab: a panel opened again would open that case (DEC-023).
+		await panel.eval(
+			`document.getElementById("back").hidden || document.getElementById("back").click()`,
 		);
+		await panel.waitFor(`!document.getElementById("home").hidden`);
 		await panel.waitFor(`document.getElementById("annotate")`);
 		await first.page.waitFor(HOST);
 		await viewportSettled(first.page);
@@ -296,6 +316,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 		await markElement(first.page, "#late", "Not there next time");
 		await saveAs(first.page, "As the owner uses it");
+		await toAllCases(panel, "As the owner uses it");
 		await first.page.send("Page.close");
 
 		// A tab on the case's page that Overmark may not see yet.
@@ -323,20 +344,20 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 		expect(await loadedCase(tabId)).not.toBeNull();
 		const button = `document.getElementById("load-case")`;
-		await panel.waitFor(`${button}.textContent === "Hide marks on this tab"`);
+		await panel.waitFor(`${button}.textContent === "Hide marks"`);
 		// A real click, as a person makes it.
 		await panel.click(button);
-		await panel.waitFor(`${button}.textContent === "Show marks on this tab"`);
+		await panel.waitFor(`${button}.textContent === "Show marks"`);
 		expect(await loadedCase(tabId)).toBeNull();
 		// The searches again (1 s, 2 s) must not draw them back.
 		await Bun.sleep(3500);
 		expect(await loadedCase(tabId)).toBeNull();
 		expect(await panel.eval<string>(`${button}.textContent`)).toBe(
-			"Show marks on this tab",
+			"Show marks",
 		);
 		// And Show puts them back.
 		await panel.click(button);
-		await panel.waitFor(`${button}.textContent === "Hide marks on this tab"`);
+		await panel.waitFor(`${button}.textContent === "Hide marks"`);
 		expect(await loadedCase(tabId)).not.toBeNull();
 	}, 60_000);
 });

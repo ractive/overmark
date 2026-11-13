@@ -1,4 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	beforeAll,
+	describe,
+	expect,
+	setSystemTime,
+	test,
+} from "bun:test";
 import { Window } from "happy-dom";
 import {
 	FOUND_COLOUR,
@@ -560,7 +567,7 @@ describe("a mark's status and actions", () => {
 		expect(window.document.getElementById("marks-heading")?.textContent).toBe(
 			"Marks 2",
 		);
-		// The bar: one open, one closed, each its share.
+		// The bar: one open, one closed, each its share; above the actions.
 		const bar = [
 			...window.document.querySelectorAll("#case-status .progress > span"),
 		].map((s) => [s.getAttribute("data-kind"), s.getAttribute("style")]);
@@ -1047,8 +1054,10 @@ describe("Load and Hide", () => {
 			hideFromTab: () => called.push("hide"),
 		});
 		render(caseState(c), actions);
-		expect(el("load-case").textContent).toBe("Show marks on this tab");
-		expect(el("load-case").classList.contains("primary")).toBe(true);
+		expect(el("load-case").textContent).toBe("Show marks");
+		// A quiet button: Add marks is the case's one primary (DEC-023).
+		expect(el("load-case").classList.contains("primary")).toBe(false);
+		expect(el("load-case").classList.contains("quiet")).toBe(true);
 		el("load-case").click();
 		const loadedOn = (front: number) =>
 			caseState(c, (s) => {
@@ -1061,12 +1070,11 @@ describe("Load and Hide", () => {
 				s.loaded = { caseId: c.id, tabId: 1, matches: new Map() };
 			});
 		render(loadedOn(1), actions);
-		expect(el("load-case").textContent).toBe("Hide marks on this tab");
-		expect(el("load-case").classList.contains("primary")).toBe(false);
+		expect(el("load-case").textContent).toBe("Hide marks");
 		el("load-case").click();
 		// Its marks are on another tab: this one can show them.
 		render(loadedOn(2), actions);
-		expect(el("load-case").textContent).toBe("Show marks on this tab");
+		expect(el("load-case").textContent).toBe("Show marks");
 		// Loaded by an AI app: the page says so.
 		render(
 			caseState(c, (s) => {
@@ -1081,7 +1089,7 @@ describe("Load and Hide", () => {
 			}),
 			actions,
 		);
-		expect(el("load-case").textContent).toBe("Hide marks on this tab");
+		expect(el("load-case").textContent).toBe("Hide marks");
 		expect(called).toEqual(["load", "hide"]);
 	});
 });
@@ -1134,18 +1142,21 @@ describe("a case on a tab Overmark may not run on", () => {
 		expect(notice.hidden).toBe(false);
 		expect(notice.textContent).toContain("Click the Overmark icon");
 		expect(notice.querySelector("svg.notice-icon")).not.toBeNull();
-		// Above Show marks on this tab.
-		expect(notice.nextElementSibling).toBe(el("load-case"));
+		// In the This tab block, which says nothing else.
+		expect(notice.parentElement).toBe(el("this-tab"));
+		expect(el("tab-line").hidden).toBe(true);
 		(
 			notice.querySelector(
 				'[data-action="allow-all-sites"]',
 			) as unknown as HTMLButtonElement
 		).click();
 		expect(asked).toEqual(["all"]);
-		for (const id of ["load-case", "add-marks"]) {
-			expect(el<HTMLButtonElement>(id).disabled).toBe(true);
-			expect(el(id).title).toContain("see the notice");
-		}
+		// Show marks goes; Add marks is off and says why.
+		expect(el("load-case").hidden).toBe(true);
+		expect(el<HTMLButtonElement>("add-marks").disabled).toBe(true);
+		expect(el("add-marks").title).toContain("see the notice");
+		// The notice is below the actions in a case, above the button on Home.
+		expect(el("add-marks").title).not.toContain("above");
 		const show = window.document.querySelector(
 			'[data-action="show"]',
 		) as unknown as HTMLButtonElement;
@@ -1481,6 +1492,25 @@ describe("the summary for the developer", () => {
 		expect(el("verdict-status").textContent).toBe("");
 	});
 
+	test("Save summary shows only while the text differs from what is stored", () => {
+		const c = { ...sampleCase("c_sv"), verdict: "Stored" };
+		render(caseState(c), noActions);
+		expect(el("save-verdict").hidden).toBe(true);
+		render(
+			caseState(c, (s) => s.verdictDrafts.set(c.id, "Stored, and more")),
+			noActions,
+		);
+		expect(el("save-verdict").hidden).toBe(false);
+		expect(el("verdict-status").textContent).toBe("Not saved yet");
+		// Saved: the draft is gone, "Saved" stays a moment without the button.
+		render(
+			caseState(c, (s) => (s.verdictStatus = "Saved")),
+			noActions,
+		);
+		expect(el("save-verdict").hidden).toBe(true);
+		expect(el("verdict-status").textContent).toBe("Saved");
+	});
+
 	test("typing tells the panel", () => {
 		const c = sampleCase("c_t");
 		const typed: string[] = [];
@@ -1504,6 +1534,10 @@ describe("an imported case", () => {
 		render(caseState(c), noActions);
 		expect(el("case-origin").hidden).toBe(false);
 		expect(el("case-origin").textContent).toContain("Imported from a file");
+		// What came in with it is the file's: statuses and reopen notes too.
+		expect(el("case-origin").textContent).toContain(
+			"statuses and reopen notes, summary and findings are as the file says",
+		);
 		render(caseState(sampleCase("c_j")), noActions);
 		expect(el("case-origin").hidden).toBe(true);
 	});
@@ -1584,43 +1618,359 @@ describe("settings and errors at home", () => {
 	});
 });
 
-describe("the annotate button", () => {
-	const label = (change: (s: PanelState) => void) => {
-		const state = initialState();
-		change(state);
-		render(state, noActions);
-		return el<HTMLButtonElement>("annotate").textContent;
-	};
+describe("the annotate button (DEC-023)", () => {
 	const c = sampleCase();
-	const overlay = {
+	const overlay = (
+		change: Partial<NonNullable<PanelState["overlay"]>> = {},
+	): NonNullable<PanelState["overlay"]> => ({
 		visible: false,
 		url: "https://example.com/",
 		title: "",
 		drafts: 0,
 		saving: false,
-		target: { caseId: c.id, title: c.title, nextAnnotation: 2 },
+		...change,
+	});
+	const home = (o: PanelState["overlay"], cases: Case[] = [c]) => {
+		const state = initialState();
+		state.tab = {
+			id: 1,
+			url: "https://example.com/",
+			title: "",
+			size: undefined,
+		};
+		state.overlay = o;
+		state.cases = cases;
+		render(state, noActions);
+		const button = el<HTMLButtonElement>("annotate");
+		const hint = el("annotate-hint");
+		return {
+			label: button.textContent,
+			primary: button.classList.contains("primary"),
+			disabled: button.disabled,
+			hint: hint.hidden ? undefined : hint.textContent,
+		};
 	};
 
-	test("says it goes on with the case the tab was adding to", () => {
-		expect(
-			label((s) => {
-				s.overlay = overlay;
-				s.cases = [c];
-			}),
-		).toBe("Continue annotating");
+	test("no toolbar: Annotate this page, the one primary, no hint", () => {
+		expect(home(undefined)).toEqual({
+			label: "Annotate this page",
+			primary: true,
+			disabled: false,
+			hint: undefined,
+		});
+		expect(home(overlay())).toEqual({
+			label: "Annotate this page",
+			primary: true,
+			disabled: false,
+			hint: undefined,
+		});
 	});
 
-	test("starts afresh once that case is gone", () => {
-		expect(label((s) => (s.overlay = overlay))).toBe("Annotate this page");
+	test("no toolbar, drafts on the page: they show again", () => {
+		expect(home(overlay({ drafts: 3 }))).toEqual({
+			label: "Annotate this page",
+			primary: true,
+			disabled: false,
+			hint: "3 marks on this page are not saved yet. Annotate this page shows them again.",
+		});
+		expect(home(overlay({ drafts: 1 })).hint).toBe(
+			"1 mark on this page is not saved yet. Annotate this page shows it again.",
+		);
 	});
 
-	test("stops while the toolbar is up", () => {
-		expect(
-			label((s) => {
-				s.overlay = { ...overlay, visible: true };
-				s.cases = [c];
+	test("toolbar up: Stop annotating, with what to do on the page", () => {
+		expect(home(overlay({ visible: true }))).toEqual({
+			label: "Stop annotating",
+			primary: false,
+			disabled: false,
+			hint: "Draw on the page with the toolbar at its bottom.",
+		});
+		expect(home(overlay({ visible: true, drafts: 3 })).hint).toBe(
+			"3 marks drawn. Click Save case… on the page's toolbar to keep them.",
+		);
+	});
+
+	test("saving: Stop annotating waits", () => {
+		expect(home(overlay({ visible: true, drafts: 2, saving: true }))).toEqual({
+			label: "Stop annotating",
+			primary: false,
+			disabled: true,
+			hint: "Saving…",
+		});
+	});
+
+	test("never Continue annotating, whatever case the page last added to", () => {
+		const target = { caseId: c.id, title: c.title, nextAnnotation: 2 };
+		for (const o of [
+			overlay({ target }),
+			overlay({ target, drafts: 2 }),
+			overlay({ target, visible: true }),
+		]) {
+			const { label } = home(o);
+			expect(label).not.toBe("Continue annotating");
+			expect(label).toBe(o.visible ? "Stop annotating" : "Annotate this page");
+		}
+		expect(home(overlay({ target }), []).label).toBe("Annotate this page");
+	});
+});
+
+describe("the top bar and Settings (DEC-023)", () => {
+	test("Home: no back button; a case: ← All cases, which closes it", () => {
+		const called: string[] = [];
+		const actions = actionsWith({
+			closeCase: () => void called.push("close"),
+		});
+		render(initialState(), actions);
+		expect(el("back").hidden).toBe(true);
+		render(caseState(sampleCase("c_top")), actions);
+		expect(el("back").hidden).toBe(false);
+		expect(el("back").textContent).toBe("← All cases");
+		expect(el("back").getAttribute("aria-label")).toBe(
+			"All cases: close this case",
+		);
+		// In the top bar, before the AI pill.
+		expect(el("back").parentElement).toBe(el("bar"));
+		expect(el("back").nextElementSibling).toBe(el("ai-button"));
+		el("back").click();
+		expect(called).toEqual(["close"]);
+	});
+
+	test("a double click on the back button is one click: it changed its meaning under the pointer", () => {
+		const called: string[] = [];
+		const actions = actionsWith({
+			closeSettings: () => void called.push("settings"),
+			closeCase: () => void called.push("case"),
+		});
+		const c = sampleCase("c_double");
+		try {
+			setSystemTime(new Date("2020-01-01T10:00:00Z"));
+			render(
+				caseState(c, (s) => (s.settings = true)),
+				actions,
+			);
+			setSystemTime(new Date("2020-01-01T10:00:05Z"));
+			el("back").click();
+			// Settings closes: the same button is "← All cases" now.
+			render(caseState(c), actions);
+			setSystemTime(new Date("2020-01-01T10:00:05.200Z"));
+			el("back").click();
+			expect(called).toEqual(["settings"]);
+			setSystemTime(new Date("2020-01-01T10:00:06Z"));
+			el("back").click();
+			expect(called).toEqual(["settings", "case"]);
+			// Blocked a moment after the first click: the second is no decision.
+			render(
+				caseState(c, (s) => (s.leaving = { phase: "blocked", left: 1 })),
+				actions,
+			);
+			setSystemTime(new Date("2020-01-01T10:00:06.100Z"));
+			el("back").click();
+			expect(called).toEqual(["settings", "case"]);
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	test("while the toolbar finishes, the back button waits and the case says so", () => {
+		const c = sampleCase("c_leave");
+		render(
+			caseState(c, (s) => (s.leaving = { phase: "finishing" })),
+			noActions,
+		);
+		expect(el<HTMLButtonElement>("back").disabled).toBe(true);
+		expect(el("leave-hint").textContent).toBe("Finishing the marks…");
+		render(
+			caseState(c, (s) => (s.leaving = { phase: "blocked", left: 1 })),
+			noActions,
+		);
+		expect(el<HTMLButtonElement>("back").disabled).toBe(false);
+		expect(el("leave-hint").textContent).toBe(
+			"1 mark is not in the case yet; the toolbar on the page says why. Click ← All cases again to leave without it.",
+		);
+		render(caseState(c), noActions);
+		expect(el("leave-hint").hidden).toBe(true);
+	});
+
+	test("Settings holds the AI app card and the options, over Home or a case", () => {
+		const called: string[] = [];
+		const actions = actionsWith({
+			closeSettings: () => void called.push("back"),
+			closeCase: () => void called.push("close"),
+		});
+		expect(el("ai-card").closest("main")).toBe(el("settings"));
+		expect(el("all-sites").closest("main")).toBe(el("settings"));
+		expect(el("blur-forms").closest("main")).toBe(el("settings"));
+		const c = sampleCase("c_set");
+		render(
+			caseState(c, (s) => (s.settings = true)),
+			actions,
+		);
+		expect(el("settings").hidden).toBe(false);
+		expect(el("case-view").hidden).toBe(true);
+		expect(el("home").hidden).toBe(true);
+		expect(el("back").textContent).toBe("← Back");
+		el("back").click();
+		expect(called).toEqual(["back"]);
+		// The case stays open underneath: its view is there when Back returns.
+		expect(el("case-view").querySelector("h2")?.textContent).toBe(c.title);
+		render(caseState(c), actions);
+		expect(el("settings").hidden).toBe(true);
+		expect(el("case-view").hidden).toBe(false);
+		const home = initialState();
+		home.settings = true;
+		render(home, actions);
+		expect(el("home").hidden).toBe(true);
+		expect(el("back").textContent).toBe("← Back");
+		home.settings = false;
+		render(home, actions);
+		expect(el("settings").hidden).toBe(true);
+		expect(el("home").hidden).toBe(false);
+	});
+});
+
+describe("the case view's actions and this tab (DEC-023)", () => {
+	const tab = {
+		id: 7,
+		url: "http://127.0.0.1/v2",
+		title: "",
+		size: undefined,
+	};
+	const overlay = (
+		change: Partial<NonNullable<PanelState["overlay"]>> = {},
+	): NonNullable<PanelState["overlay"]> => ({
+		visible: false,
+		url: tab.url,
+		title: "",
+		drafts: 0,
+		saving: false,
+		...change,
+	});
+	const line = () =>
+		el("tab-line").hidden ? undefined : el("tab-line").textContent;
+
+	test("Add marks is the primary, Export beside it, Delete alone at the bottom", () => {
+		const c = sampleCase("c_row");
+		render(
+			caseState(c, (s) => (s.tab = tab)),
+			noActions,
+		);
+		const row = el("add-marks").parentElement as unknown as HTMLElement;
+		expect([...row.querySelectorAll("button")].map((b) => b.id)).toEqual([
+			"add-marks",
+			"export-case",
+		]);
+		expect(el("add-marks").classList.contains("primary")).toBe(true);
+		expect(el("add-marks").textContent).toBe("Add marks");
+		// The last thing in the case view.
+		expect(el("case-view").lastElementChild?.contains(el("delete-case"))).toBe(
+			true,
+		);
+		expect(window.document.querySelectorAll("#case-view .primary").length).toBe(
+			1,
+		);
+	});
+
+	test("adding: Done adding, and the line says where the marks go", () => {
+		const c = sampleCase("c_adding");
+		const called: string[] = [];
+		const actions = actionsWith({
+			addMarks: () => void called.push("add"),
+			doneAdding: () => void called.push("done"),
+		});
+		render(
+			caseState(c, (s) => (s.tab = tab)),
+			actions,
+		);
+		el("add-marks").click();
+		const target = { caseId: c.id, title: c.title, nextAnnotation: 2 };
+		render(
+			caseState(c, (s) => {
+				s.tab = tab;
+				s.overlay = overlay({ visible: true, target });
 			}),
-		).toBe("Stop annotating");
+			actions,
+		);
+		expect(el("add-marks").textContent).toBe("Done adding");
+		expect(el("add-marks").classList.contains("primary")).toBe(false);
+		expect(line()).toBe(
+			"Adding marks: draw on the page. Each mark is saved into this case when its comment is done.",
+		);
+		el("add-marks").click();
+		expect(called).toEqual(["add", "done"]);
+		// A toolbar for another case is not this case's.
+		render(
+			caseState(c, (s) => {
+				s.tab = tab;
+				s.overlay = overlay({
+					visible: true,
+					target: { ...target, caseId: "c_other" },
+				});
+			}),
+			actions,
+		);
+		expect(el("add-marks").textContent).toBe("Add marks");
+	});
+
+	test("drafts of a new case on the page: Add marks takes them", () => {
+		const c = sampleCase("c_drafts");
+		render(
+			caseState(c, (s) => {
+				s.tab = tab;
+				s.overlay = overlay({ drafts: 3 });
+			}),
+			noActions,
+		);
+		expect(line()).toBe(
+			"3 unsaved marks are on this page. Add marks puts them into this case; go back to All cases to save them as a new one.",
+		);
+	});
+
+	test("drawing, hidden, found: each says so, Hide or Show where it applies", () => {
+		const c = sampleCase("c_tabline");
+		render(
+			caseState(c, (s) => {
+				s.tab = tab;
+				s.drawing = tab.id;
+			}),
+			noActions,
+		);
+		expect(line()).toBe("Looking for the marks on this tab…");
+		expect(el("load-case").hidden).toBe(true);
+		render(
+			caseState(c, (s) => {
+				s.tab = tab;
+				s.hiddenOn = new Set([tab.id]);
+			}),
+			noActions,
+		);
+		expect(line()).toBe("Marks are hidden on this tab.");
+		expect(el("load-case").hidden).toBe(false);
+		expect(el("load-case").textContent).toBe("Show marks");
+		render(
+			caseState(c, (s) => {
+				s.tab = tab;
+				s.loaded = { caseId: c.id, tabId: tab.id, matches: new Map() };
+				s.caseHint = "3 of 4 marks found on 127.0.0.1/v2.";
+			}),
+			noActions,
+		);
+		expect(line()).toBeUndefined();
+		expect(el("case-hint").textContent).toBe(
+			"3 of 4 marks found on 127.0.0.1/v2.",
+		);
+		expect(el("case-hint").parentElement).toBe(el("this-tab"));
+		expect(el("load-case").textContent).toBe("Hide marks");
+	});
+
+	test("the meta line: address · size · date, no chips", () => {
+		const c = sampleCase("c_meta");
+		render(caseState(c), noActions);
+		const meta = el("open-page").parentElement as unknown as HTMLElement;
+		expect(meta.classList.contains("chips")).toBe(false);
+		expect(meta.classList.contains("case-meta")).toBe(true);
+		expect(meta.textContent).toContain(
+			`${c.page.viewport.width}×${c.page.viewport.height}`,
+		);
 	});
 });
 

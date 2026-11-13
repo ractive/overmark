@@ -83,16 +83,47 @@ body {
 	white-space: nowrap;
 }
 
-/* Only the AI connection: Chrome shows the name and icon above the panel. */
+/* A click on a control scrolled into view lands beside the top bar. */
+html {
+	scroll-padding-top: 52px;
+}
+
+/*
+ * The top bar (DEC-023): the way back on the left, the AI connection on the
+ * right; Chrome shows the name and icon above the panel. It stays in view.
+ */
 header {
+	position: sticky;
+	top: 0;
+	z-index: 3;
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
 	justify-content: flex-end;
-	gap: 6px 8px;
-	padding: 10px 14px 0;
+	gap: 8px;
+	min-height: 44px;
+	padding: 6px 14px;
 	background: var(--band);
 	color: var(--on-ink);
+}
+
+/* "← All cases" / "← Back": large enough to be seen, and hit. */
+#back {
+	flex: none;
+	margin-right: auto;
+	min-width: 112px;
+	min-height: 32px;
+	padding: 4px 14px;
+	border: 1px solid var(--on-ink-muted);
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.08);
+	color: var(--on-ink);
+	font-size: 13px;
+	font-weight: 600;
+}
+
+#back:hover:not(:disabled) {
+	border-color: var(--on-ink);
+	background: rgba(255, 255, 255, 0.16);
 }
 
 header .meta {
@@ -178,10 +209,25 @@ header button:not(.ai-pill):hover:not(:disabled) {
 	background: rgba(255, 255, 255, 0.12);
 }
 
+/* The last AI call: one line under the top bar. */
 #ai-call {
-	flex-basis: 100%;
 	margin: 0;
+	padding: 0 14px 6px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	text-align: right;
+	background: var(--band);
+	color: var(--on-ink-muted);
+}
+
+/* Under "Annotate this page": what it does now. */
+.annotate-hint {
+	margin: 6px 0 0;
+}
+
+h3.group-title {
+	margin-top: 16px;
 }
 
 main {
@@ -522,9 +568,13 @@ ul.cases .load {
 }
 
 .case-header h2 {
+	display: -webkit-box;
 	margin: 2px 0 0;
-	font-size: 17px;
-	line-height: 1.25;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	font-size: 18px;
+	line-height: 24px;
 	font-weight: 700;
 	letter-spacing: -0.01em;
 	overflow-wrap: anywhere;
@@ -538,36 +588,78 @@ ul.cases .load {
 	color: var(--on-ink-muted);
 }
 
-/* Where and when the marks were made, in small labels. */
-.chips {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 6px;
+/* Where and when the marks were made, in one line: a · b · c. */
+.case-meta {
 	margin-top: -4px;
-}
-
-.chips > :not([hidden]) {
-	padding: 2px 8px;
-	border-radius: 6px;
-	background: rgba(255, 255, 255, 0.07);
 	font-size: 12px;
-	line-height: 1.5;
 }
 
-.case-header .chips button.page-link {
+.case-meta > :not([hidden]) ~ :not([hidden])::before {
+	content: " · ";
+}
+
+.case-header .case-meta button.page-link {
 	max-width: 100%;
 	font-size: 12px;
-	text-decoration: none;
 }
 
-.case-header .chips button.page-link:hover:not(:disabled) {
-	background: rgba(255, 255, 255, 0.14);
+/* Holds the status block; nothing while the case has no marks. */
+.case-status:empty {
+	display: none;
+}
+
+/* Add marks (or Done adding) and Export. */
+.case-actions > button {
+	min-height: 30px;
+}
+
+/* What the tab in front shows of the case: a line and a quiet button. */
+.this-tab {
+	display: grid;
+	justify-items: start;
+	gap: 6px;
+}
+
+.this-tab > * {
+	margin: 0;
+}
+
+.tab-line {
+	color: var(--on-ink-muted);
+}
+
+button.quiet {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--link);
+	font-weight: 600;
+}
+
+button.quiet:hover:not(:disabled) {
+	background: none;
 	text-decoration: underline;
 }
 
+.case-header button.quiet,
+.case-header button.quiet:hover:not(:disabled) {
+	border: 0;
+	background: none;
+	color: var(--on-ink-link);
+}
+
+/* Delete this case: alone at the bottom, away from the hand-over. */
+.case-footer {
+	padding: 16px 14px 24px;
+	border-top: 1px solid var(--rule);
+}
+
+.case-footer button.danger {
+	margin-left: 0;
+}
+
 /* This tab is not the size the marks were made at: amber, with the fix. */
-.case-header > .size {
+.this-tab > .size {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -579,7 +671,7 @@ ul.cases .load {
 	color: var(--on-ink);
 }
 
-.case-header > .size button {
+.this-tab > .size button {
 	margin: 0;
 	border-color: rgba(255, 176, 0, 0.5);
 }
@@ -719,7 +811,10 @@ ul.cases .load {
 }
 
 .verdict textarea {
-	min-height: 48px;
+	/* Two rows, growing with the text to eight. */
+	field-sizing: content;
+	min-height: calc(2lh + 12px);
+	max-height: calc(8lh + 12px);
 	border-color: var(--on-ink-rule);
 	background: rgba(0, 0, 0, 0.18);
 	color: var(--on-ink);
@@ -734,7 +829,8 @@ ul.cases .load {
 /* Stays in view while the list scrolls under it. */
 .marks-bar {
 	position: sticky;
-	top: 0;
+	/* Under the top bar. */
+	top: 44px;
 	z-index: 1;
 	display: flex;
 	flex-wrap: wrap;
@@ -864,6 +960,18 @@ button.chip[aria-pressed="true"] .sign {
 
 .status-block .all-done {
 	margin: 0;
+}
+
+/* In the case's header, on its band (DEC-023): the header's padding, ink-band chips. */
+.case-header .status-block {
+	padding: 0;
+}
+
+.case-header button.chip[aria-pressed="true"],
+.case-header button.chip[aria-pressed="true"]:hover:not(:disabled) {
+	border-color: var(--on-ink);
+	background: var(--on-ink);
+	color: var(--ink);
 }
 
 .marks > .filtered {
