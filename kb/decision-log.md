@@ -171,6 +171,19 @@ selector is read as CSS tokenizes it (escapes decoded, any case). A match inside
 select, a text area or an editor counts as none, and an `option` keeps neither `value`
 nor `selected`. The same rules hold for `add_annotation`'s selector.
 
+The answer follows the same line (the review of PR 45): a page's own style rule whose
+selector says a state (`:checked`, `:hover`, `:has()`, `:empty`, `[checked]`, …) is
+never listed among the matching rules, matched or not, and not counted; the tool's
+description says so. An editor, a select or a text area is read without its children,
+and its markup always carries the left-out note, empty or not; an element inside a
+hidden one is not named by a selector, substring operators (`^=`, `$=`, `*=`) only test
+`id`, `class` and the test ids, and the ancestors listed for an element inside an editor
+start at the editor. The markup and the rules never carry what was typed or chosen; the
+computed styles and the position of an element can reflect a field's state where the
+page's own CSS styles it by state (a ticked checkbox's colour, an autofilled field's
+background), as a screenshot does. Closing that would leave the tool without the styles
+it is for.
+
 Nothing of it is stored, so DEC-009's allow-list of recorded details does not apply, but
 its reasons do: the HTML is written by Overmark's own serializer (`src/lib/inspect.ts`),
 not taken from `outerHTML`. Form fields keep an allow-list of attributes (never `value`,

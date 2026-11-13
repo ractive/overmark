@@ -684,6 +684,47 @@ describe("a selector cannot ask about form state (CR-01)", () => {
 		expect(typed).toEqual(empty);
 		expect(typed.filter((a) => a.startsWith("descendant"))).toHaveLength(4);
 	});
+
+	test("the page's own rules that depend on a state are never listed, nor counted", () => {
+		const css = `<style>
+			.check { padding: 1px }
+			.check:checked { background-color: blue }
+			.check:checked + label { color: red }
+			.field:has(:checked) { border: 1px solid red }
+			input:not(:placeholder-shown) { color: green }
+			input:invalid, .other { border-color: red }
+			[checked] { margin: 1px }
+			option[selected] { color: red }
+			.field label:hover { color: blue }
+			label::before { content: "*" }
+			.field > label { font-weight: bold }
+		</style>`;
+		const rulesOf = (checked: boolean) => {
+			page(
+				`<form><div class="field"><input class="check" type="checkbox" name="news"${checked ? " checked" : ""}><label for="x">News</label></div></form>`,
+				css,
+			);
+			const form = $("form");
+			return ["input[name=news]", "input[name=news] + label", ".field"].map(
+				(s) => {
+					const r = resolveSelector(doc, form, s);
+					if ("error" in r) throw new Error(r.error);
+					const m = matchedRules(r.element);
+					return {
+						selectors: m.rules.map((x) => x.selector),
+						leftOut: m.leftOut,
+					};
+				},
+			);
+		};
+		const ticked = rulesOf(true);
+		expect(ticked).toEqual(rulesOf(false));
+		expect(ticked.map((r) => r.selectors)).toEqual([
+			[".check"],
+			["label::before", ".field > label"],
+			[],
+		]);
+	});
 });
 
 describe("selector vocabulary (escapes, comments, case)", () => {

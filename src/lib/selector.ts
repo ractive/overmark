@@ -86,6 +86,26 @@ const PSEUDO_CLASSES = new Set([
 	"read-write",
 ]);
 
+/**
+ * Pseudo-classes of markup a page's own style rule may also use and still be
+ * listed (`rule` mode): `:link` and `:any-link` follow `href` (Chrome never
+ * lets a page see `:visited`), `:defined` a custom element's definition,
+ * `:host` the shadow root's host.
+ */
+const RULE_PSEUDO_CLASSES = new Set(["link", "any-link", "defined", "host"]);
+/** Pseudo-elements written with one colon, as CSS 2 did. */
+const LEGACY_PSEUDO_ELEMENTS = new Set([
+	"before",
+	"after",
+	"first-line",
+	"first-letter",
+]);
+/**
+ * Attributes a page's style rule may not test and still be listed: they
+ * hold what was typed or chosen (`[checked]` tells a ticked box).
+ */
+const STATE_ATTRIBUTE = /^(?:value|checked|selected|aria-value.*)$/;
+
 /** Take a selector list: whatever they hold is scanned the same way. */
 const LIST_FUNCTIONS = new Set(["is", "where", "not"]);
 /** Take `An+B`, the first two also `of` a selector list. */
@@ -136,10 +156,13 @@ const isNameChar = (c: string | undefined) =>
 
 class Scanner {
 	readonly #s: string;
+	/** A page's own style rule, not an AI app's selector (see `listedRule`). */
+	readonly #rule: boolean;
 	#i = 0;
 
-	constructor(s: string) {
+	constructor(s: string, rule = false) {
 		this.#s = s;
+		this.#rule = rule;
 	}
 
 	#peek(): string | undefined {
@@ -278,7 +301,10 @@ class Scanner {
 		const name = this.#name().toLowerCase();
 		if (this.#peek() === "|" && this.#s[this.#i + 1] !== "=")
 			throw new Refused(OTHER("A namespace (|)"));
-		if (!SELECTOR_ATTRIBUTES.has(name)) throw new Refused(ATTRIBUTE(name));
+		if (
+			this.#rule ? STATE_ATTRIBUTE.test(name) : !SELECTOR_ATTRIBUTES.has(name)
+		)
+			throw new Refused(ATTRIBUTE(name));
 		this.#spaces();
 		if (this.#peek() === "]") {
 			this.#i++;
@@ -305,18 +331,49 @@ class Scanner {
 	/** `:name` or `:name(…)`; `::` is a pseudo-element. */
 	#pseudo(): void {
 		this.#i++; // :
-		if (this.#peek() === ":")
-			throw new Refused(OTHER("A pseudo-element (::before, ::part())"));
+		if (this.#peek() === ":") {
+			if (!this.#rule)
+				throw new Refused(OTHER("A pseudo-element (::before, ::part())"));
+			this.#pseudoElement();
+			return;
+		}
 		const name = this.#name().toLowerCase();
 		if (this.#peek() !== "(") {
 			if (PSEUDO_CLASSES.has(name)) return;
+			if (
+				this.#rule &&
+				(RULE_PSEUDO_CLASSES.has(name) || LEGACY_PSEUDO_ELEMENTS.has(name))
+			)
+				return;
 			throw new Refused(name === "empty" ? EMPTY : STATE(name));
 		}
 		this.#i++; // (
 		if (name === "has") throw new Refused(HAS);
-		if (LIST_FUNCTIONS.has(name)) this.list(true);
+		if (LIST_FUNCTIONS.has(name) || (this.#rule && name === "host"))
+			this.list(true);
 		else if (NTH_FUNCTIONS.has(name)) this.#nth(NTH_OF.has(name));
 		else throw new Refused(STATE(`${name}()`));
+		if (this.#peek() !== ")") throw new Refused(OTHER("An unclosed ( )"));
+		this.#i++;
+	}
+
+	/**
+	 * A page rule's pseudo-element: `::before`, `::placeholder`,
+	 * `::part(name)`, `::slotted(selector)`. It styles a part of the element
+	 * whatever its state; a state is in the pseudo-classes before it.
+	 */
+	#pseudoElement(): void {
+		this.#i++; // the second colon
+		const name = this.#name().toLowerCase();
+		if (this.#peek() !== "(") return;
+		this.#i++; // (
+		if (name === "slotted") this.list(true);
+		else
+			for (;;) {
+				this.#spaces();
+				if (this.#peek() === ")") break;
+				this.#name();
+			}
 		if (this.#peek() !== ")") throw new Refused(OTHER("An unclosed ( )"));
 		this.#i++;
 	}
@@ -337,6 +394,25 @@ class Scanner {
 			return;
 		}
 		throw new Refused(OTHER("This :nth-…() argument"));
+	}
+}
+
+/**
+ * Whether a page's own style rule with `selector` may be listed among the
+ * rules that match an element: whether it matches must not depend on what
+ * was typed or chosen, or on the page's state. So the same names as an AI
+ * app's selector, but any attribute other than `value`, `checked`,
+ * `selected` and `aria-value*` (the markup shows them), and pseudo-elements.
+ * A rule with `:checked`, `:hover`, `:has()`, `:empty`, … is never listed,
+ * matched or not, and not counted: its presence would say the state.
+ */
+export function listedRule(selector: string): boolean {
+	try {
+		new Scanner(selector, true).list(false);
+		return true;
+	} catch (error) {
+		if (error instanceof Refused) return false;
+		throw error;
 	}
 }
 

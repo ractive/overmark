@@ -29,7 +29,7 @@ import {
 	pageText,
 	TEST_ID_ATTRIBUTES,
 } from "./element.ts";
-import { selectorVocabularyProblem } from "./selector.ts";
+import { listedRule, selectorVocabularyProblem } from "./selector.ts";
 import { closestAcross, hostOf, parentOf, shadowOf } from "./shadow.ts";
 
 export const LIMITS = {
@@ -776,7 +776,8 @@ export function matchedRules(el: Element): MatchedRules {
 					at.parent === undefined
 						? r.selectorText
 						: nestedSelector(at.parent, r.selectorText);
-				const hit = matching(el, selector);
+				// A rule whose presence would say a state is never looked at (CR-01).
+				const hit = listedRule(selector) ? matching(el, selector) : undefined;
 				if (hit !== undefined && r.style.length > 0) {
 					found.push({
 						selector: cut(r.selectorText, LIMITS.selector),

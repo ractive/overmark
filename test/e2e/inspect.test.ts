@@ -152,6 +152,10 @@ describe.skipIf(browserBinary === undefined)("get_mark_element", () => {
 				box.name = "terms";
 				form.insertBefore(box, button);
 				box.checked = true;
+				// The page's own rules for the state.
+				const style = document.createElement("style");
+				style.textContent = "form:has(:checked) { gap: 9px } input:checked { outline: 1px solid red } [checked] { margin: 1px } .Form_root__k3L9m:not(:invalid) { color: #111 }";
+				document.head.append(style);
 			})()`);
 			const refused = async (selector: string) => {
 				const result = await client.callTool({
@@ -197,6 +201,11 @@ describe.skipIf(browserBinary === undefined)("get_mark_element", () => {
 			expect(filled.tag).toBe("form");
 			expect(filled.html).toContain('<select name="country">');
 			expect(filled.html).toContain('<input type="checkbox" name="terms">');
+			// The rules that say the state are not listed: only the page's plain ones.
+			const said = filled.rules.map((r) => r.selector);
+			expect(said).toContain(".Form_root__k3L9m");
+			for (const selector of said)
+				expect(selector).not.toMatch(/checked|:has\(|invalid/);
 			for (const value of [
 				"8001",
 				"8099",
