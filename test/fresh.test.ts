@@ -48,6 +48,13 @@ describe("a case created by Annotate this page (DEC-026)", () => {
 		expect(firstTitle({ url: "", title: "" })).toBe("Untitled case");
 	});
 
+	test("a page title of invisible characters gives the short address (review of PR 57)", () => {
+		expect(firstTitle(page({ title: "\u200b\u2060" }))).toBe(
+			"shop.example/cart",
+		);
+		expect(firstTitle(page({ title: "\u202eCart" }))).toBe("Cart");
+	});
+
 	test("a long page title is cut to a case title's length", () => {
 		const long = "x".repeat(MAX_TITLE + 20);
 		expect(newCase("c_new", page({ title: long }), NOW).title).toBe(

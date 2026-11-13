@@ -1179,11 +1179,40 @@ export function withComment(
 }
 
 /**
- * The case under a new title (DEC-026: the side panel's Rename), trimmed and
- * cut to `MAX_TITLE`; an empty one is refused, as a case always has a title.
+ * Code points taken out of a title the user gives (Rename) or a page gives
+ * ("Annotate this page"): the C0 and C1 controls (U+0000–U+001F,
+ * U+007F–U+009F), and the bidi embeddings and overrides (U+202A–U+202E) and
+ * isolates (U+2066–U+2069), which would reorder the sentence a title is put
+ * into ("Adding to “…”"). Titles already stored (a file, an older build) are
+ * left as they are.
+ */
+const notInTitle = (cp: number) =>
+	cp <= 0x1f ||
+	(cp >= 0x7f && cp <= 0x9f) ||
+	(cp >= 0x202a && cp <= 0x202e) ||
+	(cp >= 0x2066 && cp <= 0x2069);
+
+/** A character that shows: not a format character, a space or a control. */
+const VISIBLE = /[^\p{Cf}\p{Z}\p{Cc}\s]/u;
+
+/**
+ * `text` as a title: without the code points `notInTitle` names, trimmed;
+ * empty when no character in it shows (U+200B, a no-break space alone).
+ */
+export function cleanTitle(text: string): string {
+	let kept = "";
+	for (const ch of text) if (!notInTitle(ch.codePointAt(0) ?? 0)) kept += ch;
+	kept = kept.trim();
+	return VISIBLE.test(kept) ? kept : "";
+}
+
+/**
+ * The case under a new title (DEC-026: the side panel's Rename), cleaned
+ * (`cleanTitle`) and cut to `MAX_TITLE`; one in which nothing shows is
+ * refused, as a case always has a title.
  */
 export function withTitle(c: Case, title: string, now: string): Case {
-	const text = cutText(title.trim(), MAX_TITLE);
+	const text = cutText(cleanTitle(title), MAX_TITLE);
 	if (text === "") throw new CaseError("A case needs a title.");
 	return { ...c, title: text, updatedAt: now };
 }

@@ -8,6 +8,7 @@
 import {
 	CASE_FORMAT,
 	type Case,
+	cleanTitle,
 	cutText,
 	MAX_TITLE,
 	type PageInfo,
@@ -19,7 +20,7 @@ import { shortUrl } from "./dom.ts";
 
 /** A new case's title: the page's title, else its short address. */
 export function firstTitle(page: Pick<PageInfo, "url" | "title">): string {
-	const title = cutText(page.title.trim(), MAX_TITLE);
+	const title = cutText(cleanTitle(page.title), MAX_TITLE);
 	if (title !== "") return title;
 	const address = cutText(shortUrl(page.url).trim(), MAX_TITLE);
 	return address === "" ? "Untitled case" : address;
@@ -54,7 +55,7 @@ export function isUntouched(
 	typed?: string,
 	typedTitle?: string,
 ): boolean {
-	const title = (typedTitle ?? "").trim();
+	const title = cleanTitle(typedTitle ?? "");
 	return (
 		c.annotations.length === 0 &&
 		c.shots.length === 0 &&

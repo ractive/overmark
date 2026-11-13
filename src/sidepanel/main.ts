@@ -7,6 +7,7 @@
 import {
 	type Annotation,
 	type Case,
+	cleanTitle,
 	markStatus,
 	newId,
 	nextNumbers,
@@ -1099,8 +1100,11 @@ async function startAnnotating(target: Case, tabId?: number): Promise<void> {
  */
 async function renameCase(caseId: string, text: string): Promise<void> {
 	// The field says why an empty title is not saved.
-	if (text.trim() === "") return;
-	if (state.current?.id === caseId && state.current.title === text.trim()) {
+	if (cleanTitle(text) === "") return;
+	if (
+		state.current?.id === caseId &&
+		state.current.title === cleanTitle(text)
+	) {
 		update((s) => (s.renaming = undefined));
 		return;
 	}

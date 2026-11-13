@@ -10,6 +10,7 @@ import {
 	appLabel,
 	type Case,
 	caseCounts,
+	cleanTitle,
 	type FindingApp,
 	GROUP_LABEL,
 	GROUP_OF,
@@ -1061,7 +1062,8 @@ function renderTitle(state: PanelState, p: CaseParts, c: Case): void {
 	}
 	if (p.renameField.value !== renaming.text)
 		p.renameField.value = renaming.text;
-	const empty = renaming.text.trim() === "";
+	// Nothing that shows is no title (cleanTitle, as the save has it).
+	const empty = cleanTitle(renaming.text) === "";
 	p.renameSave.disabled = empty;
 	p.renameField.setAttribute("aria-invalid", String(empty));
 	setHint(p.renameHint, empty ? "A case needs a title." : renaming.error);
