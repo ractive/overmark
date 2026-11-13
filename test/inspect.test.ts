@@ -721,6 +721,9 @@ describe("selector vocabulary (escapes, comments, case)", () => {
 			"button:disabled",
 			"[ name = zip i ]",
 			"[role=button]",
+			// What cssSelector writes for the stored details.
+			'[data-testid="a\\"b"] > div:nth-of-type(2) > #x\\:y',
+			'button[class*="Button_primary"]',
 		])
 			expect(selectorVocabularyProblem(selector)).toBeUndefined();
 	});
