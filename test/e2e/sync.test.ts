@@ -33,6 +33,7 @@ import {
 	openCase,
 	panelHome,
 	READ_DB,
+	renameInPanel,
 	saveAs,
 	shadow,
 	showToolbar,
@@ -263,6 +264,24 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		// Overwritten in place, no "(1)" copy; one entry left in the list, the newest.
 		await until(downloadList, (list) => list.length === 1);
 		expect(await downloadList()).toEqual([downloaded(PAGE_FILE)]);
+
+		// Renamed in the panel: the same file is written again, under the name
+		// it was first written under; no second file (review of PR 57).
+		const item = `document.querySelector('[data-case="${laterCase}"]')`;
+		await h.control.waitFor(item);
+		await h.control.eval(`${item}.click()`);
+		await renameInPanel(h.control, laterCase, "Checkout contrast");
+		const renamed = await until(
+			() => caseIn(PAGE_FILE),
+			(c) => c?.title === "Checkout contrast",
+			20_000,
+		);
+		expect(renamed?.id).toBe(laterCase);
+		expect(
+			await Bun.file(downloaded("checkout-contrast.overmark.zip")).exists(),
+		).toBe(false);
+		await h.control.eval(`document.getElementById("back").click()`);
+		await h.control.waitFor(`!document.getElementById("home").hidden`);
 		expect((await caseIn(FILE))?.verdict).toBe("Written with the panel closed");
 		panel = await openSidePanel(h);
 	}, 90_000);
