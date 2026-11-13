@@ -858,6 +858,25 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 		expect(withReopen(c, "a1", { note: "x" }, T1)).toBe(c);
 	});
 
+	test("the note of the fix a reopen ended is kept to the reopen note's limit", () => {
+		const fixed = withResolution(
+			one(),
+			"a1",
+			{ kind: "fixed", note: "z".repeat(MAX_COMMENT) },
+			T1,
+		);
+		const back = withReopen(fixed, "a1", { note: "Still" }, T2);
+		expect(back.annotations[0]?.reopens?.[0]?.was.note?.length).toBe(
+			MAX_REOPEN_NOTE,
+		);
+		// A file with a longer one is read as it is.
+		const file = JSON.parse(JSON.stringify(back));
+		file.annotations[0].reopens[0].was.note = "z".repeat(MAX_COMMENT);
+		expect(
+			validateCase(file).annotations[0]?.reopens?.[0]?.was.note?.length,
+		).toBe(MAX_COMMENT);
+	});
+
 	test("only a fixed mark can be verified", () => {
 		const c = one();
 		expect(() => withVerified(c, "a1", undefined, T1)).toThrow(

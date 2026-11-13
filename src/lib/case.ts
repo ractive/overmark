@@ -1095,9 +1095,9 @@ export function withVerified(
 }
 
 /**
- * The case with the mark open again: its resolution moves, whole, into a new
- * reopen with `note`, the oldest going past `MAX_REOPENS`. An open mark
- * stays as it is.
+ * The case with the mark open again: its resolution moves, whole (its note
+ * cut to `MAX_REOPEN_NOTE`), into a new reopen with `note`, the oldest going
+ * past `MAX_REOPENS`. An open mark stays as it is.
  */
 export function withReopen(
 	c: Case,
@@ -1129,7 +1129,11 @@ export function withReopen(
 				...(note ? { note } : {}),
 				at: now,
 				...(reopen.app ? { app: reopen.app } : {}),
-				was,
+				// Twenty of them stay: each kept as long as a reopen note, or a
+				// case outgrows what a file may hold.
+				was: was.note
+					? { ...was, note: cutText(was.note, MAX_REOPEN_NOTE) }
+					: was,
 			};
 			return { ...open, reopens: [...reopens, entry].slice(-MAX_REOPENS) };
 		},
