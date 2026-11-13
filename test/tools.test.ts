@@ -840,6 +840,40 @@ describe("tools", () => {
 			expect((await stored())?.resolution?.note).toBe("Hover state too");
 		});
 
+		test("fixed with a note on a verified mark whose note is not the app's: refused", async () => {
+			const c = await seed();
+			const verified = (app?: { id: string; host: string }) =>
+				putCase(store, {
+					...c,
+					annotations: [
+						c.annotations[0] as Annotation,
+						{
+							...(c.annotations[1] as Annotation),
+							resolution: {
+								kind: "fixed",
+								note: "user note",
+								at: "t",
+								...(app ? { app } : {}),
+								verified: { at: "t" },
+							},
+						},
+					],
+				});
+			await verified();
+			await expect(status(2, "fixed", "AI rewrote the note")).rejects.toThrow(
+				"Mark 2 is verified, and its note is not yours: reopen it with a note on what is still wrong instead.",
+			);
+			expect((await stored())?.resolution?.note).toBe("user note");
+			// Another app's.
+			await verified({
+				id: "https://other.example/cimd.json",
+				host: "other.example",
+			});
+			await expect(status(2, "fixed", "x")).rejects.toThrow("is not yours");
+			// No note: nothing to change, nothing refused.
+			expect(await status(2, "fixed")).toBe("Mark 2 is verified already.");
+		});
+
 		test("get_case: status, reopens with who, verified with who", async () => {
 			await seed();
 			await status(2, "fixed", "Darker");

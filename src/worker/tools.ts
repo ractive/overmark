@@ -1119,14 +1119,20 @@ export function createTools(deps: ToolDeps): Tool[] {
 							`Mark ${mark} is verified.`,
 						);
 					case "fixed":
-						// Verified stays: only the note changes.
-						if (was === "verified")
-							return note === undefined
-								? set(c, `Mark ${mark} is verified already.`)
-								: set(
-										withResolutionNote(c, a.id, note, now),
-										`Mark ${mark} stays verified; its note is saved.`,
-									);
+						// Verified stays: only the note changes, and only the
+						// app's own; the user's words no AI app changes.
+						if (was === "verified") {
+							if (note === undefined)
+								return set(c, `Mark ${mark} is verified already.`);
+							if (!ownResolution(a.resolution, app))
+								throw new CaseError(
+									`Mark ${mark} is verified, and its note is not yours: reopen it with a note on what is still wrong instead.`,
+								);
+							return set(
+								withResolutionNote(c, a.id, note, now),
+								`Mark ${mark} stays verified; its note is saved.`,
+							);
+						}
 						return set(
 							withResolution(
 								c,
@@ -1357,6 +1363,12 @@ export function createTools(deps: ToolDeps): Tool[] {
 
 /** The page a confirmation for add_annotation named, by the call's signal. */
 const confirmedPages = new WeakMap<AbortSignal, { id: number; url: string }>();
+
+/** A resolution the AI app `app` set here (not one from a file): its note is the app's. */
+const ownResolution = (
+	r: Resolution | undefined,
+	app: FindingApp | undefined,
+) => app !== undefined && r?.app?.id === app.id && r.imported !== true;
 
 /** What a reopened mark was, in its result. */
 const WAS_LABEL: Record<MarkStatus, string> = {
