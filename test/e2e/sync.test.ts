@@ -170,7 +170,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		expect(await badge()).toBe("");
 	}, 60_000);
 
-	test("an AI app's change with the panel closed is written again, by the worker", async () => {
+	test("with no extension page open, an AI app's change is written again by the worker, and a save by a worker started anew", async () => {
 		const first = claude.callTool({
 			name: "set_summary",
 			arguments: { caseId, summary: "Darker button, as agreed" },

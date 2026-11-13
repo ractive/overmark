@@ -896,7 +896,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(store.current?.problem).not.toContain("Chrome asked");
 	});
 
-	test("no end within the time: failed, and the download cancelled", async () => {
+	test("the wait reported as timed out (the real timer: worker-downloads.test.ts): failed, and the download cancelled", async () => {
 		await add("c_1", "Login");
 		api.next = [{ state: "timeout" }];
 		await sync.request();
