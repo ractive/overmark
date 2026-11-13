@@ -190,3 +190,90 @@ describe("titles, app names and dates in case.md stay on their line as written",
 		).toBe("# It's the\\_name's fix: 1. first, AT&T, 50% off! (see src/a.ts)");
 	});
 });
+
+describe("addresses and paths in case.md link only where they are what they say", () => {
+	const line = (md: string, start: string) =>
+		md.split("\n").find((l) => l.startsWith(start));
+	const page = (url: string) =>
+		line(
+			caseMarkdown({
+				...caseWith("plain"),
+				page: { ...sampleCase().page, url },
+			}),
+			"- Page:",
+		);
+
+	test.each([
+		["https://www.example.com/kk?a=1#b", "<https://www.example.com/kk?a=1#b>"],
+		["http://localhost:3000/", "<http://localhost:3000/>"],
+		["https://example.com/a b<c>", "<https://example.com/a%20b%3Cc%3E>"],
+		["style", "`style`"],
+		["textarea", "`textarea`"],
+		["script", "`script`"],
+		["b", "`b`"],
+		["javascript:alert(1)", "`javascript:alert(1)`"],
+		["data:text/html,<b>x</b>", "`data:text/html,<b>x</b>`"],
+		["ftp://example.com/x", "`ftp://example.com/x`"],
+		["https://", "`https://`"],
+	])("page %p", (url, shown) => {
+		expect(page(url)).toBe(`- Page: ${shown}`);
+	});
+
+	test("a crop, a shot or a screenshot path that is not Overmark's is no link", () => {
+		const c = caseWith("plain");
+		const a = c.annotations[0] as Case["annotations"][number];
+		const md = caseMarkdown({
+			...c,
+			shots: [
+				{
+					id: "s1",
+					image: "x) ![](https://evil.example/s",
+					scrollX: 0,
+					scrollY: 0,
+					viewport: { width: 1, height: 1, dpr: 1 },
+					capturedAt: "t",
+				},
+			],
+			annotations: [
+				{
+					...a,
+					shot: "s1](https://evil.example/",
+					crop: "javascript:alert(1)",
+				},
+			],
+		});
+		// In code spans only: these are every line that names them.
+		expect(md.split("\n").filter((l) => /evil|javascript/.test(l))).toEqual([
+			"- Screenshot: `s1](https://evil.example/`",
+			"Mark 1: `javascript:alert(1)`",
+			"Screenshot s1, scrolled to 0, 0: `x) ![](https://evil.example/s`",
+		]);
+		expect(line(md, "- Screenshot:")).toBe(
+			"- Screenshot: `s1](https://evil.example/`",
+		);
+		expect(md).toContain("\nMark 1: `javascript:alert(1)`\n");
+		expect(md).toContain(
+			"\nScreenshot s1, scrolled to 0, 0: `x) ![](https://evil.example/s`\n",
+		);
+	});
+
+	test("Overmark's own paths stay links", () => {
+		const c = caseWith("plain");
+		const md = caseMarkdown({
+			...c,
+			shots: [
+				{
+					id: "s1",
+					image: "shots/s1.webp",
+					scrollX: 0,
+					scrollY: 0,
+					viewport: { width: 1, height: 1, dpr: 1 },
+					capturedAt: "t",
+				},
+			],
+		});
+		expect(md).toContain("- Screenshot: [s1](shots/s1.webp)");
+		expect(md).toContain("![Mark 1](crops/a1.webp)");
+		expect(md).toContain("![Screenshot s1, scrolled to 0, 0](shots/s1.webp)");
+	});
+});

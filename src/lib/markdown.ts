@@ -9,13 +9,17 @@ import {
 	appLabel,
 	type Case,
 	caseCounts,
+	cropImage,
 	type Finding,
 	type FindingApp,
+	isSafeId,
+	isWebPage,
 	markStatus,
 	RESOLUTION_LABEL,
 	type Resolution,
 	type ShapeKind,
 	STATUS_LABEL,
+	shotImage,
 } from "./case.ts";
 import { summarize } from "./element.ts";
 
@@ -61,6 +65,25 @@ function block(text: string): string {
 /** Text in a code span, on one line. */
 function code(text: string): string {
 	return `\`${text.replace(/\s+/g, " ").replaceAll("`", "'")}\``;
+}
+
+/**
+ * A web page's address as an autolink; anything else (an imported case's
+ * address can be any text: `style`, `javascript:…`) in a code span, where it
+ * is neither HTML nor a link.
+ */
+function address(url: string): string {
+	return isWebPage(url)
+		? `<${url.replace(/[<>\s]/g, encodeURIComponent)}>`
+		: code(url);
+}
+
+/**
+ * An image of the zip by its path, `alt` already inline text: a link only
+ * where the path is the one Overmark gives it, else in a code span.
+ */
+function image(alt: string, path: string, own: string | undefined): string {
+	return path === own ? `![${alt}](${path})` : `${alt}: ${code(path)}`;
 }
 
 /** An AI app's finding: who wrote it and when, then its text as a block. */
@@ -148,9 +171,15 @@ function annotation(a: Annotation): string {
 		lines.push("- Element: none recorded");
 	}
 	lines.push(
-		`- Screenshot: [${a.shot}](shots/${a.shot}.webp)`,
+		isSafeId(a.shot)
+			? `- Screenshot: [${a.shot}](${shotImage(a.shot)})`
+			: `- Screenshot: ${code(a.shot)}`,
 		"",
-		`![Mark ${a.number}](${a.crop})`,
+		image(
+			`Mark ${a.number}`,
+			a.crop,
+			isSafeId(a.id) ? cropImage(a.id) : undefined,
+		),
 		"",
 	);
 	if (a.findings?.length)
@@ -167,7 +196,7 @@ export function caseMarkdown(c: Case): string {
 	const out = [
 		`# ${inline(c.title)}`,
 		"",
-		`- Page: <${c.page.url.replace(/[<>\s]/g, encodeURIComponent)}>`,
+		`- Page: ${address(c.page.url)}`,
 		`- Page title: ${inline(c.page.title)}`,
 		`- Window: ${v.width}×${v.height} CSS pixels, device pixel ratio ${v.dpr}${c.page.lang ? `, language ${inline(c.page.lang)}` : ""}`,
 		`- Created: ${inline(c.createdAt)}, updated: ${inline(c.updatedAt)}`,
@@ -186,7 +215,11 @@ export function caseMarkdown(c: Case): string {
 		"",
 		...c.shots.map(
 			(s) =>
-				`![Screenshot ${s.id}, scrolled to ${Math.round(s.scrollX)}, ${Math.round(s.scrollY)}](${s.image})\n`,
+				`${image(
+					`Screenshot ${inline(s.id)}, scrolled to ${Math.round(s.scrollX)}, ${Math.round(s.scrollY)}`,
+					s.image,
+					isSafeId(s.id) ? shotImage(s.id) : undefined,
+				)}\n`,
 		),
 	];
 	return `${out.join("\n").trimEnd()}\n`;
