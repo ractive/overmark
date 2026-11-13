@@ -23,6 +23,7 @@ import {
 	shapeOnBox,
 	textLength,
 	validateCase,
+	withChoice,
 	withComment,
 	withFinding,
 	withFindingText,
@@ -802,6 +803,38 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 		const again = withResolution(reopened, "a1", { kind: "fixed" }, T4);
 		expect(again.annotations[0]?.reopens?.length).toBe(1);
 		expect(roundTrip(again)).toEqual(again);
+	});
+
+	test("Change… to the same status keeps when and who: only the note changes", () => {
+		const fixed = withResolution(
+			one(),
+			"a1",
+			{ kind: "fixed", note: "Hover state too", app: CLAUDE },
+			T1,
+		);
+		const verified = withVerified(fixed, "a1", undefined, T2);
+		const typo = withChoice(verified, "a1", "verified", "Hover state, too", T3);
+		expect(typo.annotations[0]?.resolution).toEqual({
+			kind: "fixed",
+			note: "Hover state, too",
+			at: T1,
+			app: CLAUDE,
+			verified: { at: T2 },
+		});
+		// Nothing changed: nothing written.
+		expect(
+			withChoice(verified, "a1", "verified", " Hover state too ", T3),
+		).toBe(verified);
+		expect(
+			withChoice(fixed, "a1", "fixed", "Other", T3).annotations[0]?.resolution,
+		).toEqual({ kind: "fixed", note: "Other", at: T1, app: CLAUDE });
+		// Another status: the resolution is the user's, now.
+		expect(
+			withChoice(verified, "a1", "fixed", "", T3).annotations[0]?.resolution,
+		).toEqual({ kind: "fixed", at: T3 });
+		expect(statusOf(withChoice(one(), "a1", "verified", "", T3))).toBe(
+			"verified",
+		);
 	});
 
 	test("an open mark reopened, or a verified one verified, stays as it is", () => {

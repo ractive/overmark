@@ -9,13 +9,12 @@ import {
 	type Case,
 	markStatus,
 	nextNumbers,
-	resolutionFor,
 	validateCase,
+	withChoice,
 	withComment,
 	withoutAnnotation,
 	withoutFinding,
 	withReopen,
-	withResolution,
 	withVerified,
 } from "../lib/case.ts";
 import {
@@ -1020,12 +1019,7 @@ const actions: Actions = {
 	resolveMark(c, a, kind, note) {
 		const now = new Date().toISOString();
 		void changeMark(c.id, a.id, (current) => ({
-			value: withResolution(
-				current,
-				a.id,
-				{ ...resolutionFor(kind), note },
-				now,
-			),
+			value: withChoice(current, a.id, kind, note, now),
 		}));
 	},
 

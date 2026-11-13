@@ -995,6 +995,31 @@ export function withResolution(
 	);
 }
 
+/**
+ * The panel's Resolve… and Change…: another status replaces the resolution;
+ * the same status again keeps when and by whom it was set, and changes only
+ * the note, if that differs.
+ */
+export function withChoice(
+	c: Case,
+	annotationId: string,
+	choice: ResolveChoice,
+	note: string,
+	now: string,
+): Case {
+	const a = c.annotations.find((x) => x.id === annotationId);
+	if (a?.resolution && markStatus(a) === choice)
+		return (a.resolution.note ?? "") === cutText(note.trim(), MAX_COMMENT)
+			? c
+			: withResolutionNote(c, annotationId, note, now);
+	return withResolution(
+		c,
+		annotationId,
+		{ ...resolutionFor(choice), note },
+		now,
+	);
+}
+
 /** The case with the resolution's note replaced, nothing else of it. */
 export function withResolutionNote(
 	c: Case,
