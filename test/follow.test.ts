@@ -1,13 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import type { Case } from "../src/lib/case.ts";
 import type { AnnotationMatch } from "../src/lib/messages.ts";
 import {
 	canDrawOn,
+	dashDrawn,
 	type FollowInput,
 	followStep,
 	foundText,
 	isUnsure,
 	noneFound,
 } from "../src/sidepanel/follow.ts";
+import { sampleCase } from "./fixtures.ts";
 
 const web = { id: 1, url: "http://localhost:3000/kk", loading: false };
 
@@ -226,29 +229,103 @@ describe("what a draw found, in a line (DEC-024)", () => {
 		).toBe(true);
 	});
 
+	const rect = { x: 0, y: 0, width: 10, height: 10 };
+	const SHAPES = {
+		element: { kind: "element", rect },
+		box: { kind: "box", rect },
+		note: { kind: "note", at: { x: 5, y: 5 } },
+	} as const;
+	/** A case on https://x.ch/kk with one mark per match, of these shapes. */
+	const caseOf = (shapes: (keyof typeof SHAPES)[], shotUrl?: string): Case => ({
+		...sampleCase("c_dash"),
+		page: { ...sampleCase("c_dash").page, url: "https://x.ch/kk" },
+		shots: [
+			{
+				id: "s1",
+				image: "shots/s1.webp",
+				scrollX: 0,
+				scrollY: 0,
+				...(shotUrl ? { url: shotUrl } : {}),
+			} as Case["shots"][number],
+		],
+		annotations: shapes.map(
+			(shape, i) =>
+				({
+					id: `a${i + 1}`,
+					number: i + 1,
+					shot: "s1",
+					comment: "",
+					author: "user",
+					shape: SHAPES[shape],
+					crop: `crops/a${i + 1}.webp`,
+					element: null,
+				}) as Case["annotations"][number],
+		),
+	});
+	const HERE = "https://x.ch/kk?tab=2";
+
 	test("all found and sure: the count and the page, no word on colours", () => {
-		expect(
-			foundText([match(1, "found"), match(2, "found")], "127.0.0.1/v2"),
-		).toBe("2 of 2 marks found on 127.0.0.1/v2.");
+		const matches = [match(1, "found"), match(2, "found")];
+		expect(dashDrawn(caseOf(["element", "element"]), matches, HERE)).toBe(
+			false,
+		);
+		expect(foundText(matches, "127.0.0.1/v2", false)).toBe(
+			"2 of 2 marks found on 127.0.0.1/v2.",
+		);
 	});
 
-	test("the dash is explained only where one is drawn", () => {
+	test("an unsure mark with a stroke is dashed: the line says so", () => {
+		const matches = [match(1, "found"), match(2, "probable"), match(3, "lost")];
+		const c = caseOf(["element", "element", "element"]);
+		expect(dashDrawn(c, matches, HERE)).toBe(true);
 		expect(
-			foundText(
-				[match(1, "found"), match(2, "probable"), match(3, "lost")],
-				"127.0.0.1/v2",
-			),
+			foundText(matches, "127.0.0.1/v2", dashDrawn(c, matches, HERE)),
 		).toBe("2 of 3 marks found on 127.0.0.1/v2. Dashed: unsure.");
-		expect(foundText([match(1, "found"), match(2, "lost")], "x.ch")).toBe(
+	});
+
+	test("a lost mark is not drawn: no dash, no word", () => {
+		const matches = [match(1, "found"), match(2, "lost")];
+		const c = caseOf(["element", "element"]);
+		expect(foundText(matches, "x.ch", dashDrawn(c, matches, HERE))).toBe(
 			"1 of 2 marks found on x.ch.",
 		);
-		expect(foundText([match(1, "no-element")], "x.ch")).toBe(
+	});
+
+	test("a note is its pin alone: unsure or without an element, it draws no dash", () => {
+		const c = caseOf(["note", "note"]);
+		const matches = [match(1, "probable"), match(2, "no-element")];
+		expect(dashDrawn(c, matches, HERE)).toBe(false);
+		expect(foundText(matches, "x.ch", dashDrawn(c, matches, HERE))).toBe(
+			"1 of 2 marks found on x.ch.",
+		);
+	});
+
+	test("a mark without an element is drawn, dashed, only on the route of its screenshot", () => {
+		const matches = [match(1, "no-element")];
+		// The case's page, and the page in front is that route.
+		expect(dashDrawn(caseOf(["box"]), matches, HERE)).toBe(true);
+		expect(foundText(matches, "x.ch", true)).toBe(
 			"0 of 1 marks found on x.ch. Dashed: unsure.",
 		);
+		// Another route in front: review.ts draws nothing there.
+		expect(dashDrawn(caseOf(["box"]), matches, "https://x.ch/other")).toBe(
+			false,
+		);
+		// The mark's own screenshot was taken on another route of the app.
+		expect(
+			dashDrawn(caseOf(["box"], "https://x.ch/kk/step-2"), matches, HERE),
+		).toBe(false);
+		expect(
+			dashDrawn(
+				caseOf(["box"], "https://x.ch/kk/step-2"),
+				matches,
+				"https://x.ch/kk/step-2",
+			),
+		).toBe(true);
 	});
 
 	test("it names no colour: a mark's colour is its status", () => {
-		const said = foundText([match(1, "probable")], "x.ch");
+		const said = foundText([match(1, "probable")], "x.ch", true);
 		expect(said).not.toMatch(/green|amber/i);
 	});
 });

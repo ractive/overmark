@@ -45,6 +45,7 @@ import {
 } from "./download.ts";
 import {
 	type Drawn,
+	dashDrawn,
 	followStep,
 	foundText,
 	isFound,
@@ -273,7 +274,11 @@ async function loadInto(
 		hint(
 			noneFound(result.matches) && !settling
 				? undefined
-				: foundText(result.matches, shortUrl(result.url)),
+				: foundText(
+						result.matches,
+						shortUrl(result.url),
+						dashDrawn(c, result.matches, result.url),
+					),
 		);
 		return { found, total: result.matches.length };
 	} catch (error) {
@@ -300,7 +305,13 @@ async function readLoaded(c: Case, tabId: number): Promise<void> {
 		};
 	});
 	if (!noneFound(result.matches))
-		hint(foundText(result.matches, shortUrl(result.url)));
+		hint(
+			foundText(
+				result.matches,
+				shortUrl(result.url),
+				dashDrawn(c, result.matches, result.url),
+			),
+		);
 }
 
 /**

@@ -5,6 +5,7 @@
  * page. Pure: main.ts carries the steps out.
  */
 
+import { type Case, samePath } from "../lib/case.ts";
 import type { AnnotationMatch } from "../lib/messages.ts";
 
 /** Where the panel's own marks of a case are drawn. */
@@ -108,17 +109,39 @@ export const isUnsure = (m: AnnotationMatch): boolean =>
 		!(m.status !== "ambiguous" && m.candidates[m.current]?.found === true));
 
 /**
+ * Whether the draw of `c`'s marks on the page at `url` drew a dashed one, as
+ * review.ts and the overlay do it: an unsure mark has a dashed stroke, but a
+ * note is its pin alone, and a mark without an element is drawn only on the
+ * route its screenshot was taken on.
+ */
+export function dashDrawn(
+	c: Case,
+	matches: readonly AnnotationMatch[],
+	url: string,
+): boolean {
+	return matches.some((m) => {
+		if (!isUnsure(m)) return false;
+		const a = c.annotations.find((x) => x.id === m.annotationId);
+		if (a === undefined || a.shape.kind === "note") return false;
+		if (m.status !== "no-element") return true;
+		const shot = c.shots.find((x) => x.id === a.shot);
+		return samePath(shot?.url ?? c.page.url, url);
+	});
+}
+
+/**
  * What a draw found, in the case's This-tab block; `page` is the page's short
  * address. The page shows the rest: a mark's colour is its status, and only
- * the dash needs a word.
+ * the dash needs a word, where one was drawn (`dashed`, see `dashDrawn`).
  */
 export function foundText(
 	matches: readonly AnnotationMatch[],
 	page: string,
+	dashed: boolean,
 ): string {
 	const found = matches.filter(isFound).length;
 	const said = `${found} of ${matches.length} marks found on ${page}.`;
-	return matches.some(isUnsure) ? `${said} Dashed: unsure.` : said;
+	return dashed ? `${said} Dashed: unsure.` : said;
 }
 
 /**
