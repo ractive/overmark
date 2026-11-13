@@ -446,10 +446,6 @@ async function follow(): Promise<void> {
 	if ((await frontTab())?.id !== front?.id || !work.current()) return;
 	// The panel went on to another case, or back to the list, meanwhile.
 	if (state.current?.id !== c.id || !showing(c.id)) return;
-	// A toolbar drawing a new case there goes, as opening the case hides it
-	// on the tab in front (DEC-023).
-	if (front !== undefined && page?.visible && page.target === undefined)
-		void hideNewCase(front.id);
 	const step = followStep({
 		caseId: c.id,
 		tab: front,
@@ -565,10 +561,9 @@ let adopting: string | undefined;
 
 /**
  * On Home, a toolbar on the tab in front that adds to a stored case opens
- * that case (DEC-023): so "Save case…" opens the new case, and a panel
- * opened again is in the case the toolbar adds to; one whose case is gone
- * draws a new case. The page is asked once more, so news older than "← All
- * cases" opens nothing.
+ * that case (DEC-023): a panel opened again is in the case the toolbar adds
+ * to; one whose case is gone ends (DEC-026). The page is asked once more, so
+ * news older than "← All cases" opens nothing.
  */
 async function adopt(): Promise<void> {
 	const tabId = state.tab?.id;
@@ -704,28 +699,7 @@ function openCase(id: string): void {
 		s.leaving = undefined;
 	});
 	followed = undefined;
-	void hideNewCase();
 	void refreshCase();
-}
-
-/**
- * A toolbar drawing a new case on the tab in front (or on `tabId`) goes when
- * a case opens or the open case follows to that tab (DEC-023): it would add
- * to no case the panel shows. Its marks stay on the page, and "Add marks"
- * puts them into the case.
- */
-async function hideNewCase(tabId?: number): Promise<void> {
-	const id = tabId ?? (await activeTab())?.id;
-	if (id === undefined) return;
-	const now = await overlayState(id);
-	if (!now?.visible || now.target !== undefined) return;
-	const after = (await chrome.tabs
-		.sendMessage(id, { type: "overlay:hide" })
-		.catch(() => undefined)) as OverlayState | undefined;
-	if (after !== undefined)
-		update((s) => {
-			if (s.tab?.id === id) s.overlay = after;
-		});
 }
 
 /**

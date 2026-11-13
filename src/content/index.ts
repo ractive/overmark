@@ -192,15 +192,11 @@ function start(): void {
 			switch (message.type) {
 				case "overlay:show":
 					annotator.show({
-						...(message.target ? { target: message.target } : {}),
+						target: message.target,
 						...(message.blurForms !== undefined
 							? { blurForms: message.blurForms }
 							: {}),
 					});
-					sendResponse(state());
-					break;
-				case "overlay:hide":
-					annotator.hide();
 					sendResponse(state());
 					break;
 				case "overlay:end":

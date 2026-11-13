@@ -8,7 +8,7 @@ import type { Inspection, Relation } from "./inspect.ts";
 import type { MatchStatus } from "./match.ts";
 import type { SaveRequest } from "./save.ts";
 
-/** Annotations go into this existing case instead of a new one. */
+/** The case a toolbar adds its marks to (DEC-026: there is always one). */
 export interface AnnotateTarget {
 	caseId: string;
 	title: string;
@@ -19,12 +19,11 @@ export interface AnnotateTarget {
 export type ContentRequest =
 	| {
 			type: "overlay:show";
-			/** Add to this case; a new case when absent. */
-			target?: AnnotateTarget;
+			/** Add to this case: a toolbar never draws a case of its own. */
+			target: AnnotateTarget;
 			/** Blur form fields while capturing (password fields always). */
 			blurForms?: boolean;
 	  }
-	| { type: "overlay:hide" }
 	/**
 	 * The side panel closes the case (DEC-023): a toolbar adding to it
 	 * finishes as its Done does and, once hidden, adds to no case any more
@@ -203,7 +202,10 @@ export interface OverlayState {
 	visible: boolean;
 	url: string;
 	title: string;
-	/** Marks drawn and not saved yet. */
+	/**
+	 * Marks drawn and not in the case yet: a comment being typed, one on its
+	 * way, or one that could not be added (DEC-014).
+	 */
 	drafts: number;
 	saving: boolean;
 	target?: AnnotateTarget;

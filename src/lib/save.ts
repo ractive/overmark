@@ -79,9 +79,14 @@ export const MAX_NUMBER_GAP = 100;
 /**
  * A save the content script sent (`case:save`): its marks are the user's,
  * whatever the draft says. Only an AI app's `add_annotation`, in the worker,
- * stores a mark of an AI app (CR-07).
+ * stores a mark of an AI app (CR-07). A page adds to a case and makes none:
+ * the side panel creates every case (DEC-026).
  */
 export function fromPage(request: SaveRequest): SaveRequest {
+	if (request.isNew)
+		throw new SaveError(
+			"a page adds marks to an existing case; the side panel creates cases.",
+		);
 	return {
 		...request,
 		fromPage: true,

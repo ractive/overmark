@@ -1,7 +1,8 @@
 /**
  * `overlay:end` on the page's toolbar (DEC-023): the side panel closes the
  * case, and the toolbar finishes as its Done does, then adds to no case any
- * more; a mark that could not be added keeps it up, unless `discard`.
+ * more; a mark that could not be added keeps it up, unless `discard`. The
+ * toolbar always adds to a case (DEC-026).
  */
 
 import {
@@ -145,7 +146,7 @@ const settle = async (a: AnnotatorClass, done: () => boolean) => {
 	return a;
 };
 
-test("the target is cleared and the toolbar hidden: the next show is a new case", async () => {
+test("the target is cleared and the toolbar hidden: it adds to no case until shown for one", async () => {
 	const { a, overlay } = annotator();
 	a.show({ target });
 	expect(a.state().target?.caseId).toBe("c_open");
@@ -155,12 +156,36 @@ test("the target is cleared and the toolbar hidden: the next show is a new case"
 	await a.end("c_open");
 	expect(a.state().visible).toBe(false);
 	expect(a.state().target).toBeUndefined();
-	a.show({});
-	expect(a.state().target).toBeUndefined();
+	// Shown again only for a case (DEC-026): the next one.
+	a.show({ target: { caseId: "c_next", title: "Next", nextAnnotation: 1 } });
+	expect(a.state().target?.caseId).toBe("c_next");
 	const status = overlay.toolbar.querySelector('[data-role="status"]');
-	expect(status?.textContent).toBe("New case: choose a tool");
+	expect(status?.textContent).toBe("Adding to “Next”");
 	// No New case button any more (DEC-023).
 	expect(overlay.toolbar.querySelector('[data-action="new-case"]')).toBeNull();
+});
+
+test("the toolbar draws no case of its own: no Save case…, no title, no Close (DEC-026)", () => {
+	const { a, overlay } = annotator();
+	a.show({ target });
+	const actions = [...overlay.toolbar.querySelectorAll("button")].map(
+		(b) => b.dataset["action"],
+	);
+	expect(actions).toEqual([
+		"tool-element",
+		"tool-box",
+		"tool-arrow",
+		"tool-pen",
+		"tool-note",
+		"undo",
+		"close",
+		"move-toolbar",
+	]);
+	expect(overlay.toolbar.querySelector("input")).toBeNull();
+	expect(
+		overlay.toolbar.querySelector<HTMLElement>('[data-action="close"]')
+			?.textContent,
+	).toBe("Done");
 });
 
 test("a toolbar hidden by its own Done still drops its case", async () => {
@@ -201,23 +226,25 @@ test("a mark that could not be added keeps the toolbar up and the case; discard 
 	expect(asked.some((r) => r.type === "case:save")).toBe(false);
 });
 
-test("the page tells the side panel when its drafts or its case change", async () => {
+test("the page tells the side panel when its marks not in the case or its case change", async () => {
 	const { a, overlay } = annotator();
 	let told = 0;
 	overlay.onChange = () => told++;
-	a.show({});
+	a.show({ target });
 	const shown = told;
+	expect(shown).toBeGreaterThan(0);
 	answer = noShots;
 	note(overlay, a);
 	expect(told).toBeGreaterThan(shown);
 	expect(a.state().drafts).toBe(1);
-	const status = overlay.toolbar.querySelector('[data-role="status"]');
-	expect(status?.textContent).toBe("New case: 1 mark");
-	// The screenshot it asked for is over before the page goes.
-	await settle(
-		a,
-		() => status?.textContent?.startsWith("No screenshot") ?? false,
-	);
+	const alert = () =>
+		overlay.toolbar.querySelector('[data-role="alert"]')?.textContent ?? "";
+	// A failed write, not a draft: it says so, and stays for Add mark 3.
+	await settle(a, () => alert().startsWith("Mark 3 was not added"));
+	expect(
+		overlay.toolbar.querySelector('[data-action="retry"]')?.textContent,
+	).toBe("Add mark 3");
+	await a.end("c_open", { discard: true });
 });
 
 test("All cases after the toolbar's Done left a mark out tries it once more, and says so", async () => {
@@ -260,46 +287,42 @@ test("a case loaded onto the page leaves Undo its marks, whatever copy it is", a
 	expect(undo()?.title).toBe("Take mark 3 out of “Open case”");
 });
 
-test("All cases during a new case's save: a show for that case waiting for it is dropped", async () => {
+test("All cases during another case's add: a show for that case waiting for it is dropped", async () => {
 	let release: () => void = () => undefined;
 	const held = new Promise<void>((r) => {
 		release = r;
 	});
-	const { a, overlay } = annotator();
-	a.show({});
-	note(overlay, a);
 	answer = (r) => {
 		if (r.type !== "case:save") return works(r);
 		return held.then(() => works(r));
 	};
-	const saving = a.save("A new one");
+	const { a, overlay } = annotator();
+	a.show({ target });
+	note(overlay, a);
 	await settle(a, () => a.state().saving);
-	// The panel opens case X and Add marks: the show waits for the save.
+	// The panel opens case X and Add marks: the show waits for the add.
 	a.show({ target: { caseId: "c_x", title: "X", nextAnnotation: 1 } });
-	// "← All cases" for X before the save is over.
+	// "← All cases" for X before the add is over.
 	await a.end("c_x");
 	release();
-	await saving;
+	await settle(a, () => !a.state().saving);
 	expect(a.state().target?.caseId).not.toBe("c_x");
 	expect(a.state().visible).toBe(false);
 });
 
-test("every button of the toolbar that can be an icon alone has a tooltip, Close too", () => {
+test("every button of the toolbar that can be an icon alone has a tooltip, Done too", () => {
 	const { a, overlay } = annotator();
-	a.show({});
+	a.show({ target });
 	const bare = () =>
 		[...overlay.toolbar.querySelectorAll("button")]
 			.filter((b) => b.querySelector("svg") !== null && !b.disabled)
 			.filter((b) => b.title === "")
 			.map((b) => b.dataset["action"]);
-	// A new case: the tools, Close and the move button.
+	// The tools, Done and the move button.
 	expect(bare()).toEqual([]);
 	expect(
 		overlay.toolbar.querySelector<HTMLElement>('[data-action="close"]')?.title,
-	).toBe("Close the toolbar; the marks stay on this page");
-	// Adding to a case: Done says what it does too.
-	a.show({ target });
-	expect(bare()).toEqual([]);
+	).toBe("Stop adding marks");
 });
 
 test("a rename reaches the toolbar adding to the case, and only that one (DEC-026)", async () => {

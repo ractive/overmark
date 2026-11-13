@@ -21,6 +21,7 @@ import {
 	undoAdd,
 } from "../src/lib/save.ts";
 import { MemoryStore } from "../src/lib/store.ts";
+import { putCase, sampleCase } from "./fixtures.ts";
 
 const page = {
 	url: "https://www.example.com/kk",
@@ -350,11 +351,12 @@ describe("saveCase", () => {
 
 	test("a save from the page is the user's: an AI author in its draft does not count (CR-07)", async () => {
 		const store = new MemoryStore();
+		await putCase(store, sampleCase("c_1"));
 		await captured(store, "c_1", "p_a");
 		const ai = { ...draft(1, "p_a"), author: "ai" as const };
 		const saved = await saveCase(
 			store,
-			fromPage(request("c_1", true, [shot("p_a")], [ai, draft(2, "p_a")])),
+			fromPage(request("c_1", false, [shot("p_a")], [ai, draft(2, "p_a")])),
 			crop,
 		);
 		expect(saved.annotations.map((a) => a.author)).toEqual(["user", "user"]);
@@ -375,6 +377,56 @@ describe("saveCase", () => {
 			"user",
 			"ai",
 		]);
+	});
+
+	test("a page makes no case: the side panel creates them (DEC-026)", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_1", "p_a");
+		expect(() =>
+			fromPage(request("c_1", true, [shot("p_a")], [draft(1, "p_a")])),
+		).toThrow("a page adds marks to an existing case");
+		expect(await store.getCase("c_1")).toBeUndefined();
+	});
+
+	test("the first mark of a case Annotate this page made: s1 and a1, the case's page and title kept (DEC-026)", async () => {
+		const store = new MemoryStore();
+		const empty = await putCase(store, {
+			...sampleCase("c_1"),
+			title: "Your cart",
+		});
+		expect(nextNumbers(empty)).toEqual({ annotation: 1, shot: 1 });
+		await captured(store, "c_1", "p_a");
+		const saved = await saveCase(
+			store,
+			fromPage({
+				...request("c_1", false, [shot("p_a")], [draft(1, "p_a")]),
+				// The toolbar sends the page as it is now: the case keeps its own.
+				page: { ...page, url: "https://elsewhere.example/" },
+				keepPending: true,
+			}),
+			crop,
+		);
+		expect(saved.title).toBe("Your cart");
+		expect(saved.page).toEqual(empty.page);
+		expect(saved.createdAt).toBe(empty.createdAt);
+		expect(saved.shots.map((s) => s.id)).toEqual(["s1"]);
+		expect(saved.annotations.map((a) => [a.id, a.shot])).toEqual([
+			["a1", "s1"],
+		]);
+		// Undo of that first mark leaves the case as it was made: empty.
+		const undone = await undoAdd(
+			store,
+			"c_1",
+			"a1",
+			{ shot: "s1", comment: "comment 1" },
+			new Date("2026-11-04T10:05:00Z"),
+		);
+		expect(undone).toEqual({ removed: true, next: 1 });
+		const after = (await store.getCase("c_1")) as Case;
+		expect(after.annotations).toEqual([]);
+		expect(after.shots).toEqual([]);
+		expect(after.lastNumber).toBeUndefined();
+		expect(validateCase(after)).toEqual(after);
 	});
 
 	test("a save from the page cannot choose a number far above the case's next (review of PR 45)", async () => {
@@ -407,13 +459,14 @@ describe("saveCase", () => {
 		);
 		expect(gap.annotations.at(-1)?.number).toBe(3 + MAX_NUMBER_GAP);
 		// Several marks in one save: each may be one more.
+		await putCase(store, sampleCase("c_2"));
 		await captured(store, "c_2", "p_a");
 		const many = Array.from({ length: 5 }, (_, i) =>
 			draft(i + 1 + MAX_NUMBER_GAP, "p_a"),
 		);
 		const saved = await saveCase(
 			store,
-			fromPage(request("c_2", true, [shot("p_a")], many)),
+			fromPage(request("c_2", false, [shot("p_a")], many)),
 			crop,
 		);
 		expect(saved.annotations).toHaveLength(5);
