@@ -930,7 +930,11 @@ const actions: Actions = {
 		})();
 	},
 
-	addMarks: (c) => void startAnnotating(c),
+	addMarks: (c) => {
+		// The marks drawn now show, whatever the list was filtered by.
+		update((s) => (s.markFilter = undefined));
+		void startAnnotating(c);
+	},
 
 	exportCase(c) {
 		// Chrome asks only during a click: nothing may be awaited before this.
