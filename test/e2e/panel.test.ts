@@ -1171,6 +1171,33 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			},
 		);
 
+		slowTest(
+			"an import that ends while another case is open leaves that case open",
+			async () => {
+				const { page, caseId } = await inCaseWithMarks("Open while importing");
+				await importFile(
+					"other.overmark.zip",
+					await zipOf(sampleCase("c_imported_meanwhile")),
+				);
+				await until(
+					async () => (await storedCase("c_imported_meanwhile")) !== undefined,
+					"the import",
+				);
+				await Bun.sleep(500);
+				expect(
+					await h.control.eval<string | undefined>(
+						`${id("verdict")}?.dataset.case`,
+					),
+				).toBe(caseId);
+				await h.control.eval(`${back}.click()`);
+				await h.control.waitFor(`!${id("home")}.hidden`);
+				await h.control.waitFor(
+					`${id("import-done")}.textContent.includes("Imported")`,
+				);
+				await page.send("Page.close");
+			},
+		);
+
 		slowTest("Hide holds through a reload of that tab", async () => {
 			const { page, tabId } = await inCaseWithMarks("Hidden through a reload");
 			await h.control.waitFor(

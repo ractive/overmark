@@ -933,8 +933,14 @@ async function finishImport(
 			batch.stored++;
 			return await importRest(batch);
 		}
-		// Its marks are drawn on the tab in front, as for any case opened.
-		openCase(c.id);
+		// Its marks are drawn on the tab in front, as for any case opened;
+		// but not over a case opened meanwhile, whose toolbar may be up
+		// (DEC-023): the list shows it.
+		if (state.view.kind === "home") openCase(c.id);
+		else {
+			update((s) => (s.importDone = `Imported “${c.title}”.`));
+			void refreshCases();
+		}
 	} catch (error) {
 		update(
 			(s) =>
