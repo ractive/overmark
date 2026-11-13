@@ -26,7 +26,7 @@ import {
 	TARGET_KEY,
 	targetIdOf,
 } from "../lib/sync.ts";
-import { askForDownloads } from "./download.ts";
+import { askForDownloads, DOWNLOADS } from "./download.ts";
 import type { PanelState } from "./state.ts";
 import type { SyncActions } from "./sync-view.ts";
 
@@ -87,6 +87,8 @@ export function startSync(
 ): PanelSync {
 	/** The folder as last read, for a click that must not wait for the database. */
 	let current: (ChosenFolder & { handle: WindowFolder }) | undefined;
+	/** Where it syncs, as last read. */
+	let target: string | undefined;
 	/** The problem `refresh` shows while the database cannot be read. */
 	let unreadable: string | undefined;
 
@@ -114,6 +116,7 @@ export function startSync(
 				? (choice.folder as typeof current)
 				: undefined;
 		const id = targetIdOf(choice);
+		target = choice?.target;
 		const was = unreadable;
 		unreadable = undefined;
 		update((s) => {
@@ -205,9 +208,16 @@ export function startSync(
 	}
 
 	function syncStop(): void {
+		const fromDownloads = target === "downloads";
 		// A folder stays known: choosing it again keeps what was written there.
 		void stopSyncing(kv).then(
 			() => {
+				// The permission goes back with it: Export or Sync to Downloads asks
+				// again. (A build that has it at install cannot give it back.)
+				if (fromDownloads)
+					void Promise.resolve()
+						.then(() => chrome.permissions.remove(DOWNLOADS))
+						.catch(() => undefined);
 				update((s) => {
 					s.sync.problem = undefined;
 					s.sync.changing = false;

@@ -150,6 +150,15 @@ class MemorySyncStore implements SyncStore {
 
 const NOW = new Date("2026-11-12T09:30:00Z");
 
+/** Wait until `done` holds, at most a second. */
+async function until(done: () => boolean | Promise<boolean>): Promise<void> {
+	for (let i = 0; i < 100; i++) {
+		if (await done()) return;
+		await Bun.sleep(10);
+	}
+	throw new Error("timed out");
+}
+
 describe("the sync to a folder (DEC-021)", () => {
 	let cases: MemoryStore;
 	let folder: FakeFolder;
@@ -1061,6 +1070,57 @@ describe("the sync's database, opened when first used", () => {
 			expect(state.sync.target).toBe("folder");
 			expect(state.sync.folder).toBe("iCloud");
 			expect(state.sync.status?.state).toBe("paused");
+		} finally {
+			globals["chrome"] = chromeBefore;
+		}
+	});
+
+	test("Stop syncing to Downloads gives the downloads permission back", async () => {
+		const globals = globalThis as unknown as Record<string, unknown>;
+		const chromeBefore = globals["chrome"];
+		const removed: unknown[] = [];
+		globals["chrome"] = {
+			runtime: { sendMessage: () => Promise.resolve() },
+			permissions: {
+				remove: async (p: unknown) => {
+					removed.push(p);
+					return true;
+				},
+			},
+		};
+		try {
+			const state = initialState();
+			const kv = referenceKv();
+			await chooseDownloads(kv);
+			const panel = startSync((change) => change(state), kv);
+			await panel.refresh();
+			panel.syncStop();
+			await until(() => removed.length > 0);
+			expect(removed).toEqual([{ permissions: ["downloads"] }]);
+			expect(await kvSyncStore(kv).choice()).toBeUndefined();
+		} finally {
+			globals["chrome"] = chromeBefore;
+		}
+	});
+
+	test("Stop syncing to a folder leaves the permission alone", async () => {
+		const globals = globalThis as unknown as Record<string, unknown>;
+		const chromeBefore = globals["chrome"];
+		const removed: unknown[] = [];
+		globals["chrome"] = {
+			runtime: { sendMessage: () => Promise.resolve() },
+			permissions: { remove: async (p: unknown) => removed.push(p) },
+		};
+		try {
+			const state = initialState();
+			const kv = referenceKv();
+			await chooseFolder(kv, new FakeFolder(), () => "f_1");
+			const panel = startSync((change) => change(state), kv);
+			await panel.refresh();
+			panel.syncStop();
+			await until(async () => (await kvSyncStore(kv).choice()) === undefined);
+			await Bun.sleep(5);
+			expect(removed).toEqual([]);
 		} finally {
 			globals["chrome"] = chromeBefore;
 		}

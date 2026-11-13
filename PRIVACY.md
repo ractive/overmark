@@ -163,8 +163,8 @@ Overmark does not sell data, use it for advertising, or pass it to anyone else.
   that case's earlier file, and to take its own previous entry out of Chrome's download
   list (the file stays). It does not read, change or open your other downloads. With a
   no, the export is saved as before, without the path, the sync to Downloads does not
-  start, and Chrome asks again only when you click again. You can take it back in
-  Chrome's extension settings; the sync then pauses and says so.
+  start, and Chrome asks again only when you click again. "Stop syncing" gives it back
+  when the sync went to Downloads; Export or "Sync to Downloads" asks for it again.
 - **Single sites (optional):** when you open a case's page from its address, or show a
   case's marks on a tab where Overmark may not run yet ("Show marks on this tab" or the
   case's Load button), Chrome asks whether Overmark may run on that case's site from
