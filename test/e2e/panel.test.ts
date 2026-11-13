@@ -1150,6 +1150,27 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			},
 		);
 
+		slowTest(
+			"a tab that does not answer the end does not hold the panel in the case",
+			async () => {
+				const { page, tabId } = await inCaseWithMarks("A silent tab");
+				// Frozen by Chrome, or a page in an alert(): no answer, ever.
+				await wrapSend(`(tabId, message, send) =>
+					message.type === "overlay:end" ? new Promise(() => {}) : send(tabId, message)`);
+				await h.control.eval(`${back}.click()`);
+				await h.control.waitFor(
+					`${id("leave-hint")}.textContent === "Finishing the marks…"`,
+				);
+				await h.control.waitFor(`!${id("home")}.hidden`, 30_000);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to go",
+				);
+				await openPanel();
+				await page.send("Page.close");
+			},
+		);
+
 		slowTest("Hide holds through a reload of that tab", async () => {
 			const { page, tabId } = await inCaseWithMarks("Hidden through a reload");
 			await h.control.waitFor(

@@ -656,6 +656,14 @@ async function hideNewCase(tabId?: number): Promise<void> {
 }
 
 /**
+ * A tab's answer to `overlay:end` comes once its marks are in, or not: a mark
+ * may wait for an AI app's screenshot (10 s) and take its own (8 s at most).
+ * A tab that says nothing for longer (frozen by Chrome, a page in an
+ * `alert()`) counts as ended.
+ */
+const END_TIMEOUT_MS = 20_000;
+
+/**
  * End the toolbar adding to the case (`overlay:end`) on the tab in front and
  * wherever the panel put it up for the case; answers how many marks are
  * still not in the case where a toolbar stays up for it, and the state of
@@ -670,9 +678,12 @@ async function endToolbars(
 	if (front !== undefined) tabs.add(front);
 	const answers = await Promise.all(
 		[...tabs].map(async (tabId) => {
-			const answer = (await chrome.tabs
-				.sendMessage(tabId, { type: "overlay:end", caseId, ...how })
-				.catch(() => undefined)) as OverlayState | undefined;
+			const answer = (await Promise.race([
+				chrome.tabs
+					.sendMessage(tabId, { type: "overlay:end", caseId, ...how })
+					.catch(() => undefined),
+				sleep(END_TIMEOUT_MS),
+			])) as OverlayState | undefined;
 			return { tabId, answer };
 		}),
 	);
@@ -725,17 +736,23 @@ async function leaveCase(): Promise<void> {
 	update((s) => (s.leaving = { phase: "finishing" }));
 	// A refresh read before the end would show the toolbar as it was.
 	tabWork.cancel();
-	const { left, front } = await endToolbars(caseId, { retry });
-	// Closed meanwhile (deleted elsewhere), or opened again.
-	if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
-	if (left > 0) {
-		update((s) => {
-			s.leaving = { phase: "blocked", left };
-			if (front !== undefined) s.overlay = front;
-		});
-		return;
+	try {
+		const { left, front } = await endToolbars(caseId, { retry });
+		// Closed meanwhile (deleted elsewhere), or opened again.
+		if (!showing(caseId) || leavingNow()?.phase !== "finishing") return;
+		if (left > 0) {
+			update((s) => {
+				s.leaving = { phase: "blocked", left };
+				if (front !== undefined) s.overlay = front;
+			});
+			return;
+		}
+		closeCase();
+	} finally {
+		// Not left for good when something above failed.
+		if (leavingNow()?.phase === "finishing")
+			update((s) => (s.leaving = undefined));
 	}
-	closeCase();
 }
 
 /**
