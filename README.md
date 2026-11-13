@@ -124,8 +124,8 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
      downloads folder. Chrome asks once whether Overmark may manage your downloads; then
      it writes with the side panel closed too, also after a browser restart. Each write
      shows in Chrome's download list; Overmark keeps only its newest entry there, for
-     "Show in folder". A case whose title changed gets a file of the new name and the old
-     one stays. Files deleted there are written again at their case's next change, or
+     "Show in folder". A case keeps the file name it was first written under, also after
+     a rename (nothing can be removed there, so a new name would leave the old file). Files deleted there are written again at their case's next change, or
      all at once with Change… and Sync to Downloads. The folder is one for every Chrome
      profile and browser on the computer: two of them syncing to Downloads write into the
      same `Overmark` folder, and a case of the same title in each overwrites the other's

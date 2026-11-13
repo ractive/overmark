@@ -759,8 +759,8 @@ describe("the sync to Downloads (DEC-025)", () => {
 		]);
 	});
 
-	test("a renamed case gets its new file; the old one stays, as nothing can be removed there", async () => {
-		const c = await add("c_1", "Login");
+	test("a renamed case keeps the file it was first written under: nothing is left behind (review of PR 57)", async () => {
+		const c = await add("c_1", "Example Domain");
 		await sync.request();
 		await putCase(cases, {
 			...c,
@@ -768,12 +768,22 @@ describe("the sync to Downloads (DEC-025)", () => {
 			updatedAt: "2026-11-12T09:00:00Z",
 		});
 		await sync.request();
-		expect([...api.files.keys()].sort()).toEqual([
-			"Overmark/login-button.overmark.zip",
-			"Overmark/login.overmark.zip",
+		// Nothing can be removed there: the case's one file is written again.
+		expect([...api.files.keys()]).toEqual([
+			"Overmark/example-domain.overmark.zip",
 		]);
+		const file = api.files.get("Overmark/example-domain.overmark.zip");
+		expect((await readExport(file as Uint8Array)).case.title).toBe(
+			"Login button",
+		);
 		expect(store.records.get("downloads")?.byCase["c_1"]?.file).toBe(
-			"login-button.overmark.zip",
+			"example-domain.overmark.zip",
+		);
+		// A new case of the old title does not take its name.
+		await add("c_2", "Example Domain", "2026-11-12T09:01:00Z");
+		await sync.request();
+		expect(store.records.get("downloads")?.byCase["c_2"]?.file).toBe(
+			"example-domain-2.overmark.zip",
 		);
 	});
 

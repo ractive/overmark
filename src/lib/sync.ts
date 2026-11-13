@@ -805,7 +805,7 @@ export class Sync {
 	 * with `-2`, `-3` when another case has that name already, a deleted one
 	 * too, or when the target has a file of that name Overmark did not write
 	 * for this case: such a file is never overwritten. A case keeps its file
-	 * while its title gives the same name.
+	 * while its title gives the same name; in Downloads, whatever its title.
 	 */
 	async #fileName(
 		target: SyncTarget,
@@ -813,6 +813,11 @@ export class Sync {
 		current: string | undefined,
 		owner: ReadonlyMap<string, string>,
 	): Promise<string> {
+		// In Downloads nothing can be removed, so a case keeps the name it was
+		// first written under: a rename changes the file, not its name, and
+		// leaves no stale file behind (review of PR 57: under DEC-026 every
+		// case starts with the page's title and is renamed afterwards).
+		if (current !== undefined && target.kind === "downloads") return current;
 		const stem = safeStem(exportFileName(c).slice(0, -EXPORT_SUFFIX.length));
 		const wanted = `${stem}${EXPORT_SUFFIX}`;
 		if (

@@ -651,7 +651,8 @@ access again" with a button, never failing silently. The rest was worked out her
   overwritten. A case keeps its file while its title gives the same name.
 - **A renamed case**: its file of the new name is written, then its old file is
   removed. It is the same case, so two files of it would only mislead; deleted cases
-  keep theirs.
+  keep theirs. *(In Downloads, where nothing can be removed, a case keeps the name it
+  was first written under: DEC-025 as amended after the review of PR 57.)*
 - **Another folder starts afresh** (a new id: nothing written to the old one counts).
   Choosing a folder synced before, at any time (Change folder… back to it, after Stop
   syncing, after other folders in between), gives it its id back, compared with
@@ -877,8 +878,12 @@ cannot be missed.
 
 - **Two targets, one engine.** `Sync` (one writer, a record per target of what was
   written, names with `-2`) writes to a target: Downloads (`Overmark/` in Chrome's
-  downloads folder; a renamed case leaves its old file, as nothing can be removed
-  there) or the folder. Someone syncing to a folder keeps doing so; nothing switches by
+  downloads folder) or the folder. *Amended after the review of PR 57:* in Downloads,
+  where nothing can be removed, **a case keeps the file name it was first written
+  under**; a rename changes the file's content, not its name, so no stale file is left
+  (it left its old file before, and under DEC-026 every case starts with the page's
+  title and is renamed afterwards). The folder removes the old file and writes the new
+  name, as before. Someone syncing to a folder keeps doing so; nothing switches by
   itself. "Use Downloads instead" is offered where the folder needs access.
 - **What needs the user is above every view and on the icon.** While the sync is paused
   (the folder needs access again, or the downloads permission is gone) or has failed, a
@@ -1004,8 +1009,9 @@ wouldn't have drafts — which is ok I think."
   opened and left, and then goes by the same rule: nothing deletes a case nobody is
   looking at.
 - **The sync writes no file for a case without marks** until its first mark: a file in
-  Downloads cannot be taken back, and a renamed case leaves its old file there
-  (DEC-025). A case written before whose marks were all deleted is written again, empty.
+  Downloads cannot be taken back. A case renamed later keeps its file name in Downloads
+  (the name it had at its first mark; DEC-025 as amended), and gets the new name in a
+  folder. A case written before whose marks were all deleted is written again, empty.
 - **What follows from it.** "← All cases" with a mark still on its way waits for it, and
   with a mark that could not be added stays two-step as DEC-023 has it; with no mark
   left, the case is checked as above. A case deleted while its toolbar is up (Delete in
