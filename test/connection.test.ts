@@ -19,14 +19,28 @@ import { Connection } from "../src/worker/connection.ts";
 import type { AiState } from "../src/worker/protocol.ts";
 import type { Capture } from "../src/worker/tab.ts";
 
-/** A memory store whose revocations wait `slowMs`, and fail while `failing`. */
+/**
+ * A memory store whose revocations wait `slowMs`, and fail while `failing`;
+ * `log`, while set, records what the relay asked it in order (each
+ * `grant.revoke` starts with `listGrants`).
+ */
 class SlowStore extends MemoryTokenStore {
 	failing = false;
 	slowMs = 0;
+	log: string[] | undefined;
+	override listGrants(addressId: string, now: number) {
+		this.log?.push("listGrants");
+		return super.listGrants(addressId, now);
+	}
 	override async revoke(selector: RevokeSelector, options: RevokeOptions) {
-		if (this.slowMs > 0) await Bun.sleep(this.slowMs);
-		if (this.failing) throw new Error("store down");
-		return super.revoke(selector, options);
+		this.log?.push("revoke");
+		try {
+			if (this.slowMs > 0) await Bun.sleep(this.slowMs);
+			if (this.failing) throw new Error("store down");
+			return await super.revoke(selector, options);
+		} finally {
+			this.log?.push("revoke answered");
+		}
 	}
 }
 
@@ -190,8 +204,10 @@ describe("the worker's connection with client 0.16", () => {
 		);
 		// Two's revoke waits in the store when One's is asked for, and then
 		// fails. The relay answers One at once: it knows no such grant.
+		const listed = w.last().grants.map((g) => g.name);
 		store.slowMs = 300;
 		store.failing = true;
+		store.log = [];
 		w.send({ type: "revoke", grantId: ids["Two"] });
 		await Bun.sleep(20);
 		w.send({ type: "revoke", grantId: ids["One"] });
@@ -201,7 +217,17 @@ describe("the worker's connection with client 0.16", () => {
 				grant(w, "One")?.problem !== undefined,
 		);
 		await Bun.sleep(50);
-		// Each app with its own answer: Two stays, with its Allow all changes.
+		// One's revoke reached the relay only once Two's was answered.
+		expect(store.log).toEqual([
+			"listGrants",
+			"revoke",
+			"revoke answered",
+			"listGrants",
+		]);
+		store.log = undefined;
+		// Each app with its own answer: Two stays, in its place, with its
+		// Allow all changes.
+		expect(w.last().grants.map((g) => g.name)).toEqual(listed);
 		expect(grant(w, "Two")?.problem).toBe(
 			"Two was not disconnected: the relay could not save this. Try again.",
 		);
