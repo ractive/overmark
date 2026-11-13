@@ -5,15 +5,17 @@
  * failed, while the user wants it.
  */
 
-import type { DisconnectDetail, TabMcp } from "@ractive-ch/tab-mcp-client";
+import type { TabMcp } from "@ractive-ch/tab-mcp-client";
 import { Latest } from "../lib/latest.ts";
 
 /** The waits between tries to connect, in ms; the last one repeats. */
 const KEEP_ON_DELAYS_MS = [5000, 10_000, 20_000, 40_000, 60_000];
 
 /** The part of `TabMcp` that `KeepOn` uses. */
-export type KeptConnection = EventTarget &
-	Pick<TabMcp, "state" | "reconnecting" | "connect">;
+export type KeptConnection = Pick<
+	TabMcp,
+	"state" | "connect" | "addEventListener"
+>;
 
 /**
  * "Keep AI access on": the library reconnects by itself only after a broken
@@ -57,20 +59,26 @@ export class KeepOn {
 		this.#connection = connection;
 		const { signal } = this.#listening;
 		connection.addEventListener(
-			"disconnected",
-			(event) => {
-				const { reason } = (event as CustomEvent<DisconnectDetail>).detail;
-				if (reason === "idle" || reason === "expired") this.connect();
+			"statechange",
+			({ detail: { state, reason } }) => {
+				if (state === "connected") this.stop();
+				// The relay ended an idle or old session; the library connects
+				// again by itself only after a broken one (state `reconnecting`).
+				else if (
+					state === "disconnected" &&
+					(reason === "idle" || reason === "expired")
+				)
+					this.connect();
 			},
 			{ signal },
 		);
-		connection.addEventListener("connected", () => this.stop(), { signal });
-		// The library gave up reconnecting: the relay refused an attempt.
+		// The library gave up reconnecting: the relay refused an attempt. It
+		// says so with `error`, its state already `disconnected`, just before
+		// the `statechange` to it.
 		connection.addEventListener(
 			"error",
-			(event) => {
-				if (connection.state === "disconnected")
-					this.failed((event as CustomEvent<{ error: Error }>).detail.error);
+			({ detail: { error } }) => {
+				if (connection.state === "disconnected") this.failed(error);
 			},
 			{ signal },
 		);
@@ -81,11 +89,11 @@ export class KeepOn {
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
 		const connection = this.#connection;
+		// Not while connecting, connected, or reconnecting by itself.
 		if (
 			connection === undefined ||
 			!this.#wanted() ||
-			connection.state !== "disconnected" ||
-			connection.reconnecting !== undefined
+			connection.state !== "disconnected"
 		)
 			return;
 		const attempt = this.#tries.start();

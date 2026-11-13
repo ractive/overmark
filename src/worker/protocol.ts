@@ -108,10 +108,11 @@ export interface AiState {
 	keepOn: boolean;
 	/** "Blur form fields in screenshots". */
 	blurForms: boolean;
-	/** The library's state. */
-	state: "disconnected" | "connecting" | "connected";
-	/** The library is reconnecting by itself. */
-	reconnecting: boolean;
+	/**
+	 * The library's state: `reconnecting` while it connects again by itself
+	 * after the connection broke (waiting for an attempt or making one).
+	 */
+	state: "disconnected" | "connecting" | "connected" | "reconnecting";
 	/** "Keep AI access on" waits to try again. */
 	retrying: boolean;
 	/** Why the last connect failed, or the last command. */
