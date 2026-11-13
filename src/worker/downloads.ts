@@ -23,9 +23,23 @@ const DOWNLOADS: chrome.permissions.Permissions = {
 
 let opening: Promise<void> | undefined;
 
+/**
+ * A document left open by a worker that stopped in the middle of a run: it
+ * goes at the worker's start, before a run opens one of its own.
+ */
+let cleared: Promise<void> | undefined;
+function clearLeftover(): Promise<void> {
+	cleared ??= (async () => {
+		if (await chrome.offscreen.hasDocument())
+			await chrome.offscreen.closeDocument();
+	})().catch(() => undefined);
+	return cleared;
+}
+
 /** The offscreen document, opened once however many ask at the same time. */
 function offscreen(): Promise<void> {
 	opening ??= (async () => {
+		await clearLeftover();
 		if (await chrome.offscreen.hasDocument()) return;
 		await chrome.offscreen.createDocument({
 			url: OFFSCREEN_PATH,
@@ -48,16 +62,35 @@ async function ask(request: OffscreenRequest): Promise<OffscreenResponse> {
 	return answer;
 }
 
+/**
+ * While the worker waits for a download it calls an extension API this
+ * often: that keeps Chrome from stopping it after 30 s without events.
+ */
+export const KEEP_ALIVE_MS = 20_000;
+
 /** How download `id` ended, by `chrome.downloads.onChanged`. */
-function finished(id: number, timeoutMs: number): Promise<DownloadEnd> {
+export function finished(
+	id: number,
+	timeoutMs: number,
+	keepAliveMs = KEEP_ALIVE_MS,
+): Promise<DownloadEnd> {
 	return new Promise((resolve, reject) => {
 		let done = false;
-		const end = (result: DownloadEnd) => {
-			if (done) return;
+		const stop = () => {
 			done = true;
 			clearTimeout(timer);
+			clearInterval(alive);
 			chrome.downloads.onChanged.removeListener(changed);
+		};
+		const end = (result: DownloadEnd) => {
+			if (done) return;
+			stop();
 			resolve(result);
+		};
+		const fail = (error: unknown) => {
+			if (done) return;
+			stop();
+			reject(error);
 		};
 		const check = async () => {
 			const [item] = await chrome.downloads.search({ id });
@@ -68,17 +101,23 @@ function finished(id: number, timeoutMs: number): Promise<DownloadEnd> {
 				end({ state: "interrupted", error: item.error ?? "?" });
 		};
 		const changed = (delta: chrome.downloads.DownloadDelta) => {
-			if (delta.id === id && delta.state !== undefined) check().catch(reject);
+			if (delta.id === id && delta.state !== undefined) check().catch(fail);
 		};
 		const timer = setTimeout(() => end({ state: "timeout" }), timeoutMs);
+		const alive = setInterval(
+			() => void chrome.runtime.getPlatformInfo().catch(() => undefined),
+			keepAliveMs,
+		);
 		chrome.downloads.onChanged.addListener(changed);
 		// It may have ended before the listener was there.
-		check().catch(reject);
+		check().catch(fail);
 	});
 }
 
 /** Chrome's downloads, for the sync's database `kv`. */
 export function chromeDownloads(kv: Kv): DownloadsApi {
+	// At the worker's start: a document a stopped worker left goes.
+	void clearLeftover();
 	return {
 		granted: async () =>
 			typeof chrome.downloads?.download === "function" &&
