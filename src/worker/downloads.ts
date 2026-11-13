@@ -137,9 +137,8 @@ export function chromeDownloads(kv: Kv): DownloadsApi {
 	// At the worker's start: a document a stopped worker left goes.
 	void clearLeftover();
 	return {
-		granted: async () =>
-			typeof chrome.downloads?.download === "function" &&
-			(await chrome.permissions.contains(DOWNLOADS)),
+		granted: () => chrome.permissions.contains(DOWNLOADS),
+		apiMissing: () => typeof chrome.downloads?.download !== "function",
 		async url(c) {
 			const answer = await ask({ type: "offscreen:export", caseId: c.id });
 			if (!answer.ok) throw new Error(answer.error);

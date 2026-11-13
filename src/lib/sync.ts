@@ -372,6 +372,11 @@ export type DownloadEnd =
 export interface DownloadsApi {
 	/** Whether Overmark has the `downloads` permission now. */
 	granted(): Promise<boolean>;
+	/**
+	 * Allowed, but `chrome.downloads` is not there in this worker: whether a
+	 * worker running when the user said yes gets the API was not seen (DEC-025).
+	 */
+	apiMissing?(): boolean;
 	/** A URL of the case's export, made where blob URLs can be (the offscreen document). */
 	url(c: Case): Promise<string>;
 	revoke(url: string): Promise<void>;
@@ -445,6 +450,13 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 		// (the README says so).
 		exists: async () => false,
 		async write(name, c) {
+			if (api.apiMissing?.()) {
+				// Taken back meanwhile: paused, as at the run's start.
+				if (!(await api.granted().catch(() => false))) throw new SyncPaused();
+				throw new TargetFailed(
+					"Chrome allowed Overmark to save to your downloads, but Overmark's background part does not see it yet. It starts writing once Chrome restarts that part, by itself after a while without use; now, turn Overmark off and on in chrome://extensions.",
+				);
+			}
 			// Its export failing is the case's own problem.
 			const url = await api.url(c);
 			let end: DownloadEnd;

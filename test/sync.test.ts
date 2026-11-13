@@ -505,6 +505,11 @@ class FakeDownloads implements DownloadsApi {
 	ends = 0;
 	/** How the next downloads end, instead of complete. */
 	next: DownloadEnd[] = [];
+	/** Allowed, but `chrome.downloads` not there in the worker yet. */
+	missing = false;
+	apiMissing() {
+		return this.missing;
+	}
 	/** Names Chrome refuses, besides Windows' own. */
 	refuse: ((filename: string) => boolean) | undefined;
 	/** The folder Chrome saved them in, if not where asked. */
@@ -717,6 +722,19 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(api.files.size).toBe(1);
 	});
 
+	test("allowed, but the API not there yet in this worker: failed, saying what to do; written once it is", async () => {
+		await add("c_1", "Login");
+		api.missing = true;
+		await sync.request();
+		expect(store.current?.state).toBe("failed");
+		expect(store.current?.needsUser).toBeUndefined();
+		expect(store.current?.problem).toContain("chrome://extensions");
+		expect(api.downloads).toHaveLength(0);
+		api.missing = false;
+		await sync.request();
+		expect(store.current?.state).toBe("synced");
+	});
+
 	test("the permission taken back in a run: paused, what was written is kept", async () => {
 		await add("c_1", "A", "2026-11-12T08:01:00Z");
 		await add("c_2", "B", "2026-11-12T08:00:00Z");
@@ -726,6 +744,8 @@ describe("the sync to Downloads (DEC-025)", () => {
 			if (++calls === 2) api.allowed = false;
 			return url(c);
 		};
+		// In Chrome the API goes with the permission.
+		api.apiMissing = () => !api.allowed;
 		await sync.request();
 		expect(store.current?.state).toBe("paused");
 		expect(store.current?.reason).toBe("downloads");

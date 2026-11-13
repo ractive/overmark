@@ -880,8 +880,11 @@ cannot be missed.
   Tried headless with an optional `downloads`: `permissions.request` from a click in
   an extension page neither resolved nor rejected within 10 s (Chrome's prompt cannot
   be answered there), so whether the API appears without a worker restart is not
-  known; if it does not, the sync says "paused" until the worker restarts (at most 30 s
-  idle). The e2e tests run with `downloads` at install. Not tried either: a headed
+  known, and is on the owner's list to try by hand. If it does not, the worker sees the
+  permission (`permissions.contains`) without the API: the sync fails saying so, that
+  it starts once Chrome restarts Overmark's background part (by itself after a while
+  without use), and how to do it now (Overmark off and on in chrome://extensions); every
+  change and start tries again. The e2e tests run with `downloads` at install. Not tried either: a headed
   Chrome's download bubble on each write (changes in a row now wait 2 s of quiet, so a
   burst is one download per case), and Edge.
 - **After the review of PR 48.** A title Windows reserves (`con`, `nul`, `com1`…) is
