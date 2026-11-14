@@ -873,10 +873,19 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			),
 		);
 		await home(panel);
-		await panel.waitFor(
-			`document.getElementById("hint").textContent === ${JSON.stringify(`“${title}” was deleted, and 1 mark not in it yet is gone with it.`)}`,
-			20_000,
-		);
+		// What Home says instead, if it does not say this.
+		const said = `“${title}” was deleted, and 1 mark not in it yet is gone with it.`;
+		await panel
+			.waitFor(
+				`document.getElementById("hint").textContent === ${JSON.stringify(said)}`,
+				10_000,
+			)
+			.catch(async () => {
+				const hint = await panel.eval<string>(
+					`document.getElementById("hint").textContent`,
+				);
+				throw new Error(`Home says ${JSON.stringify(hint)}, not ${said}`);
+			});
 		await until(
 			() => toolbarUp(tabId),
 			(up) => !up,
