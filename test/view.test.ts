@@ -92,7 +92,7 @@ describe("the tab", () => {
 		expect(notice.hidden).toBe(false);
 		expect(notice.querySelector("svg.notice-icon")).not.toBeNull();
 		expect(notice.textContent).toContain("Click the Overmark icon");
-		// It stands above Annotate this page, and the hint below says nothing.
+		// It stands above New case for this page, and the hint below says nothing.
 		expect(notice.nextElementSibling).toBe(el("annotate"));
 		expect(el("hint").hidden).toBe(true);
 		expect(allow().hidden).toBe(false);
@@ -119,7 +119,7 @@ describe("the tab", () => {
 		expect(el<HTMLButtonElement>("annotate").disabled).toBe(false);
 	});
 
-	test("with an address: no notice, Annotate this page on", () => {
+	test("with an address: no notice, New case for this page on", () => {
 		home({
 			id: 1,
 			url: "https://www.example.com/kk",
@@ -1921,7 +1921,7 @@ describe("the annotate button (DEC-023, DEC-026)", () => {
 		};
 	};
 
-	test("one state: Annotate this page, the one primary, whatever the page shows", () => {
+	test("one state: New case for this page, the one primary, whatever the page shows", () => {
 		const target = { caseId: c.id, title: c.title, nextAnnotation: 2 };
 		for (const o of [
 			undefined,
@@ -1933,11 +1933,11 @@ describe("the annotate button (DEC-023, DEC-026)", () => {
 			overlay({ target, visible: true, drafts: 1 }),
 		])
 			expect(home(o)).toEqual({
-				label: "Annotate this page",
+				label: "New case for this page",
 				primary: true,
 				disabled: false,
 			});
-		expect(home(overlay({ target }), []).label).toBe("Annotate this page");
+		expect(home(overlay({ target }), []).label).toBe("New case for this page");
 	});
 
 	test("no hint lines for drafts: there are no drafts (DEC-026)", () => {
@@ -2759,7 +2759,7 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			["Sync to Downloads", true],
 			["Choose a folder…", true],
 		]);
-		// Ink, not amber: amber is Home's Annotate this page alone (DEC-024).
+		// Ink, not amber: amber is Home's New case for this page alone (DEC-024).
 		expect(box.querySelector('[data-action="sync-downloads"]')?.className).toBe(
 			"strong",
 		);

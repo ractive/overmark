@@ -123,7 +123,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 
 	test("marks drawn with the toolbar are saved as a case with screenshots", async () => {
 		const { page, tabId } = await h.open("v1");
-		// As "Annotate this page": the case first, the toolbar adding to it.
+		// As "New case for this page": the case first, the toolbar adding to it.
 		await showToolbar(h, page, tabId);
 
 		// 1: a box around the submit button
@@ -739,7 +739,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			);
 			await caseMarksAre(page, []);
 			await h.control.waitFor(
-				`${annotate}.textContent === "Annotate this page"`,
+				`${annotate}.textContent === "New case for this page"`,
 			);
 			await h.control.eval(`${annotate}.click()`);
 			await page.waitFor(
@@ -808,7 +808,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			);
 			expect(await marksOf("Same screen")).toBe(2);
 
-			// A new case starts with All cases, then Annotate this page.
+			// A new case starts with All cases, then New case for this page.
 			await allCases();
 			await h.control.eval(`${annotate}.click()`);
 			await page.waitFor(
@@ -851,7 +851,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 			await page.send("Page.close");
 		}, 60_000);
 
-		test("Annotate this page never continues a case, also one deleted meanwhile", async () => {
+		test("New case for this page never continues a case, also one deleted meanwhile", async () => {
 			const { page, tabId } = await h.open("v1");
 			await showToolbar(h, page, tabId);
 			await markElement(page, "[data-truth=submit]", "Deleted meanwhile");
@@ -880,7 +880,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 				`chrome-extension://${h.extensionId}/sidepanel/index.html`,
 			);
 			await h.control.waitFor(
-				`${annotate}.textContent === "Annotate this page" && !document.getElementById("home").hidden`,
+				`${annotate}.textContent === "New case for this page" && !document.getElementById("home").hidden`,
 			);
 			await h.control.eval(`${annotate}.click()`);
 			await page.waitFor(

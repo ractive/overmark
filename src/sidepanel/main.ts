@@ -1011,7 +1011,7 @@ async function endDeleted(
 }
 
 /**
- * A case "Annotate this page" made and the user left as it was made goes
+ * A case "New case for this page" made and the user left as it was made goes
  * again, silently (DEC-026), so trying the button leaves no empty case
  * behind. Never on doubt: every tab in every window must say that it holds
  * nothing of the case (a toolbar adding to it, a mark on its way or failed),
@@ -1064,7 +1064,7 @@ function announce(caseId: string): void {
 
 /**
  * Show the toolbar adding to the open case: on the tab in front ("Add
- * marks"), or on `tabId`, the tab "Annotate this page" was clicked for
+ * marks"), or on `tabId`, the tab "New case for this page" was clicked for
  * (DEC-026), whatever tab is in front by then.
  */
 async function startAnnotating(target: Case, tabId?: number): Promise<boolean> {
@@ -1171,11 +1171,11 @@ async function retitleToolbars(c: Case): Promise<void> {
 	);
 }
 
-/** "Annotate this page" is creating its case: a second click waits for it. */
+/** "New case for this page" is creating its case: a second click waits for it. */
 let creating = false;
 
 /**
- * How long "Annotate this page" waits for the page to say what it is: a tab
+ * How long "New case for this page" waits for the page to say what it is: a tab
  * in an alert(), paused in DevTools or still loading says nothing, and the
  * button must work again.
  */
@@ -1194,7 +1194,7 @@ async function askPage(tabId: number): Promise<PageInfo | undefined> {
 }
 
 /**
- * "Annotate this page" (DEC-026): the case is stored at once, with the
+ * "New case for this page" (DEC-026): the case is stored at once, with the
  * page's title and info and no marks, and opens as if chosen from the list,
  * with the toolbar on the page adding to it. The page says what it is; the
  * panel writes the case, as it writes every change to a case but a mark's

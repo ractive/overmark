@@ -1,5 +1,5 @@
 /**
- * A case starts the moment "Annotate this page" is clicked (DEC-026): stored
+ * A case starts the moment "New case for this page" is clicked (DEC-026): stored
  * at once, with the page's title as its title and no marks. One that is left
  * as it was made goes again, silently, so trying the button leaves no empty
  * case behind. Pure: main.ts creates and deletes.
@@ -26,7 +26,7 @@ export function firstTitle(page: Pick<PageInfo, "url" | "title">): string {
 	return address === "" ? "Untitled case" : address;
 }
 
-/** The case "Annotate this page" stores: the page's, no marks, no screenshots. */
+/** The case "New case for this page" stores: the page's, no marks, no screenshots. */
 export function newCase(id: string, page: PageInfo, now: string): Case {
 	const kept = { ...page, url: plainUrl(page.url) };
 	return validateCase({
@@ -43,7 +43,7 @@ export function newCase(id: string, page: PageInfo, now: string): Case {
 }
 
 /**
- * The case is as "Annotate this page" made it: no marks and no screenshots,
+ * The case is as "New case for this page" made it: no marks and no screenshots,
  * no mark ever stored (`lastNumber`: a delete in the panel and the toolbar's
  * Undo both set it), not from a file, no summary stored or typed (`typed`,
  * the summary not saved yet), and the title it was given, with no other

@@ -1,6 +1,6 @@
 /**
  * End to end: each mark goes into the case as soon as it is done, without a
- * save step (DEC-014); "Annotate this page" creates the case at once and opens
+ * save step (DEC-014); "New case for this page" creates the case at once and opens
  * it, and a case left untouched goes again (DEC-026).
  */
 
@@ -185,7 +185,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		const panel = await addMarks(page, "Straight in");
 		const shown = await buttons(page);
 		expect(shown).toContain("Done");
-		// A new case starts with All cases, then Annotate this page (DEC-023).
+		// A new case starts with All cases, then New case for this page (DEC-023).
 		expect(shown).not.toContain("New case");
 		expect(shown.some((b) => b.startsWith("Save"))).toBe(false);
 		expect(shown).not.toContain("Back");
@@ -418,7 +418,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		return c;
 	};
 
-	/** "Annotate this page" in the panel, on the tab `page` in front. */
+	/** "New case for this page" in the panel, on the tab `page` in front. */
 	async function annotate(page: Page): Promise<Page> {
 		await page.activate();
 		const panel = h.control;
@@ -430,7 +430,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		return panel;
 	}
 
-	test("Annotate this page creates the case and opens it; a mark goes in without a save; Rename (DEC-026)", async () => {
+	test("New case for this page creates the case and opens it; a mark goes in without a save; Rename (DEC-026)", async () => {
 		const { page, tabId } = await h.open("v1");
 		const panel = await annotate(page);
 		// At once: the page's title, the case view, the toolbar adding to it.
@@ -585,7 +585,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			`(() => { const send = chrome.tabs.sendMessage.bind(chrome.tabs); chrome.tabs.sendMessage = (tabId, message) => (${body})(tabId, message, send); })()`,
 		);
 
-	test("Annotate this page stays with the tab it was clicked for (review of PR 57)", async () => {
+	test("New case for this page stays with the tab it was clicked for (review of PR 57)", async () => {
 		const a = await h.open("v1");
 		const b = await h.open("v2");
 		// Overmark runs on the tab already: one question, no injection on the
@@ -895,7 +895,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	const home = (panel: Page) =>
 		panel.waitFor(`!document.getElementById("home").hidden`, 10_000);
 
-	test("Add marks, then All cases: no toolbar, no marks, and Annotate this page starts another case", async () => {
+	test("Add marks, then All cases: no toolbar, no marks, and New case for this page starts another case", async () => {
 		const { page, tabId } = await savedCase("Closed after adding");
 		const panel = await addMarks(page, "Closed after adding");
 		await markElement(page, "[data-truth=submit]", "Second");
@@ -914,7 +914,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		// The case's marks leave the page, its toolbar is no longer its.
 		await drawnAre(page, { drafts: [], saved: [] });
 		await panel.waitFor(
-			`document.getElementById("annotate").textContent === "Annotate this page"`,
+			`document.getElementById("annotate").textContent === "New case for this page"`,
 		);
 		expect(
 			await h.control.eval<string | null>(

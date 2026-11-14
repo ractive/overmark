@@ -1180,7 +1180,7 @@ export function withComment(
 
 /**
  * Code points taken out of a title the user gives (Rename) or a page gives
- * ("Annotate this page"): the C0 and C1 controls (U+0000–U+001F,
+ * ("New case for this page"): the C0 and C1 controls (U+0000–U+001F,
  * U+007F–U+009F), and the bidi embeddings and overrides (U+202A–U+202E) and
  * isolates (U+2066–U+2069), which would reorder the sentence a title is put
  * into ("Adding to “…”"). Titles already stored (a file, an older build) are

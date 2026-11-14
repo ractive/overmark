@@ -36,7 +36,7 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 ## Use
 
 1. Click the Overmark icon on a tab. The side panel opens there.
-2. "Annotate this page" creates a case at once, named after the page's title, opens it
+2. "New case for this page" creates a case at once, named after the page's title, opens it
    in the side panel and shows the toolbar on the page: Element (click one), Box, Arrow,
    Pen and Note, each followed by a comment. Overmark takes screenshots with the marks
    on them and records each marked element's details. "Rename" beside the case's title
@@ -44,7 +44,7 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    stored as you do it. A case you leave without a single mark, as it was made, is
    deleted again.
 3. The toolbar adds to a case only while that case is open in the side panel: after
-   "Annotate this page", and whenever the toolbar was started with "Add marks" in a
+   "New case for this page", and whenever the toolbar was started with "Add marks" in a
    case, the toolbar says "Adding to “<case>”" ("Done adding" in the side panel stops
    it), and each mark goes into that case as soon as its
    comment is done (Done, or the comment closed with Escape or a click elsewhere); the
@@ -59,8 +59,8 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    it. "← All cases" at the top of the side panel closes the case: the toolbar finishes
    as with Done and adds to no case any more, and the case's marks leave the tab, also
    those an AI app drew; with a mark not in the case yet the panel stays and says so,
-   and a second click leaves without it. A new case starts there, with "Annotate this
-   page". Closing the side panel leaves marks and toolbar on the page; opening it again
+   and a second click leaves without it. A new case starts there, with "New case for
+   this page". Closing the side panel leaves marks and toolbar on the page; opening it again
    opens the case the page shows.
 4. On another build of the page (say `localhost:3000`), click the case in the side panel:
    its marks are drawn on the tab in front, whatever page that is. While the case is open

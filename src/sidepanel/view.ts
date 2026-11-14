@@ -43,7 +43,7 @@ import {
 
 /** What the user can do; main.ts carries it out and updates the state. */
 export interface Actions extends SyncActions {
-	/** "Annotate this page": a new case, stored at once and opened (DEC-026). */
+	/** "New case for this page": a new case, stored at once and opened (DEC-026). */
 	annotate(): void;
 	openCase(id: string): void;
 	/** "← All cases": end the toolbar adding to the case, then close it (DEC-023). */
@@ -414,7 +414,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 			h(
 				"p",
 				{ class: "empty" },
-				"No cases yet. Annotate a page to start one, or import a case someone sent you.",
+				"No cases yet. Start one with “New case for this page”, or import a case someone sent you.",
 			),
 		);
 		return;
