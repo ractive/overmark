@@ -1583,6 +1583,87 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		);
 
 		slowTest(
+			"the page's popover has the mark's commands: Resolve…, Verified, Reopen… (DEC-027)",
+			async () => {
+				const { page, caseId } = await inCaseWithMarks("Commands on the page");
+				const mark = async () => (await storedCase(caseId))?.annotations[0];
+				const before = await mark();
+				if (before === undefined) throw new Error("no mark");
+				const group = shadow(`.review [data-review="${before.number}"]`);
+				const pin = shadow(
+					`.review [data-review="${before.number}"] [data-number] text`,
+				);
+				const popover = shadow(".popover");
+				const act = (name: string) =>
+					shadow(`.popover [data-action="${name}"]`);
+				const commands = () =>
+					page.eval<string[]>(
+						`[...${popover}.querySelectorAll(".commands button")].map((b) => b.textContent)`,
+					);
+				const row = `document.querySelector('[data-annotation="${before.id}"]')`;
+
+				// Resolve…: fixed, with a note.
+				await page.click(pin);
+				await page.waitFor(`${act("mark-resolve")} !== null`);
+				expect(await commands()).toEqual(["Resolve…"]);
+				await page.click(act("mark-resolve"));
+				await page.waitFor(`${shadow(".popover .choices")} !== null`);
+				expect(
+					await page.eval<string>(
+						`${shadow(".popover .choices input:checked")}.value`,
+					),
+				).toBe("fixed");
+				await page.click(shadow(".popover input.note"));
+				await page.type("Darker text");
+				await page.click(act("mark-resolve-done"));
+				await until(async () => {
+					const r = (await mark())?.resolution;
+					return r?.kind === "fixed" && r.note === "Darker text";
+				}, "the mark fixed in the case");
+				await page.waitFor(
+					`${popover}.hidden && ${group}?.dataset.status === "fixed"`,
+				);
+				await h.control.waitFor(`${row}?.dataset.status === "fixed"`);
+
+				// Verified: one click.
+				await page.click(pin);
+				await page.waitFor(`${act("mark-verify")} !== null`);
+				expect(await commands()).toEqual(["Verified", "Reopen…", "Change…"]);
+				await page.click(act("mark-verify"));
+				await until(
+					async () => (await mark())?.resolution?.verified !== undefined,
+					"the fix verified in the case",
+				);
+				await page.waitFor(
+					`${popover}.hidden && ${group}?.dataset.status === "verified"`,
+				);
+
+				// Reopen…: only with what is still wrong.
+				await page.click(pin);
+				await page.waitFor(`${act("mark-reopen")} !== null`);
+				expect(await commands()).toEqual(["Reopen…", "Change…"]);
+				await page.click(act("mark-reopen"));
+				await page.waitFor(`${act("mark-reopen-done")}?.disabled === true`);
+				await page.click(shadow(".popover textarea"));
+				await page.type("Still pale on hover");
+				await page.waitFor(`${act("mark-reopen-done")}.disabled === false`);
+				await page.click(act("mark-reopen-done"));
+				await until(async () => {
+					const m = await mark();
+					return (
+						m?.resolution === undefined &&
+						m?.reopens?.at(-1)?.note === "Still pale on hover"
+					);
+				}, "the mark open again with its note");
+				await page.waitFor(
+					`${popover}.hidden && ${group}?.dataset.status === "open"`,
+				);
+				await h.control.waitFor(`${row}?.dataset.status === "open"`);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
 			"with no panel showing the case, the page's popover says so and keeps the text",
 			async () => {
 				const { page, caseId } = await inCaseWithMarks("Not without a panel");

@@ -17,8 +17,13 @@ import {
 	type Case,
 	caseCounts,
 	MAX_COMMENT,
+	MAX_REOPEN_NOTE,
+	type MarkStatus,
 	markStatus,
+	RESOLUTION_LABEL,
+	RESOLVE_CHOICES,
 	type Rect,
+	type ResolveChoice,
 	type Shape,
 	STATUS_LABEL,
 	samePath,
@@ -77,15 +82,39 @@ export const DELETE_ARMED_MS = 4000;
 /** A double click is no second thought. */
 const DELETE_CLICK_GAP_MS = 400;
 
-/** The popover of a loaded mark, open on the page (DEC-027). */
+/** The four ways Resolve… and Change… settle a mark, as the panel says them. */
+const CHOICE_LABEL: Record<ResolveChoice, string> = {
+	fixed: "Fixed, to verify",
+	verified: "Fixed and verified",
+	wontfix: RESOLUTION_LABEL.wontfix,
+	cantreproduce: RESOLUTION_LABEL.cantreproduce,
+};
+
+/**
+ * The popover of a loaded mark, open on the page (DEC-027): its comment with
+ * the mark's commands, or the form of one of them.
+ */
 interface OpenMark {
 	annotationId: string;
-	field: HTMLTextAreaElement;
+	mode: "main" | "resolve" | "reopen";
+	/** The comment as the case has it, and as typed here. */
+	base: string;
+	draft: string;
+	/** The status its commands were drawn for. */
+	status: MarkStatus;
+	/** Of the view shown now. */
+	field: HTMLTextAreaElement | undefined;
 	problem: HTMLElement;
-	remove: HTMLButtonElement;
-	done: HTMLButtonElement;
+	controls: HTMLButtonElement[];
+	remove: HTMLButtonElement | undefined;
 	armedAt: number | undefined;
 	busy: boolean;
+}
+
+/** The comment as typed: read from its field while that is the view shown. */
+function typed(open: OpenMark): string {
+	if (open.field !== undefined) open.draft = open.field.value;
+	return open.draft;
 }
 
 /** Let the page run between annotations: loading a big case takes a while. */
@@ -277,9 +306,7 @@ export class Reviewer {
 		this.#entries = kept;
 		if (this.#focused !== undefined && !byId.has(this.#focused))
 			this.#focused = undefined;
-		// Its mark was deleted (here, in the panel, by an AI app).
-		if (this.#open !== undefined && !byId.has(this.#open.annotationId))
-			this.#closeMark();
+		this.#follow(byId);
 		this.#renderBar();
 		this.#render();
 		return {
@@ -399,8 +426,9 @@ export class Reviewer {
 
 	/**
 	 * A loaded mark's pin was clicked (DEC-027): its comment opens in the
-	 * popover a new mark's comment is typed in, with Delete mark and Done, and
-	 * the side panel shows the mark with its other actions.
+	 * popover a new mark's comment is typed in, with the commands the panel
+	 * has for it (Resolve…, Verified, Reopen…, Change…, Delete mark) and Done,
+	 * and the side panel shows the mark.
 	 */
 	pick(number: number): void {
 		const c = this.#case;
@@ -413,65 +441,27 @@ export class Reviewer {
 			!this.overlay.popover.hidden
 		)
 			return;
-		const doc = this.overlay.doc;
-		const status = markStatus(annotation);
-		const pin = doc.createElement("span");
-		pin.className = "pin";
-		pin.style.background = reviewColour({ status });
-		pin.textContent = String(annotation.number);
-		const label = doc.createElement("div");
-		label.className = "label";
-		label.append(pin, "Comment");
-		if (status !== "open") {
-			const state = doc.createElement("span");
-			state.className = "state";
-			state.textContent = STATUS_LABEL[status];
-			label.append(state);
-		}
-		const field = doc.createElement("textarea");
-		field.setAttribute("aria-label", `Comment of mark ${annotation.number}`);
-		field.placeholder = "What is wrong, or what should change?";
-		field.maxLength = MAX_COMMENT;
-		field.value = annotation.comment;
-		field.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void this.#done();
-			// What was typed is dropped, as the panel's Cancel does.
-			else if (e.key === "Escape") this.#closeMark();
-		});
-		const problem = doc.createElement("p");
-		problem.className = "problem";
-		problem.setAttribute("role", "alert");
-		problem.hidden = true;
-		const done = doc.createElement("button");
-		done.type = "button";
-		done.className = "primary";
-		done.dataset["action"] = "mark-done";
-		done.textContent = "Done";
-		done.addEventListener("click", () => void this.#done());
-		const remove = doc.createElement("button");
-		remove.type = "button";
-		remove.dataset["action"] = "mark-delete";
-		remove.textContent = "Delete mark";
-		remove.addEventListener("click", () => void this.#delete());
-		const row = doc.createElement("div");
-		row.className = "row";
-		row.append(remove, done);
 		const open: OpenMark = {
 			annotationId: annotation.id,
-			field,
-			problem,
-			remove,
-			done,
+			mode: "main",
+			base: annotation.comment,
+			draft: annotation.comment,
+			status: markStatus(annotation),
+			field: undefined,
+			problem: this.overlay.doc.createElement("p"),
+			controls: [],
+			remove: undefined,
 			armedAt: undefined,
 			busy: false,
 		};
-		this.overlay.openPopover([label, field, problem, row], () => {
-			// Closed for another popover, or by a click beside it: what was
-			// typed is the mark's comment, as a new mark's is.
+		this.overlay.openPopover([], () => {
+			// Closed for another popover, or by a click beside it: a comment
+			// typed is the mark's, as a new mark's is; a form half filled in
+			// settles nothing.
 			if (this.#open !== open) return;
 			this.#open = undefined;
-			const text = field.value.trim();
-			if (!open.busy && text !== annotation.comment)
+			const text = typed(open).trim();
+			if (!open.busy && text !== open.base)
 				void this.#ask({
 					type: "mark:comment",
 					caseId: c.id,
@@ -482,8 +472,7 @@ export class Reviewer {
 		this.#open = open;
 		// Its element is outlined, as after the panel's Show.
 		this.#focused = annotation.id;
-		this.#render();
-		field.focus();
+		this.#fill(open);
 		void this.#ask({
 			type: "mark:picked",
 			caseId: c.id,
@@ -504,40 +493,286 @@ export class Reviewer {
 		return annotation === undefined ? undefined : { c, open, annotation };
 	}
 
-	/** Ask the panel, with the buttons off meanwhile; says why it did not work. */
-	async #change(open: OpenMark, request: MarkRequest): Promise<void> {
+	/** Draw the popover's view (`open.mode`) and put it at its mark. */
+	#fill(open: OpenMark): void {
+		const now = this.#openAnnotation();
+		if (now === undefined || now.open !== open) return;
+		const { annotation } = now;
+		const doc = this.overlay.doc;
+		// What was typed in the view that goes stays the draft.
+		typed(open);
+		open.controls = [];
+		open.remove = undefined;
+		open.armedAt = undefined;
+		open.field = undefined;
+		const problem = doc.createElement("p");
+		problem.className = "problem";
+		problem.setAttribute("role", "alert");
+		problem.hidden = true;
+		open.problem = problem;
+		const button = (
+			text: string,
+			action: string,
+			run: () => void,
+			primary = false,
+		) => {
+			const b = doc.createElement("button");
+			b.type = "button";
+			if (primary) b.className = "primary";
+			b.dataset["action"] = action;
+			b.textContent = text;
+			b.addEventListener("click", run);
+			open.controls.push(b);
+			return b;
+		};
+		const row = (className: string, ...children: Node[]) => {
+			const div = doc.createElement("div");
+			div.className = className;
+			div.append(...children);
+			return div;
+		};
+		const pin = doc.createElement("span");
+		pin.className = "pin";
+		pin.style.background = reviewColour({ status: open.status });
+		pin.textContent = String(annotation.number);
+		const label = doc.createElement("div");
+		label.className = "label";
+		const back = () => {
+			if (open.busy) return;
+			open.mode = "main";
+			this.#fill(open);
+		};
+		let content: Node[];
+		let focus: HTMLElement;
+		if (open.mode === "resolve") {
+			label.append(pin, `Mark ${annotation.number} is`);
+			const name = `overmark-resolution-${annotation.id}`;
+			const chosen: ResolveChoice =
+				open.status === "open" ? "fixed" : open.status;
+			const choices = doc.createElement("div");
+			choices.className = "choices";
+			choices.setAttribute("role", "radiogroup");
+			choices.setAttribute("aria-label", `Mark ${annotation.number} is`);
+			for (const kind of RESOLVE_CHOICES) {
+				const radio = doc.createElement("input");
+				radio.type = "radio";
+				radio.name = name;
+				radio.value = kind;
+				radio.checked = kind === chosen;
+				const choice = doc.createElement("label");
+				choice.className = "choice";
+				choice.append(radio, CHOICE_LABEL[kind]);
+				choices.append(choice);
+			}
+			const note = doc.createElement("input");
+			note.type = "text";
+			note.className = "note";
+			note.placeholder = "Note (optional): what was done, or why";
+			note.maxLength = MAX_COMMENT;
+			note.setAttribute("aria-label", `Note for mark ${annotation.number}`);
+			note.value = annotation.resolution?.note ?? "";
+			const save = () => {
+				const kind = (choices.querySelector<HTMLInputElement>("input:checked")
+					?.value ?? chosen) as ResolveChoice;
+				void this.#settle(open, {
+					type: "mark:resolve",
+					caseId: now.c.id,
+					annotationId: annotation.id,
+					kind,
+					note: note.value,
+				});
+			};
+			note.addEventListener("keydown", (e) => {
+				if (e.key === "Enter") save();
+				else if (e.key === "Escape") back();
+			});
+			content = [
+				label,
+				choices,
+				note,
+				problem,
+				row(
+					"row",
+					button("Cancel", "mark-back", back),
+					button("Save", "mark-resolve-done", save, true),
+				),
+			];
+			focus = note;
+		} else if (open.mode === "reopen") {
+			label.append(pin, "Reopen");
+			const note = doc.createElement("textarea");
+			note.maxLength = MAX_REOPEN_NOTE;
+			note.placeholder = "What is still wrong? The developer reads this first.";
+			note.setAttribute(
+				"aria-label",
+				`What is still wrong with mark ${annotation.number}`,
+			);
+			const reopen = () => {
+				// The developer reads it first: a reopen says why.
+				if (note.value.trim() === "") return;
+				void this.#settle(open, {
+					type: "mark:reopen",
+					caseId: now.c.id,
+					annotationId: annotation.id,
+					note: note.value,
+				});
+			};
+			const done = button("Reopen", "mark-reopen-done", reopen, true);
+			done.disabled = true;
+			note.addEventListener("input", () => {
+				if (!open.busy) done.disabled = note.value.trim() === "";
+			});
+			note.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) reopen();
+				else if (e.key === "Escape") back();
+			});
+			content = [
+				label,
+				note,
+				problem,
+				row("row", button("Cancel", "mark-back", back), done),
+			];
+			focus = note;
+		} else {
+			label.append(pin, "Comment");
+			if (open.status !== "open") {
+				const state = doc.createElement("span");
+				state.className = "state";
+				state.textContent = STATUS_LABEL[open.status];
+				label.append(state);
+			}
+			const field = doc.createElement("textarea");
+			field.setAttribute("aria-label", `Comment of mark ${annotation.number}`);
+			field.placeholder = "What is wrong, or what should change?";
+			field.maxLength = MAX_COMMENT;
+			field.value = open.draft;
+			field.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void this.#done();
+				// What was typed is dropped, as the panel's Cancel does.
+				else if (e.key === "Escape") this.#closeMark();
+			});
+			open.field = field;
+			// The panel's commands for a mark of this status, in its order.
+			const commands: HTMLButtonElement[] = [];
+			if (open.status === "open")
+				commands.push(
+					button(
+						"Resolve…",
+						"mark-resolve",
+						() => void this.#form(open, "resolve"),
+					),
+				);
+			else {
+				if (open.status === "fixed")
+					commands.push(
+						button(
+							"Verified",
+							"mark-verify",
+							() =>
+								void this.#settle(open, {
+									type: "mark:verify",
+									caseId: now.c.id,
+									annotationId: annotation.id,
+								}),
+						),
+					);
+				commands.push(
+					button(
+						"Reopen…",
+						"mark-reopen",
+						() => void this.#form(open, "reopen"),
+					),
+					button(
+						"Change…",
+						"mark-change",
+						() => void this.#form(open, "resolve"),
+					),
+				);
+			}
+			const remove = button(
+				"Delete mark",
+				"mark-delete",
+				() => void this.#delete(),
+			);
+			open.remove = remove;
+			content = [
+				label,
+				field,
+				problem,
+				row("commands", ...commands),
+				row(
+					"row",
+					remove,
+					button("Done", "mark-done", () => void this.#done(), true),
+				),
+			];
+			focus = field;
+		}
+		this.overlay.popover.replaceChildren(...content);
+		this.#render();
+		focus.focus();
+	}
+
+	/**
+	 * Ask the panel, with the buttons off meanwhile; says why it did not work.
+	 * Answers whether it did, and `false` when the popover went meanwhile.
+	 */
+	async #request(open: OpenMark, request: MarkRequest): Promise<boolean> {
 		open.busy = true;
-		open.done.disabled = true;
-		open.remove.disabled = true;
+		const was = open.controls.map((b) => b.disabled);
+		for (const b of open.controls) b.disabled = true;
 		open.problem.hidden = true;
 		const answer = await this.#ask(request);
-		if (this.#open !== open) return;
-		if (answer.ok) {
-			this.#closeMark();
-			return;
-		}
+		if (this.#open !== open) return false;
 		open.busy = false;
-		open.done.disabled = false;
-		open.remove.disabled = false;
+		open.controls.forEach((b, i) => {
+			b.disabled = was[i] ?? false;
+		});
+		if (answer.ok) return true;
 		open.problem.textContent = answer.error;
 		open.problem.hidden = false;
+		return false;
+	}
+
+	/** A comment typed is stored before anything else is done with the mark. */
+	async #keep(open: OpenMark): Promise<boolean> {
+		const now = this.#openAnnotation();
+		if (now === undefined || now.open !== open) return false;
+		const text = typed(open).trim();
+		if (text === open.base) return true;
+		const kept = await this.#request(open, {
+			type: "mark:comment",
+			caseId: now.c.id,
+			annotationId: open.annotationId,
+			text,
+		});
+		if (kept) {
+			open.base = text;
+			open.draft = text;
+		}
+		return kept;
+	}
+
+	/** Resolve…, Change… or Reopen…: its form takes the popover. */
+	async #form(open: OpenMark, mode: "resolve" | "reopen"): Promise<void> {
+		if (open.busy || this.#open !== open) return;
+		if (!(await this.#keep(open))) return;
+		open.mode = mode;
+		this.#fill(open);
+	}
+
+	/** A command that settles the mark: done, the popover goes. */
+	async #settle(open: OpenMark, request: MarkRequest): Promise<void> {
+		if (open.busy || this.#open !== open) return;
+		if (!(await this.#keep(open))) return;
+		if (await this.#request(open, request)) this.#closeMark();
 	}
 
 	/** Done: a changed comment is stored, then the popover goes. */
 	async #done(): Promise<void> {
-		const now = this.#openAnnotation();
-		if (now === undefined || now.open.busy) return;
-		const text = now.open.field.value.trim();
-		if (text === now.annotation.comment) {
-			this.#closeMark();
-			return;
-		}
-		await this.#change(now.open, {
-			type: "mark:comment",
-			caseId: now.c.id,
-			annotationId: now.annotation.id,
-			text,
-		});
+		const open = this.#open;
+		if (open === undefined || open.busy) return;
+		if (await this.#keep(open)) this.#closeMark();
 	}
 
 	/** Delete mark: asked twice, as in the panel; the mark leaves the case. */
@@ -545,25 +780,57 @@ export class Reviewer {
 		const now = this.#openAnnotation();
 		if (now === undefined || now.open.busy) return;
 		const { open } = now;
+		const remove = open.remove;
+		if (remove === undefined) return;
 		if (open.armedAt === undefined) {
 			const at = Date.now();
 			open.armedAt = at;
-			open.remove.textContent = "Really delete?";
-			open.remove.setAttribute("data-armed", "");
+			remove.textContent = "Really delete?";
+			remove.setAttribute("data-armed", "");
 			setTimeout(() => {
 				if (this.#open !== open || open.armedAt !== at || open.busy) return;
 				open.armedAt = undefined;
-				open.remove.textContent = "Delete mark";
-				open.remove.removeAttribute("data-armed");
+				remove.textContent = "Delete mark";
+				remove.removeAttribute("data-armed");
 			}, DELETE_ARMED_MS);
 			return;
 		}
 		if (Date.now() - open.armedAt < DELETE_CLICK_GAP_MS) return;
-		await this.#change(open, {
-			type: "mark:delete",
-			caseId: now.c.id,
-			annotationId: now.annotation.id,
-		});
+		if (
+			await this.#request(open, {
+				type: "mark:delete",
+				caseId: now.c.id,
+				annotationId: now.annotation.id,
+			})
+		)
+			this.#closeMark();
+	}
+
+	/**
+	 * The case changed under the open popover: it goes with its mark (deleted
+	 * here, in the panel, by an AI app); a comment changed elsewhere shows
+	 * unless one is being typed; another status draws its commands anew.
+	 */
+	#follow(byId: Map<string, Annotation>): void {
+		const open = this.#open;
+		if (open === undefined) return;
+		const annotation = byId.get(open.annotationId);
+		if (annotation === undefined) {
+			this.#closeMark();
+			return;
+		}
+		const untouched = typed(open).trim() === open.base;
+		open.base = annotation.comment;
+		if (untouched) {
+			open.draft = annotation.comment;
+			if (open.field !== undefined) open.field.value = annotation.comment;
+		}
+		const status = markStatus(annotation);
+		if (status === open.status) return;
+		open.status = status;
+		// A request under way ends the popover or says why not; a form open
+		// is answered by the panel, which knows the mark as it is now.
+		if (open.mode === "main" && !open.busy) this.#fill(open);
 	}
 
 	/** The popover goes, with what was typed in it. */

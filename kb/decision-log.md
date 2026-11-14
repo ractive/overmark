@@ -1099,3 +1099,24 @@ when creating a mark?"
   the panel) is one line away and is listed in the open questions.
 - The annotator's own faint copies of marks it saved (shown only after a Hide while
   adding) are not clickable: "Add marks" now draws the case's marks (DEC-023).
+- **The owner, the same day: "Would be cool to have the available commands also in the
+  overlay of a mark … 'Reopen…', 'Change…', 'Resolve…' etc."** The popover has the
+  panel's commands for the mark's status, in its order and with its words: Resolve…
+  for an open mark; Verified, Reopen… and Change… for one to verify; Reopen… and
+  Change… for a verified or closed one; Delete mark and Done always. Resolve… and
+  Change… show the panel's four ways and its optional note in the popover, Reopen…
+  its required "What is still wrong?", each with Cancel back to the comment. A comment
+  typed is stored before a command acts on the mark; a command done closes the
+  popover (the pin's colour says the rest); what the panel refuses is said in the form.
+  When the case changes under an open popover, its commands follow the mark's new
+  status, a comment being typed stays, and one changed elsewhere shows. This replaces
+  "Resolve, Verified, Reopen stay in the panel" above; the findings stay there. The
+  page's requests grow by `mark:resolve`, `mark:verify` and `mark:reopen`, done by the
+  panel as its own buttons do them, so the price named above now covers a mark's
+  status too.
+- **Which panel answers, corrected.** The panel that has the case open answers for the
+  tab it drew the case on, and also for the tab in front of its window whose page says
+  it shows that case, the same two the panel redraws and hides (`redrawLoaded`). A panel
+  opened again finds the marks on the page without drawing them, and answered nobody.
+  The second is the page's own word: a compromised page in front, which had the case
+  before, could say so after "Hide marks" too.

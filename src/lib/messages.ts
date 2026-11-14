@@ -3,7 +3,14 @@
  * (`chrome.runtime` and `chrome.tabs` messaging).
  */
 
-import type { Case, ElementDetails, Rect, Viewport } from "./case.ts";
+import {
+	type Case,
+	type ElementDetails,
+	RESOLVE_CHOICES,
+	type Rect,
+	type ResolveChoice,
+	type Viewport,
+} from "./case.ts";
 import type { Inspection, Relation } from "./inspect.ts";
 import type { MatchStatus } from "./match.ts";
 import type { SaveRequest } from "./save.ts";
@@ -287,15 +294,26 @@ export type Broadcast =
 
 /**
  * What a page asks of the side panel about a mark of the case drawn on it
- * (DEC-027): its pin was clicked, its comment was changed in the page's
- * popover, or it is to be deleted. A panel answers only for the case it has
+ * (DEC-027): its pin was clicked, or its comment or status was changed, or
+ * it was deleted, in the page's popover. A panel answers only for the case it has
  * open and drew on that tab, and does it as its own buttons would; nobody
  * answers when no panel shows the case.
  */
 export type MarkRequest =
 	| { type: "mark:picked"; caseId: string; annotationId: string }
 	| { type: "mark:comment"; caseId: string; annotationId: string; text: string }
-	| { type: "mark:delete"; caseId: string; annotationId: string };
+	| { type: "mark:delete"; caseId: string; annotationId: string }
+	/** Resolve… and Change…: how it is settled, with a note or "". */
+	| {
+			type: "mark:resolve";
+			caseId: string;
+			annotationId: string;
+			kind: ResolveChoice;
+			note: string;
+	  }
+	| { type: "mark:verify"; caseId: string; annotationId: string }
+	/** Reopen…: with what is still wrong, which the panel requires. */
+	| { type: "mark:reopen"; caseId: string; annotationId: string; note: string };
 
 export type MarkAnswer = { ok: true } | { ok: false; error: string };
 
@@ -303,6 +321,9 @@ const MARK_REQUESTS: ReadonlySet<string> = new Set<MarkRequest["type"]>([
 	"mark:picked",
 	"mark:comment",
 	"mark:delete",
+	"mark:resolve",
+	"mark:verify",
+	"mark:reopen",
 ]);
 
 export function isMarkRequest(message: unknown): message is MarkRequest {
@@ -312,7 +333,11 @@ export function isMarkRequest(message: unknown): message is MarkRequest {
 		MARK_REQUESTS.has(m["type"] as string) &&
 		typeof m["caseId"] === "string" &&
 		typeof m["annotationId"] === "string" &&
-		(m["type"] !== "mark:comment" || typeof m["text"] === "string")
+		(m["type"] !== "mark:comment" || typeof m["text"] === "string") &&
+		(m["type"] !== "mark:reopen" || typeof m["note"] === "string") &&
+		(m["type"] !== "mark:resolve" ||
+			(typeof m["note"] === "string" &&
+				RESOLVE_CHOICES.includes(m["kind"] as ResolveChoice)))
 	);
 }
 

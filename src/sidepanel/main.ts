@@ -2106,8 +2106,8 @@ async function changeMark(
 
 /**
  * A page asks about a mark of the case drawn on it (DEC-027). Answered only
- * by the panel that has the case open and drew it on that tab itself: a page
- * reaches no other case, and no case the user did not put on it. What it asks
+ * by the panel that has the case open, for the tab it drew it on or the tab
+ * in front that shows it (`markAsked`): a page reaches no other case. What it asks
  * is done as the panel's own buttons do it. `false`: not this panel's.
  */
 function answerMark(
@@ -2116,7 +2116,18 @@ function answerMark(
 	answer: (result: MarkAnswer) => void,
 ): boolean {
 	const c = state.view.kind === "case" ? state.current : undefined;
-	const a = markAsked({ open: c, loaded: state.loaded }, request, tabId);
+	const a = markAsked(
+		{
+			open: c,
+			loaded: state.loaded,
+			front:
+				state.tab === undefined
+					? undefined
+					: { tabId: state.tab.id, loadedCase: state.overlay?.loadedCase },
+		},
+		request,
+		tabId,
+	);
 	if (c === undefined || a === undefined) return false;
 	if (a === "gone") {
 		answer({ ok: false, error: "That mark is no longer in the case." });
@@ -2141,6 +2152,32 @@ function answerMark(
 			}
 			void changeMark(c.id, a.id, (current) => ({
 				value: withComment(current, a.id, request.text, now),
+			})).then(done);
+			return true;
+		case "mark:resolve":
+			void changeMark(c.id, a.id, (current) => ({
+				value: withChoice(current, a.id, request.kind, request.note, now),
+			})).then(done);
+			return true;
+		case "mark:verify":
+			void changeMark(c.id, a.id, (current) => ({
+				value: withVerified(current, a.id, undefined, now),
+			})).then(done);
+			return true;
+		case "mark:reopen":
+			// The developer reads it first: a reopen says why, here as in the panel.
+			if (request.note.trim() === "") {
+				answer({ ok: false, error: "Say what is still wrong." });
+				return false;
+			}
+			void changeMark(c.id, a.id, (current) => ({
+				// Opened meanwhile: the form stays, and says why.
+				value: withReopen(
+					current,
+					a.id,
+					{ note: request.note, refuseOpen: true },
+					now,
+				),
 			})).then(done);
 			return true;
 		case "mark:delete":

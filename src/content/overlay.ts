@@ -179,6 +179,19 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .popover button.primary:hover { background: ${L.amberHover}; }
 .popover .label { display: flex; gap: 8px; align-items: center; font-weight: 600; margin-bottom: 8px; }
 .popover .label .state { margin-inline-start: auto; font-weight: 400; color: ${L.popoverMuted}; }
+/* The mark's commands, as the panel has them (DEC-027). */
+.popover .commands { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.popover .commands:empty { display: none; }
+.popover .choices { display: grid; gap: 2px; }
+.popover .choice { display: flex; gap: 8px; align-items: center; min-height: 24px; cursor: pointer; }
+.popover .choice input { margin: 0; accent-color: ${L.popoverText}; }
+.popover input.note {
+	box-sizing: border-box; display: block; width: 100%; margin-top: 8px;
+	font: inherit; padding: 6px 8px; border: 1px solid ${L.popoverEdge}; border-radius: 6px;
+	color: ${L.popoverText}; background: ${L.popover};
+}
+.popover input.note::placeholder { color: ${L.popoverMuted}; opacity: 1; }
+.popover input:focus-visible { outline: 2px solid ${HOVER_COLOUR}; outline-offset: 1px; }
 .popover .problem { margin: 8px 0 0; color: #a4161a; }
 .popover button:disabled { opacity: 0.6; cursor: default; }
 .popover button[data-armed] { border-color: #a4161a; color: #a4161a; }
@@ -228,7 +241,7 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	}
 	.toolbar button:disabled { border-color: GrayText; color: GrayText; opacity: 1; }
 	.toolbar button:focus-visible, .reviewbar button:focus-visible { outline-color: Highlight; }
-	.popover textarea { border: 1px solid CanvasText; }
+	.popover textarea, .popover input.note { border: 1px solid CanvasText; }
 	.ring { stroke: CanvasText; }
 }
 /* Screenshots show the page alone. Invisible, not gone: a field keeps its focus. */
