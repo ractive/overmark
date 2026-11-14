@@ -2,8 +2,8 @@
  * Annotating a page: the tools (element, box, arrow, pen, note), a comment for
  * each mark, undo, and adding the marks to a case.
  *
- * The toolbar always adds to a case (DEC-014, DEC-026): the one "Annotate this
- * page" just created, or the open case's "Add marks". Each mark goes into it
+ * The toolbar always adds to a case (DEC-014, DEC-026): the one "New case for
+ * this page" just created, or the open case's "Add marks". Each mark goes into it
  * as soon as it is done: its comment confirmed, or the comment closed with the
  * mark kept. One queue adds them in order; Undo takes the last one out of the
  * case again. A mark that could not be added stays on the page with the

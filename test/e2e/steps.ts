@@ -198,7 +198,7 @@ export const PUT_CASE = (c: Case) => `new Promise((resolve, reject) => {
 })`;
 
 /**
- * Show the toolbar as "Annotate this page" does (DEC-026): a new case with
+ * Show the toolbar as "New case for this page" does (DEC-026): a new case with
  * the page's title and info, stored at once, and the toolbar adding to it.
  * A side panel on Home opens it, as it opens the case any toolbar on the tab
  * in front adds to (DEC-023). Answers the case's id.

@@ -1688,7 +1688,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				await until(async () => !(await toolbarUp(tabId)), "the toolbar to go");
 				await page.activate();
 				await h.control.waitFor(
-					`${id("annotate")}.textContent === "Annotate this page" && !${id("home")}.hidden`,
+					`${id("annotate")}.textContent === "New case for this page" && !${id("home")}.hidden`,
 				);
 				await other.page.send("Page.close");
 				await page.send("Page.close");

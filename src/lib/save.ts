@@ -231,7 +231,7 @@ export async function saveCase(
 			createdAt: current?.createdAt ?? stamp,
 			updatedAt: stamp,
 			// The first mark's page is the case's (review of PR 57): a case
-			// "Annotate this page" made has the page as it was at that click,
+			// "New case for this page" made has the page as it was at that click,
 			// and the window or the route may have changed before the mark.
 			page:
 				current !== undefined && current.shots.length > 0

@@ -1038,6 +1038,10 @@ wouldn't have drafts — which is ok I think."
   a case on the page once it has a mark: an empty one has nothing to show ("0 of 0
   marks found" is not said). `list_cases` and `get_case` show an empty case with zero
   marks; `add_annotation` adds to a case as before.
+- **The owner, 2026-11-14: the button is "New case for this page".** "Annotate this
+  page" named what one does next and hid what the click does: it always creates a case,
+  also on a page that has one in the list, where it read as "continue". The entries
+  above and the log keep the old name where they were written with it.
 - **After the review of PR 57.** *Never delete on doubt:* an untouched case is deleted
   only when every tab in every window has answered that it holds nothing of the case (no
   toolbar adding to it); a tab that does not answer in time, or an `overlay:end` that

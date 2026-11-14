@@ -448,7 +448,7 @@ describe("saveCase", () => {
 		expect(await store.getCase("c_1")).toBeUndefined();
 	});
 
-	test("the first mark of a case Annotate this page made: s1 and a1, the page its mark's, the title kept (DEC-026)", async () => {
+	test("the first mark of a case New case for this page made: s1 and a1, the page its mark's, the title kept (DEC-026)", async () => {
 		const store = new MemoryStore();
 		const empty = await putCase(store, {
 			...sampleCase("c_1"),
