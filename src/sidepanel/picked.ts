@@ -11,28 +11,31 @@ export interface Showing {
 	open: Case | undefined;
 	/** Where this panel drew a case's marks itself. */
 	loaded: { caseId: string; tabId: number } | undefined;
+	/**
+	 * The tab in front of this panel's window and the case its page says it
+	 * shows: a panel opened again finds the marks there without drawing them.
+	 */
+	front: { tabId: number; loadedCase: string | undefined } | undefined;
 }
 
 /**
  * The mark a page's request is about. `undefined`: not this panel's to answer
- * (the request is not from a tab, or not from the tab this panel drew its
- * open case on): a page reaches no other case, and no case the user did not
- * put on it. `"gone"`: this panel's, but the case has no such mark any more.
+ * (the request is not from a tab, or the tab is neither the one this panel
+ * drew its open case on nor the tab in front showing it): a page reaches no
+ * other case, and none that is not open. The marks the panel redraws and
+ * hides are the same two (`redrawLoaded`). `"gone"`: this panel's, but the
+ * case has no such mark any more.
  */
 export function markAsked(
 	showing: Showing,
 	request: Pick<MarkRequest, "caseId" | "annotationId">,
 	tabId: number | undefined,
 ): Annotation | "gone" | undefined {
-	const { open, loaded } = showing;
-	if (
-		tabId === undefined ||
-		open === undefined ||
-		open.id !== request.caseId ||
-		loaded === undefined ||
-		loaded.caseId !== open.id ||
-		loaded.tabId !== tabId
-	)
+	const { open, loaded, front } = showing;
+	if (tabId === undefined || open === undefined || open.id !== request.caseId)
 		return undefined;
+	const drewIt = loaded?.caseId === open.id && loaded.tabId === tabId;
+	const inFront = front?.tabId === tabId && front.loadedCase === open.id;
+	if (!drewIt && !inFront) return undefined;
 	return open.annotations.find((a) => a.id === request.annotationId) ?? "gone";
 }

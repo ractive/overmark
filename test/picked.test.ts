@@ -16,7 +16,11 @@ describe("which panel answers a page about a mark (DEC-027)", () => {
 	};
 	const c: Case = { ...sampleCase("c_open"), annotations: [mark] };
 	const request = { caseId: c.id, annotationId: mark.id };
-	const showing = { open: c, loaded: { caseId: c.id, tabId: 7 } };
+	const showing = {
+		open: c,
+		loaded: { caseId: c.id, tabId: 7 },
+		front: undefined,
+	};
 
 	test("the panel that has the case open and drew it on that tab", () => {
 		expect(markAsked(showing, request, 7)).toBe(mark);
@@ -47,6 +51,35 @@ describe("which panel answers a page about a mark (DEC-027)", () => {
 		// Another case open, the asked one drawn on the tab before.
 		expect(
 			markAsked({ ...showing, open: sampleCase("c_next") }, request, 7),
+		).toBeUndefined();
+	});
+
+	test("a panel opened again: the tab in front that shows the open case", () => {
+		const reopened = {
+			open: c,
+			loaded: undefined,
+			front: { tabId: 9, loadedCase: c.id },
+		};
+		expect(markAsked(reopened, request, 9)).toBe(mark);
+		// Another tab, the tab in front showing another case or none, or
+		// another case open in the panel.
+		expect(markAsked(reopened, request, 7)).toBeUndefined();
+		expect(
+			markAsked(
+				{ ...reopened, front: { tabId: 9, loadedCase: "c_other" } },
+				request,
+				9,
+			),
+		).toBeUndefined();
+		expect(
+			markAsked(
+				{ ...reopened, front: { tabId: 9, loadedCase: undefined } },
+				request,
+				9,
+			),
+		).toBeUndefined();
+		expect(
+			markAsked({ ...reopened, open: sampleCase("c_next") }, request, 9),
 		).toBeUndefined();
 	});
 

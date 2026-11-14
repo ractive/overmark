@@ -711,6 +711,225 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		expect(overlay.popover.hidden).toBe(true);
 	});
 
+	const commands = () =>
+		[...overlay.popover.querySelectorAll(".commands button")].map(
+			(b) => b.textContent,
+		);
+	const settledAs = (
+		c: Case,
+		kind: "fixed" | "wontfix" | "cantreproduce",
+		more: object = {},
+	): Case => ({
+		...c,
+		annotations: c.annotations.map((a) => ({
+			...a,
+			resolution: { kind, at: "2026-11-14T10:00:00Z", ...more },
+		})),
+	});
+	const radios = () =>
+		[
+			...overlay.popover.querySelectorAll<HTMLInputElement>(
+				".choices input[type=radio]",
+			),
+		].map((r) => [r.value, r.checked]);
+
+	test("the commands are the panel's for the mark's status", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		expect(commands()).toEqual(["Resolve…"]);
+		reviewer.clear();
+		await reviewer.load(settledAs(c, "fixed"));
+		overlay.onPick?.(1);
+		expect(commands()).toEqual(["Verified", "Reopen…", "Change…"]);
+		reviewer.clear();
+		await reviewer.load(settledAs(c, "fixed", { verified: { at: "x" } }));
+		overlay.onPick?.(1);
+		expect(commands()).toEqual(["Reopen…", "Change…"]);
+		reviewer.clear();
+		await reviewer.load(settledAs(c, "cantreproduce"));
+		overlay.onPick?.(1);
+		expect(commands()).toEqual(["Reopen…", "Change…"]);
+		// Delete mark and Done are there for every status.
+		expect(button("mark-delete")).not.toBeNull();
+		expect(button("mark-done")).not.toBeNull();
+	});
+
+	test("Resolve…: the four ways and a note; Save settles the mark and the popover goes", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		button("mark-resolve").click();
+		await settled();
+		expect(overlay.popover.querySelector(".label")?.textContent).toBe(
+			"1Mark 1 is",
+		);
+		expect(radios()).toEqual([
+			["fixed", true],
+			["verified", false],
+			["wontfix", false],
+			["cantreproduce", false],
+		]);
+		const note = overlay.popover.querySelector(
+			"input.note",
+		) as HTMLInputElement;
+		expect(note.value).toBe("");
+		(
+			overlay.popover.querySelector(
+				'.choices input[value="wontfix"]',
+			) as HTMLInputElement
+		).checked = true;
+		note.value = "By design";
+		button("mark-resolve-done").click();
+		await settled();
+		expect(asked.at(-1)).toEqual({
+			type: "mark:resolve",
+			caseId: c.id,
+			annotationId: "a1",
+			kind: "wontfix",
+			note: "By design",
+		});
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("a comment typed is stored before a command's form opens; Cancel is back at the comment", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		field().value = "Much too pale";
+		button("mark-resolve").click();
+		await settled();
+		expect(asked.at(-1)).toEqual({
+			type: "mark:comment",
+			caseId: c.id,
+			annotationId: "a1",
+			text: "Much too pale",
+		});
+		expect(overlay.popover.querySelector(".choices")).not.toBeNull();
+		button("mark-back").click();
+		expect(field().value).toBe("Much too pale");
+		expect(commands()).toEqual(["Resolve…"]);
+		// Stored already: Done asks nothing more.
+		const before = asked.length;
+		button("mark-done").click();
+		await settled();
+		expect(asked.length).toBe(before);
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("a comment that could not be stored keeps the popover at the comment", async () => {
+		await loaded();
+		overlay.onPick?.(1);
+		answer = { ok: false, error: NO_PANEL };
+		field().value = "Changed";
+		button("mark-resolve").click();
+		await settled();
+		expect(overlay.popover.querySelector(".choices")).toBeNull();
+		expect(field().value).toBe("Changed");
+		expect(overlay.popover.querySelector(".problem")?.textContent).toBe(
+			NO_PANEL,
+		);
+	});
+
+	test("Verified: one click, for a mark to verify", async () => {
+		const c = await loaded();
+		await reviewer.update(settledAs(c, "fixed"));
+		overlay.onPick?.(1);
+		button("mark-verify").click();
+		await settled();
+		expect(asked.at(-1)).toEqual({
+			type: "mark:verify",
+			caseId: c.id,
+			annotationId: "a1",
+		});
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("Reopen… needs what is still wrong; what the panel refuses is said in the form", async () => {
+		const c = await loaded();
+		await reviewer.update(settledAs(c, "fixed"));
+		overlay.onPick?.(1);
+		button("mark-reopen").click();
+		await settled();
+		const note = () =>
+			overlay.popover.querySelector("textarea") as HTMLTextAreaElement;
+		expect(note().getAttribute("aria-label")).toBe(
+			"What is still wrong with mark 1",
+		);
+		expect(button("mark-reopen-done").disabled).toBe(true);
+		note().value = "  ";
+		note().dispatchEvent(
+			new (doc.defaultView as unknown as Window).Event("input") as never,
+		);
+		expect(button("mark-reopen-done").disabled).toBe(true);
+		note().value = "Still pale on hover";
+		note().dispatchEvent(
+			new (doc.defaultView as unknown as Window).Event("input") as never,
+		);
+		expect(button("mark-reopen-done").disabled).toBe(false);
+		answer = { ok: false, error: "Not saved: no." };
+		button("mark-reopen-done").click();
+		await settled();
+		expect(overlay.popover.hidden).toBe(false);
+		expect(overlay.popover.querySelector(".problem")?.textContent).toBe(
+			"Not saved: no.",
+		);
+		expect(note().value).toBe("Still pale on hover");
+		answer = { ok: true };
+		button("mark-reopen-done").click();
+		await settled();
+		expect(asked.at(-1)).toEqual({
+			type: "mark:reopen",
+			caseId: c.id,
+			annotationId: "a1",
+			note: "Still pale on hover",
+		});
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("Change… starts from how the mark was settled, with its note", async () => {
+		const c = await loaded();
+		await reviewer.update(settledAs(c, "wontfix", { note: "By design" }));
+		overlay.onPick?.(1);
+		button("mark-change").click();
+		await settled();
+		expect(radios().find(([, checked]) => checked)?.[0]).toBe("wontfix");
+		expect(
+			(overlay.popover.querySelector("input.note") as HTMLInputElement).value,
+		).toBe("By design");
+	});
+
+	test("the case changes under the popover: other commands, the comment typed stays, one changed elsewhere shows", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		// Untouched here, changed in the panel: it shows, and Done asks nothing.
+		const edited = {
+			...c,
+			annotations: c.annotations.map((a) => ({
+				...a,
+				comment: "From the panel",
+			})),
+		};
+		await reviewer.update(edited);
+		expect(field().value).toBe("From the panel");
+		// Being typed here while the panel resolves the mark: the text stays.
+		field().value = "Typing";
+		await reviewer.update(settledAs(edited, "fixed"));
+		expect(commands()).toEqual(["Verified", "Reopen…", "Change…"]);
+		expect(field().value).toBe("Typing");
+		expect(overlay.popover.querySelector(".state")?.textContent).toBe(
+			"Fixed, to verify",
+		);
+		const before = asked.length;
+		button("mark-done").click();
+		await settled();
+		expect(asked.slice(before)).toEqual([
+			{
+				type: "mark:comment",
+				caseId: c.id,
+				annotationId: "a1",
+				text: "Typing",
+			},
+		]);
+	});
+
 	test("only a mark's request with its fields is one", () => {
 		const base = { caseId: "c_1", annotationId: "a1" };
 		expect(isMarkRequest({ type: "mark:picked", ...base })).toBe(true);
@@ -723,6 +942,21 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 			false,
 		);
 		expect(isMarkRequest({ type: "mark:delete", caseId: "c_1" })).toBe(false);
+		expect(isMarkRequest({ type: "mark:verify", ...base })).toBe(true);
+		expect(isMarkRequest({ type: "mark:reopen", ...base, note: "x" })).toBe(
+			true,
+		);
+		expect(isMarkRequest({ type: "mark:reopen", ...base })).toBe(false);
+		expect(
+			isMarkRequest({ type: "mark:resolve", ...base, kind: "fixed", note: "" }),
+		).toBe(true);
+		// Only the four ways the panel has; "open" is Reopen's.
+		expect(
+			isMarkRequest({ type: "mark:resolve", ...base, kind: "open", note: "" }),
+		).toBe(false);
+		expect(
+			isMarkRequest({ type: "mark:resolve", ...base, kind: "fixed" }),
+		).toBe(false);
 		expect(isMarkRequest({ type: "cases:changed", caseId: "c_1" })).toBe(false);
 		expect(isMarkRequest(null)).toBe(false);
 	});
