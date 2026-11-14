@@ -1459,6 +1459,50 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		);
 
 		slowTest(
+			"Add marks shows the case's marks too: a Hide on the tab holds no longer",
+			async () => {
+				const { page, tabId, caseId } =
+					await inCaseWithMarks("Shown while adding");
+				await h.control.eval(`${id("load-case")}.click()`);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to go",
+				);
+				await h.control.waitFor(
+					`${id("load-case")}.textContent === "Show marks"`,
+				);
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(() => toolbarUp(tabId), "the toolbar");
+				await until(
+					async () => (await pageCase(tabId)) === caseId,
+					"the marks back on the page",
+				);
+				await h.control.waitFor(
+					`${id("load-case")}.textContent === "Hide marks" && ${id("add-marks")}.textContent === "Done adding"`,
+				);
+				// A mark added now is the case's, drawn as the others are.
+				await markElement(page, "[data-truth=tip]", "And this");
+				await until(
+					async () =>
+						(await page.eval<number>(
+							`${shadow("svg.marks")}.querySelectorAll("[data-review]").length`,
+						)) === 2,
+					"the new mark among the loaded ones",
+				);
+				// Hide still hides, also while adding.
+				await h.control.eval(`${id("load-case")}.click()`);
+				await until(
+					async () => (await pageCase(tabId)) === null,
+					"the marks to go again",
+				);
+				expect(await toolbarUp(tabId)).toBe(true);
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(async () => !(await toolbarUp(tabId)), "the toolbar to go");
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
 			"Add marks says in the case why it could not show the toolbar",
 			async () => {
 				const { page } = await inCaseWithMarks("Add marks fails");

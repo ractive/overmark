@@ -1062,14 +1062,14 @@ function announce(caseId: string): void {
  * marks"), or on `tabId`, the tab "Annotate this page" was clicked for
  * (DEC-026), whatever tab is in front by then.
  */
-async function startAnnotating(target: Case, tabId?: number): Promise<void> {
+async function startAnnotating(target: Case, tabId?: number): Promise<boolean> {
 	// Under the case's buttons, and only where there is something to say
 	// (what a draw found stays).
 	const say = (text: string | undefined) => {
 		if (text !== undefined) caseHintWriter()(text);
 	};
 	const id = tabId ?? (await activeTab())?.id;
-	if (id === undefined) return;
+	if (id === undefined) return false;
 	const tab = { id };
 	tabWork.cancel(); // a refresh still running must not overwrite this
 	try {
@@ -1091,8 +1091,10 @@ async function startAnnotating(target: Case, tabId?: number): Promise<void> {
 				? "Overmark is still saving the last marks on this page; the toolbar switches once that is done."
 				: undefined,
 		);
+		return true;
 	} catch (error) {
 		say(describeError(error));
+		return false;
 	}
 }
 
@@ -1535,7 +1537,15 @@ const actions: Actions = {
 	addMarks: (c) => {
 		// The marks drawn now show, whatever the list was filtered by.
 		update((s) => (s.markFilter = undefined));
-		void startAnnotating(c);
+		void (async () => {
+			const tab = await activeTab();
+			if (tab?.id === undefined) return;
+			if (!(await startAnnotating(c, tab.id))) return;
+			// Adding to a case shows its marks on the tab too (the owner): a Hide
+			// there holds no longer, and a new mark is drawn like the others.
+			if (hiddenOn.delete(tab.id)) update(() => undefined);
+			void follow();
+		})();
 	},
 
 	startRename: (c) =>

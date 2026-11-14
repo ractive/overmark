@@ -793,6 +793,14 @@ fixed, to verify / verified. The details are the
   and opening it again is in that case again, not on Home with orphaned marks.
 - **Hide holds through a reload of that tab** (PR 42's other open question): it ends
   with Show marks, with closing the case, or with closing the panel.
+- **The owner, 2026-11-14, on the case view.** "Show marks" was a link and was
+  overlooked: it is a button with an edge, in the marks' bar beside "Expand all", and
+  absent on a case without marks. The status block (the bar and its chips) moves from
+  the header to just under the "Marks" heading, where its chips filter the list below;
+  the header keeps what the tab in front says in words. "Add marks" also shows the
+  case's marks on that tab: a Hide there ends with it, and a mark added is drawn like
+  the others; Hide still hides while adding. A mark's head answers the pointer as one block (a wash), not with an
+  underline, which made each line of a comment look like a link of its own.
 - **A Settings view** holds the AI app card and the options. The AI pill opens it and
   keeps the case open: it closed the case before, which would now also end annotating
   and clear the page.
