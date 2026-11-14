@@ -285,5 +285,36 @@ export type Broadcast =
 	 */
 	| { type: "sync:run"; force?: boolean };
 
+/**
+ * What a page asks of the side panel about a mark of the case drawn on it
+ * (DEC-027): its pin was clicked, its comment was changed in the page's
+ * popover, or it is to be deleted. A panel answers only for the case it has
+ * open and drew on that tab, and does it as its own buttons would; nobody
+ * answers when no panel shows the case.
+ */
+export type MarkRequest =
+	| { type: "mark:picked"; caseId: string; annotationId: string }
+	| { type: "mark:comment"; caseId: string; annotationId: string; text: string }
+	| { type: "mark:delete"; caseId: string; annotationId: string };
+
+export type MarkAnswer = { ok: true } | { ok: false; error: string };
+
+const MARK_REQUESTS: ReadonlySet<string> = new Set<MarkRequest["type"]>([
+	"mark:picked",
+	"mark:comment",
+	"mark:delete",
+]);
+
+export function isMarkRequest(message: unknown): message is MarkRequest {
+	if (typeof message !== "object" || message === null) return false;
+	const m = message as Record<string, unknown>;
+	return (
+		MARK_REQUESTS.has(m["type"] as string) &&
+		typeof m["caseId"] === "string" &&
+		typeof m["annotationId"] === "string" &&
+		(m["type"] !== "mark:comment" || typeof m["text"] === "string")
+	);
+}
+
 /** The content script's file, as the build writes it. */
 export const CONTENT_SCRIPT = "content.js";

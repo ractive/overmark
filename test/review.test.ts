@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { Overlay } from "../src/content/overlay.ts";
-import { LoadReplaced, Reviewer } from "../src/content/review.ts";
+import { LoadReplaced, NO_PANEL, Reviewer } from "../src/content/review.ts";
 import type { Annotation, Case, Shape } from "../src/lib/case.ts";
 import { describeElement } from "../src/lib/element.ts";
+import type { MarkAnswer, MarkRequest } from "../src/lib/messages.ts";
+import { isMarkRequest } from "../src/lib/messages.ts";
 import { sampleCase } from "./fixtures.ts";
 
 let doc: Document;
@@ -11,6 +13,9 @@ let doc: Document;
 let restoreLayout: () => void = () => undefined;
 let overlay: ReturnType<typeof stubOverlay>;
 let reviewer: Reviewer;
+/** What the page asked of the side panel, and what the panel answers. */
+let asked: MarkRequest[];
+let answer: MarkAnswer;
 
 interface Item {
 	number: number;
@@ -33,6 +38,33 @@ function stubOverlay(document: Document) {
 		renderReview(items: readonly Item[]) {
 			this.items = items;
 		},
+		// The one popover, as the overlay keeps it.
+		popover: document.createElement("div"),
+		onPick: undefined as ((number: number) => void) | undefined,
+		dismissed: undefined as (() => void) | undefined,
+		placed: 0,
+		openPopover(content: Node[], dismissed: () => void) {
+			this.dismissPopover();
+			this.dismissed = dismissed;
+			this.popover.replaceChildren(...content);
+			this.popover.hidden = false;
+		},
+		closePopover() {
+			this.dismissed = undefined;
+			this.popover.hidden = true;
+			this.popover.replaceChildren();
+		},
+		dismissPopover() {
+			const dismissed = this.dismissed;
+			if (dismissed === undefined) return false;
+			this.dismissed = undefined;
+			dismissed();
+			this.closePopover();
+			return true;
+		},
+		placePopover() {
+			this.placed++;
+		},
 	};
 }
 
@@ -54,7 +86,12 @@ beforeEach(() => {
 		requestAnimationFrame: (run: () => void) => setTimeout(run, 0),
 	});
 	overlay = stubOverlay(doc);
-	reviewer = new Reviewer(overlay as unknown as Overlay);
+	asked = [];
+	answer = { ok: true };
+	reviewer = new Reviewer(overlay as unknown as Overlay, async (request) => {
+		asked.push(request);
+		return answer;
+	});
 });
 
 afterEach(() => {
@@ -497,5 +534,196 @@ describe("a load that draws a newer copy at its end", () => {
 		const again = reviewer.load(newer);
 		expect((await again).matches.length).toBe(3);
 		expect((await loading).matches.length).toBe(3);
+	});
+});
+
+describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
+	const PAGE = `<main><h1>Prämien</h1><button>Berechnen</button><p>Tipp</p></main>`;
+	const field = () =>
+		overlay.popover.querySelector("textarea") as HTMLTextAreaElement;
+	const button = (action: string) =>
+		overlay.popover.querySelector(
+			`[data-action="${action}"]`,
+		) as HTMLButtonElement;
+	const settled = () => new Promise<void>((r) => setTimeout(r, 0));
+
+	async function loaded(comment = "Too pale"): Promise<Case> {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const marked = {
+			...c,
+			annotations: c.annotations.map((a) => ({ ...a, comment })),
+		};
+		await reviewer.load(marked);
+		return marked;
+	}
+
+	test("its comment opens in the popover, its element is outlined, the panel is told", async () => {
+		const c = await loaded();
+		expect(overlay.onPick).toBeDefined();
+		overlay.onPick?.(1);
+		expect(overlay.popover.hidden).toBe(false);
+		expect(field().value).toBe("Too pale");
+		expect(field().getAttribute("aria-label")).toBe("Comment of mark 1");
+		expect(overlay.popover.querySelector(".pin")?.textContent).toBe("1");
+		expect(button("mark-delete").textContent).toBe("Delete mark");
+		expect(button("mark-done").textContent).toBe("Done");
+		expect(overlay.items[0]?.focused).toBe(true);
+		expect(overlay.placed).toBeGreaterThan(0);
+		expect(asked).toEqual([
+			{ type: "mark:picked", caseId: c.id, annotationId: "a1" },
+		]);
+		// A second click on the same pin leaves what is being typed.
+		field().value = "Typing";
+		overlay.onPick?.(1);
+		expect(field().value).toBe("Typing");
+		expect(asked.length).toBe(1);
+		// A number the case has no mark for opens nothing.
+		reviewer.clear();
+		overlay.onPick?.(1);
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("a mark that is not open says its status beside the label", async () => {
+		const c = await loaded();
+		const fixed = {
+			...c,
+			annotations: c.annotations.map((a) => ({
+				...a,
+				resolution: { kind: "fixed" as const, at: "2026-11-14T10:00:00Z" },
+			})),
+		};
+		await reviewer.update(fixed);
+		overlay.onPick?.(1);
+		expect(overlay.popover.querySelector(".state")?.textContent).toBe(
+			"Fixed, to verify",
+		);
+	});
+
+	test("Done with the comment as it was asks nothing; a changed one is stored, then the popover goes", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		button("mark-done").click();
+		await settled();
+		expect(overlay.popover.hidden).toBe(true);
+		expect(asked.length).toBe(1);
+
+		overlay.onPick?.(1);
+		field().value = "  Much too pale ";
+		button("mark-done").click();
+		// Off while the panel is asked: no second request.
+		expect(button("mark-done").disabled).toBe(true);
+		button("mark-done").click();
+		await settled();
+		expect(asked.at(-1)).toEqual({
+			type: "mark:comment",
+			caseId: c.id,
+			annotationId: "a1",
+			text: "Much too pale",
+		});
+		expect(asked.filter((r) => r.type === "mark:comment").length).toBe(1);
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("what could not be stored is said in the popover, which stays with the text", async () => {
+		await loaded();
+		overlay.onPick?.(1);
+		answer = { ok: false, error: NO_PANEL };
+		field().value = "Changed";
+		button("mark-done").click();
+		await settled();
+		expect(overlay.popover.hidden).toBe(false);
+		const problem = overlay.popover.querySelector(".problem") as HTMLElement;
+		expect(problem.hidden).toBe(false);
+		expect(problem.textContent).toBe(NO_PANEL);
+		expect(problem.getAttribute("role")).toBe("alert");
+		expect(field().value).toBe("Changed");
+		expect(button("mark-done").disabled).toBe(false);
+	});
+
+	test("Delete mark asks twice, and not on a double click", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		const realNow = Date.now;
+		let now = 1_000_000;
+		Date.now = () => now;
+		try {
+			button("mark-delete").click();
+			expect(button("mark-delete").textContent).toBe("Really delete?");
+			expect(button("mark-delete").hasAttribute("data-armed")).toBe(true);
+			// The second half of a double click.
+			now += 100;
+			button("mark-delete").click();
+			await settled();
+			expect(asked.some((r) => r.type === "mark:delete")).toBe(false);
+			now += 1000;
+			button("mark-delete").click();
+			await settled();
+		} finally {
+			Date.now = realNow;
+		}
+		expect(asked.at(-1)).toEqual({
+			type: "mark:delete",
+			caseId: c.id,
+			annotationId: "a1",
+		});
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("Escape drops what was typed; a click beside it, or another popover, keeps it", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		field().value = "Dropped";
+		field().dispatchEvent(
+			new (doc.defaultView as unknown as Window).KeyboardEvent("keydown", {
+				key: "Escape",
+			}) as never,
+		);
+		expect(overlay.popover.hidden).toBe(true);
+		expect(asked.some((r) => r.type === "mark:comment")).toBe(false);
+
+		overlay.onPick?.(1);
+		field().value = "Kept";
+		// What the annotator does at a press beside the popover, or as it opens
+		// a new mark's comment.
+		expect(overlay.dismissPopover()).toBe(true);
+		expect(overlay.popover.hidden).toBe(true);
+		expect(asked.at(-1)).toEqual({
+			type: "mark:comment",
+			caseId: c.id,
+			annotationId: "a1",
+			text: "Kept",
+		});
+	});
+
+	test("the popover goes with its mark, and with the case", async () => {
+		const c = await loaded();
+		overlay.onPick?.(1);
+		// Another change of the case leaves it open.
+		await reviewer.update({ ...c, title: "Renamed" });
+		expect(overlay.popover.hidden).toBe(false);
+		await reviewer.update({ ...c, annotations: [] });
+		expect(overlay.popover.hidden).toBe(true);
+		await reviewer.load(c);
+		overlay.onPick?.(1);
+		expect(overlay.popover.hidden).toBe(false);
+		reviewer.clear();
+		expect(overlay.popover.hidden).toBe(true);
+	});
+
+	test("only a mark's request with its fields is one", () => {
+		const base = { caseId: "c_1", annotationId: "a1" };
+		expect(isMarkRequest({ type: "mark:picked", ...base })).toBe(true);
+		expect(isMarkRequest({ type: "mark:delete", ...base })).toBe(true);
+		expect(isMarkRequest({ type: "mark:comment", ...base, text: "" })).toBe(
+			true,
+		);
+		expect(isMarkRequest({ type: "mark:comment", ...base })).toBe(false);
+		expect(isMarkRequest({ type: "mark:comment", ...base, text: 1 })).toBe(
+			false,
+		);
+		expect(isMarkRequest({ type: "mark:delete", caseId: "c_1" })).toBe(false);
+		expect(isMarkRequest({ type: "cases:changed", caseId: "c_1" })).toBe(false);
+		expect(isMarkRequest(null)).toBe(false);
 	});
 });

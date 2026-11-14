@@ -155,6 +155,11 @@ export interface PanelState {
 	 * it was pressed) was added.
 	 */
 	markFilter: { caseId: string; group: StatusGroup; upTo: number } | undefined;
+	/**
+	 * The mark whose pin was clicked on the page (DEC-027): the list opens it
+	 * and brings it into view, once per click (`at`).
+	 */
+	picked: { caseId: string; annotationId: string; at: number } | undefined;
 	/** A mark's Delete, clicked once: the second click deletes. */
 	markDeleteArmed: { annotationId: string; at: number } | undefined;
 	/**
@@ -242,6 +247,7 @@ export const initialState = (): PanelState => ({
 	markEdit: undefined,
 	renaming: undefined,
 	markFilter: undefined,
+	picked: undefined,
 	markDeleteArmed: undefined,
 	findingDeleteArmed: undefined,
 	verdictStatus: undefined,

@@ -707,6 +707,46 @@ describe("Verify (DEC-023)", () => {
 		).toBe(true);
 	});
 
+	test("a mark picked on the page opens its row, once per click (DEC-027)", () => {
+		const c = fourMarks();
+		const open = (id: string) =>
+			window.document
+				.querySelector(`[data-annotation="${id}"]`)
+				?.hasAttribute("data-open");
+		render(caseState(c), noActions);
+		expect(open("a3")).toBe(false);
+		const picked = (at: number) =>
+			caseState(c, (s) => {
+				s.picked = { caseId: c.id, annotationId: "a3", at };
+			});
+		render(picked(1), noActions);
+		expect(open("a3")).toBe(true);
+		expect(
+			window.document
+				.querySelector('[data-annotation="a3"]')
+				?.hasAttribute("data-picked"),
+		).toBe(true);
+		// Closed by hand: the same click does not open it again.
+		(
+			window.document.querySelector(
+				'[data-annotation="a3"] .mark-toggle',
+			) as unknown as HTMLElement
+		).click();
+		expect(open("a3")).toBe(false);
+		render(picked(1), noActions);
+		expect(open("a3")).toBe(false);
+		// Another click does; another case's does not.
+		render(picked(2), noActions);
+		expect(open("a3")).toBe(true);
+		render(
+			caseState(c, (s) => {
+				s.picked = { caseId: "c_other", annotationId: "a1", at: 3 };
+			}),
+			noActions,
+		);
+		expect(open("a1")).toBe(false);
+	});
+
 	test("a chip filters the list, a second click or Show all shows all", () => {
 		const c = fourMarks();
 		const filters: unknown[] = [];

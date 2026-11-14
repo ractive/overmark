@@ -1503,6 +1503,118 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		);
 
 		slowTest(
+			"a mark's pin on the page opens its comment there: changed, then deleted (DEC-027)",
+			async () => {
+				const { page, tabId, caseId } =
+					await inCaseWithMarks("Picked on the page");
+				const before = (await storedCase(caseId))?.annotations[0];
+				if (before === undefined) throw new Error("no mark");
+				const pin = shadow(
+					`.review [data-review="${before.number}"] [data-number] text`,
+				);
+				const popover = shadow(".popover");
+				const field = shadow(".popover textarea");
+				const row = `document.querySelector('[data-annotation="${before.id}"]')`;
+				await page.waitFor(pin);
+				expect(
+					await h.control.eval<boolean>(`${row}.hasAttribute("data-open")`),
+				).toBe(false);
+				await page.click(pin);
+				await page.waitFor(`!${popover}.hidden && ${field} !== null`);
+				expect(await page.eval<string>(`${field}.value`)).toBe(before.comment);
+				// The panel shows the mark, with its other actions.
+				await h.control.waitFor(`${row}.hasAttribute("data-open")`);
+
+				// Done stores the changed comment; the panel and the case have it.
+				await page.eval(`${field}.value = "Changed on the page"`);
+				await page.click(shadow('[data-action="mark-done"]'));
+				await until(
+					async () =>
+						(await storedCase(caseId))?.annotations[0]?.comment ===
+						"Changed on the page",
+					"the comment in the case",
+				);
+				await page.waitFor(`${popover}.hidden`);
+				await h.control.waitFor(
+					`${row}.querySelector(".comment").textContent === "Changed on the page"`,
+				);
+
+				// With a tool on, the layer that takes the pointer covers the pin:
+				// a press there opens the comment and draws nothing.
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(() => toolbarUp(tabId), "the toolbar");
+				await page.click(shadow('[data-action="tool-box"]'));
+				await page.waitFor(
+					`${shadow('[data-action="tool-box"]')}.getAttribute("aria-pressed") === "true"`,
+				);
+				const at = await page.eval<{ x: number; y: number }>(
+					`(() => { const r = ${pin}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+				);
+				await page.clickAt(at.x, at.y);
+				await page.waitFor(
+					`!${popover}.hidden && ${field}?.value === "Changed on the page"`,
+				);
+				expect(
+					await page.eval<number>(
+						`${shadow("svg.marks")}.querySelectorAll(".drafts [data-number]").length`,
+					),
+				).toBe(0);
+
+				// Delete mark asks twice; then the mark is out of the case, off
+				// the page and off the panel's list.
+				const remove = shadow('[data-action="mark-delete"]');
+				await page.click(remove);
+				await page.waitFor(`${remove}.textContent === "Really delete?"`);
+				expect((await storedCase(caseId))?.annotations.length).toBe(1);
+				await Bun.sleep(500);
+				await page.click(remove);
+				await until(
+					async () => (await storedCase(caseId))?.annotations.length === 0,
+					"the mark out of the case",
+				);
+				await page.waitFor(
+					`${popover}.hidden && ${shadow("svg.marks")}.querySelectorAll("[data-review]").length === 0`,
+				);
+				await h.control.waitFor(`${row} === null`);
+				await h.control.eval(`${id("add-marks")}.click()`);
+				await until(async () => !(await toolbarUp(tabId)), "the toolbar to go");
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
+			"with no panel showing the case, the page's popover says so and keeps the text",
+			async () => {
+				const { page, caseId } = await inCaseWithMarks("Not without a panel");
+				const before = (await storedCase(caseId))?.annotations[0];
+				if (before === undefined) throw new Error("no mark");
+				await page.click(
+					shadow(`.review [data-review="${before.number}"] [data-number] text`),
+				);
+				const field = shadow(".popover textarea");
+				await page.waitFor(`${field} !== null`);
+				// As closing the side panel: the marks stay on the page.
+				await h.control.goto("about:blank");
+				await page.eval(`${field}.value = "Nobody stores this"`);
+				await page.click(shadow('[data-action="mark-done"]'));
+				const problem = shadow(".popover .problem");
+				await page.waitFor(`${problem} !== null && !${problem}.hidden`);
+				expect(await page.eval<string>(`${problem}.textContent`)).toBe(
+					"Open this case in Overmark's side panel to change its marks.",
+				);
+				expect(await page.eval<string>(`${field}.value`)).toBe(
+					"Nobody stores this",
+				);
+				await openPanel();
+				await h.control.waitFor(`document.getElementById("home") !== null`);
+				expect((await storedCase(caseId))?.annotations[0]?.comment).toBe(
+					before.comment,
+				);
+				await page.send("Page.close");
+			},
+		);
+
+		slowTest(
 			"Add marks says in the case why it could not show the toolbar",
 			async () => {
 				const { page } = await inCaseWithMarks("Add marks fails");

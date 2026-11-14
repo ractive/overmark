@@ -1365,6 +1365,28 @@ ol.annotations {
 	padding-right: var(--s4);
 }
 
+/* Brought into view (its pin was clicked on the page): below the bars. */
+.annotation {
+	scroll-margin-top: calc(var(--bar) + 48px);
+}
+
+/* Its pin was clicked on the page (DEC-027): the row says "this one" a moment. */
+.annotation[data-picked] > .mark-head {
+	animation: picked 1.6s ease-out;
+}
+
+@keyframes picked {
+	from {
+		background: var(--wash);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.annotation[data-picked] > .mark-head {
+		animation: none;
+	}
+}
+
 /* The whole head opens and closes the mark; Show sits beside it. */
 .mark-toggle {
 	flex: 1;
