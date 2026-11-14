@@ -22,6 +22,7 @@ import {
 	markElement,
 	openCase,
 	panelHome,
+	putCases,
 	READ_DB,
 	saveAs,
 	shadow,
@@ -42,17 +43,6 @@ const chips = `[...document.querySelectorAll("#case-status .chip")].map((b) => b
 const bar = `[...document.querySelectorAll("#case-status .progress > span")].map((s) => s.dataset.kind)`;
 
 /** Put `cases` into the extension's database as they are. */
-const putCases = (h: Harness, cases: Case[]) =>
-	h.control.eval(`new Promise((resolve, reject) => {
-		const open = indexedDB.open("overmark");
-		open.onerror = () => reject(open.error);
-		open.onsuccess = () => {
-			const tx = open.result.transaction("cases", "readwrite");
-			for (const c of ${JSON.stringify(cases)}) tx.objectStore("cases").put(c);
-			tx.oncomplete = () => { open.result.close(); resolve(); };
-			tx.onerror = () => reject(tx.error);
-		};
-	})`);
 
 /** Reopen… on mark `id`, its note `note`: the button waits for the text. */
 async function reopen(panel: Page, id: string, note: string): Promise<void> {

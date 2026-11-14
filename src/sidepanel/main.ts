@@ -50,6 +50,7 @@ import {
 	followStep,
 	foundText,
 	isFound,
+	newsLetsIn,
 	noneFound,
 } from "./follow.ts";
 import { CaseHints } from "./hints.ts";
@@ -1822,7 +1823,7 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 	if (news?.type === "overlay:changed") {
 		const from = sender.tab?.id;
 		// Overmark runs on the tab the open case waits for: the icon was clicked.
-		if (from !== undefined && from === pendingLoad?.tabId) {
+		if (newsLetsIn(from, pendingLoad?.tabId, state.tab)) {
 			pendingLoad = undefined;
 			void follow();
 		}

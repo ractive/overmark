@@ -14,7 +14,8 @@ import { sampleCase } from "../fixtures.ts";
 import { answerInPanel, connectAi, mcpClient, openSidePanel } from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
-import { READ_DB } from "./steps.ts";
+import { putCases, READ_DB } from "./steps.ts";
+import { step } from "./trace.ts";
 
 interface CallResult {
 	isError?: boolean;
@@ -48,18 +49,6 @@ const markedCase = (): Case => ({
 		},
 	],
 });
-
-const putCases = (h: Harness, cases: Case[]) =>
-	h.control.eval(`new Promise((resolve, reject) => {
-		const open = indexedDB.open("overmark");
-		open.onerror = () => reject(open.error);
-		open.onsuccess = () => {
-			const tx = open.result.transaction("cases", "readwrite");
-			for (const c of ${JSON.stringify(cases)}) tx.objectStore("cases").put(c);
-			tx.oncomplete = () => { open.result.close(); resolve(); };
-			tx.onerror = () => reject(tx.error);
-		};
-	})`);
 
 const storedMark = async (h: Harness) =>
 	(await h.control.eval<{ cases: Case[] }>(READ_DB)).cases.find(
@@ -98,7 +87,7 @@ describe.skipIf(browserBinary === undefined)("AI findings on a mark", () => {
 		h = await startHarness(browserBinary as string);
 		await putCases(h, [markedCase()]);
 		const tab = await h.open("v1");
-		await tab.page.activate();
+		await step("bring the page to the front", () => tab.page.activate());
 		panel = await openSidePanel(h);
 		const address = await connectAi(panel, relay.url);
 		claude = await mcpClient(relay.store, address);

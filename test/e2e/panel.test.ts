@@ -23,6 +23,7 @@ import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
 	type Db,
 	markElement,
+	putCases as putStored,
 	READ_DB,
 	resetPanel,
 	saveAs,
@@ -72,17 +73,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		);
 
 	/** Write these cases over what the store has. */
-	const putCases = (cases: Case[]) =>
-		h.control.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark");
-			open.onerror = () => reject(open.error);
-			open.onsuccess = () => {
-				const tx = open.result.transaction("cases", "readwrite");
-				for (const c of ${JSON.stringify(cases)}) tx.objectStore("cases").put(c);
-				tx.oncomplete = () => { open.result.close(); resolve(); };
-				tx.onerror = () => reject(tx.error);
-			};
-		})`);
+	const putCases = (cases: Case[]) => putStored(h, cases);
 
 	/** The panel on an empty store with these cases and no settings. */
 	async function fresh(cases: Case[] = []): Promise<void> {

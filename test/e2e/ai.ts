@@ -12,6 +12,7 @@ import { tokenFor } from "@ractive-ch/tab-mcp/testing";
 import type { Page } from "./browser.ts";
 import type { Harness } from "./harness.ts";
 import { worker } from "./steps.ts";
+import { step } from "./trace.ts";
 
 const PANEL = "/sidepanel/index.html";
 
@@ -34,7 +35,11 @@ async function panelPages(h: Harness): Promise<string[]> {
  * (`sidePanel.open` with the DevTools Protocol's user gesture), once its
  * page has the worker's state.
  */
-export async function openSidePanel(h: Harness): Promise<Page> {
+export function openSidePanel(h: Harness): Promise<Page> {
+	return step("open the side panel", () => openPanel(h));
+}
+
+async function openPanel(h: Harness): Promise<Page> {
 	const before = new Set(await panelPages(h));
 	const opened = (await h.control.send("Runtime.evaluate", {
 		expression: `chrome.windows.getLastFocused({ windowTypes: ["normal"] }).then((w) => chrome.sidePanel.open({ windowId: w.id })).then(() => "", (e) => String(e))`,
@@ -93,10 +98,20 @@ export async function setRelay(panel: Page, relay: string): Promise<void> {
  * Connect the panel to `relay` (optionally with "Keep AI access on") and
  * return the address the card shows: at once, with no AI app paired yet.
  */
-export async function connectAi(
+export function connectAi(
 	panel: Page,
 	relay: string,
 	options: { keepOn?: boolean } = {},
+): Promise<string> {
+	return step("connect the side panel to the relay", () =>
+		connectPanel(panel, relay, options),
+	);
+}
+
+async function connectPanel(
+	panel: Page,
+	relay: string,
+	options: { keepOn?: boolean },
 ): Promise<string> {
 	await setRelay(panel, relay);
 	if (options.keepOn)
@@ -120,6 +135,16 @@ export async function mcpClient(
 	store: Parameters<typeof tokenFor>[0],
 	address: string,
 	app: { clientId?: string; clientName?: string } = {},
+): Promise<Client> {
+	return step(`pair an MCP client (${app.clientName ?? "Test client"})`, () =>
+		pairClient(store, address, app),
+	);
+}
+
+async function pairClient(
+	store: Parameters<typeof tokenFor>[0],
+	address: string,
+	app: { clientId?: string; clientName?: string },
 ): Promise<Client> {
 	const token = await tokenFor(store, address, app);
 	const client = new Client(

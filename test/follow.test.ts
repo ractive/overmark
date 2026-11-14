@@ -8,6 +8,7 @@ import {
 	followStep,
 	foundText,
 	isUnsure,
+	newsLetsIn,
 	noneFound,
 } from "../src/sidepanel/follow.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -154,6 +155,29 @@ describe("the open case's marks follow it to the tab in front", () => {
 			clear: drawn,
 			action: "none",
 		});
+	});
+});
+
+describe("news from a tab's overlay after the icon's click", () => {
+	const hidden = { id: 4, url: "" };
+	test("the tab the case waits for lets the case follow", () => {
+		expect(newsLetsIn(4, 4, hidden)).toBe(true);
+		expect(newsLetsIn(4, 4, { id: 4, url: "https://example.com/" })).toBe(true);
+	});
+
+	test("so does the tab in front with its address hidden, before follow found out it waits", () => {
+		// The case opened, and the click came before follow had read the
+		// tab twice and noted the wait: the news must not be lost.
+		expect(newsLetsIn(4, undefined, hidden)).toBe(true);
+	});
+
+	test("not news from another tab, nor from one Overmark ran on already", () => {
+		expect(newsLetsIn(5, undefined, hidden)).toBe(false);
+		expect(
+			newsLetsIn(4, undefined, { id: 4, url: "https://example.com/" }),
+		).toBe(false);
+		expect(newsLetsIn(undefined, 4, hidden)).toBe(false);
+		expect(newsLetsIn(4, undefined, undefined)).toBe(false);
 	});
 });
 

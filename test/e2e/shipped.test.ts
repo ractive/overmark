@@ -17,6 +17,7 @@ import {
 	reachOverlay,
 	saveAs,
 	shadow,
+	until,
 	viewportSettled,
 	worker,
 } from "./steps.ts";
@@ -199,6 +200,25 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 	}, 60_000);
 
+	test("a click on the icon while the site's next page loads runs Overmark on that page", async () => {
+		const { page } = await h.open("v1?next=1");
+		const tab = await h.browser.waitForTarget(
+			(t) => t.type === "tab" && t.url === `${h.base}/v1?next=1`,
+		);
+		// A link to the next page of the site, which is slow to come: clicked
+		// while it comes, the script went into the page on its way out.
+		const next = `${h.base}/v2?wait=1500`;
+		await page.eval(`location.href = ${JSON.stringify(next)}`);
+		await Bun.sleep(300);
+		await h.browser.send("Extensions.triggerAction", {
+			id: h.extensionId,
+			targetId: tab.targetId,
+		});
+		await page.waitFor(`location.href === ${JSON.stringify(next)}`, 10_000);
+		await page.waitFor(HOST, 10_000);
+		await page.send("Page.close");
+	}, 30_000);
+
 	test("a case's address opens a tab, and the icon's click there loads the case", async () => {
 		const url = `${h.base}/v1?opened=1`;
 		const first = await h.open("v1?opened=1");
@@ -236,6 +256,26 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		// The case's address has no query: the new tab is the one not there before.
 		const opened = (await tabTargets()).find((t) => !before.has(t.targetId));
 		expect(opened?.url).toBe(`${h.base}/v1`);
+		// The notice above may still be about the tab in front before (the
+		// closed page's neighbour, hidden from Overmark too). A click before
+		// the new tab's first page has come grants that page nothing, as for
+		// a person: click once it has loaded, as the panel then asks.
+		await until(
+			() =>
+				h.control.eval<string>(
+					`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.status)`,
+				),
+			(status) => status === "complete",
+			10_000,
+		);
+		// The notice for THIS tab, not the one before it.
+		const openedId = await h.control.eval<number>(
+			`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.id)`,
+		);
+		await panel.waitFor(
+			`!document.getElementById("case-access").hidden && document.getElementById("case-access").dataset.tab === "${openedId}"`,
+			10_000,
+		);
 		await h.browser.send("Extensions.triggerAction", {
 			id: h.extensionId,
 			targetId: opened?.targetId,
@@ -249,6 +289,79 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 				`document.getElementById("case-hint").textContent`,
 			),
 		).toContain("1 of 1 marks found");
+	}, 60_000);
+
+	test("an early click on the tab a case's address opens lets nothing in; the panel asks for that tab, and a click once it has loaded loads the case", async () => {
+		const url = `${h.base}/slow/v1`;
+		const first = await h.open("slow/v1");
+		await h.browser.clickIcon(h.extensionId, url);
+		const panel = await sidePanel();
+		await panel.eval(
+			`document.getElementById("back").hidden || document.getElementById("back").click()`,
+		);
+		await panel.waitFor(`!document.getElementById("home").hidden`);
+		await panel.waitFor(`document.getElementById("annotate")`);
+		await first.page.waitFor(HOST);
+		await viewportSettled(first.page);
+		await panel.click(`document.getElementById("annotate")`);
+		await reachOverlay(first.page);
+		await first.page.waitFor(`!${shadow(".toolbar")}.hidden`);
+		await markElement(first.page, "[data-truth=tip]", "Slow to come");
+		await saveAs(first.page, "From a slow page");
+		await toAllCases(panel, "From a slow page");
+		await first.page.send("Page.close");
+		const tabTargets = async () =>
+			(await h.browser.targets()).filter((t) => t.type === "tab");
+		while ((await tabTargets()).some((t) => t.url === url))
+			await Bun.sleep(100);
+
+		const row = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes("From a slow page"))`;
+		await panel.waitFor(row);
+		await panel.click(row);
+		await panel.waitFor(`document.getElementById("open-page")`);
+		const before = new Set((await tabTargets()).map((t) => t.targetId));
+		await panel.click(`document.getElementById("open-page")`);
+		const opened = await h.browser.waitForTarget(
+			(t) => t.type === "tab" && !before.has(t.targetId),
+		);
+		// Clicked before its first page has come (it takes 1.5 s): Chrome
+		// grants that page nothing.
+		await h.browser.send("Extensions.triggerAction", {
+			id: h.extensionId,
+			targetId: opened.targetId,
+		});
+		const tabId = await h.control.eval<number>(
+			`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.id)`,
+		);
+		await until(
+			() =>
+				h.control.eval<string>(
+					`chrome.tabs.get(${tabId}).then((t) => t.status)`,
+				),
+			(status) => status === "complete",
+			10_000,
+		);
+		// Nothing went in, and the panel asks for the click on this tab.
+		await panel.waitFor(
+			`!document.getElementById("case-access").hidden && document.getElementById("case-access").dataset.tab === "${tabId}"`,
+			10_000,
+		);
+		const { targetId } = await h.browser.waitForTarget(
+			(t) => t.type === "page" && t.url === url,
+		);
+		const page = await h.browser.attachPage(targetId);
+		expect(await page.eval<boolean>(`${HOST} === null`)).toBe(true);
+		// The click again, now that the page is there: the case loads.
+		await h.browser.send("Extensions.triggerAction", {
+			id: h.extensionId,
+			targetId: opened.targetId,
+		});
+		await panel.waitFor(
+			`document.querySelector(".match")?.dataset.status === "found"`,
+			15_000,
+		);
+		expect(await page.eval<boolean>(`${HOST} !== null`)).toBe(true);
+		await page.send("Page.close");
 	}, 60_000);
 
 	test("a case opened on a tab Overmark may not see yet loads at the icon's click", async () => {
@@ -333,7 +446,14 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		const row = `[...document.querySelectorAll("[data-case]")].find((e) => e.textContent.includes("As the owner uses it"))`;
 		await panel.waitFor(row);
 		await panel.eval(`${row}.click()`);
-		await panel.waitFor(`!document.getElementById("case-access").hidden`);
+		// The notice for THIS tab, not the one before it.
+		const openedId = await h.control.eval<number>(
+			`chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => t.id)`,
+		);
+		await panel.waitFor(
+			`!document.getElementById("case-access").hidden && document.getElementById("case-access").dataset.tab === "${openedId}"`,
+			10_000,
+		);
 		await h.browser.send("Extensions.triggerAction", {
 			id: h.extensionId,
 			targetId: fresh?.targetId,

@@ -51,7 +51,7 @@ import {
 	Sync,
 	type SyncTarget,
 } from "./lib/sync.ts";
-import { inject } from "./lib/tabs.ts";
+import { injectOnClick } from "./lib/tabs.ts";
 import { AddLedger } from "./lib/undo.ts";
 import { badge } from "./worker/badge.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
@@ -152,7 +152,7 @@ chrome.action.onClicked.addListener((tab) => {
 	void chrome.sidePanel
 		.open({ tabId: tab.id, windowId: tab.windowId })
 		.catch((error: unknown) => console.warn("Overmark: side panel", error));
-	void inject(tab.id).catch((error: unknown) =>
+	void injectOnClick(tab).catch((error: unknown) =>
 		console.warn("Overmark: cannot run on this tab", error),
 	);
 });

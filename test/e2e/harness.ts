@@ -14,6 +14,7 @@ import {
 	build,
 } from "../../scripts/build.ts";
 import { Browser, findBrowser, type Page } from "./browser.ts";
+import { StepTimeout, step } from "./trace.ts";
 
 // A timed-out test also loses the browser, and with it the rest of its file:
 // on a busy machine a first screenshot alone can take longer than Bun's default.
@@ -72,7 +73,15 @@ function servePages(): ReturnType<typeof Bun.serve> {
 		hostname: "127.0.0.1",
 		port: 0,
 		async fetch(req) {
-			const path = new URL(req.url).pathname.replace(/^\/+/, "") || "v1";
+			const address = new URL(req.url);
+			let path = address.pathname.replace(/^\/+/, "") || "v1";
+			// `?wait=<ms>`: a page that takes that long to come (a slow site);
+			// `slow/<page>`: 1.5 s, also at a case's address, which has no query.
+			const wait = path.startsWith("slow/")
+				? 1500
+				: Number(address.searchParams.get("wait"));
+			path = path.replace(/^slow\//, "");
+			if (wait > 0) await Bun.sleep(Math.min(wait, 10_000));
 			const file = Bun.file(
 				join(pages, path.endsWith(".html") ? path : `${path}.html`),
 			);
@@ -107,31 +116,44 @@ async function start(binary: string, launch: Launch): Promise<Harness> {
 		rmSync(outdir, { recursive: true, force: true });
 	};
 	try {
-		const built = await build({ outdir, ...launch.options });
+		const built = await step(
+			"build",
+			() => build({ outdir, ...launch.options }),
+			60_000,
+		);
 		server = servePages();
 		const base = `http://127.0.0.1:${server.port}`;
-		const launched = await launch.browser(outdir);
+		// Chrome is not Overmark: a start that failed (it gives up after 20 s and
+		// is killed) is tried once more.
+		const startChrome = () =>
+			step("start Chrome", () => launch.browser(outdir), 30_000);
+		const launched = await startChrome().catch(startChrome);
 		browser = launched;
-		const extensionId = await launch.extensionId(launched, outdir, built);
-		const control = await openControl(launched, extensionId).catch(
-			(error: unknown) => {
-				throw new Error(
-					`the extension did not load; is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
-					{ cause: error },
-				);
-			},
+		const extensionId = await step("load the extension", () =>
+			launch.extensionId(launched, outdir, built),
 		);
+		const control = await step("open the control page", () =>
+			openControl(launched, extensionId),
+		).catch((error: unknown) => {
+			// Too slow is no wrong binary: the step's own message says which.
+			if (error instanceof StepTimeout) throw error;
+			throw new Error(
+				`the extension did not load (${error instanceof Error ? error.message : String(error)}); is ${binary} Chrome for Testing or Chromium? (branded Chrome ignores --load-extension)`,
+				{ cause: error },
+			);
+		});
 		return {
 			browser: launched,
 			base,
 			extensionId,
 			manifest: built.manifest,
 			control,
-			async open(path) {
-				const url = `${base}/${path}`;
-				const page = await launched.newPage(url);
-				return { page, tabId: await launch.tabIdOf(control, page, url) };
-			},
+			open: (path) =>
+				step(`open ${path}`, async () => {
+					const url = `${base}/${path}`;
+					const page = await launched.newPage(url);
+					return { page, tabId: await launch.tabIdOf(control, page, url) };
+				}),
 			stop: cleanUp,
 		};
 	} catch (error) {

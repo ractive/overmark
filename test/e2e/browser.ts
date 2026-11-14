@@ -20,6 +20,13 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 
+/**
+ * `OVERMARK_E2E_SLOW=<rate>`: every page and worker the tests attach to runs
+ * its CPU that many times slower (CDP `Emulation.setCPUThrottlingRate`), as
+ * a busy CI machine may; unset or 1, at full speed.
+ */
+export const SLOW = Math.max(1, Number(process.env["OVERMARK_E2E_SLOW"]) || 1);
+
 /** Chrome for Testing or Chromium; `undefined` if there is none. */
 export function findBrowser(): string | undefined {
 	const fromEnv = process.env["CHROME_PATH"];
@@ -208,10 +215,25 @@ async function connectTo(
 	});
 	const ws = new WebSocket(endpoint);
 	await new Promise<void>((resolve, reject) => {
-		ws.addEventListener("open", () => resolve(), { once: true });
+		// Within launch's own clean-up: a hang here would leave a Chrome behind.
+		const timer = setTimeout(() => {
+			ws.close();
+			reject(new Error("CDP connection did not open"));
+		}, 10_000);
+		ws.addEventListener(
+			"open",
+			() => {
+				clearTimeout(timer);
+				resolve();
+			},
+			{ once: true },
+		);
 		ws.addEventListener(
 			"error",
-			() => reject(new Error("CDP connection failed")),
+			() => {
+				clearTimeout(timer);
+				reject(new Error("CDP connection failed"));
+			},
 			{ once: true },
 		);
 	});
@@ -385,7 +407,13 @@ export class Browser {
 			targetId,
 			flatten: true,
 		})) as { sessionId: string };
-		return new Page(this, sessionId, targetId);
+		const page = new Page(this, sessionId, targetId);
+		if (SLOW > 1)
+			// Not every target has the Emulation domain: as fast as it is then.
+			await page
+				.send("Emulation.setCPUThrottlingRate", { rate: SLOW })
+				.catch(() => undefined);
+		return page;
 	}
 
 	/** Every target; tabs are targets of their own, beside the page they show. */

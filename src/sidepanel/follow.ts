@@ -95,6 +95,22 @@ function nextAction({
 	return "draw";
 }
 
+/**
+ * Whether news from the overlay of tab `from` should make the open case
+ * follow: Overmark runs there now, so the icon was clicked on it. The tab
+ * the open case waits for (`pending`), or the tab in front whose address
+ * Chrome hid from Overmark until now (`front`): the news can come before
+ * `follow` has found out that it waits, for it reads the tab twice first.
+ */
+export function newsLetsIn(
+	from: number | undefined,
+	pending: number | undefined,
+	front: { id: number; url: string } | undefined,
+): boolean {
+	if (from === undefined) return false;
+	return from === pending || (from === front?.id && front.url === "");
+}
+
 /** A match that has its element on the page, sure or not. */
 export const isFound = (m: AnnotationMatch): boolean =>
 	m.status !== "lost" && m.status !== "no-element";
