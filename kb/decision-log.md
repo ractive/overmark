@@ -1061,3 +1061,41 @@ wouldn't have drafts — which is ok I think."
   it wait with "Add mark N". A screenshot that failed still waits for the user. Found on
   the way: a mark added after a delete was refused by the format (`lastNumber` below
   its number); `saveCase` now raises `lastNumber` with the new marks.
+
+## DEC-027: A loaded mark's pin on the page opens its comment there; the panel does the change (owner)
+
+The owner, 2026-11-14, with the toolbar on and marks drawn: "I can't interact with the
+marks on the page. Could you show the action buttons and the same overlay that you show
+when creating a mark?"
+
+- **The pin is what is clicked.** A press on a loaded mark's pin (the numbered circle)
+  opens the popover a new mark's comment is typed in: the pin in the status's colour,
+  the status in words when the mark is not open, the comment in a field, "Delete mark"
+  and "Done". The mark's shape stays out of the pointer's way: it lies on the page's own
+  buttons and links, which must stay clickable. With a tool on, the layer that takes the
+  pointer covers the pins, so a press there is tested against where the pins were drawn
+  and opens the comment instead of starting a mark; the cursor says so. On the press,
+  not the click: the marks are drawn anew at every scroll and twice a second.
+- **Done** stores a changed comment; **Escape** drops what was typed; a press beside the
+  popover, or another popover opening (another pin, a new mark's comment), keeps it, as
+  a new mark's comment is kept. **Delete mark** asks twice ("Really delete?", four
+  seconds, no double click), as in the panel. What could not be done is said in the
+  popover, which stays with the text.
+- **The side panel shows the mark**: its row opens, comes into view and is tinted a
+  moment; a filter by a chip ends. Resolve, Verified, Reopen and the findings stay
+  there. They need a form or the mark's history, and the panel is the complete,
+  keyboard-reachable place for every action; the pins are a shortcut for the pointer
+  (they are redrawn too often to hold the focus).
+- **The page asks, the panel does** (`mark:picked`, `mark:comment`, `mark:delete`). A
+  panel answers only for the case it has open and drew on that tab itself
+  (`markAsked`), and changes it as its own buttons do; the worker ignores these
+  messages. No panel showing the case: "Open this case in Overmark's side panel to
+  change its marks." The price, against DEC-014's rule for `case:undo-add` (a page takes
+  back only what it added): a page whose renderer was compromised can, while the user
+  has a case drawn on it, rewrite the comment of or delete any mark of that case, where
+  before it could add marks to it and read it (CR-06, CR-07). It reaches no other case
+  and nothing once the case is closed or drawn on another tab. The owner asked for the
+  page to change marks; a stricter variant (the page only picks, every change is made in
+  the panel) is one line away and is listed in the open questions.
+- The annotator's own faint copies of marks it saved (shown only after a Hide while
+  adding) are not clickable: "Add marks" now draws the case's marks (DEC-023).

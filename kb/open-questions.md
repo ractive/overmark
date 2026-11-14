@@ -42,6 +42,11 @@ timestamp: 2026-11-04T17:00:00+01:00
    syncing" gives the `downloads` permission back when the sync was what asked for it.
    (f) Not done, the stronger option: keeping Allow off until a question's arguments
    were scrolled to their end.
+   (g) DEC-027 lets the page's popover change a mark's comment and delete a mark of
+   the case drawn on that tab, through the panel that drew it. A compromised renderer
+   of that page could do the same; before, it could only add marks and read the case.
+   The stricter variant: the pin only shows the mark in the panel, and every change is
+   made there.
 8. **Left from the code review** ([the review](research/code-review-2026-11.md)).
    Medium: CR-02, a content script orphaned by an update puts its toolbar back and its
    listeners stay (needs one teardown for every listener in `annotator.ts`,

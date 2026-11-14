@@ -384,3 +384,67 @@ describe("the toolbar's layout is measured, not guessed from the page's width", 
 		overlay.setAnnotating(false);
 	});
 });
+
+describe("a loaded mark's pin and the one popover (DEC-027)", () => {
+	const pinAt = { kind: "box" as const, rect };
+
+	test("reviewAt answers the mark whose pin is at the point, the one drawn last first", () => {
+		overlay.setReviewing(true);
+		overlay.renderReview([
+			item(1, pinAt),
+			item(2, { kind: "note", at: { x: 300, y: 300 } }),
+			item(3, { kind: "box", rect: { ...rect, x: 14 } }),
+		]);
+		// A box's pin is at its corner, 11 px each way and 2 px to spare.
+		expect(overlay.reviewAt(-2, 20)).toBe(1);
+		// Under two pins: the one on top.
+		expect(overlay.reviewAt(12, 22)).toBe(3);
+		expect(overlay.reviewAt(300, 312)).toBe(2);
+		expect(overlay.reviewAt(60, 40)).toBeUndefined();
+		// No marks shown: nothing to pick.
+		overlay.setReviewing(false);
+		expect(overlay.reviewAt(-2, 20)).toBeUndefined();
+	});
+
+	test("a press on a pin picks its mark; a press on its shape does not", () => {
+		overlay.setReviewing(true);
+		overlay.renderReview([item(7, pinAt)]);
+		const picked: number[] = [];
+		overlay.onPick = (number) => picked.push(number);
+		const group = overlay.marks.querySelector('[data-review="7"]') as Element;
+		const press = (target: Element, button = 0) =>
+			target.dispatchEvent(
+				new window.MouseEvent("pointerdown", {
+					bubbles: true,
+					button,
+				}) as never,
+			);
+		press(group.querySelector("[data-number] circle") as Element);
+		expect(picked).toEqual([7]);
+		press(group.querySelector("[data-number] text") as Element, 2);
+		expect(picked).toEqual([7]);
+		overlay.onPick = undefined;
+		overlay.setReviewing(false);
+	});
+
+	test("one popover: whoever opens it closes the other's, which is told once", () => {
+		const told: string[] = [];
+		const text = (value: string) => window.document.createTextNode(value);
+		overlay.openPopover([text("first") as never], () => told.push("first"));
+		expect(overlay.popover.hidden).toBe(false);
+		expect(overlay.popover.textContent).toBe("first");
+		overlay.openPopover([text("second") as never], () => told.push("second"));
+		expect(told).toEqual(["first"]);
+		expect(overlay.popover.textContent).toBe("second");
+		// Its owner closes it itself: nobody is told.
+		overlay.closePopover();
+		expect(overlay.popover.hidden).toBe(true);
+		expect(overlay.popover.childNodes.length).toBe(0);
+		expect(overlay.dismissPopover()).toBe(false);
+		expect(told).toEqual(["first"]);
+		overlay.openPopover([text("third") as never], () => told.push("third"));
+		expect(overlay.dismissPopover()).toBe(true);
+		expect(told).toEqual(["first", "third"]);
+		expect(overlay.popover.hidden).toBe(true);
+	});
+});

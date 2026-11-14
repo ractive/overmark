@@ -16,9 +16,11 @@ import {
 	type Annotation,
 	type Case,
 	caseCounts,
+	MAX_COMMENT,
 	markStatus,
 	type Rect,
 	type Shape,
+	STATUS_LABEL,
 	samePath,
 	shapeBounds,
 	shapeOnBox,
@@ -35,14 +37,55 @@ import type {
 	AnnotationMatch,
 	CandidateInfo,
 	LoadResult,
+	MarkAnswer,
+	MarkRequest,
 } from "../lib/messages.ts";
-import { type Overlay, type ReviewItem, ring } from "./overlay.ts";
+import {
+	type Overlay,
+	type ReviewItem,
+	reviewColour,
+	ring,
+} from "./overlay.ts";
 
 interface Entry {
 	annotation: Annotation;
 	/** The best elements worth showing, best first. */
 	candidates: Candidate[];
 	match: AnnotationMatch;
+}
+
+/** Asks the side panel that shows the case (DEC-027). */
+export type AskPanel = (request: MarkRequest) => Promise<MarkAnswer>;
+
+/** No panel shows the case: nothing changes it from the page. */
+export const NO_PANEL =
+	"Open this case in Overmark's side panel to change its marks.";
+
+const askPanel: AskPanel = async (request) => {
+	try {
+		const answer = (await chrome.runtime.sendMessage(request)) as
+			| MarkAnswer
+			| undefined;
+		return answer ?? { ok: false, error: NO_PANEL };
+	} catch {
+		return { ok: false, error: NO_PANEL };
+	}
+};
+
+/** How long "Really delete?" waits for its second click. */
+export const DELETE_ARMED_MS = 4000;
+/** A double click is no second thought. */
+const DELETE_CLICK_GAP_MS = 400;
+
+/** The popover of a loaded mark, open on the page (DEC-027). */
+interface OpenMark {
+	annotationId: string;
+	field: HTMLTextAreaElement;
+	problem: HTMLElement;
+	remove: HTMLButtonElement;
+	done: HTMLButtonElement;
+	armedAt: number | undefined;
+	busy: boolean;
 }
 
 /** Let the page run between annotations: loading a big case takes a while. */
@@ -81,9 +124,14 @@ export class Reviewer {
 	#newer: Case | undefined;
 	/** The newest load: an older one of the same case ends with its result. */
 	#latest: { caseId: string; run: Promise<LoadResult> } | undefined;
+	/** The mark whose popover is open (DEC-027). */
+	#open: OpenMark | undefined;
+	readonly #ask: AskPanel;
 
-	constructor(overlay: Overlay) {
+	constructor(overlay: Overlay, ask: AskPanel = askPanel) {
 		this.overlay = overlay;
+		this.#ask = ask;
+		overlay.onPick = (number) => this.pick(number);
 		const doc = overlay.doc;
 		// Capture phase: scrolling inside a container moves elements too.
 		doc.addEventListener("scroll", () => this.#schedule(), {
@@ -166,6 +214,7 @@ export class Reviewer {
 			if (generation !== this.#generation) throw new LoadReplaced();
 			entries.push(this.#find(search, annotation));
 		}
+		this.#closeMark();
 		this.#case = c;
 		this.#entries = entries;
 		this.#focused = undefined;
@@ -228,6 +277,9 @@ export class Reviewer {
 		this.#entries = kept;
 		if (this.#focused !== undefined && !byId.has(this.#focused))
 			this.#focused = undefined;
+		// Its mark was deleted (here, in the panel, by an AI app).
+		if (this.#open !== undefined && !byId.has(this.#open.annotationId))
+			this.#closeMark();
 		this.#renderBar();
 		this.#render();
 		return {
@@ -345,7 +397,184 @@ export class Reviewer {
 		});
 	}
 
+	/**
+	 * A loaded mark's pin was clicked (DEC-027): its comment opens in the
+	 * popover a new mark's comment is typed in, with Delete mark and Done, and
+	 * the side panel shows the mark with its other actions.
+	 */
+	pick(number: number): void {
+		const c = this.#case;
+		const entry = this.#entries.find((e) => e.annotation.number === number);
+		if (c === undefined || entry === undefined) return;
+		const { annotation } = entry;
+		// Open for this mark already: what is being typed stays.
+		if (
+			this.#open?.annotationId === annotation.id &&
+			!this.overlay.popover.hidden
+		)
+			return;
+		const doc = this.overlay.doc;
+		const status = markStatus(annotation);
+		const pin = doc.createElement("span");
+		pin.className = "pin";
+		pin.style.background = reviewColour({ status });
+		pin.textContent = String(annotation.number);
+		const label = doc.createElement("div");
+		label.className = "label";
+		label.append(pin, "Comment");
+		if (status !== "open") {
+			const state = doc.createElement("span");
+			state.className = "state";
+			state.textContent = STATUS_LABEL[status];
+			label.append(state);
+		}
+		const field = doc.createElement("textarea");
+		field.setAttribute("aria-label", `Comment of mark ${annotation.number}`);
+		field.placeholder = "What is wrong, or what should change?";
+		field.maxLength = MAX_COMMENT;
+		field.value = annotation.comment;
+		field.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void this.#done();
+			// What was typed is dropped, as the panel's Cancel does.
+			else if (e.key === "Escape") this.#closeMark();
+		});
+		const problem = doc.createElement("p");
+		problem.className = "problem";
+		problem.setAttribute("role", "alert");
+		problem.hidden = true;
+		const done = doc.createElement("button");
+		done.type = "button";
+		done.className = "primary";
+		done.dataset["action"] = "mark-done";
+		done.textContent = "Done";
+		done.addEventListener("click", () => void this.#done());
+		const remove = doc.createElement("button");
+		remove.type = "button";
+		remove.dataset["action"] = "mark-delete";
+		remove.textContent = "Delete mark";
+		remove.addEventListener("click", () => void this.#delete());
+		const row = doc.createElement("div");
+		row.className = "row";
+		row.append(remove, done);
+		const open: OpenMark = {
+			annotationId: annotation.id,
+			field,
+			problem,
+			remove,
+			done,
+			armedAt: undefined,
+			busy: false,
+		};
+		this.overlay.openPopover([label, field, problem, row], () => {
+			// Closed for another popover, or by a click beside it: what was
+			// typed is the mark's comment, as a new mark's is.
+			if (this.#open !== open) return;
+			this.#open = undefined;
+			const text = field.value.trim();
+			if (!open.busy && text !== annotation.comment)
+				void this.#ask({
+					type: "mark:comment",
+					caseId: c.id,
+					annotationId: annotation.id,
+					text,
+				});
+		});
+		this.#open = open;
+		// Its element is outlined, as after the panel's Show.
+		this.#focused = annotation.id;
+		this.#render();
+		field.focus();
+		void this.#ask({
+			type: "mark:picked",
+			caseId: c.id,
+			annotationId: annotation.id,
+		});
+	}
+
+	/** The open popover's mark, as the case has it now. */
+	#openAnnotation():
+		| { c: Case; open: OpenMark; annotation: Annotation }
+		| undefined {
+		const c = this.#case;
+		const open = this.#open;
+		if (c === undefined || open === undefined) return undefined;
+		const annotation = this.#entries.find(
+			(e) => e.annotation.id === open.annotationId,
+		)?.annotation;
+		return annotation === undefined ? undefined : { c, open, annotation };
+	}
+
+	/** Ask the panel, with the buttons off meanwhile; says why it did not work. */
+	async #change(open: OpenMark, request: MarkRequest): Promise<void> {
+		open.busy = true;
+		open.done.disabled = true;
+		open.remove.disabled = true;
+		open.problem.hidden = true;
+		const answer = await this.#ask(request);
+		if (this.#open !== open) return;
+		if (answer.ok) {
+			this.#closeMark();
+			return;
+		}
+		open.busy = false;
+		open.done.disabled = false;
+		open.remove.disabled = false;
+		open.problem.textContent = answer.error;
+		open.problem.hidden = false;
+	}
+
+	/** Done: a changed comment is stored, then the popover goes. */
+	async #done(): Promise<void> {
+		const now = this.#openAnnotation();
+		if (now === undefined || now.open.busy) return;
+		const text = now.open.field.value.trim();
+		if (text === now.annotation.comment) {
+			this.#closeMark();
+			return;
+		}
+		await this.#change(now.open, {
+			type: "mark:comment",
+			caseId: now.c.id,
+			annotationId: now.annotation.id,
+			text,
+		});
+	}
+
+	/** Delete mark: asked twice, as in the panel; the mark leaves the case. */
+	async #delete(): Promise<void> {
+		const now = this.#openAnnotation();
+		if (now === undefined || now.open.busy) return;
+		const { open } = now;
+		if (open.armedAt === undefined) {
+			const at = Date.now();
+			open.armedAt = at;
+			open.remove.textContent = "Really delete?";
+			open.remove.setAttribute("data-armed", "");
+			setTimeout(() => {
+				if (this.#open !== open || open.armedAt !== at || open.busy) return;
+				open.armedAt = undefined;
+				open.remove.textContent = "Delete mark";
+				open.remove.removeAttribute("data-armed");
+			}, DELETE_ARMED_MS);
+			return;
+		}
+		if (Date.now() - open.armedAt < DELETE_CLICK_GAP_MS) return;
+		await this.#change(open, {
+			type: "mark:delete",
+			caseId: now.c.id,
+			annotationId: now.annotation.id,
+		});
+	}
+
+	/** The popover goes, with what was typed in it. */
+	#closeMark(): void {
+		if (this.#open === undefined) return;
+		this.#open = undefined;
+		this.overlay.closePopover();
+	}
+
 	clear(): void {
+		this.#closeMark();
 		this.#generation++;
 		clearInterval(this.#timer);
 		this.#timer = undefined;
@@ -420,17 +649,24 @@ export class Reviewer {
 	#render(): void {
 		if (!this.overlay.reviewing) return;
 		const items: ReviewItem[] = [];
+		/** The mark the popover is open for, where it is drawn now. */
+		let open: ReviewItem | undefined;
+		const add = (entry: Entry, item: ReviewItem) => {
+			items.push(item);
+			if (entry.annotation.id === this.#open?.annotationId) open = item;
+		};
 		for (const entry of this.#entries) {
 			if (entry.match.status === "no-element") {
 				const item = this.#whereItWas(entry.annotation);
-				if (item !== undefined) items.push(item);
+				if (item !== undefined) add(entry, item);
 				continue;
 			}
 			const el = this.#element(entry);
 			if (el === undefined || !el.isConnected) continue;
 			const r = el.getBoundingClientRect();
 			if (r.width === 0 && r.height === 0) continue;
-			items.push(
+			add(
+				entry,
 				this.#onElement(entry, {
 					x: r.x,
 					y: r.y,
@@ -440,6 +676,9 @@ export class Reviewer {
 			);
 		}
 		this.overlay.renderReview(items);
+		// The popover follows its mark; a mark off the page leaves it where it is.
+		if (open !== undefined)
+			this.overlay.placePopover(shapeBounds((open as ReviewItem).shape));
 	}
 
 	#renderBar(): void {

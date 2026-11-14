@@ -8,6 +8,7 @@ import {
 	type Annotation,
 	type Case,
 	cleanTitle,
+	MAX_COMMENT,
 	markStatus,
 	newId,
 	nextNumbers,
@@ -31,12 +32,15 @@ import {
 	readExports,
 	storeImport,
 } from "../lib/export.ts";
-import type {
-	AnnotationMatch,
-	Broadcast,
-	LoadReplacedAnswer,
-	LoadResult,
-	OverlayState,
+import {
+	type AnnotationMatch,
+	type Broadcast,
+	isMarkRequest,
+	type LoadReplacedAnswer,
+	type LoadResult,
+	type MarkAnswer,
+	type MarkRequest,
+	type OverlayState,
 } from "../lib/messages.ts";
 import { IdbStore } from "../lib/store.ts";
 import { inject, NoAccessError, sendToTab } from "../lib/tabs.ts";
@@ -59,6 +63,7 @@ import {
 } from "./follow.ts";
 import { isUntouched, mayHold, newCase, type TabAnswer } from "./fresh.ts";
 import { CaseHints } from "./hints.ts";
+import { markAsked } from "./picked.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
 	type Exported,
@@ -2062,12 +2067,13 @@ const deleting = new Set<string>();
  * Change a mark of a case in one transaction, then show and draw the result.
  * The mark's form closes, unless `keepEdit`: a change the form is not about.
  */
+/** Answers why it was not saved, if it was not (the hint says so too). */
 async function changeMark(
 	caseId: string,
 	annotationId: string,
 	change: (current: Case) => { value: Case; images?: string[] },
 	{ keepEdit = false } = {},
-): Promise<void> {
+): Promise<string | undefined> {
 	const hint = caseHintWriter();
 	try {
 		// The images go in the same transaction: a save may take a freed path.
@@ -2090,8 +2096,65 @@ async function changeMark(
 		announce(caseId);
 		await refreshCase();
 		await redrawLoaded(saved);
+		return undefined;
 	} catch (error) {
-		hint(`Not saved: ${message(error)}`);
+		const why = `Not saved: ${message(error)}`;
+		hint(why);
+		return why;
+	}
+}
+
+/**
+ * A page asks about a mark of the case drawn on it (DEC-027). Answered only
+ * by the panel that has the case open and drew it on that tab itself: a page
+ * reaches no other case, and no case the user did not put on it. What it asks
+ * is done as the panel's own buttons do it. `false`: not this panel's.
+ */
+function answerMark(
+	request: MarkRequest,
+	tabId: number | undefined,
+	answer: (result: MarkAnswer) => void,
+): boolean {
+	const c = state.view.kind === "case" ? state.current : undefined;
+	const a = markAsked({ open: c, loaded: state.loaded }, request, tabId);
+	if (c === undefined || a === undefined) return false;
+	if (a === "gone") {
+		answer({ ok: false, error: "That mark is no longer in the case." });
+		return false;
+	}
+	const done = (why: string | undefined) =>
+		answer(why === undefined ? { ok: true } : { ok: false, error: why });
+	const now = new Date().toISOString();
+	switch (request.type) {
+		case "mark:picked":
+			update((s) => {
+				// Its row shows, whatever the list was filtered by.
+				s.markFilter = undefined;
+				s.picked = { caseId: c.id, annotationId: a.id, at: Date.now() };
+			});
+			answer({ ok: true });
+			return false;
+		case "mark:comment":
+			if (request.text.length > MAX_COMMENT) {
+				answer({ ok: false, error: "That comment is too long." });
+				return false;
+			}
+			void changeMark(c.id, a.id, (current) => ({
+				value: withComment(current, a.id, request.text, now),
+			})).then(done);
+			return true;
+		case "mark:delete":
+			if (deleting.has(a.id)) {
+				answer({ ok: false, error: "That mark is being deleted." });
+				return false;
+			}
+			deleting.add(a.id);
+			void changeMark(c.id, a.id, (current) =>
+				withoutAnnotation(current, a.id, now),
+			)
+				.then(done)
+				.finally(() => deleting.delete(a.id));
+			return true;
 	}
 }
 
@@ -2104,8 +2167,18 @@ void startAi(update, () => {
 
 // --- news from the pages and the browser -----------------------------------------
 
-chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
-	if (sender.id !== chrome.runtime.id) return false;
+chrome.runtime.onMessage.addListener(
+	(news: Broadcast | MarkRequest, sender, sendResponse) => {
+		if (sender.id !== chrome.runtime.id) return false;
+		// From a page's content script only: an extension page has no tab.
+		if (isMarkRequest(news))
+			return answerMark(news, sender.tab?.id, sendResponse);
+		return hear(news, sender);
+	},
+);
+
+/** News from the pages and the worker: nothing is answered. */
+function hear(news: Broadcast, sender: chrome.runtime.MessageSender): false {
 	if (news?.type === "overlay:changed") {
 		const from = sender.tab?.id;
 		// Overmark runs on the tab the open case waits for: the icon was clicked.
@@ -2154,7 +2227,7 @@ chrome.runtime.onMessage.addListener((news: Broadcast, sender) => {
 		void refreshTab();
 	} else if (news?.type === "sync:changed") void panelSync.refresh();
 	return false;
-});
+}
 
 /** The window this panel is in. */
 let panelWindow: number | undefined;

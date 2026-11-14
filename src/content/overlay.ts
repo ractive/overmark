@@ -103,6 +103,9 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .capture { position: fixed; inset: 0; pointer-events: none; cursor: crosshair; }
 .capture.active { pointer-events: auto; }
 .capture.element { cursor: default; }
+/* Over a loaded mark's pin: a click opens its comment (DEC-027). */
+.capture.pick { cursor: pointer; }
+.review [data-number] { pointer-events: auto; cursor: pointer; }
 .toolbar {
 	position: fixed; left: 16px; right: 16px; bottom: 16px; margin-inline: auto;
 	box-sizing: border-box; width: fit-content; max-width: calc(100vw - 32px);
@@ -175,6 +178,10 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 .popover button.primary { background: ${L.amber}; border-color: ${L.amberEdge}; }
 .popover button.primary:hover { background: ${L.amberHover}; }
 .popover .label { display: flex; gap: 8px; align-items: center; font-weight: 600; margin-bottom: 8px; }
+.popover .label .state { margin-inline-start: auto; font-weight: 400; color: ${L.popoverMuted}; }
+.popover .problem { margin: 8px 0 0; color: #a4161a; }
+.popover button:disabled { opacity: 0.6; cursor: default; }
+.popover button[data-armed] { border-color: #a4161a; color: #a4161a; }
 .popover .pin {
 	display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding-inline: 4px;
 	box-sizing: border-box; border-radius: 11px; background: ${MARK_COLOUR}; color: #fff;
@@ -372,6 +379,12 @@ export class Overlay {
 	#annotating = false;
 	#reviewing = false;
 	#marking = false;
+	/** The loaded marks' pins as drawn last, in window coordinates. */
+	#pins: { number: number; x: number; y: number; r: number }[] = [];
+	/** Tells whoever has the popover open that it is closed for another. */
+	#popoverDismiss: (() => void) | undefined;
+	/** A loaded mark's pin was clicked (DEC-027). */
+	onPick: ((number: number) => void) | undefined;
 	#timer: ReturnType<typeof setInterval> | undefined;
 	/**
 	 * Called after the toolbar or the outlines are shown or hidden, including
@@ -425,6 +438,16 @@ export class Overlay {
 		this.root.append(this.layer);
 		for (const type of OWN_EVENTS)
 			this.layer.addEventListener(type, (e) => e.stopPropagation());
+		// On the press, not the click: the marks are drawn anew at every scroll
+		// and twice a second, and a click needs the same element twice.
+		this.#review.addEventListener("pointerdown", (e) => {
+			if (e.button !== 0) return;
+			const pin = (e.target as Element | null)?.closest?.("[data-review]");
+			const number = Number(pin?.getAttribute("data-review"));
+			if (pin === null || pin === undefined || !Number.isFinite(number)) return;
+			e.preventDefault();
+			this.onPick?.(number);
+		});
 		for (const type of FOCUS_EVENTS)
 			doc.defaultView?.addEventListener(
 				type,
@@ -465,6 +488,60 @@ export class Overlay {
 		this.#reviewing = on;
 		this.#update();
 		this.onChange?.();
+	}
+
+	/**
+	 * The loaded mark whose pin is at this point of the window, the one drawn
+	 * last first: for the layer that takes the pointer while a tool is on.
+	 */
+	reviewAt(x: number, y: number): number | undefined {
+		if (!this.#reviewing) return undefined;
+		return this.#pins.findLast((p) => Math.hypot(x - p.x, y - p.y) <= p.r + 2)
+			?.number;
+	}
+
+	/**
+	 * Show the one popover with `content`. Whoever had it open is told
+	 * (`dismissed`) before its content goes: a comment being typed is kept.
+	 */
+	openPopover(content: Node[], dismissed: () => void): void {
+		this.dismissPopover();
+		this.#popoverDismiss = dismissed;
+		this.popover.replaceChildren(...content);
+		this.popover.hidden = false;
+	}
+
+	/** Its owner is done with the popover. */
+	closePopover(): void {
+		this.#popoverDismiss = undefined;
+		this.popover.hidden = true;
+		this.popover.replaceChildren();
+	}
+
+	/** Close the popover for its owner, which is told; `false` when none is open. */
+	dismissPopover(): boolean {
+		const dismissed = this.#popoverDismiss;
+		if (dismissed === undefined) return false;
+		this.#popoverDismiss = undefined;
+		dismissed();
+		this.closePopover();
+		return true;
+	}
+
+	/** Put the popover under (or above) a mark whose bounds in the window are `b`. */
+	placePopover(b: Rect): void {
+		const win = this.doc.defaultView;
+		const vw = win?.innerWidth ?? 1024;
+		const vh = win?.innerHeight ?? 768;
+		const width = 296;
+		const height = Math.max(160, this.popover.offsetHeight || 0);
+		let x = b.x;
+		let y = b.y + b.height + 12;
+		if (y + height > vh) y = b.y - height - 12;
+		x = Math.min(Math.max(8, x), vw - width - 8);
+		y = Math.min(Math.max(8, y), vh - height - 70);
+		this.popover.style.left = `${x}px`;
+		this.popover.style.top = `${y}px`;
 	}
 
 	/**
@@ -613,6 +690,11 @@ export class Overlay {
 	 */
 	renderReview(items: readonly ReviewItem[]): void {
 		const doc = this.doc;
+		this.#pins = items.map((item) => ({
+			number: item.number,
+			...badgePosition(item.shape),
+			r: badgeRadius(item.shape),
+		}));
 		const groups = items.map((item) => {
 			const settled = isSettled(item.status);
 			const colour = reviewColour(item);

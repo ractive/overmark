@@ -55,6 +55,9 @@ is what a case is about, and finding the element again is a best-effort extra:
   "Add marks" adds to the open case, and "← All cases" ends the toolbar (as its Done,
   then without a case: `overlay:end`) and takes the case's marks off the tab in front.
   A panel opened again opens the case the tab in front shows.
+- A press on a loaded mark's pin on the page opens its comment there, with "Delete
+  mark" and "Done", and shows the mark in the side panel; the page asks, the panel
+  that drew the case on that tab does the change (DEC-027).
 - Shapes are stored in the screenshot's own coordinates (CSS pixels of that viewport).
   They never have to follow the live page.
 - Each annotation also stores the details of its element (tag, role, accessible name,

@@ -420,6 +420,11 @@ export class Annotator {
 	}
 
 	#move(e: PointerEvent): void {
+		if (this.#drag === null)
+			this.overlay.capture.classList.toggle(
+				"pick",
+				this.overlay.reviewAt(e.clientX, e.clientY) !== undefined,
+			);
 		if (this.#tool === "element" && this.#drag === null) {
 			this.#hover = elementAt(e.clientX, e.clientY, this.overlay.host);
 			this.#schedule();
@@ -448,6 +453,14 @@ export class Annotator {
 			this.#commitComment();
 			return;
 		}
+		// A loaded mark's pin under the layer that takes the pointer: its
+		// comment opens (DEC-027). A click beside an open one closes it.
+		const picked = this.overlay.reviewAt(e.clientX, e.clientY);
+		if (picked !== undefined) {
+			this.overlay.onPick?.(picked);
+			return;
+		}
+		if (this.overlay.dismissPopover()) return;
 		const p = this.#toDocument(e);
 		this.#drag = { pointerId: e.pointerId, start: p, points: [p] };
 		this.overlay.capture.setPointerCapture?.(e.pointerId);
@@ -567,7 +580,6 @@ export class Annotator {
 	#openComment(draft: Draft): void {
 		this.#editing = draft;
 		const doc = this.overlay.doc;
-		const popover = this.overlay.popover;
 		const pin = doc.createElement("span");
 		pin.className = "pin";
 		pin.textContent = String(draft.number);
@@ -599,26 +611,17 @@ export class Annotator {
 		const row = doc.createElement("div");
 		row.className = "row";
 		row.append(remove, done);
-		popover.replaceChildren(label, field, row);
-		popover.hidden = false;
+		// A loaded mark's popover opened over this one (DEC-027): the comment
+		// typed so far is the mark's, as after a click beside it.
+		this.overlay.openPopover([label, field, row], () => {
+			if (this.#editing === draft) this.#commitComment();
+		});
 		this.#placePopover(draft);
 		field.focus();
 	}
 
 	#placePopover(draft: Draft): void {
-		const win = this.overlay.doc.defaultView;
-		const b = shapeBounds(this.#onWindow(draft));
-		const vw = win?.innerWidth ?? 1024;
-		const vh = win?.innerHeight ?? 768;
-		const width = 296;
-		const height = 160;
-		let x = b.x;
-		let y = b.y + b.height + 12;
-		if (y + height > vh) y = b.y - height - 12;
-		x = Math.min(Math.max(8, x), vw - width - 8);
-		y = Math.min(Math.max(8, y), vh - height - 70);
-		this.overlay.popover.style.left = `${x}px`;
-		this.overlay.popover.style.top = `${y}px`;
+		this.overlay.placePopover(shapeBounds(this.#onWindow(draft)));
 	}
 
 	#commitComment(): void {
@@ -631,8 +634,7 @@ export class Annotator {
 
 	#closeComment(): void {
 		this.#editing = null;
-		this.overlay.popover.hidden = true;
-		this.overlay.popover.replaceChildren();
+		this.overlay.closePopover();
 		this.#renderToolbar();
 		this.#render();
 	}

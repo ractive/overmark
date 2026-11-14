@@ -740,6 +740,8 @@ interface CaseParts {
 	saveVerdict: HTMLButtonElement;
 	marks: HTMLElement;
 	marksKey: string;
+	/** The click on a mark's pin on the page that was last shown in the list. */
+	pickedAt: number | undefined;
 	shots: HTMLElement;
 	shotsKey: string;
 }
@@ -947,6 +949,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		),
 		marks: h("section"),
 		marksKey: "",
+		pickedAt: undefined,
 		shots: h("section"),
 		shotsKey: "",
 	};
@@ -1688,7 +1691,14 @@ function renderCase(state: PanelState, actions: Actions): void {
 	if (edit === undefined) focusedForm = undefined;
 	const markArmed = state.markDeleteArmed?.annotationId;
 	const findingArmed = state.findingDeleteArmed;
+	// A mark's pin was clicked on the page (DEC-027): its row opens, once.
+	const picked =
+		state.picked?.caseId === c.id && state.picked.at !== p.pickedAt
+			? state.picked
+			: undefined;
+	if (picked !== undefined) openMarks.add(`${c.id}:${picked.annotationId}`);
 	const marksKey = JSON.stringify([
+		picked?.at ?? null,
 		filter ?? null,
 		c.updatedAt,
 		images?.version,
@@ -1793,6 +1803,15 @@ function renderCase(state: PanelState, actions: Actions): void {
 		p.marks.replaceWith(marks);
 		p.marks = marks;
 		if (kept !== undefined && !kept.hidden) kept.focus();
+		if (picked !== undefined) {
+			p.pickedAt = picked.at;
+			const row = items.find(
+				(li) => li.dataset["annotation"] === picked.annotationId,
+			);
+			// Its head under the sticky bars, its actions in view where they fit.
+			row?.setAttribute("data-picked", "");
+			row?.scrollIntoView?.({ block: "nearest" });
+		}
 		p.marksKey = marksKey;
 	}
 
