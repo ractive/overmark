@@ -699,8 +699,11 @@ describe("Verify (DEC-023)", () => {
 		render(caseState({ ...c, id: "c_none", annotations: [] }), noActions);
 		expect(window.document.querySelector("#case-status")).toBeNull();
 		expect(
-			window.document.querySelector<HTMLElement>("section.marks .case-status")
-				?.hidden,
+			(
+				window.document.querySelector(
+					"section.marks .case-status",
+				) as unknown as HTMLElement | null
+			)?.hidden,
 		).toBe(true);
 	});
 
