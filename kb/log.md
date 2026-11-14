@@ -1,5 +1,11 @@
 # Log
 
+Not written any more, since 2026-11-14 (the owner: "is this log even useful?"). Each
+entry repeated its commit and its pull request, nothing read it, and an entry per change
+made every two pull requests conflict. What changed and why is in the commit and the
+pull request; a decision is in the [decision log](decision-log.md); a lesson that is no
+decision goes where it is looked for, the operations or the research notes.
+
 ## 2026-11-04
 
 - Planned with the owner: design, prior art, DEC-001 to DEC-007, iterations 1 to 5, open questions; repository `ractive/overmark` created
