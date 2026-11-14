@@ -79,9 +79,14 @@ export const MAX_NUMBER_GAP = 100;
 /**
  * A save the content script sent (`case:save`): its marks are the user's,
  * whatever the draft says. Only an AI app's `add_annotation`, in the worker,
- * stores a mark of an AI app (CR-07).
+ * stores a mark of an AI app (CR-07). A page adds to a case and makes none:
+ * the side panel creates every case (DEC-026).
  */
 export function fromPage(request: SaveRequest): SaveRequest {
+	if (request.isNew)
+		throw new SaveError(
+			"a page adds marks to an existing case; the side panel creates cases.",
+		);
 	return {
 		...request,
 		fromPage: true,
@@ -216,21 +221,37 @@ export async function saveCase(
 			const image = crops.get(draft);
 			if (image !== undefined) images.set(cropImage(id), image);
 		}
+		// In the order of their numbers, whatever order they went in: a mark
+		// added again with "Add mark N" can come after a later one (DEC-014).
+		annotations.sort((a, b) => a.number - b.number);
 		const value = validateCase({
 			format: CASE_FORMAT,
 			id: request.caseId,
 			title: current?.title ?? (request.title.trim() || "Untitled case"),
 			createdAt: current?.createdAt ?? stamp,
 			updatedAt: stamp,
-			page: current?.page ?? {
-				...request.page,
-				url: plainUrl(request.page.url),
-			},
+			// The first mark's page is the case's (review of PR 57): a case
+			// "Annotate this page" made has the page as it was at that click,
+			// and the window or the route may have changed before the mark.
+			page:
+				current !== undefined && current.shots.length > 0
+					? current.page
+					: { ...request.page, url: plainUrl(request.page.url) },
 			shots,
 			annotations,
 			verdict: current?.verdict ?? null,
 			importedAt: current?.importedAt,
-			lastNumber: current?.lastNumber,
+			// The highest number used, the new marks' too: a case's format
+			// refuses a lastNumber below a mark's (it was kept as it was, so
+			// a mark added after a delete or an Undo could not be stored).
+			...(current?.lastNumber === undefined
+				? {}
+				: {
+						lastNumber: Math.max(
+							current.lastNumber,
+							...annotations.map((a) => a.number),
+						),
+					}),
 		});
 		return { value, images };
 	});
@@ -275,7 +296,9 @@ export interface AddedAs {
  * here the mark must still be as that add stored it (not resolved, its comment
  * not edited), the user's, the highest number in the case, on a screenshot of
  * its own taken lately. Its pin was on that screenshot only, which goes with
- * it, so its number is free again (unlike a delete, DEC-014).
+ * it, so its number is free again (unlike a delete, DEC-014). `lastNumber`
+ * is set to the highest number left (0 for none): a case that has had a mark
+ * is never untouched again (DEC-026).
  * `removed: false`: it was gone already (deleted in the side panel).
  */
 export async function undoAdd(
@@ -314,10 +337,18 @@ export async function undoAdd(
 		)
 			throw refuse("cannot be undone here");
 		removed = true;
+		const annotations = current.annotations.filter((a) => a !== gone);
 		const value = validateCase({
 			...current,
-			annotations: current.annotations.filter((a) => a !== gone),
+			annotations,
 			shots: current.shots.filter((s) => s !== shot),
+			// A mark was stored, so the case is the user's (DEC-026, review of
+			// PR 57): `lastNumber` says so, set below the freed number so that
+			// the number is free again. A case with no mark left gets 0.
+			lastNumber: Math.max(
+				current.lastNumber ?? 0,
+				...annotations.map((a) => a.number),
+			),
 			updatedAt: now.toISOString(),
 		});
 		return { value, deleteImages: [gone.crop, shot.image] };

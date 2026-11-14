@@ -21,6 +21,7 @@ import {
 	undoAdd,
 } from "../src/lib/save.ts";
 import { MemoryStore } from "../src/lib/store.ts";
+import { putCase, sampleCase } from "./fixtures.ts";
 
 const page = {
 	url: "https://www.example.com/kk",
@@ -350,11 +351,12 @@ describe("saveCase", () => {
 
 	test("a save from the page is the user's: an AI author in its draft does not count (CR-07)", async () => {
 		const store = new MemoryStore();
+		await putCase(store, sampleCase("c_1"));
 		await captured(store, "c_1", "p_a");
 		const ai = { ...draft(1, "p_a"), author: "ai" as const };
 		const saved = await saveCase(
 			store,
-			fromPage(request("c_1", true, [shot("p_a")], [ai, draft(2, "p_a")])),
+			fromPage(request("c_1", false, [shot("p_a")], [ai, draft(2, "p_a")])),
 			crop,
 		);
 		expect(saved.annotations.map((a) => a.author)).toEqual(["user", "user"]);
@@ -375,6 +377,129 @@ describe("saveCase", () => {
 			"user",
 			"ai",
 		]);
+	});
+
+	test("a mark added after a delete raises lastNumber with it (was refused by the format)", async () => {
+		const store = new MemoryStore();
+		await newCase(store); // marks 1 and 2
+		await store.updateCase("c_1", (c) => ({
+			value: { ...(c as Case), lastNumber: 2 },
+		}));
+		await captured(store, "c_1", "p_b");
+		const saved = await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_b")], [draft(3, "p_b")])),
+			crop,
+		);
+		expect(saved.annotations.map((a) => a.number)).toEqual([1, 2, 3]);
+		expect(saved.lastNumber).toBe(3);
+		expect(validateCase(saved)).toEqual(saved);
+	});
+
+	test("a later mark leaves the case's page as its first mark had it", async () => {
+		const store = new MemoryStore();
+		await putCase(store, sampleCase("c_1"));
+		await captured(store, "c_1", "p_a");
+		const first = await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_a")], [draft(1, "p_a")])),
+			crop,
+		);
+		await captured(store, "c_1", "p_b");
+		const second = await saveCase(
+			store,
+			fromPage({
+				...request("c_1", false, [shot("p_b")], [draft(2, "p_b")]),
+				page: { ...page, url: "https://elsewhere.example/" },
+			}),
+			crop,
+		);
+		expect(second.page).toEqual(first.page);
+	});
+
+	test("marks are kept in the order of their numbers, whatever order they went in", async () => {
+		const store = new MemoryStore();
+		await putCase(store, sampleCase("c_1"));
+		await captured(store, "c_1", "p_b");
+		await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_b")], [draft(2, "p_b")])),
+			crop,
+		);
+		// Mark 1 goes in after mark 2 ("Add mark 1" took its screenshot later).
+		await captured(store, "c_1", "p_a");
+		const saved = await saveCase(
+			store,
+			fromPage(request("c_1", false, [shot("p_a")], [draft(1, "p_a")])),
+			crop,
+		);
+		expect(saved.annotations.map((a) => [a.number, a.shot])).toEqual([
+			[1, "s2"],
+			[2, "s1"],
+		]);
+	});
+
+	test("a page makes no case: the side panel creates them (DEC-026)", async () => {
+		const store = new MemoryStore();
+		await captured(store, "c_1", "p_a");
+		expect(() =>
+			fromPage(request("c_1", true, [shot("p_a")], [draft(1, "p_a")])),
+		).toThrow("a page adds marks to an existing case");
+		expect(await store.getCase("c_1")).toBeUndefined();
+	});
+
+	test("the first mark of a case Annotate this page made: s1 and a1, the page its mark's, the title kept (DEC-026)", async () => {
+		const store = new MemoryStore();
+		const empty = await putCase(store, {
+			...sampleCase("c_1"),
+			title: "Your cart",
+		});
+		expect(nextNumbers(empty)).toEqual({ annotation: 1, shot: 1 });
+		await captured(store, "c_1", "p_a");
+		const saved = await saveCase(
+			store,
+			fromPage({
+				...request("c_1", false, [shot("p_a")], [draft(1, "p_a")]),
+				// The window grew, and the route changed, between the click and
+				// the mark: the case's page is the mark's (review of PR 57).
+				page: {
+					...page,
+					url: "https://elsewhere.example/checkout?step=2#top",
+					viewport: { width: 1600, height: 900, dpr: 2 },
+				},
+				keepPending: true,
+			}),
+			crop,
+		);
+		expect(saved.title).toBe("Your cart");
+		expect(saved.page).toEqual({
+			...page,
+			url: "https://elsewhere.example/checkout",
+			viewport: { width: 1600, height: 900, dpr: 2 },
+		});
+		expect(saved.createdAt).toBe(empty.createdAt);
+		expect(saved.shots.map((s) => s.id)).toEqual(["s1"]);
+		expect(saved.annotations.map((a) => [a.id, a.shot])).toEqual([
+			["a1", "s1"],
+		]);
+		// Undo of that first mark leaves the case as it was made: empty.
+		const undone = await undoAdd(
+			store,
+			"c_1",
+			"a1",
+			{ shot: "s1", comment: "comment 1" },
+			new Date("2026-11-04T10:05:00Z"),
+		);
+		expect(undone).toEqual({ removed: true, next: 1 });
+
+		const after = (await store.getCase("c_1")) as Case;
+		expect(after.annotations).toEqual([]);
+		expect(after.shots).toEqual([]);
+		// A mark was stored: the case is the user's now (review of PR 57),
+		// and number 1 is free again.
+		expect(after.lastNumber).toBe(0);
+		expect(nextNumbers(after).annotation).toBe(1);
+		expect(validateCase(after)).toEqual(after);
 	});
 
 	test("a save from the page cannot choose a number far above the case's next (review of PR 45)", async () => {
@@ -407,13 +532,14 @@ describe("saveCase", () => {
 		);
 		expect(gap.annotations.at(-1)?.number).toBe(3 + MAX_NUMBER_GAP);
 		// Several marks in one save: each may be one more.
+		await putCase(store, sampleCase("c_2"));
 		await captured(store, "c_2", "p_a");
 		const many = Array.from({ length: 5 }, (_, i) =>
 			draft(i + 1 + MAX_NUMBER_GAP, "p_a"),
 		);
 		const saved = await saveCase(
 			store,
-			fromPage(request("c_2", true, [shot("p_a")], many)),
+			fromPage(request("c_2", false, [shot("p_a")], many)),
 			crop,
 		);
 		expect(saved.annotations).toHaveLength(5);
@@ -546,7 +672,8 @@ describe("adding mark by mark", () => {
 		const c = (await store.getCase("c_1")) as Case;
 		expect(c.annotations.map((a) => a.number)).toEqual([1, 2]);
 		expect(c.shots.map((s) => s.id)).toEqual(["s1"]);
-		expect(c.lastNumber).toBeUndefined();
+		// It records that marks were stored (review of PR 57), below the freed number.
+		expect(c.lastNumber).toBe(2);
 		expect(keys(store)).toEqual([
 			"c_1/crops/a1.webp",
 			"c_1/crops/a2.webp",

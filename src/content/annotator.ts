@@ -1,14 +1,13 @@
 /**
  * Annotating a page: the tools (element, box, arrow, pen, note), a comment for
- * each mark, undo, and saving the marks as a case.
+ * each mark, undo, and adding the marks to a case.
  *
- * Two modes (DEC-014). Without a case, the marks are drafts until "Save case"
- * stores them as a new case with a title. With a case (the side panel's "Add
- * marks", or after that save), each mark goes into the case as soon as it is
- * done: its comment confirmed, or the comment closed with the mark kept. One
- * queue adds them in order; Undo takes the last one out of the case again. A
- * mark that could not be added stays on the page with the reason and a button
- * to add it again.
+ * The toolbar always adds to a case (DEC-014, DEC-026): the one "Annotate this
+ * page" just created, or the open case's "Add marks". Each mark goes into it
+ * as soon as it is done: its comment confirmed, or the comment closed with the
+ * mark kept. One queue adds them in order; Undo takes the last one out of the
+ * case again. A mark that could not be added stays on the page with the
+ * reason and a button to add it again: a failed write, not a draft.
  *
  * A mark's screenshot is taken when the mark is drawn (DEC-012): the page as
  * the user sees it then is the record, whatever it does afterwards. Marks drawn
@@ -27,7 +26,6 @@ import {
 	MAX_COMMENT,
 	MAX_PAGE_TITLE,
 	MAX_PEN_POINTS,
-	MAX_TITLE,
 	newId,
 	type PageInfo,
 	type Point,
@@ -95,6 +93,8 @@ interface Draft {
 	shot?: { view: View; shape: Shape; box?: Rect };
 	/** The case it was queued for: it never goes into another one unasked. */
 	queuedFor?: { caseId: string; title: string };
+	/** Why its screenshot could not be taken, if it could not. */
+	shotError?: string;
 }
 
 /** One screenshot, and the marks that share it. */
@@ -128,6 +128,13 @@ const frame = () =>
 		sleep(250),
 	]);
 
+/** How long the page must stand still before a mark's screenshot is taken again. */
+const STILL_MS = 800;
+/** How long one wait for a still page lasts at most. */
+const STILL_WAIT_MS = 5000;
+/** How often a mark's screenshot the page moved away from is taken again by itself. */
+const AGAIN_TRIES = 3;
+
 /** Chrome allows two screenshots a second; the overlay stays up meanwhile. */
 const SHOT_GAP_MS = 620;
 
@@ -155,6 +162,10 @@ function normalizeRect(a: Point, b: Point): Rect {
 
 export class Annotator {
 	readonly overlay: Overlay;
+	/**
+	 * Marks drawn and not in the case yet: a comment being typed, one on its
+	 * way, one that could not be added. The case holds every other (DEC-026).
+	 */
 	#drafts: Draft[] = [];
 	/** The target case's marks saved from this page: shown, no longer changed. */
 	#savedMarks: Draft[] = [];
@@ -165,8 +176,6 @@ export class Annotator {
 	#editing: Draft | null = null;
 	#target: AnnotateTarget | undefined;
 	#blurForms = false;
-	#saveForm = false;
-	#title = "";
 	#message = "";
 	#frame = 0;
 	#views: View[] = [];
@@ -175,7 +184,7 @@ export class Annotator {
 	/** Screenshots run one after the other; this never rejects. */
 	#shots: Promise<void> = Promise.resolve();
 	#lastShot = 0;
-	/** Where pending screenshots are stored until a save takes them. */
+	/** Where pending screenshots are stored until an add takes them. */
 	#pendingCase: string | undefined;
 	/** Since the last screenshot, something scrolled or the window changed. */
 	#scrolled = true;
@@ -186,12 +195,14 @@ export class Annotator {
 	#unblur: (() => void) | undefined;
 	/** The last screenshot's page scrolled while it was taken. */
 	#shotMoved = false;
-	#saveCalled = false;
-	/** "Save case" is storing the drafts as a new case now. */
-	#savingCase = false;
-	/** Adding to a case: what changes it (adds, undos) runs in order. */
+	/** When the page last scrolled or the window changed (`Date.now()`). */
+	#movedAt = 0;
+	/** What changes the case (adds, undos) runs in order. */
 	#ops: Promise<void> = Promise.resolve();
-	/** Drafts waiting to be added to the case, or being added now. */
+	/**
+	 * Marks not in the case yet (`#drafts`: a comment being typed, a failed
+	 * add too) waiting to be added, or being added now.
+	 */
 	#queued = new Set<Draft>();
 	/** Drafts that could not be added, with why. */
 	#failed = new Map<Draft, string>();
@@ -203,7 +214,7 @@ export class Annotator {
 	#finishing = false;
 	/** Done (or the side panel's end) under way: a second one waits for it. */
 	#finishRun: Promise<void> | undefined;
-	/** What the side panel last heard: the drafts, the case, a save. */
+	/** What the side panel last heard: the marks not in the case, the case, an add. */
 	#announced = "";
 	/** Done found these marks not in the case: Done again discards them. */
 	#leftOut: Set<Draft> | undefined;
@@ -212,6 +223,8 @@ export class Annotator {
 	/** The toolbar's status and alert: kept, and changed in place. */
 	readonly #statusEl: HTMLElement;
 	readonly #alertEl: HTMLElement;
+	/** What each toolbar button does now (#button, #mount). */
+	readonly #onClick = new WeakMap<HTMLButtonElement, () => void>();
 
 	readonly #pageBlur: PageBlur;
 	readonly #activity: PageActivity;
@@ -244,6 +257,7 @@ export class Annotator {
 		const win = doc.defaultView;
 		const moved = () => {
 			this.#scrolled = true;
+			this.#movedAt = Date.now();
 			this.#schedule();
 		};
 		// Capture phase: scrolling inside a container moves elements too.
@@ -263,7 +277,6 @@ export class Annotator {
 			(e) => {
 				if (!overlay.annotating || e.key !== "Escape") return;
 				if (this.#editing !== null) this.#commitComment();
-				else if (this.#saveForm) this.#setSaveForm(false);
 				else if (this.#tool !== null) this.setTool(null);
 				else return;
 				// It was for Overmark, not for a dialog the page has open.
@@ -272,6 +285,7 @@ export class Annotator {
 			},
 			true,
 		);
+		// Marks not in the case yet (a failed add, one on its way) would go.
 		win?.addEventListener("beforeunload", (e) => {
 			if (this.#drafts.length > 0) e.preventDefault();
 		});
@@ -298,31 +312,24 @@ export class Annotator {
 		return state;
 	}
 
+	/** Show the toolbar adding to `options.target` (DEC-026: never to no case). */
 	show(options: ShowOptions): void {
-		// During a save its case stays; the new one applies when it is over.
+		// During an add its case stays; the new one applies when it is over.
 		if (!this.#activity.defer({ kind: "show", options })) {
-			const before = this.#target;
 			const next = options.target;
-			if (next?.caseId !== before?.caseId) {
+			if (next.caseId !== this.#target?.caseId) {
 				this.#savedMarks = [];
 				this.#added = [];
-				if (next === undefined) {
-					// Drafts of a new case now.
-					this.#failed.clear();
-					for (const d of this.#drafts) delete d.queuedFor;
-				}
 				// Not moved into another case unasked: they wait for "Add mark N".
-				else
-					for (const d of this.#failed.keys())
-						this.#failed.set(d, this.#notFor(d, next));
+				for (const d of this.#failed.keys())
+					this.#failed.set(d, this.#notFor(d, next));
 			}
 			this.#target = next;
 			this.#blurForms = options.blurForms ?? false;
 			this.#message = "";
 			this.#alert = "";
-			if (this.#target !== undefined) this.#saveForm = false;
 			this.#renumber();
-			// Marks drawn before a case was chosen go into it now.
+			// Marks done and not on their way yet go into it now.
 			this.#addDone();
 		}
 		this.overlay.setAnnotating(true);
@@ -334,7 +341,7 @@ export class Annotator {
 	}
 
 	hide(): void {
-		// A save still running finishes first.
+		// A mark being added finishes first.
 		if (this.#activity.defer({ kind: "hide" })) return;
 		if (this.#editing !== null) this.#commitComment();
 		this.setTool(null);
@@ -500,7 +507,7 @@ export class Annotator {
 
 	// --- marks and comments --------------------------------------------------
 
-	/** Number the unsaved marks on from the target's next number (or 1 for a new case). */
+	/** Number the marks not in the case on from the case's next number. */
 	#renumber(): void {
 		let next = this.#target?.nextAnnotation ?? 1;
 		for (const draft of this.#drafts) draft.number = next++;
@@ -735,13 +742,11 @@ export class Annotator {
 			b.append(word);
 		}
 		b.dataset["action"] = action;
-		b.addEventListener("click", onClick);
+		this.#onClick.set(b, onClick);
+		// What a click does is looked up then: a button kept through a
+		// re-render (#mount) does what the newest render says.
+		b.addEventListener("click", () => this.#onClick.get(b)?.());
 		return b;
-	}
-
-	#setSaveForm(on: boolean): void {
-		this.#saveForm = on;
-		this.#renderToolbar();
 	}
 
 	/**
@@ -770,10 +775,25 @@ export class Annotator {
 	}
 
 	/**
+	 * The case the toolbar adds to was renamed (DEC-026): "Adding to “<title>”"
+	 * and the marks still on their way say its new title.
+	 */
+	setTitle(caseId: string, title: string): void {
+		if (this.#target?.caseId !== caseId) return;
+		this.#target = { ...this.#target, title };
+		for (const d of this.#drafts)
+			if (d.queuedFor?.caseId === caseId) d.queuedFor = { caseId, title };
+		// "Mark 2 added to “<old title>”" says no more than the status now.
+		if (!this.#activity.saving) this.#message = "";
+		this.#renderToolbar();
+	}
+
+	/**
 	 * The side panel closes the case (DEC-023): finish as Done does and, once
-	 * the toolbar is hidden, add to no case any more, so the next show starts
-	 * a new one. A mark that could not be added keeps the toolbar up, adding
-	 * to the case, unless `discard`: then the marks not in the case go.
+	 * the toolbar is hidden, add to no case any more, until it is shown for
+	 * one again. A mark that could not be added keeps the toolbar up, adding
+	 * to the case, unless `discard` (the second "← All cases", the case
+	 * deleted): then the marks not in the case go.
 	 * Without `retry` it is Done's own second click where an earlier Done left
 	 * marks out (they go); with it they are tried once more.
 	 */
@@ -784,9 +804,9 @@ export class Annotator {
 			retry = false,
 		}: { discard?: boolean; retry?: boolean } = {},
 	): Promise<void> {
-		// "Add marks" for it waits for a new case's save: it is not shown then.
+		// "Add marks" for it waits for another case's add: it is not shown then.
 		const deferred = this.#activity.deferred;
-		if (deferred?.kind === "show" && deferred.options.target?.caseId === caseId)
+		if (deferred?.kind === "show" && deferred.options.target.caseId === caseId)
 			this.#activity.defer({ kind: "hide" });
 		if (this.#target?.caseId !== caseId) return;
 		// Not a Done again: what an earlier Done left out is tried once more.
@@ -798,7 +818,7 @@ export class Annotator {
 		this.#forgetTarget();
 	}
 
-	/** Add to no case any more: the next marks are a new case's drafts. */
+	/** Add to no case any more: the toolbar is shown again only for one. */
 	#forgetTarget(): void {
 		this.#target = undefined;
 		this.#savedMarks = [];
@@ -853,9 +873,10 @@ export class Annotator {
 	}
 
 	/**
-	 * Tell the side panel when what it shows of the page changed (the drafts'
-	 * count, the case added to, a save under way): it opens a case that a
-	 * save made (DEC-023) and says how many marks are not saved yet.
+	 * Tell the side panel when what it shows of the page changed (how many
+	 * marks are not in the case, the case added to, an add under way): it
+	 * opens the case a toolbar adds to (DEC-023) and says when a mark keeps
+	 * "← All cases" waiting.
 	 */
 	#announce(): void {
 		const now = JSON.stringify([
@@ -878,40 +899,7 @@ export class Annotator {
 			s.className = "sep";
 			return s;
 		};
-		const count = this.#drafts.length;
 		const target = this.#target;
-		if (this.#savingCase) {
-			this.#mount([brand], this.#message || "Saving…", []);
-			return;
-		}
-		if (this.#saveForm && target === undefined) {
-			const title = doc.createElement("input");
-			title.type = "text";
-			title.placeholder = "Case title";
-			title.setAttribute("aria-label", "Case title");
-			title.maxLength = MAX_TITLE;
-			title.value = this.#title;
-			title.addEventListener("input", () => {
-				this.#title = title.value;
-			});
-			title.addEventListener("keydown", (e) => {
-				if (e.key === "Enter") void this.save(title.value);
-			});
-			const save = this.#button(
-				"Save case",
-				"save-confirm",
-				() => void this.save(title.value),
-			);
-			save.className = "primary";
-			const keep = this.#button("Keep drawing", "save-cancel", () =>
-				this.#setSaveForm(false),
-			);
-			keep.title = "Close this without saving; the marks stay";
-			this.#mount([brand, title], this.#message, [save, keep]);
-			title.focus();
-			title.select();
-			return;
-		}
 		const tools = TOOLS.map(({ tool, label, title }) => {
 			const b = this.#button(
 				label,
@@ -934,31 +922,18 @@ export class Annotator {
 					? `Take mark ${last.number} out of “${target.title}”`
 					: `Remove mark ${last.number}`;
 		const middle: Element[] = [undo];
-		if (target === undefined) {
-			const save = this.#button("Save case…", "save", () => {
-				if (this.#editing !== null) this.#commitComment();
-				this.setTool(null);
-				this.#title = doc.title.slice(0, 120);
-				this.#setSaveForm(true);
-			});
-			save.title = "Save the marks as a new case";
-			save.disabled = count === 0;
-			if (count > 0) save.className = "primary";
-			middle.push(save);
-		} else {
-			const failed = [...this.#failed.keys()];
-			if (failed.length > 0) {
-				const again = this.#button(
-					failed.length === 1
-						? `Add mark ${(failed[0] as Draft).number}`
-						: `Add ${failed.length} marks`,
-					"retry",
-					() => this.#retry(),
-				);
-				again.className = "primary";
-				again.title = `Try again to add to “${target.title}”`;
-				middle.push(again);
-			}
+		const failed = [...this.#failed.keys()];
+		if (target !== undefined && failed.length > 0) {
+			const again = this.#button(
+				failed.length === 1
+					? `Add mark ${(failed[0] as Draft).number}`
+					: `Add ${failed.length} marks`,
+				"retry",
+				() => this.#retry(),
+			);
+			again.className = "primary";
+			again.title = `Try again to add to “${target.title}”`;
+			middle.push(again);
 		}
 		const top = bar.classList.contains("top");
 		const move = this.#button(
@@ -972,20 +947,18 @@ export class Annotator {
 		);
 		move.title = top ? "Move the toolbar down" : "Move the toolbar up";
 		move.setAttribute("aria-label", move.title);
-		const close =
-			target === undefined
-				? this.#button("Close", "close", () => this.hide(), "close")
-				: this.#button("Done", "close", () => void this.#finish(), "close");
+		const close = this.#button(
+			"Done",
+			"close",
+			() => void this.#finish(),
+			"close",
+		);
 		// As an icon on a narrow page it needs its tooltip, as every other one.
-		if (target === undefined)
-			close.title = "Close the toolbar; the marks stay on this page";
-		else {
-			close.title =
-				this.#leftOut === undefined
-					? "Stop adding marks"
-					: "Discard the marks that are not in the case, and stop";
-			close.disabled = this.#finishing;
-		}
+		close.title =
+			this.#leftOut === undefined
+				? "Stop adding marks"
+				: "Discard the marks that are not in the case, and stop";
+		close.disabled = this.#finishing;
 		this.#mount(
 			[brand, ...tools, sep(), ...middle, sep()],
 			this.#message || this.#statusText(),
@@ -1008,23 +981,64 @@ export class Annotator {
 				: undefined;
 		const statusEl = this.#statusEl;
 		const alertEl = this.#alertEl;
-		for (const child of [...bar.children])
-			if (child !== statusEl && child !== alertEl) child.remove();
-		if (statusEl.parentNode !== bar) bar.append(statusEl);
-		if (statusEl.nextSibling !== alertEl) statusEl.after(alertEl);
 		if (statusEl.textContent !== status) statusEl.textContent = status;
 		statusEl.hidden = status === "";
 		const alert = this.#alert || this.#failureText();
 		if (alertEl.textContent !== alert) alertEl.textContent = alert;
 		alertEl.hidden = alert === "";
-		statusEl.before(...before);
-		alertEl.after(...after);
+		// A button already there stays the same element (a click pressed on it
+		// before this render still lands: Chrome sends it to the element both
+		// mousedown and mouseup were on) and takes the new one's state.
+		const kept = new Map<string, HTMLButtonElement>();
+		// By tag name, not instanceof: the page's realm is not the script's.
+		const isButton = (el: Element): el is HTMLButtonElement =>
+			el.tagName === "BUTTON";
+		for (const child of bar.children) {
+			const action = isButton(child) ? child.dataset["action"] : undefined;
+			if (action !== undefined && isButton(child)) kept.set(action, child);
+		}
+		const reuse = (el: Element): Element => {
+			if (!isButton(el)) return el;
+			const action = el.dataset["action"];
+			const old = action === undefined ? undefined : kept.get(action);
+			if (old === undefined || action === undefined) return el;
+			kept.delete(action);
+			this.#takeOver(old, el);
+			return old;
+		};
+		const wanted = [
+			...before.map(reuse),
+			statusEl,
+			alertEl,
+			...after.map(reuse),
+		];
+		for (const child of [...bar.children])
+			if (!wanted.includes(child)) child.remove();
+		// In order, moving only what is out of place.
+		let at: ChildNode | null = bar.firstChild;
+		for (const node of wanted) {
+			if (node === at) at = at.nextSibling;
+			else bar.insertBefore(node, at);
+		}
 		// Other parts, other widths: laid out for the room there is.
 		this.overlay.fitToolbar();
 		if (action !== undefined)
 			bar
 				.querySelector<HTMLElement>(`[data-action="${CSS.escape(action)}"]`)
 				?.focus();
+	}
+
+	/** `old`, kept in the toolbar, takes `fresh`'s attributes, content and action. */
+	#takeOver(old: HTMLButtonElement, fresh: HTMLButtonElement): void {
+		for (const { name } of [...old.attributes])
+			if (!fresh.hasAttribute(name)) old.removeAttribute(name);
+		for (const { name, value } of [...fresh.attributes])
+			if (old.getAttribute(name) !== value) old.setAttribute(name, value);
+		old.disabled = fresh.disabled;
+		if (old.innerHTML !== fresh.innerHTML)
+			old.replaceChildren(...fresh.childNodes);
+		const run = this.#onClick.get(fresh);
+		if (run !== undefined) this.#onClick.set(old, run);
 	}
 
 	/** Why the last mark that could not be added is not in the case. */
@@ -1039,11 +1053,8 @@ export class Annotator {
 	/** What the toolbar says when nothing just happened. */
 	#statusText(): string {
 		const target = this.#target;
-		const count = this.#drafts.length;
-		if (target === undefined)
-			return count === 0
-				? "New case: choose a tool"
-				: `New case: ${count} mark${count === 1 ? "" : "s"}`;
+		// Shown only for a case; between its end and its hiding, nothing.
+		if (target === undefined) return "";
 		const failed = [...this.#failed.keys()];
 		if (failed.length === 1)
 			return `Mark ${(failed[0] as Draft).number} is not in “${target.title}” yet`;
@@ -1089,7 +1100,8 @@ export class Annotator {
 		this.#shots = this.#shots
 			.then(() => this.#shoot(draft, same, shape))
 			.catch((error: unknown) => {
-				this.#message = `No screenshot of mark ${draft.number} yet: ${errorText(error)}`;
+				draft.shotError = errorText(error);
+				this.#message = `No screenshot of mark ${draft.number} yet: ${draft.shotError}`;
 				this.#renderToolbar();
 			});
 	}
@@ -1138,8 +1150,8 @@ export class Annotator {
 	/**
 	 * A new screenshot of the page as it is, for `draft`. With `drawn`, where the
 	 * mark was drawn, it is given up when the page moved on: the image would not
-	 * show the mark, and the page is not moved while the user works. Saving then
-	 * takes it, without `drawn`.
+	 * show the mark, and the page is not moved while the user works. Adding it
+	 * again ("Add mark N", Done) then takes it, without `drawn`.
 	 */
 	async #take(draft: Draft, drawn?: Shape): Promise<void> {
 		await this.#hold("shot");
@@ -1206,8 +1218,8 @@ export class Annotator {
 		}
 	}
 
-	/** At saving, nobody is using the page: back to where a mark was drawn. */
-	async #takeBack(draft: Draft): Promise<void> {
+	/** Adding a mark again, nobody is using the page: back to where it was drawn. */
+	async #takeBack(draft: Draft, strict = false): Promise<void> {
 		const win = this.overlay.doc.defaultView as Window;
 		const here = this.#scroll();
 		this.#scrollTo(draft.scroll);
@@ -1224,9 +1236,30 @@ export class Annotator {
 				behavior: "instant",
 			});
 		try {
-			await this.#take(draft);
+			// `strict`: given up again if the page moves meanwhile, as a shot
+			// taken when the mark is drawn is (#take, #shotMoved).
+			await this.#take(draft, strict ? this.#onWindow(draft) : undefined);
 		} finally {
 			this.#scrollTo(here);
+		}
+	}
+
+	/**
+	 * Until the page has stood still for a moment (no scroll, no resize) and
+	 * nobody is drawing or typing a comment, `STILL_WAIT_MS` at most; whether
+	 * it did.
+	 */
+	async #still(): Promise<boolean> {
+		const end = Date.now() + STILL_WAIT_MS;
+		for (;;) {
+			if (
+				Date.now() - this.#movedAt >= STILL_MS &&
+				this.#drag === null &&
+				this.#editing === null
+			)
+				return true;
+			if (Date.now() > end) return false;
+			await sleep(100);
 		}
 	}
 
@@ -1257,20 +1290,12 @@ export class Annotator {
 				capturedAt: new Date().toISOString(),
 				url: location.href,
 			},
-			page: {
-				url: location.href,
-				title: doc.title.slice(0, MAX_PAGE_TITLE),
-				lang: LANGUAGE.test(doc.documentElement.lang)
-					? doc.documentElement.lang
-					: "",
-				viewport,
-				userAgent: navigator.userAgent,
-			},
+			page: pageInfo(doc, viewport),
 			marks: [],
 		};
 	}
 
-	// --- saving --------------------------------------------------------------
+	// --- what an add stores ---------------------------------------------------
 
 	/** What the case stores for a draft that has its screenshot. */
 	#annotationOf(d: Draft): AnnotationDraft {
@@ -1288,7 +1313,7 @@ export class Annotator {
 		};
 	}
 
-	/** What to do once the page is free again: hide only after a success. */
+	/** What to do once an add is over and the page free again: hide only after a success. */
 	#afterwards(afterwards: Afterwards | undefined, ok: boolean): void {
 		if (afterwards?.kind === "hide") {
 			// A failure stays up with its error, or its marks would be lost.
@@ -1297,105 +1322,6 @@ export class Annotator {
 			const message = this.#message;
 			this.show(afterwards.options);
 			this.#message = message;
-		}
-	}
-
-	/** Save the drafts as a new case. */
-	async save(title: string): Promise<SaveResult | undefined> {
-		// A second click must not start over while screenshots are still awaited.
-		if (this.#saveCalled) return undefined;
-		this.#saveCalled = true;
-		try {
-			return await this.#save(title);
-		} finally {
-			this.#saveCalled = false;
-		}
-	}
-
-	async #save(title: string): Promise<SaveResult | undefined> {
-		if (
-			this.#activity.saving ||
-			this.#drafts.length === 0 ||
-			this.#target !== undefined
-		)
-			return undefined;
-		this.#title = title;
-		if (this.#editing !== null) this.#commitComment();
-		await this.#shots;
-		try {
-			for (const draft of this.#drafts) {
-				if (draft.shot !== undefined) continue;
-				if (draft.url !== location.href) {
-					// Its page is gone: a screenshot of this one would show something else.
-					this.#message = `Mark ${draft.number} has no screenshot and was drawn on another page. Go back there, or undo it.`;
-					this.#renderToolbar();
-					return undefined;
-				}
-				await this.#takeBack(draft);
-			}
-		} catch (error) {
-			this.#message = `Not saved: ${errorText(error)}`;
-			this.#renderToolbar();
-			return undefined;
-		}
-		const started = this.#activity.begin("saving");
-		if (!started.ok) {
-			this.#message = started.error;
-			this.#renderToolbar();
-			return undefined;
-		}
-		const drafts = [...this.#drafts];
-		const first = (v: View) => Math.min(...v.marks.map((d) => d.number));
-		const views = this.#views
-			.filter((v) => v.marks.some((d) => drafts.includes(d)))
-			.sort((a, b) => first(a) - first(b));
-		this.#saveForm = false;
-		this.#savingCase = true;
-		this.#message = "Saving…";
-		this.setTool(null);
-		let saved = false;
-		try {
-			const annotations = drafts.map((d) => this.#annotationOf(d));
-			annotations.sort((a, b) => a.number - b.number);
-			const result = await ask<SaveResult>({
-				type: "case:save",
-				request: {
-					caseId: newId("c"),
-					imagesFrom: this.#pendingId(),
-					isNew: true,
-					title,
-					page: (views[0] as View).page,
-					shots: views.map((v) => v.shot),
-					annotations,
-				},
-			});
-			this.#drafts = this.#drafts.filter((d) => !drafts.includes(d));
-			this.#savedMarks.push(...drafts);
-			this.#views = this.#views.filter((v) => !views.includes(v));
-			// Their images went with the save: a mark drawn on one meanwhile
-			// takes its own, and so does the next mark.
-			for (const d of this.#drafts)
-				if (d.shot !== undefined && views.includes(d.shot.view)) delete d.shot;
-			this.#shown = undefined;
-			this.#target = {
-				caseId: result.caseId,
-				title: result.title,
-				nextAnnotation: Math.max(...drafts.map((d) => d.number)) + 1,
-			};
-			this.#message = `Saved “${result.title}”`;
-			saved = true;
-			return result;
-		} catch (error) {
-			// The marks and their screenshots stay: the save can be tried again.
-			this.#message = `Not saved: ${errorText(error)}`;
-			return undefined;
-		} finally {
-			this.#savingCase = false;
-			this.#afterwards(this.#activity.end("saving"), saved);
-			// Further marks go into the case one by one, those drawn meanwhile too.
-			this.#addDone();
-			this.#renderToolbar();
-			this.#render();
 		}
 	}
 
@@ -1409,7 +1335,7 @@ export class Annotator {
 		});
 	}
 
-	/** Adding to a case: queue every mark that is done and not on its way yet. */
+	/** Queue every mark that is done and not on its way yet. */
 	#addDone(): void {
 		const target = this.#target;
 		if (target === undefined) return;
@@ -1503,14 +1429,36 @@ export class Annotator {
 					);
 					return false;
 				}
-				if (!takeBack) {
+				if (!takeBack && draft.shotError !== undefined) {
 					this.#fail(
 						draft,
-						"the page changed before its screenshot was taken. Adding it again scrolls back to take one.",
+						`its screenshot could not be taken (${draft.shotError}). Adding it again takes one.`,
 					);
 					return false;
 				}
-				await this.#takeBack(draft);
+				if (takeBack) await this.#takeBack(draft);
+				else {
+					// The page moved as it was drawn (DEC-026, every action saves
+					// at once): its screenshot is taken again by itself once the
+					// page stands still, a few times, before it waits for "Add
+					// mark N".
+					for (
+						let tries = 0;
+						tries < AGAIN_TRIES && draft.shot === undefined;
+						tries++
+					) {
+						if (!(await this.#still())) continue;
+						if (gone() || this.#elsewhere(draft)) return false;
+						await this.#takeBack(draft, true);
+					}
+					if (draft.shot === undefined) {
+						this.#fail(
+							draft,
+							"the page kept moving before its screenshot was taken. Adding it again scrolls back to take one.",
+						);
+						return false;
+					}
+				}
 				// Undone, or its case left, meanwhile.
 				if (gone() || this.#elsewhere(draft)) return false;
 			}
@@ -1547,7 +1495,7 @@ export class Annotator {
 				if (!check.free) {
 					// An AI app took the number: the marks not added yet move on.
 					target = { ...target, nextAnnotation: check.next };
-					this.#target = target;
+					this.#advance(target.caseId, check.next);
 					this.#renumber();
 				}
 				// Only marks before it: Undo of a later one leaves no pin behind.
@@ -1584,11 +1532,11 @@ export class Annotator {
 			this.#savedMarks.push(draft);
 			// Undo reaches only what was added while the toolbar is up.
 			if (this.overlay.annotating) this.#added.push(draft);
-			this.#target = {
-				...target,
-				nextAnnotation: Math.max(target.nextAnnotation, draft.number + 1),
-			};
-			this.#message = `Mark ${draft.number} added to “${target.title}”`;
+			this.#advance(
+				target.caseId,
+				Math.max(target.nextAnnotation, draft.number + 1),
+			);
+			this.#message = `Mark ${draft.number} added to “${this.#titleOf(target)}”`;
 			this.#retire();
 			added = true;
 		} catch (error) {
@@ -1597,6 +1545,23 @@ export class Annotator {
 		} finally {
 			this.#afterwards(this.#activity.end("saving"), added);
 		}
+	}
+
+	/**
+	 * The case's next number after an add or an undo, written onto the
+	 * target as it is now: a rename meanwhile (`setTitle`) stays (review of
+	 * PR 57), and a target switched to another case is left alone.
+	 */
+	#advance(caseId: string, nextAnnotation: number): void {
+		if (this.#target?.caseId !== caseId) return;
+		this.#target = { ...this.#target, nextAnnotation };
+	}
+
+	/** The case's title as the toolbar knows it now: renamed meanwhile, perhaps. */
+	#titleOf(target: AnnotateTarget): string {
+		return this.#target?.caseId === target.caseId
+			? this.#target.title
+			: target.title;
 	}
 
 	/** Undo for a mark that was added, or on its way: out of the case again. */
@@ -1625,10 +1590,11 @@ export class Annotator {
 				view.marks = view.marks.filter((d) => d !== draft);
 			this.#retire();
 			// Its number is free again (or another mark took the next one).
-			this.#target = { ...target, nextAnnotation: result.next };
+			this.#advance(target.caseId, result.next);
+			const title = this.#titleOf(target);
 			this.#message = result.removed
-				? `Mark ${draft.number} taken out of “${target.title}”`
-				: `Mark ${draft.number} was deleted from “${target.title}” already`;
+				? `Mark ${draft.number} taken out of “${title}”`
+				: `Mark ${draft.number} was deleted from “${title}” already`;
 		} catch (error) {
 			// It stays in the case, and Undo no longer offers it.
 			this.#added = this.#added.filter((d) => d !== draft);
@@ -1706,6 +1672,31 @@ export class Annotator {
 				: `${remaining.length} marks are not in the case yet: Add ${remaining.length} marks, or Done again to discard them.`;
 		this.#renderToolbar();
 	}
+}
+
+/**
+ * What a case records of the page (`viewport`: the window's now when not
+ * given): a new case has it from the start (DEC-026), a mark's screenshot
+ * from when it was taken.
+ */
+export function pageInfo(
+	doc: Document,
+	viewport?: PageInfo["viewport"],
+): PageInfo {
+	const win = doc.defaultView;
+	return {
+		url: location.href,
+		title: doc.title.slice(0, MAX_PAGE_TITLE),
+		lang: LANGUAGE.test(doc.documentElement.lang)
+			? doc.documentElement.lang
+			: "",
+		viewport: viewport ?? {
+			width: win?.innerWidth ?? 0,
+			height: win?.innerHeight ?? 0,
+			dpr: win?.devicePixelRatio || 1,
+		},
+		userAgent: navigator.userAgent,
+	};
 }
 
 /** The mark Undo takes: the one with the highest number. */

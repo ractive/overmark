@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
 	type Annotation,
 	type Case,
+	CaseError,
 	caseCounts,
+	cleanTitle,
 	cutText,
 	type Finding,
 	findingsTextOf,
@@ -14,6 +16,7 @@ import {
 	MAX_FINDINGS_TEXT,
 	MAX_REOPEN_NOTE,
 	MAX_REOPENS,
+	MAX_TITLE,
 	MAX_URL,
 	markStatus,
 	newId,
@@ -31,6 +34,7 @@ import {
 	withoutFinding,
 	withReopen,
 	withResolution,
+	withTitle,
 	withVerified,
 } from "../src/lib/case.ts";
 import { sampleCase } from "./fixtures.ts";
@@ -1037,5 +1041,62 @@ describe("Verify: statuses, reopens and their format (DEC-023)", () => {
 			verified: 0,
 			closed: 0,
 		});
+	});
+});
+
+describe("a case's title (DEC-026)", () => {
+	const NOW = "2026-11-13T10:00:00.000Z";
+
+	test("renamed: trimmed, the case changed now, nothing else", () => {
+		const c = withMarks();
+		const renamed = withTitle(c, "  Login button  ", NOW);
+		expect(renamed).toEqual({ ...c, title: "Login button", updatedAt: NOW });
+		expect(validateCase(JSON.parse(JSON.stringify(renamed)))).toEqual(renamed);
+	});
+
+	test("an empty title is refused, spaces only too", () => {
+		for (const title of ["", "   ", "\n\t"])
+			expect(() => withTitle(sampleCase(), title, NOW)).toThrow(CaseError);
+		expect(() => withTitle(sampleCase(), " ", NOW)).toThrow(
+			"A case needs a title.",
+		);
+	});
+
+	test("a title of invisible characters only is refused (review of PR 57)", () => {
+		for (const title of [
+			"\u200b",
+			"\u200b \u00a0\u2060",
+			"\u202e",
+			"\u2066\u2069",
+			"\u0007",
+		])
+			expect(() => withTitle(sampleCase(), title, NOW)).toThrow(
+				"A case needs a title.",
+			);
+	});
+
+	test("controls and bidi overrides and isolates are taken out of a title", () => {
+		// C0 and C1 controls, U+202A–U+202E, U+2066–U+2069; the rest stays.
+		expect(cleanTitle("\u202egpj.exe")).toBe("gpj.exe");
+		expect(cleanTitle("a\u0000b\u001fc\u007fd\u009fe")).toBe("abcde");
+		expect(cleanTitle("\u2066Login\u2069 \u202abutton\u202c")).toBe(
+			"Login button",
+		);
+		expect(cleanTitle("  Zürich \u{1f600} ")).toBe("Zürich \u{1f600}");
+		// A joiner inside a word is no control: it stays.
+		expect(cleanTitle("a\u200db")).toBe("a\u200db");
+		expect(withTitle(sampleCase(), "\u202eLogin", NOW).title).toBe("Login");
+	});
+
+	test("a case from a file keeps its title as it is", () => {
+		const c = { ...sampleCase(), title: "\u202eold" };
+		expect(validateCase(c).title).toBe("\u202eold");
+	});
+
+	test("a long title is cut to MAX_TITLE characters, never inside a pair", () => {
+		const long = withTitle(sampleCase(), "😀".repeat(MAX_TITLE + 5), NOW);
+		expect(textLength(long.title)).toBe(MAX_TITLE);
+		expect(long.title).toBe("😀".repeat(MAX_TITLE));
+		expect(validateCase(long).title).toBe(long.title);
 	});
 });

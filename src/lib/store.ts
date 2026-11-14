@@ -29,6 +29,12 @@ export interface CaseStore {
 	getCase(id: string): Promise<Case | undefined>;
 	/** Deletes the case and its images. */
 	deleteCase(id: string): Promise<void>;
+	/**
+	 * Deletes the case and its images only if `when` holds for it as it is
+	 * stored, in one transaction: a writer between a read and the delete (an
+	 * AI app adding a mark) is never lost. Answers whether it was deleted.
+	 */
+	deleteCaseIf(id: string, when: (c: Case) => boolean): Promise<boolean>;
 	getImage(caseId: string, path: string): Promise<StoredImage | undefined>;
 	putImage(caseId: string, path: string, image: StoredImage): Promise<void>;
 	/**
@@ -91,6 +97,13 @@ export class MemoryStore implements CaseStore {
 		this.cases.delete(id);
 		for (const key of [...this.images.keys()])
 			if (key.startsWith(`${id}/`)) this.images.delete(key);
+	}
+
+	async deleteCaseIf(id: string, when: (c: Case) => boolean): Promise<boolean> {
+		const found = this.cases.get(id);
+		if (found === undefined || !when(structuredClone(found))) return false;
+		await this.deleteCase(id);
+		return true;
 	}
 
 	async getImage(
@@ -208,6 +221,33 @@ export class IdbStore implements CaseStore {
 		tx.objectStore("cases").delete(id);
 		tx.objectStore("images").delete(prefixRange(id));
 		await done(tx);
+	}
+
+	async deleteCaseIf(id: string, when: (c: Case) => boolean): Promise<boolean> {
+		const db = await this.#open();
+		const tx = db.transaction(["cases", "images"], "readwrite");
+		const cases = tx.objectStore("cases");
+		let deleted = false;
+		let failure: unknown;
+		const read = cases.get(id);
+		read.onsuccess = () => {
+			try {
+				const found = read.result as Case | undefined;
+				if (found === undefined || !when(found)) return;
+				cases.delete(id);
+				tx.objectStore("images").delete(prefixRange(id));
+				deleted = true;
+			} catch (error) {
+				failure = error;
+				tx.abort();
+			}
+		};
+		try {
+			await done(tx);
+		} catch (error) {
+			throw failure ?? error;
+		}
+		return deleted;
 	}
 
 	async getImage(

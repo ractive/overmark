@@ -729,7 +729,14 @@ export class Sync {
 				file: settled.file,
 			};
 		const all = await cases.listCases();
-		const todo = all.filter((c) => byCase[c.id]?.version !== versionOf(c));
+		// A case without marks gets no file until its first mark (DEC-026): a
+		// file in Downloads cannot be taken back, and an empty case that is
+		// left goes again. One written before is kept up to date.
+		const todo = all.filter(
+			(c) =>
+				byCase[c.id]?.version !== versionOf(c) &&
+				(c.annotations.length > 0 || byCase[c.id] !== undefined),
+		);
 		if (todo.length === 0)
 			return this.#report(
 				{ folderId: target.id, state: "synced", lastSyncedAt: this.#now() },
@@ -798,7 +805,7 @@ export class Sync {
 	 * with `-2`, `-3` when another case has that name already, a deleted one
 	 * too, or when the target has a file of that name Overmark did not write
 	 * for this case: such a file is never overwritten. A case keeps its file
-	 * while its title gives the same name.
+	 * while its title gives the same name; in Downloads, whatever its title.
 	 */
 	async #fileName(
 		target: SyncTarget,
@@ -806,6 +813,11 @@ export class Sync {
 		current: string | undefined,
 		owner: ReadonlyMap<string, string>,
 	): Promise<string> {
+		// In Downloads nothing can be removed, so a case keeps the name it was
+		// first written under: a rename changes the file, not its name, and
+		// leaves no stale file behind (review of PR 57: under DEC-026 every
+		// case starts with the page's title and is renamed afterwards).
+		if (current !== undefined && target.kind === "downloads") return current;
 		const stem = safeStem(exportFileName(c).slice(0, -EXPORT_SUFFIX.length));
 		const wanted = `${stem}${EXPORT_SUFFIX}`;
 		if (

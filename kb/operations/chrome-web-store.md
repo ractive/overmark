@@ -105,8 +105,9 @@ PRs (`.github/dependabot.yml`).
 > Mark what is wrong on a web page and carry the marks to the build where it gets fixed.
 >
 > Pick an element, draw a box, an arrow or a freehand mark, add a note, and comment on
-> each. Overmark saves them as a case with screenshots of the page with the marks on
-> them, and records each marked element's details.
+> each. Overmark keeps them in a case, each the moment you comment on it, with
+> screenshots of the page with the marks on them, and records each marked element's
+> details.
 >
 > Open the same page on another build, such as localhost or a test environment, and
 > load the case: Overmark finds each mark's element and outlines it, solid when found,
@@ -148,7 +149,7 @@ data only, and no tool runs code an AI app sends.
 **Data usage (Privacy practices tab):**
 
 - Collected:
-  - **Web history:** the address, title and time of each page saved as a case, and the
+  - **Web history:** the address, title and time of each page a case is started on, and the
     address and title of the tab in front when an AI app asks for them.
   - **Website content:** screenshots, page text excerpts and element details (see
     PRIVACY.md for the full list); when the AI app asks about a mark, also the marked

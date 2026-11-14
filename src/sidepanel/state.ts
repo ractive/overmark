@@ -145,6 +145,11 @@ export interface PanelState {
 	/** A mark of the open case being resolved or its comment edited. */
 	markEdit: MarkEdit | undefined;
 	/**
+	 * The open case's title being changed (DEC-026): the text typed, and why
+	 * the last save failed.
+	 */
+	renaming: { caseId: string; text: string; error?: string } | undefined;
+	/**
 	 * The status chip pressed: the open case's list shows only those marks,
 	 * while there are any and no mark above `upTo` (the highest number when
 	 * it was pressed) was added.
@@ -235,6 +240,7 @@ export const initialState = (): PanelState => ({
 	downloads: false,
 	deleteArmedAt: undefined,
 	markEdit: undefined,
+	renaming: undefined,
 	markFilter: undefined,
 	markDeleteArmed: undefined,
 	findingDeleteArmed: undefined,

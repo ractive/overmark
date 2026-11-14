@@ -16,7 +16,7 @@ import { MARK_COLOUR } from "../../src/lib/marks.ts";
 import { openSidePanel, setRelay } from "./ai.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
-import { markElement, saveAs, shadow } from "./steps.ts";
+import { markElement, parkControl, saveAs, shadow } from "./steps.ts";
 
 const id = (name: string) => `document.getElementById(${JSON.stringify(name)})`;
 
@@ -34,6 +34,9 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 
 	beforeAll(async () => {
 		h = await startHarness(browserBinary as string);
+		// One panel in the test's window: the control page, a panel too,
+		// would open and draw the case as well, after this one closed it.
+		await parkControl(h);
 		({ page } = await h.open("v1"));
 		await page.activate();
 		panel = await openSidePanel(h);
@@ -99,9 +102,12 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		// A case with a long title and three marks, drawn on the page.
 		await panel.eval(`${id("annotate")}.click()`);
 		await page.waitFor(shadow('[data-action="tool-box"]'));
-		// The toolbar is up: Stop annotating is no amber button. The panel
-		// hears of the toolbar a moment after the page shows it.
-		await panel.waitFor(`${id("annotate")}.textContent === "Stop annotating"`);
+		// The case is made and open, the toolbar adding to it (DEC-026): Done
+		// adding is no amber button.
+		await panel.waitFor(
+			`!${id("case-view")}.hidden && ${id("add-marks")}?.textContent === "Done adding"`,
+			20_000,
+		);
 		await holds([]);
 		await markElement(
 			page,
@@ -113,8 +119,9 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 		await saveAs(
 			page,
 			"Premium form: contrast, copy and a title that takes more than one line of the panel",
+			panel,
 		);
-		// The panel opens the case the toolbar saved (DEC-023), adding to it.
+		// Still the case, renamed, the toolbar adding to it.
 		await panel.waitFor(
 			`!${id("case-view")}.hidden && ${id("add-marks")}?.textContent === "Done adding"`,
 			20_000,

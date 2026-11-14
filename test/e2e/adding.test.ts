@@ -1,7 +1,7 @@
 /**
- * End to end: with a case open, each mark goes into it as soon as it is done,
- * without a save step (DEC-014). Without a case, the marks are saved as a new
- * case with a title, as before.
+ * End to end: each mark goes into the case as soon as it is done, without a
+ * save step (DEC-014); "Annotate this page" creates the case at once and opens
+ * it, and a case left untouched goes again (DEC-026).
  */
 
 import {
@@ -22,11 +22,13 @@ import {
 	openCase,
 	panelHome,
 	READ_DB,
+	renameInPanel,
 	resetPanel,
 	saveAs,
 	shadow,
 	showToolbar,
 	until,
+	worker,
 } from "./steps.ts";
 
 const status = `${shadow('[data-role="status"]')}?.textContent`;
@@ -141,6 +143,12 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 			() => toolbarUp(v1.tabId),
 			(up) => !up,
 		);
+		// The panel back on Home: the next case it opens is the next toolbar's.
+		await Bun.sleep(600);
+		await h.control.eval(
+			`document.getElementById("back").hidden || document.getElementById("back").click()`,
+		);
+		await h.control.waitFor(`!document.getElementById("home").hidden`);
 		return v1;
 	}
 
@@ -392,48 +400,489 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.send("Page.close");
 	}, 90_000);
 
-	test("New case: the marks wait for Save case and a title, as before", async () => {
-		// No case open in the panel: its marks would follow to the new tab.
-		await panelHome(h);
-		const { page, tabId } = await h.open("v1");
-		await showToolbar(h, page, tabId);
-		expect(await buttons(page)).toContain("Close");
-		await markElement(page, "[data-truth=submit]", "Waits");
-		expect(await page.eval<string>(status)).toBe("New case: 1 mark");
-		await Bun.sleep(1500);
-		expect(
-			(await h.control.eval<Db>(READ_DB)).cases.some((x) =>
-				x.annotations.some((a) => a.comment === "Waits"),
-			),
-		).toBe(false);
-
-		// The form's second button says what it does, and keeps the marks.
-		await page.click(shadow('[data-action="save"]'));
-		await page.waitFor(shadow('input[aria-label="Case title"]'));
-		expect(await buttons(page)).toEqual(["Save case", "Keep drawing"]);
-		await page.click(shadow('[data-action="save-cancel"]'));
-		await drawnAre(page, { drafts: ["1"], saved: [] });
-		await page.click(shadow('[data-action="undo"]'));
-		await drawnAre(page, { drafts: [], saved: [] });
-		await markElement(page, "[data-truth=tip]", "Saved with a title");
-
-		await saveAs(page, "Saved the old way");
-		const { c } = await caseTitled("Saved the old way");
-		expect(c.annotations.map((a) => [a.number, a.comment])).toEqual([
-			[1, "Saved with a title"],
-		]);
-		// From then on the marks go into that case, and the panel shows it.
-		expect(await buttons(page)).toContain("Done");
-		await h.control.waitFor(
-			`!document.getElementById("case-view").hidden && document.querySelector("#case-view h2")?.textContent === "Saved the old way" && document.getElementById("add-marks").textContent === "Done adding"`,
+	/** The panel's case view shows `title`, with the toolbar adding to it. */
+	const inCase = (panel: Page, title: string) =>
+		panel.waitFor(
+			`!document.getElementById("case-view").hidden && document.querySelector("#case-view .case-title")?.textContent === ${JSON.stringify(title)} && document.getElementById("add-marks").textContent === "Done adding"`,
 			10_000,
 		);
+
+	/** The case open in the panel, as stored. */
+	const openOne = async (panel: Page) => {
+		const caseId = await panel.eval<string>(
+			`document.getElementById("verdict")?.dataset.case`,
+		);
+		const db = await h.control.eval<Db>(READ_DB);
+		const c = db.cases.find((x) => x.id === caseId);
+		if (c === undefined) throw new Error(`no case ${caseId}`);
+		return c;
+	};
+
+	/** "Annotate this page" in the panel, on the tab `page` in front. */
+	async function annotate(page: Page): Promise<Page> {
+		await page.activate();
+		const panel = h.control;
+		await panel.waitFor(
+			`!document.getElementById("home").hidden && !document.getElementById("annotate").disabled && document.getElementById("page").textContent.endsWith(new URL(${JSON.stringify(await page.eval<string>("location.href"))}).pathname)`,
+			10_000,
+		);
+		await panel.eval(`document.getElementById("annotate").click()`);
+		return panel;
+	}
+
+	test("Annotate this page creates the case and opens it; a mark goes in without a save; Rename (DEC-026)", async () => {
+		const { page, tabId } = await h.open("v1");
+		const panel = await annotate(page);
+		// At once: the page's title, the case view, the toolbar adding to it.
+		const title = "Krankenkasse vergleichen (v1)";
+		await inCase(panel, title);
+		await page.waitFor(
+			`${status} === ${JSON.stringify(`Adding to “${title}”`)}`,
+		);
+		expect(await buttons(page)).not.toContain("Save case…");
+		expect(await buttons(page)).toContain("Done");
+		await panel.waitFor(
+			`document.getElementById("tab-line").textContent === "Adding marks: draw on the page. Each mark is saved into this case when its comment is done."`,
+		);
+		const made = { c: await openOne(panel) };
+		expect(made.c.annotations).toEqual([]);
+		expect(made.c.shots).toEqual([]);
+		expect(made.c.page.url).toBe(`${h.base}/v1`);
+		expect(made.c.page.title).toBe(title);
+		expect(made.c.page.viewport.width).toBeGreaterThan(0);
+
+		// A mark with its comment: in the case and in the panel's list, no save.
+		await markElement(page, "[data-truth=submit]", "Too pale");
+		await page.waitFor(
+			`${status} === ${JSON.stringify(`Mark 1 added to “${title}”`)}`,
+			20_000,
+		);
+		await panel.waitFor(
+			`[...document.querySelectorAll(".annotation")].map((a) => a.textContent).join().includes("Too pale")`,
+			10_000,
+		);
+
+		// Rename: where the title is shown; Escape leaves it, Enter stores it.
+		await panel.eval(`document.getElementById("rename-case").click()`);
+		await panel.waitFor(`document.activeElement?.id === "rename-field"`);
+		const typeTitle = (text: string, key: string) =>
+			panel.eval(`(() => {
+				const f = document.getElementById("rename-field");
+				f.value = ${JSON.stringify(text)};
+				f.dispatchEvent(new Event("input"));
+				f.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, cancelable: true }));
+			})()`);
+		await typeTitle("Not this", "Escape");
+		await panel.waitFor(`document.getElementById("rename").hidden`);
+		expect((await openOne(panel)).title).toBe(title);
+		await panel.eval(`document.getElementById("rename-case").click()`);
+		await typeTitle("   ", "Enter");
+		await panel.waitFor(
+			`document.getElementById("rename-hint").textContent === "A case needs a title."`,
+		);
+		expect(
+			await panel.eval<boolean>(
+				`document.getElementById("rename-save").disabled`,
+			),
+		).toBe(true);
+		await typeTitle("Submit button contrast", "Enter");
+		await inCase(panel, "Submit button contrast");
+		// The toolbar follows, the list and the store have it.
+		await page.waitFor(`${status} === "Adding to “Submit button contrast”"`);
+		const renamed = await caseTitled("Submit button contrast");
+		expect(renamed.c.id).toBe(made.c.id);
+		expect(renamed.c.annotations.map((a) => a.comment)).toEqual(["Too pale"]);
+
+		// The next mark goes into it under its new title.
+		await markElement(page, "h1", "Too long");
+		await page.waitFor(
+			`${status} === "Mark 2 added to “Submit button contrast”"`,
+			20_000,
+		);
 		await page.click(shadow('[data-action="close"]'));
-		await h.control.waitFor(
-			`document.getElementById("add-marks").textContent === "Add marks"`,
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
 		);
 		await page.send("Page.close");
 	}, 90_000);
+
+	test("All cases with no mark: the case goes again; with one mark it stays (DEC-026)", async () => {
+		const { page, tabId } = await h.open("v1");
+		const title = "Krankenkasse vergleichen (v1)";
+		let panel = await annotate(page);
+		await inCase(panel, title);
+		const first = await openOne(panel);
+		await allCases(panel);
+		await home(panel);
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		await until(
+			() => h.control.eval<Db>(READ_DB),
+			(db) => !db.cases.some((c) => c.id === first.id),
+		);
+		await panel.waitFor(
+			`![...document.querySelectorAll("[data-case]")].some((e) => e.dataset.case === ${JSON.stringify(first.id)})`,
+		);
+
+		// Done adding, then back, with no mark: gone too.
+		panel = await annotate(page);
+		await inCase(panel, title);
+		const second = await openOne(panel);
+		await panel.eval(`document.getElementById("add-marks").click()`);
+		await panel.waitFor(
+			`document.getElementById("add-marks").textContent === "Add marks"`,
+		);
+		await allCases(panel);
+		await home(panel);
+		await until(
+			() => h.control.eval<Db>(READ_DB),
+			(db) => !db.cases.some((c) => c.id === second.id),
+		);
+
+		// A mark, then Undo: it has had a mark, so it is the user's and stays,
+		// empty (review of PR 57).
+		panel = await annotate(page);
+		await inCase(panel, title);
+		const third = await openOne(panel);
+		await markElement(page, "h1", "Undone");
+		await page.waitFor(`${status}?.startsWith("Mark 1 added to")`, 20_000);
+		await page.click(shadow('[data-action="undo"]'));
+		await page.waitFor(`${status}?.startsWith("Mark 1 taken out of")`, 20_000);
+		expect((await openOne(panel)).annotations).toEqual([]);
+		await allCases(panel);
+		await home(panel);
+		await panel.waitFor(
+			`[...document.querySelectorAll("[data-case]")].some((e) => e.dataset.case === ${JSON.stringify(third.id)})`,
+		);
+		const undone = (await h.control.eval<Db>(READ_DB)).cases.find(
+			(c) => c.id === third.id,
+		);
+		expect(undone?.annotations).toEqual([]);
+		expect(undone?.lastNumber).toBe(0);
+
+		// One mark: it stays, and shows in the list.
+		panel = await annotate(page);
+		await inCase(panel, title);
+		await markElement(page, "h1", "Kept");
+		await page.waitFor(`${status}?.startsWith("Mark 1 added to")`, 20_000);
+		const kept = await openOne(panel);
+		await allCases(panel);
+		await home(panel);
+		await panel.waitFor(
+			`[...document.querySelectorAll("[data-case]")].some((e) => e.dataset.case === ${JSON.stringify(kept.id)})`,
+		);
+		const db = await h.control.eval<Db>(READ_DB);
+		expect(db.cases.find((c) => c.id === kept.id)?.annotations).toHaveLength(1);
+		await page.send("Page.close");
+	}, 120_000);
+
+	/** Make the panel's `chrome.tabs.sendMessage` go through `body` (until it is reloaded). */
+	const wrapSend = (body: string) =>
+		h.control.eval(
+			`(() => { const send = chrome.tabs.sendMessage.bind(chrome.tabs); chrome.tabs.sendMessage = (tabId, message) => (${body})(tabId, message, send); })()`,
+		);
+
+	test("Annotate this page stays with the tab it was clicked for (review of PR 57)", async () => {
+		const a = await h.open("v1");
+		const b = await h.open("v2");
+		// Overmark runs on the tab already: one question, no injection on the
+		// way (each would count against the 5 s the page has to answer).
+		await h.control.eval(
+			`chrome.scripting.executeScript({ target: { tabId: ${a.tabId} }, files: ["content.js"] })`,
+		);
+		// The page answers when the test says so: once the other tab is in
+		// front. A hold the test never released ends far inside the 5 s the
+		// page has, and fails the test saying so.
+		await wrapSend(`async (tabId, message, send) => {
+			if (message.type === "page:info")
+				await new Promise((release) => {
+					globalThis.releaseInfo = release;
+					setTimeout(() => {
+						globalThis.heldTooLong = true;
+						release();
+					}, 3000);
+				});
+			return send(tabId, message);
+		}`);
+		const panel = await annotate(a.page);
+		await h.control.waitFor(`typeof globalThis.releaseInfo === "function"`);
+		await b.page.activate();
+		const windowId = await h.control.eval<number>(
+			`chrome.tabs.get(${a.tabId}).then((t) => t.windowId)`,
+		);
+		await until(
+			() =>
+				h.control.eval<number | undefined>(
+					`chrome.tabs.query({ active: true, windowId: ${windowId} }).then(([t]) => t?.id)`,
+				),
+			(front) => front === b.tabId,
+		);
+		await h.control.eval("globalThis.releaseInfo()");
+		if (await h.control.eval<boolean>("globalThis.heldTooLong === true"))
+			throw new Error(
+				"page:info was not released by the test within 3 s: the hold ended by itself",
+			);
+		// No content script on the tab yet: no toolbar either.
+		const upOn = (tabId: number) =>
+			h.control.eval<boolean>(
+				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.visible, () => false)`,
+			);
+		await until(
+			() => upOn(a.tabId),
+			(up) => up,
+			10_000,
+		).catch(async (error: unknown) => {
+			const said = await panel.eval<string>(
+				`document.getElementById("hint").textContent + " | " + (document.getElementById("case-hint")?.textContent ?? "")`,
+			);
+			throw new Error(
+				`no toolbar on the tab clicked for; the panel says: ${said}`,
+				{ cause: error },
+			);
+		});
+		expect(await upOn(b.tabId)).toBe(false);
+		expect(
+			await panel.eval<string>(`document.getElementById("hint").textContent`),
+		).not.toContain("did not answer");
+		const made = await openOne(panel);
+		expect(made.page.url).toBe(`${h.base}/v1`);
+		expect(made.title).toBe("Krankenkasse vergleichen (v1)");
+		await a.page.send("Page.close");
+		await b.page.send("Page.close");
+	}, 60_000);
+
+	test("the first mark's draw meeting a busy page is drawn once it is free (review of PR 57)", async () => {
+		const { page } = await h.open("v1");
+		// The page says it is busy at the first draw, as while the next
+		// mark's screenshot is taken.
+		await wrapSend(`(tabId, message, send) => {
+			if (message.type === "case:load" && !globalThis.saidBusy) {
+				globalThis.saidBusy = true;
+				return Promise.resolve({ error: "The user is marking this page right now; try again in a moment.", busy: true });
+			}
+			return send(tabId, message);
+		}`);
+		const panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		await markElement(page, "h1", "Too long");
+		await panel.waitFor(
+			`globalThis.saidBusy && document.getElementById("case-hint").textContent.includes("1 of 1 marks found")`,
+			20_000,
+		);
+		expect(
+			await panel.eval<string>(
+				`document.getElementById("case-hint").textContent`,
+			),
+		).not.toContain("try again in a moment");
+		await page.send("Page.close");
+	}, 60_000);
+
+	test("a page that does not answer: said under the button, which works again (review of PR 57)", async () => {
+		const { page, tabId } = await h.open("v1");
+		await wrapSend(`(tabId, message, send) =>
+			message.type === "page:info" && globalThis.mute ? new Promise(() => {}) : send(tabId, message)`);
+		await h.control.eval("globalThis.mute = true");
+		const panel = await annotate(page);
+		await panel.waitFor(
+			`document.getElementById("hint").textContent === "This page did not answer. Reload it and try again."`,
+			15_000,
+		);
+		expect(
+			await panel.eval<boolean>(`document.getElementById("annotate").disabled`),
+		).toBe(false);
+		// The button works again once the page answers.
+		await h.control.eval("globalThis.mute = false");
+		await panel.eval(`document.getElementById("annotate").click()`);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		await until(
+			() => toolbarUp(tabId),
+			(up) => up,
+		);
+		await page.send("Page.close");
+	}, 60_000);
+
+	test("a toolbar button pressed while the toolbar draws itself again still takes the click", async () => {
+		const { page, tabId } = await h.open("v1");
+		const panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const pen = shadow('[data-action="tool-pen"]');
+		const at = await page.centreOf(pen);
+		await page.mouse("mouseMoved", at.x, at.y);
+		await page.mouse("mousePressed", at.x, at.y);
+		// Between press and release the toolbar draws itself again: a rename.
+		const before = await page.eval<string>(
+			`${shadow('[data-role="status"]')}.textContent`,
+		);
+		await h.control.eval(
+			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:title", caseId: document.getElementById("verdict").dataset.case, title: "Renamed under the press" })`,
+		);
+		await page.waitFor(
+			`${shadow('[data-role="status"]')}.textContent !== ${JSON.stringify(before)}`,
+		);
+		await page.mouse("mouseReleased", at.x, at.y);
+		await page.waitFor(`${pen}.getAttribute("aria-pressed") === "true"`, 5000);
+		await page.send("Page.close");
+	}, 60_000);
+
+	test("an empty case whose toolbar holds a comment on another tab stays when left (review of PR 57)", async () => {
+		const a = await h.open("v1");
+		let panel = await annotate(a.page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const made = await openOne(panel);
+		// A mark whose comment is still being typed: on the page only.
+		await a.page.click(shadow('[data-action="tool-note"]'));
+		await a.page.click(`document.querySelector("h1")`);
+		await a.page.waitFor(shadow(".popover textarea"));
+		await a.page.type("Still typing");
+		// The panel opened again on another tab knows nothing of that toolbar.
+		const b = await h.open("v2");
+		await b.page.activate();
+		panel = await panelHome(h);
+		const item = `document.querySelector('[data-case="${made.id}"]')`;
+		await panel.waitFor(item);
+		await panel.eval(`${item}.click()`);
+		await panel.waitFor(
+			`document.getElementById("verdict")?.dataset.case === "${made.id}"`,
+		);
+		await allCases(panel);
+		await home(panel);
+		await Bun.sleep(1000);
+		const db = await h.control.eval<Db>(READ_DB);
+		expect(db.cases.some((c) => c.id === made.id)).toBe(true);
+		expect(
+			await a.page.eval<string>(`${shadow(".popover textarea")}.value`),
+		).toBe("Still typing");
+		await b.page.send("Page.close");
+		await a.page.send("Page.close");
+	}, 60_000);
+
+	test("left without a mark, the user's case stays: renamed, or a summary typed and not saved (review of PR 57)", async () => {
+		const { page } = await h.open("v1");
+		const stays = async (id: string) =>
+			(await h.control.eval<Db>(READ_DB)).cases.some((c) => c.id === id);
+
+		// Renamed.
+		let panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const renamed = await openOne(panel);
+		await renameInPanel(panel, renamed.id, "Checkout bugs");
+		await allCases(panel);
+		await home(panel);
+		await Bun.sleep(1000);
+		expect(await stays(renamed.id)).toBe(true);
+
+		// A summary typed and not saved.
+		panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const typed = await openOne(panel);
+		await panel.eval(`(() => {
+			const v = document.getElementById("verdict");
+			v.value = "Make it darker";
+			v.dispatchEvent(new Event("input"));
+		})()`);
+		await panel.waitFor(`!document.getElementById("save-verdict").hidden`);
+		await allCases(panel);
+		await home(panel);
+		await Bun.sleep(1000);
+		expect(await stays(typed.id)).toBe(true);
+		await page.send("Page.close");
+	}, 60_000);
+
+	test("the tab closed while the case has a mark: the case stays open (review of PR 57)", async () => {
+		const { page } = await h.open("v1");
+		const panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		await markElement(page, "h1", "Kept");
+		await page.waitFor(`${status}?.startsWith("Mark 1 added")`, 20_000);
+		const made = await openOne(panel);
+		await page.send("Page.close");
+		await Bun.sleep(1500);
+		expect(
+			await panel.eval<string | undefined>(
+				`document.getElementById("case-view").hidden ? undefined : document.getElementById("verdict")?.dataset.case`,
+			),
+		).toBe(made.id);
+		expect(
+			(await h.control.eval<Db>(READ_DB)).cases.some((c) => c.id === made.id),
+		).toBe(true);
+		await allCases(panel);
+		await home(panel);
+	}, 60_000);
+
+	test("the tab closed with an untouched case's toolbar: the case goes, the panel on Home (DEC-026)", async () => {
+		const { page } = await h.open("v1");
+		const panel = await annotate(page);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		const made = await openOne(panel);
+		await page.send("Page.close");
+		await home(panel);
+		await until(
+			() => h.control.eval<Db>(READ_DB),
+			(db) => !db.cases.some((c) => c.id === made.id),
+		);
+	}, 60_000);
+
+	test("the case deleted elsewhere while adding: the toolbar goes, the panel on Home (DEC-026)", async () => {
+		const { page, tabId } = await h.open("v1");
+		const panel = await annotate(page);
+		const title = "Krankenkasse vergleichen (v1)";
+		await inCase(panel, title);
+		await markElement(page, "h1", "In it");
+		await page.waitFor(`${status}?.startsWith("Mark 1 added to")`, 20_000);
+		const c = await openOne(panel);
+		// Deleted as an AI app's delete_case or another window does it: the
+		// store, then the news.
+		await takeOut(c.id);
+		await worker(h).then((w) =>
+			w.eval(
+				`chrome.runtime.sendMessage({ type: "cases:changed", caseId: ${JSON.stringify(c.id)} })`,
+			),
+		);
+		await home(panel);
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		expect(
+			await h.control.eval<string | null>(
+				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.target?.caseId ?? null)`,
+			),
+		).toBeNull();
+		// No mark was lost: nothing is said.
+		expect(
+			await panel.eval<boolean>(`document.getElementById("hint").hidden`),
+		).toBe(true);
+		await page.send("Page.close");
+	}, 60_000);
+
+	test("the case deleted elsewhere with a mark not in it yet: that loss is said (DEC-026)", async () => {
+		const { page, tabId } = await h.open("v1");
+		const panel = await annotate(page);
+		const title = "Krankenkasse vergleichen (v1)";
+		await inCase(panel, title);
+		const c = await openOne(panel);
+		await takeOut(c.id);
+		await markElement(page, "h1", "Lost");
+		await page.waitFor(`${alert}?.startsWith("Mark 1 was not added")`, 20_000);
+		await worker(h).then((w) =>
+			w.eval(
+				`chrome.runtime.sendMessage({ type: "cases:changed", caseId: ${JSON.stringify(c.id)} })`,
+			),
+		);
+		await home(panel);
+		await panel.waitFor(
+			`document.getElementById("hint").textContent === ${JSON.stringify(`“${title}” was deleted, and 1 mark not in it yet is gone with it.`)}`,
+			20_000,
+		);
+		await until(
+			() => toolbarUp(tabId),
+			(up) => !up,
+		);
+		await page.send("Page.close");
+	}, 60_000);
 
 	/**
 	 * "← All cases" in the panel, as a person clicks it: a click within half
@@ -446,7 +895,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	const home = (panel: Page) =>
 		panel.waitFor(`!document.getElementById("home").hidden`, 10_000);
 
-	test("Add marks, then All cases: no toolbar, no marks, and the next mark is a new case's", async () => {
+	test("Add marks, then All cases: no toolbar, no marks, and Annotate this page starts another case", async () => {
 		const { page, tabId } = await savedCase("Closed after adding");
 		const panel = await addMarks(page, "Closed after adding");
 		await markElement(page, "[data-truth=submit]", "Second");
@@ -474,18 +923,21 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		).toBeNull();
 
 		await panel.eval(`document.getElementById("annotate").click()`);
-		await page.waitFor(`${status} === "New case: choose a tool"`);
-		await markElement(page, "h1", "A new case's");
-		await page.waitFor(`${status} === "New case: 1 mark"`);
-		await drawnAre(page, { drafts: ["1"], saved: [] });
-		await Bun.sleep(1000);
+		await inCase(panel, "Krankenkasse vergleichen (v1)");
+		await page.waitFor(
+			`${status} === "Adding to “Krankenkasse vergleichen (v1)”"`,
+		);
+		await markElement(page, "h1", "Another case's");
+		await page.waitFor(
+			`${status} === "Mark 1 added to “Krankenkasse vergleichen (v1)”"`,
+			20_000,
+		);
 		expect(
 			(await caseTitled("Closed after adding")).c.annotations,
 		).toHaveLength(2);
-		await panel.waitFor(
-			`document.getElementById("annotate-hint").textContent === "1 mark drawn. Click Save case… on the page's toolbar to keep it."`,
-		);
-		await page.click(shadow('[data-action="undo"]'));
+		expect((await openOne(panel)).annotations.map((a) => a.comment)).toEqual([
+			"Another case's",
+		]);
 		await page.click(shadow('[data-action="close"]'));
 		await page.send("Page.close");
 	}, 90_000);

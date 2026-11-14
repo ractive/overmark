@@ -196,7 +196,7 @@ describe("the page's fixed colours", () => {
 		["muted text on the bar", L.barMuted, L.bar, 9.88, TEXT],
 		["toolbar text on hover", L.barText, L.barHover, 11.73, TEXT],
 		["muted text on hover", L.barMuted, L.barHover, 7.21, TEXT],
-		["ink on amber (pressed tool, Save case…)", L.bar, L.amber, 8.77, TEXT],
+		["ink on amber (pressed tool, Add mark N)", L.bar, L.amber, 8.77, TEXT],
 		["ink on amber, hovered", L.bar, L.amberHover, 7.66, TEXT],
 		["the bar on a white page", L.bar, WHITE, 16.07, EDGE],
 		["its white ring on a black page", L.casing, BLACK, 21, EDGE],

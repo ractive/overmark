@@ -36,20 +36,24 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 ## Use
 
 1. Click the Overmark icon on a tab. The side panel opens there.
-2. "Annotate this page" shows the toolbar for a new case: Element (click one), Box,
-   Arrow, Pen and Note, each followed by a comment. "Save case…" saves the marks as a new
-   case with a title, and the side panel opens it. Overmark takes screenshots with the
-   marks on them and records each marked element's details. Saved marks stay on the
-   page, fainter.
-3. The toolbar adds to a case only while that case is open in the side panel: from the
-   save on, and whenever the toolbar was started with "Add marks" in a case, the
-   toolbar says "Adding to “<case>”" ("Done adding" in the side panel stops it), and
-   each mark goes into that case as soon as its
-   comment is done (Done, or the comment closed with Escape or a click elsewhere); there
-   is no save step, and the case in the side panel shows it at once. Undo takes the last
+2. "Annotate this page" creates a case at once, named after the page's title, opens it
+   in the side panel and shows the toolbar on the page: Element (click one), Box, Arrow,
+   Pen and Note, each followed by a comment. Overmark takes screenshots with the marks
+   on them and records each marked element's details. "Rename" beside the case's title
+   changes it (Enter saves, Escape cancels). There is no save step: everything is
+   stored as you do it. A case you leave without a single mark, as it was made, is
+   deleted again.
+3. The toolbar adds to a case only while that case is open in the side panel: after
+   "Annotate this page", and whenever the toolbar was started with "Add marks" in a
+   case, the toolbar says "Adding to “<case>”" ("Done adding" in the side panel stops
+   it), and each mark goes into that case as soon as its
+   comment is done (Done, or the comment closed with Escape or a click elsewhere); the
+   case in the side panel shows it at once. Marks in the case stay on the page,
+   fainter. Undo takes the last
    mark added since the toolbar was shown out of the case again, while nobody has
-   resolved or edited it. A mark that could not be added stays on the page with the
-   reason and an "Add mark N" button to try again; it never moves to another case unless
+   resolved or edited it. A mark whose screenshot the page moved away from is taken
+   again by itself once the page stands still. A mark that could not be added stays on
+   the page with the reason and an "Add mark N" button to try again; it never moves to another case unless
    you click that button. Done tries such marks once more and closes the toolbar when all
    are in; while one is not, the toolbar stays up and says so, and Done again discards
    it. "← All cases" at the top of the side panel closes the case: the toolbar finishes
@@ -120,8 +124,8 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
      downloads folder. Chrome asks once whether Overmark may manage your downloads; then
      it writes with the side panel closed too, also after a browser restart. Each write
      shows in Chrome's download list; Overmark keeps only its newest entry there, for
-     "Show in folder". A case whose title changed gets a file of the new name and the old
-     one stays. Files deleted there are written again at their case's next change, or
+     "Show in folder". A case keeps the file name it was first written under, also after
+     a rename (nothing can be removed there, so a new name would leave the old file). Files deleted there are written again at their case's next change, or
      all at once with Change… and Sync to Downloads. The folder is one for every Chrome
      profile and browser on the computer: two of them syncing to Downloads write into the
      same `Overmark` folder, and a case of the same title in each overwrites the other's

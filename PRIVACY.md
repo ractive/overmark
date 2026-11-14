@@ -6,8 +6,10 @@ relay when you connect an AI app through it (see "An AI app" below).
 
 ## What Overmark keeps, and where
 
-When you save marks as a case, or add marks to a case, Overmark stores in your browser, on your computer
-(IndexedDB of the extension):
+When you start a case ("Annotate this page") and add marks to it, Overmark stores in
+your browser, on your computer (IndexedDB of the extension). The case and the page's
+information below are stored the moment you start it, before any mark; a case you leave
+without a mark, as it was made, is deleted again:
 
 - the case's title, your comments, the summary for the developer, when the case and its
   screenshots were made and changed, and for an imported case when it was imported;

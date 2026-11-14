@@ -28,6 +28,12 @@ if (browserBinary === undefined && process.env["CI"])
 		"Chrome for Testing is needed for the end-to-end tests in CI",
 	);
 
+/**
+ * The harness and tab of each page `open` opened: steps that act for the
+ * user (saveAs) reach the side panel and the page's tab through it.
+ */
+export const opened = new WeakMap<Page, { h: Harness; tabId: number }>();
+
 export interface Harness {
 	browser: Browser;
 	/** `http://127.0.0.1:<port>` serving `test/e2e/pages/`. */
@@ -142,7 +148,7 @@ async function start(binary: string, launch: Launch): Promise<Harness> {
 				{ cause: error },
 			);
 		});
-		return {
+		const harness: Harness = {
 			browser: launched,
 			base,
 			extensionId,
@@ -152,10 +158,13 @@ async function start(binary: string, launch: Launch): Promise<Harness> {
 				step(`open ${path}`, async () => {
 					const url = `${base}/${path}`;
 					const page = await launched.newPage(url);
-					return { page, tabId: await launch.tabIdOf(control, page, url) };
+					const tabId = await launch.tabIdOf(control, page, url);
+					opened.set(page, { h: harness, tabId });
+					return { page, tabId };
 				}),
 			stop: cleanUp,
 		};
+		return harness;
 	} catch (error) {
 		await cleanUp();
 		throw error;

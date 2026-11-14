@@ -8,7 +8,7 @@ import type { Inspection, Relation } from "./inspect.ts";
 import type { MatchStatus } from "./match.ts";
 import type { SaveRequest } from "./save.ts";
 
-/** Annotations go into this existing case instead of a new one. */
+/** The case a toolbar adds its marks to (DEC-026: there is always one). */
 export interface AnnotateTarget {
 	caseId: string;
 	title: string;
@@ -19,12 +19,11 @@ export interface AnnotateTarget {
 export type ContentRequest =
 	| {
 			type: "overlay:show";
-			/** Add to this case; a new case when absent. */
-			target?: AnnotateTarget;
+			/** Add to this case: a toolbar never draws a case of its own. */
+			target: AnnotateTarget;
 			/** Blur form fields while capturing (password fields always). */
 			blurForms?: boolean;
 	  }
-	| { type: "overlay:hide" }
 	/**
 	 * The side panel closes the case (DEC-023): a toolbar adding to it
 	 * finishes as its Done does and, once hidden, adds to no case any more
@@ -35,11 +34,18 @@ export type ContentRequest =
 	 */
 	| { type: "overlay:end"; caseId: string; discard?: boolean; retry?: boolean }
 	| { type: "overlay:state" }
+	/**
+	 * The case was renamed (DEC-026): a toolbar adding to it says its new
+	 * title (`OverlayState`).
+	 */
+	| { type: "overlay:title"; caseId: string; title: string }
+	/** What a new case records of this page (`PageInfo`, DEC-026). */
+	| { type: "page:info" }
 	/** The side panel's "Blur form fields" changed (`OverlayState`). */
 	| { type: "overlay:settings"; blurForms: boolean }
 	/**
 	 * Find the case's elements on this page and draw its marks (`LoadResult`, or
-	 * `{ error }`, also while the page is busy). Two loads of the case close
+	 * `{ error }`; `{ error, busy: true }` while the page is busy). Two loads of the case close
 	 * together both answer the newer one's result; one stopped by a clear or
 	 * by another case's load answers `LoadReplacedAnswer`, which is no error.
 	 */
@@ -196,7 +202,10 @@ export interface OverlayState {
 	visible: boolean;
 	url: string;
 	title: string;
-	/** Marks drawn and not saved yet. */
+	/**
+	 * Marks drawn and not in the case yet: a comment being typed, one on its
+	 * way, or one that could not be added (DEC-014).
+	 */
 	drafts: number;
 	saving: boolean;
 	target?: AnnotateTarget;

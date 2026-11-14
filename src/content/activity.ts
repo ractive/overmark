@@ -5,23 +5,24 @@
  * refused, or (for the toolbar) done once it is over.
  *
  *   idle ──mark drawn──▶ shot ──end──▶ idle
- *   idle ──save──▶ saving ──end──▶ idle   (then: stay, hide if saved, or show another case)
+ *   idle ──mark added──▶ saving ──end──▶ idle   (then: stay, hide if added, or show another case)
  *   idle ──AI mark / AI capture──▶ ai-mark / ai-capture ──end or 10 s──▶ idle
  */
 
 import type { AnnotateTarget } from "../lib/messages.ts";
 
 export interface ShowOptions {
-	target?: AnnotateTarget;
+	/** The case the toolbar adds to: always one (DEC-026). */
+	target: AnnotateTarget;
 	blurForms?: boolean;
 }
 
-/** What to do when a save is over. */
+/** What to do when a mark's add is over. */
 export type Afterwards =
 	| { kind: "stay" }
-	/** "Stop annotating" during the save: hide, but only if the save worked. */
+	/** Hidden during the add: hide, but only if the add worked. */
 	| { kind: "hide" }
-	/** "Add marks" for a case during the save: switch to it. */
+	/** "Add marks" for another case during the add: switch to it. */
 	| { kind: "show"; options: ShowOptions };
 
 export type Activity =
@@ -99,12 +100,12 @@ export class PageActivity {
 		return afterwards;
 	}
 
-	/** During a save: what is to be done once it is over. */
+	/** During an add: what is to be done once it is over. */
 	get deferred(): Afterwards | undefined {
 		return this.#now.kind === "saving" ? this.#now.afterwards : undefined;
 	}
 
-	/** During a save: remember what to do once it is over. `false` otherwise. */
+	/** During an add: remember what to do once it is over. `false` otherwise. */
 	defer(afterwards: Afterwards): boolean {
 		if (this.#now.kind !== "saving") return false;
 		this.#now = { kind: "saving", afterwards };

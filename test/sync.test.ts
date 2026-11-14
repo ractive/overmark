@@ -30,7 +30,7 @@ import {
 import { initialState } from "../src/sidepanel/state.ts";
 import { startSync } from "../src/sidepanel/sync.ts";
 import { memoryKv } from "../src/worker/kv.ts";
-import { putCase, sampleCase } from "./fixtures.ts";
+import { putCase, putMarked, sampleCase } from "./fixtures.ts";
 
 const domError = (name: string) => new DOMException(name, name);
 
@@ -168,7 +168,7 @@ describe("the sync to a folder (DEC-021)", () => {
 	let notified: number;
 
 	const add = (id: string, title: string, updatedAt = "2026-11-12T08:00:00Z") =>
-		putCase(cases, { ...sampleCase(id, updatedAt), title });
+		putMarked(cases, { ...sampleCase(id, updatedAt), title });
 	const change = (c: Case, extra: Partial<Case> = {}) =>
 		putCase(cases, {
 			...c,
@@ -235,6 +235,33 @@ describe("the sync to a folder (DEC-021)", () => {
 		await putCase(cases, { ...c, importedAt: "2026-11-12T09:00:00Z" });
 		await sync.request();
 		expect(folder.writes).toEqual(["login.overmark.zip"]);
+	});
+
+	test("a case without marks gets no file; one written before is kept up to date (DEC-026)", async () => {
+		const empty = await putCase(cases, {
+			...sampleCase("c_1", "2026-11-12T08:00:00Z"),
+			title: "Example Domain",
+		});
+		await sync.request();
+		expect(folder.writes).toEqual([]);
+		expect(store.current?.state).toBe("synced");
+		// Renamed while still empty: still nothing, so no file under the old name.
+		await change(empty, { title: "Login" });
+		await sync.request();
+		expect(folder.writes).toEqual([]);
+		// The first mark: one file, under the title it has now.
+		const marked = await putMarked(cases, {
+			...((await cases.getCase("c_1")) as Case),
+			updatedAt: "2026-11-12T08:05:00Z",
+		});
+		await sync.request();
+		expect(folder.writes).toEqual(["login.overmark.zip"]);
+		// Its marks deleted later: the file it has is written again, empty.
+		await change(marked, { annotations: [], shots: [], lastNumber: 1 });
+		await sync.request();
+		expect(folder.writes).toEqual(["login.overmark.zip", "login.overmark.zip"]);
+		const file = folder.files.get("login.overmark.zip") as Uint8Array;
+		expect((await readExport(file)).case.annotations).toEqual([]);
 	});
 
 	test("a renamed case gets its new file, and its old one goes", async () => {
@@ -364,25 +391,12 @@ describe("the sync to a folder (DEC-021)", () => {
 
 	test("one case that cannot be exported does not stop the others", async () => {
 		await add("c_1", "Broken", "2026-11-12T08:01:00Z");
-		await putCase(cases, {
+		await putMarked(cases, {
 			...sampleCase("c_2", "2026-11-12T08:00:00Z"),
 			title: "Fine",
 		});
-		// c_1 names a screenshot that is not stored.
-		const broken = (await cases.getCase("c_1")) as Case;
-		await putCase(cases, {
-			...broken,
-			shots: [
-				{
-					id: "s1",
-					image: "shots/s1.webp",
-					scrollX: 0,
-					scrollY: 0,
-					viewport: { width: 1280, height: 800, dpr: 2 },
-					capturedAt: "2026-11-12T08:00:00Z",
-				},
-			],
-		});
+		// c_1's screenshot is not stored.
+		await cases.deleteImages("c_1", ["shots/s1.webp"]);
 		await sync.request();
 		expect([...folder.files.keys()]).toEqual(["fine.overmark.zip"]);
 		expect(store.current?.state).toBe("failed");
@@ -603,7 +617,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 	let sync: Sync;
 
 	const add = (id: string, title: string, updatedAt = "2026-11-12T08:00:00Z") =>
-		putCase(cases, { ...sampleCase(id, updatedAt), title });
+		putMarked(cases, { ...sampleCase(id, updatedAt), title });
 
 	beforeEach(() => {
 		cases = new MemoryStore();
@@ -642,6 +656,16 @@ describe("the sync to Downloads (DEC-025)", () => {
 		// The URL is revoked once the download is over, the document closed after the run.
 		expect(api.revoked).toEqual(["blob:x/1"]);
 		expect(api.ends).toBe(1);
+	});
+
+	test("a case without marks is not downloaded: a file there cannot be taken back (DEC-026)", async () => {
+		await putCase(cases, {
+			...sampleCase("c_1", "2026-11-12T08:00:00Z"),
+			title: "Example Domain",
+		});
+		await sync.request();
+		expect(api.downloads).toEqual([]);
+		expect(store.current?.state).toBe("synced");
 	});
 
 	test("the download under way is recorded while it is waited for, and cleared after", async () => {
@@ -735,8 +759,8 @@ describe("the sync to Downloads (DEC-025)", () => {
 		]);
 	});
 
-	test("a renamed case gets its new file; the old one stays, as nothing can be removed there", async () => {
-		const c = await add("c_1", "Login");
+	test("a renamed case keeps the file it was first written under: nothing is left behind (review of PR 57)", async () => {
+		const c = await add("c_1", "Example Domain");
 		await sync.request();
 		await putCase(cases, {
 			...c,
@@ -744,12 +768,22 @@ describe("the sync to Downloads (DEC-025)", () => {
 			updatedAt: "2026-11-12T09:00:00Z",
 		});
 		await sync.request();
-		expect([...api.files.keys()].sort()).toEqual([
-			"Overmark/login-button.overmark.zip",
-			"Overmark/login.overmark.zip",
+		// Nothing can be removed there: the case's one file is written again.
+		expect([...api.files.keys()]).toEqual([
+			"Overmark/example-domain.overmark.zip",
 		]);
+		const file = api.files.get("Overmark/example-domain.overmark.zip");
+		expect((await readExport(file as Uint8Array)).case.title).toBe(
+			"Login button",
+		);
 		expect(store.records.get("downloads")?.byCase["c_1"]?.file).toBe(
-			"login-button.overmark.zip",
+			"example-domain.overmark.zip",
+		);
+		// A new case of the old title does not take its name.
+		await add("c_2", "Example Domain", "2026-11-12T09:01:00Z");
+		await sync.request();
+		expect(store.records.get("downloads")?.byCase["c_2"]?.file).toBe(
+			"example-domain-2.overmark.zip",
 		);
 	});
 
@@ -1081,7 +1115,7 @@ describe("choosing a folder synced before (DEC-021)", () => {
 	});
 
 	test("A, then B, then A again: A's files are Overmark's and updated in place", async () => {
-		const login = await putCase(cases, {
+		const login = await putMarked(cases, {
 			...sampleCase("c_1"),
 			title: "Login",
 		});
@@ -1110,7 +1144,7 @@ describe("choosing a folder synced before (DEC-021)", () => {
 	});
 
 	test("A, Stop syncing, B, then A again: nothing is written twice", async () => {
-		await putCase(cases, { ...sampleCase("c_1"), title: "Login" });
+		await putMarked(cases, { ...sampleCase("c_1"), title: "Login" });
 		const a = new FakeFolder("A");
 		const first = await choose(a);
 		await sync.request();

@@ -33,7 +33,9 @@ import {
 	openCase,
 	panelHome,
 	READ_DB,
+	renameInPanel,
 	saveAs,
+	shadow,
 	showToolbar,
 	until,
 } from "./steps.ts";
@@ -147,7 +149,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await showToolbar(h, page, tabId);
 		await markElement(page, "[data-truth=submit]", "Too pale");
 		await saveAs(page, "Synced case");
-		// "Save case…" opens the case in the panel (DEC-023): back to the list,
+		// The case is open in the panel (DEC-023, DEC-026): back to the list,
 		// where the sync's choice is.
 		await panel.waitFor(
 			`document.querySelector("#case-view h2")?.textContent === "Synced case"`,
@@ -191,9 +193,11 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 			15_000,
 		);
 
-		// A page with the toolbar, for a save once the worker is a new one.
+		// A page with the toolbar, for a mark once the worker is a new one. Its
+		// case has no mark yet: no file for it (DEC-026).
 		const later = await h.open("v1");
-		await showToolbar(h, later.page, later.tabId);
+		const laterCase = await showToolbar(h, later.page, later.tabId);
+		const PAGE_FILE = "krankenkasse-vergleichen-v1.overmark.zip";
 		// No extension page open: the panel closed, the control page elsewhere.
 		await (await h.open("v2")).page.activate();
 		await closeSidePanel(h, panel);
@@ -229,8 +233,12 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		expect(written?.id).toBe(caseId);
 		expect(await extensionPages()).toEqual([]);
 
-		// The worker stopped, as Chrome stops an idle one; a save on the page
-		// starts a new one, which writes with no extension page open either.
+		// The case without marks was not written, while everything else was.
+		expect(await Bun.file(downloaded(PAGE_FILE)).exists()).toBe(false);
+
+		// The worker stopped, as Chrome stops an idle one; the first mark on
+		// the page goes into its case and starts a new one, which writes the
+		// case's first file with no extension page open either.
 		await h.browser.send("Target.closeTarget", { targetId });
 		await until(
 			() => h.browser.targets(),
@@ -238,22 +246,42 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		);
 		await later.page.activate();
 		await markElement(later.page, "[data-truth=submit]", "Fresh worker");
-		await saveAs(later.page, "Fresh worker");
+		await later.page.waitFor(
+			`${shadow('[data-role="status"]')}?.textContent.startsWith("Mark 1 added")`,
+			20_000,
+		);
 		const fresh = await until(
-			() => caseIn("fresh-worker.overmark.zip"),
+			() => caseIn(PAGE_FILE),
 			(c) => c !== undefined,
 			20_000,
 		);
-		expect(fresh?.title).toBe("Fresh worker");
+		expect(fresh?.id).toBe(laterCase);
+		expect(fresh?.annotations.map((a) => a.comment)).toEqual(["Fresh worker"]);
 		expect(await extensionPages()).toEqual([]);
 		await later.page.send("Page.close");
 
 		await h.control.goto(PANEL_PAGE(h));
 		// Overwritten in place, no "(1)" copy; one entry left in the list, the newest.
 		await until(downloadList, (list) => list.length === 1);
-		expect(await downloadList()).toEqual([
-			downloaded("fresh-worker.overmark.zip"),
-		]);
+		expect(await downloadList()).toEqual([downloaded(PAGE_FILE)]);
+
+		// Renamed in the panel: the same file is written again, under the name
+		// it was first written under; no second file (review of PR 57).
+		const item = `document.querySelector('[data-case="${laterCase}"]')`;
+		await h.control.waitFor(item);
+		await h.control.eval(`${item}.click()`);
+		await renameInPanel(h.control, laterCase, "Checkout contrast");
+		const renamed = await until(
+			() => caseIn(PAGE_FILE),
+			(c) => c?.title === "Checkout contrast",
+			20_000,
+		);
+		expect(renamed?.id).toBe(laterCase);
+		expect(
+			await Bun.file(downloaded("checkout-contrast.overmark.zip")).exists(),
+		).toBe(false);
+		await h.control.eval(`document.getElementById("back").click()`);
+		await h.control.waitFor(`!document.getElementById("home").hidden`);
 		expect((await caseIn(FILE))?.verdict).toBe("Written with the panel closed");
 		panel = await openSidePanel(h);
 	}, 90_000);

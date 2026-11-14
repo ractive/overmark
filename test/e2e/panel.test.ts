@@ -10,7 +10,7 @@ import { startTestRelay } from "@ractive-ch/tab-mcp/testing";
 import type { Case } from "../../src/lib/case.ts";
 import { exportCase } from "../../src/lib/export.ts";
 import { MemoryStore } from "../../src/lib/store.ts";
-import { sampleCase } from "../fixtures.ts";
+import { putMarked, sampleCase } from "../fixtures.ts";
 import {
 	answerInPanel,
 	closeSidePanel,
@@ -119,7 +119,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			`(() => { const send = chrome.tabs.sendMessage.bind(chrome.tabs); chrome.tabs.sendMessage = (tabId, message) => (${body})(tabId, message, send); })()`,
 		);
 
-	/** "Save case…" opened the case `title` in the panel (DEC-023): back to the list. */
+	/** The panel shows the case `title`, as it opens the case a toolbar adds to (DEC-023): back to the list. */
 	async function afterSave(title: string, page = h.control): Promise<void> {
 		await page.waitFor(
 			`document.querySelector("#case-view h2")?.textContent === ${JSON.stringify(title)}`,
@@ -135,7 +135,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		await showToolbar(h, page, tabId);
 		await markElement(page, "h1", "Too long");
 		await saveAs(page, title);
-		// "Save case…" opens the case in the panel (DEC-023): back to the
+		// The panel opened the case the toolbar adds to (DEC-023): back to the
 		// list, which ends the toolbar (as its Done) and takes the marks off.
 		await afterSave(title);
 		const saved = (await readDb()).cases.find((c) => c.title === title);
@@ -431,7 +431,17 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					},
 				],
 			};
-			await fresh([slow, sampleCase("c_next")]);
+			// Two on c_next: a case without marks is not drawn (DEC-026).
+			const next: Case = {
+				...sampleCase("c_next"),
+				annotations: [1, 2].map((n) => ({
+					...(slow.annotations[0] as Case["annotations"][number]),
+					id: `a${n}`,
+					number: n,
+					crop: `crops/a${n}.webp`,
+				})),
+			};
+			await fresh([slow, next]);
 			const { page, tabId } = await h.open("v1");
 			await page.activate();
 			await h.control.eval(
@@ -455,13 +465,13 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await backHome();
 			await openCase("c_next");
 			await h.control.waitFor(
-				`${id("case-hint")}.textContent.includes("0 of 0 marks found")`,
+				`${id("case-hint")}.textContent.includes("0 of 2 marks found")`,
 			);
 			await h.control.eval(`globalThis.leftCase = true`);
 			await h.control.waitFor(`globalThis.answered`);
 			await Bun.sleep(300);
 			expect(await h.control.eval(`${id("case-hint")}.textContent`)).toContain(
-				"0 of 0 marks found",
+				"0 of 2 marks found",
 			);
 			expect((await overlayOf(tabId)).loadedCase).toBe("c_next");
 			// The panel still knows they are its own: back to the list takes them off.
@@ -495,7 +505,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			const b = await h.open("v2");
 			await b.page.activate();
 			await h.control.eval(
-				`chrome.tabs.sendMessage(${a.tabId}, { type: "overlay:show" })`,
+				`chrome.tabs.sendMessage(${a.tabId}, { type: "overlay:show", target: { caseId: "c_news", title: "News", nextAnnotation: 1 } })`,
 			);
 			await Bun.sleep(200);
 			await h.control.eval(`globalThis.slow = false`);
@@ -544,14 +554,17 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await fresh();
 			const { page, tabId } = await h.open("v1");
 			await page.activate();
-			const onPage = (id: string, path: string): Case => {
+			// A mark each: a case without marks is not drawn (DEC-026).
+			const onPage = async (id: string, path: string) => {
+				const store = new MemoryStore();
 				const c = sampleCase(id);
-				return { ...c, page: { ...c.page, url: `${h.base}/${path}` } };
+				const marked = await putMarked(store, {
+					...c,
+					page: { ...c.page, url: `${h.base}/${path}` },
+				});
+				return exportCase(store, marked);
 			};
-			await importFile(
-				"other.overmark.zip",
-				await zipOf(onPage("c_far", "v2")),
-			);
+			await importFile("other.overmark.zip", await onPage("c_far", "v2"));
 			await h.control.waitFor(`${id("verdict")}?.dataset.case === "c_far"`);
 			await until(
 				async () => (await overlayOf(tabId)).loadedCase === "c_far",
@@ -564,10 +577,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				async () => (await overlayOf(tabId)).loadedCase === undefined,
 				"the marks to go",
 			);
-			await importFile(
-				"here.overmark.zip",
-				await zipOf(onPage("c_here", "v1")),
-			);
+			await importFile("here.overmark.zip", await onPage("c_here", "v1"));
 			await h.control.waitFor(
 				`${id("case-hint")}?.textContent.includes("marks found")`,
 			);
@@ -810,7 +820,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await showToolbar(h, page, tabId);
 			await markElement(page, "[data-truth=submit]", "Too pale");
 			await saveAs(page, "Not for this page");
-			// "Save case…" opened it (DEC-023): its marks would follow the page.
+			// The panel opened it (DEC-023): its marks would follow the page.
 			await afterSave("Not for this page");
 			const saved = (await readDb()).cases.find(
 				(c) => c.title === "Not for this page",
@@ -1104,13 +1114,12 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		);
 
 		slowTest(
-			"Save case…, then Done adding while the draw is under way: the found line comes",
+			"the first mark, then Done adding while the draw is under way: the found line comes",
 			async () => {
 				await fresh();
 				const { page, tabId } = await h.open("v1");
-				await showToolbar(h, page, tabId);
-				await markElement(page, "h1", "Too long");
-				// The draw the adopted case starts answers only after Done adding.
+				// The draw the case's first mark starts (DEC-026) answers only
+				// after Done adding.
 				await h.control.eval(`globalThis.go = false`);
 				await wrapSend(`async (tabId, message, send) => {
 					const answer = await send(tabId, message);
@@ -1120,10 +1129,11 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					}
 					return answer;
 				}`);
-				await saveAs(page, "Done while drawing");
+				await showToolbar(h, page, tabId);
+				await markElement(page, "h1", "Too long");
 				await h.control.waitFor(
-					`document.querySelector("#case-view h2")?.textContent === "Done while drawing" && globalThis.held`,
-					10_000,
+					`document.querySelector("#case-view h2")?.textContent === "Krankenkasse vergleichen (v1)" && globalThis.held`,
+					20_000,
 				);
 				await h.control.waitFor(
 					`${id("add-marks")}.textContent === "Done adding"`,
@@ -1288,7 +1298,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		async function inCaseWithMarks(title: string) {
 			await fresh();
 			const saved = await annotated(title);
-			// "Save case…" opened the case; start from the list.
+			// The panel opened the case; start from the list.
 			await h.control.eval(`${back}.hidden || ${back}.click()`);
 			await h.control.waitFor(`!${id("home")}.hidden`);
 			await openCase(saved.caseId);
@@ -1304,48 +1314,6 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			h.control.eval<boolean>(
 				`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.visible)`,
 			);
-
-		slowTest(
-			"a new case's toolbar on another tab goes when that tab comes to the front under an open case",
-			async () => {
-				await fresh();
-				const { page, tabId, caseId } = await annotated("Toolbar elsewhere");
-				// A new case is being drawn on another tab, the panel on Home.
-				const other = await h.open("v2");
-				await showToolbar(h, other.page, other.tabId);
-				await markElement(other.page, "h1", "A draft");
-				// The case opens on the first tab.
-				await page.activate();
-				await openCase(caseId);
-				await until(
-					async () => (await pageCase(tabId)) === caseId,
-					"the case's marks on the page",
-				);
-				expect(await toolbarUp(other.tabId)).toBe(true);
-				// The case follows to the other tab: a toolbar there would add to
-				// no case the panel shows.
-				await other.page.activate();
-				await until(
-					async () => (await pageCase(other.tabId)) === caseId,
-					"the case's marks on the other tab",
-				);
-				await until(
-					async () => !(await toolbarUp(other.tabId)),
-					"the new case's toolbar to go",
-				);
-				// Its draft stays on the page: Add marks would put it into the case.
-				await h.control.waitFor(
-					`${id("tab-line")}.textContent.startsWith("1 unsaved mark is on this page.")`,
-				);
-				await h.control.eval(`${back}.click()`);
-				await h.control.waitFor(`!${id("home")}.hidden`);
-				// No draft left: it would hold the tab open with "leave this site?".
-				await showToolbar(h, other.page, other.tabId);
-				await other.page.click(shadow('[data-action="undo"]'));
-				await other.page.send("Page.close");
-				await page.send("Page.close");
-			},
-		);
 
 		slowTest(
 			"the back button is a real button in the top bar, 32 px high at least",
@@ -1528,7 +1496,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			);
 
 		slowTest(
-			"the case deleted elsewhere under its toolbar: the toolbar draws a new case, its drafts kept",
+			"the case deleted elsewhere under its toolbar: the toolbar ends, the panel on Home (DEC-026)",
 			async () => {
 				const { page, tabId, caseId } =
 					await inCaseWithMarks("Deleted elsewhere");
@@ -1536,17 +1504,17 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				await until(() => toolbarUp(tabId), "the toolbar");
 				await deleteElsewhere(caseId, page);
 				await h.control.waitFor(`!${id("home")}.hidden`);
-				await page.waitFor(
-					`${shadow('[data-role="status"]')}?.textContent === "New case: choose a tool"`,
+				await until(async () => !(await toolbarUp(tabId)), "the toolbar to go");
+				// No mark was lost: nothing is said.
+				expect(await h.control.eval<boolean>(`${id("hint")}.hidden`)).toBe(
+					true,
 				);
-				expect(await toolbarUp(tabId)).toBe(true);
-				await page.click(shadow('[data-action="close"]'));
 				await page.send("Page.close");
 			},
 		);
 
 		slowTest(
-			"a toolbar on another tab whose case was deleted meanwhile draws a new case when it comes to the front",
+			"a toolbar on another tab whose case was deleted meanwhile ends too (DEC-026)",
 			async () => {
 				const { page, tabId, caseId } = await inCaseWithMarks("Deleted behind");
 				await h.control.eval(`${id("add-marks")}.click()`);
@@ -1557,17 +1525,15 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					async () => (await pageCase(other.tabId)) === caseId,
 					"the marks on the next tab",
 				);
+				expect(await toolbarSays(page)).toBe("Adding to “Deleted behind”");
 				await deleteElsewhere(caseId, other.page);
 				await h.control.waitFor(`!${id("home")}.hidden`);
-				expect(await toolbarSays(page)).toBe("Adding to “Deleted behind”");
+				// Not in front, its toolbar ends all the same: no case to add to.
+				await until(async () => !(await toolbarUp(tabId)), "the toolbar to go");
 				await page.activate();
-				await page.waitFor(
-					`${shadow('[data-role="status"]')}?.textContent === "New case: choose a tool"`,
-				);
 				await h.control.waitFor(
-					`${id("annotate")}.textContent === "Stop annotating" && ${id("annotate-hint")}.textContent === "Draw on the page with the toolbar at its bottom."`,
+					`${id("annotate")}.textContent === "Annotate this page" && !${id("home")}.hidden`,
 				);
-				await page.click(shadow('[data-action="close"]'));
 				await other.page.send("Page.close");
 				await page.send("Page.close");
 			},

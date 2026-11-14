@@ -870,11 +870,6 @@ main {
 	margin-top: var(--s1);
 }
 
-/* Under "Annotate this page": what it does now. */
-.annotate-hint {
-	margin: 0;
-}
-
 /* --- home: the cases ---------------------------------------------------------- */
 
 #cases > .group-title:first-child {
@@ -1019,6 +1014,39 @@ ul.cases .title {
 	font-weight: 700;
 	letter-spacing: -0.01em;
 	overflow-wrap: anywhere;
+}
+
+/* The title, and Rename beside it at its first line (DEC-026). */
+.case-title-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--s2);
+}
+
+.case-title-row > .case-title {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+}
+
+.case-title-row > #rename-case {
+	flex: none;
+	font-size: 12px;
+}
+
+/* The title as a field while it is renamed. */
+.rename {
+	display: grid;
+	gap: var(--s2);
+}
+
+#rename-field {
+	font-size: 16px;
+	font-weight: 700;
+}
+
+.rename > .hint {
+	margin: 0;
 }
 
 /* Where and when the marks were made, in one line: a · b · c. */

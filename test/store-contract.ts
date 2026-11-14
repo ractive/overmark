@@ -114,6 +114,31 @@ export const storeContract: Record<
 			same(await held(store, id, paths), paths);
 	},
 
+	"deleteCaseIf deletes only a case its check holds for, with its images":
+		async (store) => {
+			await putCase(store, sampleCase("c_1"));
+			await putCase(store, { ...sampleCase("c_2"), title: "Kept" });
+			for (const id of ["c_1", "c_2"])
+				await store.putImage(id, "shots/s1.webp", image());
+			const empty = (c: Case) => c.title === "Button contrast";
+			same(await store.deleteCaseIf("c_2", empty), false);
+			same((await store.getCase("c_2"))?.title, "Kept");
+			same(await held(store, "c_2", ["shots/s1.webp"]), ["shots/s1.webp"]);
+			same(await store.deleteCaseIf("c_1", empty), true);
+			same(await store.getCase("c_1"), undefined);
+			same(await held(store, "c_1", ["shots/s1.webp"]), []);
+			// Gone already: nothing to delete, no failure.
+			same(await store.deleteCaseIf("c_1", () => true), false);
+			// A check that throws deletes nothing and fails.
+			await rejects(
+				store.deleteCaseIf("c_2", () => {
+					throw new Error("no check");
+				}),
+				"no check",
+			);
+			same((await store.getCase("c_2"))?.title, "Kept");
+		},
+
 	"updateCase writes the case and its images together": async (store) => {
 		await putCase(store, sampleCase("c_1"));
 		const saved = await store.updateCase("c_1", (current) => ({

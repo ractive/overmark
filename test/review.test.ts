@@ -104,6 +104,37 @@ describe("elements replaced after loading", () => {
 		expect(bar()).toContain("1 of 1 found");
 	});
 
+	test("the bar's Hide stays the same element when the case is drawn again", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		await reviewer.load(c);
+		const hide = overlay.reviewBar.querySelector('[data-action="review-hide"]');
+		expect(hide).not.toBeNull();
+		await reviewer.update({ ...c, title: "Renamed" });
+		await reviewer.load(c);
+		expect(overlay.reviewBar.querySelector('[data-action="review-hide"]')).toBe(
+			hide,
+		);
+		expect(bar()).toContain("1 of 1 found");
+		expect(
+			overlay.reviewBar.querySelectorAll('[data-role="review-status"]'),
+		).toHaveLength(1);
+	});
+
+	test("a clear while the case is loading stops the load: nothing is drawn after it", async () => {
+		doc.body.innerHTML = PAGE;
+		const c = caseOf($("button"));
+		const loading = reviewer.load(c);
+		// What case:clear for this case looks at while the load runs.
+		expect(reviewer.caseId).toBeUndefined();
+		expect(reviewer.loadingCaseId).toBe(c.id);
+		reviewer.clear();
+		await expect(loading).rejects.toBeInstanceOf(LoadReplaced);
+		expect(overlay.reviewing).toBe(false);
+		expect(overlay.items).toEqual([]);
+		expect(reviewer.loadingCaseId).toBeUndefined();
+	});
+
 	test("gone for good: showing says so", async () => {
 		doc.body.innerHTML = PAGE;
 		await reviewer.load(caseOf($("button")));

@@ -349,6 +349,23 @@ describe("tools", () => {
 		expect(scaled).toBe(0);
 	});
 
+	test("a case just started, without marks: listed with zero, read without error (DEC-026)", async () => {
+		await putCase(store, { ...sampleCase("c_new"), title: "Your cart" });
+		expect(json(await call("list_cases"))).toEqual([
+			{
+				caseId: "c_new",
+				title: "Your cart",
+				url: "https://www.example.com/kk",
+				marks: { open: 0, toVerify: 0, verified: 0, closed: 0 },
+				summary: null,
+				updatedAt: "2026-11-04T10:00:00Z",
+			},
+		]);
+		const result = await call("get_case", { caseId: "c_new" });
+		expect(result.content.map((c) => c.type)).toEqual(["text"]);
+		expect(json(result).marks).toEqual([]);
+	});
+
 	test("get_case leaves out crops beyond the size budget", async () => {
 		await seed(2000);
 		cropSize = 400_000; // ~533 000 base64 characters each

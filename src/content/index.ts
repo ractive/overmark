@@ -23,7 +23,7 @@ import type {
 	Released,
 } from "../lib/messages.ts";
 import { PageActivity } from "./activity.ts";
-import { Annotator } from "./annotator.ts";
+import { Annotator, pageInfo } from "./annotator.ts";
 import { PageBlur } from "./blur.ts";
 import { HOST_ID, Overlay } from "./overlay.ts";
 import { LoadReplaced, Reviewer } from "./review.ts";
@@ -192,15 +192,11 @@ function start(): void {
 			switch (message.type) {
 				case "overlay:show":
 					annotator.show({
-						...(message.target ? { target: message.target } : {}),
+						target: message.target,
 						...(message.blurForms !== undefined
 							? { blurForms: message.blurForms }
 							: {}),
 					});
-					sendResponse(state());
-					break;
-				case "overlay:hide":
-					annotator.hide();
 					sendResponse(state());
 					break;
 				case "overlay:end":
@@ -219,6 +215,13 @@ function start(): void {
 				case "overlay:state":
 					sendResponse(state());
 					break;
+				case "overlay:title":
+					annotator.setTitle(message.caseId, message.title);
+					sendResponse(state());
+					break;
+				case "page:info":
+					sendResponse(pageInfo(document));
+					break;
 				case "overlay:settings":
 					annotator.setBlurForms(message.blurForms);
 					sendResponse(state());
@@ -228,7 +231,8 @@ function start(): void {
 					break;
 				case "case:load":
 					if (activity.busy !== undefined) {
-						sendResponse({ error: activity.busy });
+						// `busy`: a moment later it may well work (the side panel waits).
+						sendResponse({ error: activity.busy, busy: true });
 						break;
 					}
 					reviewer.load(message.case).then(
@@ -275,9 +279,12 @@ function start(): void {
 					break;
 				case "case:clear":
 					// An AI app may have loaded another case meanwhile: that one stays.
+					// A load of the case still under way stops too, or it would draw
+					// the marks after the clear ("← All cases" during a draw).
 					if (
 						message.caseId === undefined ||
-						message.caseId === reviewer.caseId
+						message.caseId === reviewer.caseId ||
+						message.caseId === reviewer.loadingCaseId
 					)
 						reviewer.clear();
 					sendResponse(state());

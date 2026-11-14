@@ -137,12 +137,6 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 /* Not opacity alone: muted, and nothing answers the pointer. */
 .toolbar button:disabled { color: ${L.barMuted}; opacity: 0.6; cursor: default; background: none; }
 .toolbar button:focus-visible, .reviewbar button:focus-visible { outline: 2px solid ${L.barText}; outline-offset: 1px; }
-.toolbar input {
-	box-sizing: border-box; min-height: 30px; flex: 0 1 auto; width: 220px; min-width: 120px;
-	font: inherit; padding: 4px 8px; border-radius: 8px; border: 0; margin-right: 4px;
-	color: ${L.popoverText}; background: #fff; color-scheme: light;
-}
-.toolbar input:focus-visible { outline: 2px solid ${L.amber}; outline-offset: 1px; }
 /* Two rows on purpose: the tools on the first, what they are at under them. */
 .toolbar[data-fit~="rows"] { flex-wrap: wrap; row-gap: 0; }
 /* No width of its own, then all of the row: the bar is as wide as its tools. */
@@ -226,8 +220,8 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 		forced-color-adjust: none; background: Highlight; color: HighlightText; border-color: Highlight;
 	}
 	.toolbar button:disabled { border-color: GrayText; color: GrayText; opacity: 1; }
-	.toolbar button:focus-visible, .reviewbar button:focus-visible, .toolbar input:focus-visible { outline-color: Highlight; }
-	.toolbar input, .popover textarea { border: 1px solid CanvasText; }
+	.toolbar button:focus-visible, .reviewbar button:focus-visible { outline-color: Highlight; }
+	.popover textarea { border: 1px solid CanvasText; }
 	.ring { stroke: CanvasText; }
 }
 /* Screenshots show the page alone. Invisible, not gone: a field keeps its focus. */
@@ -543,7 +537,7 @@ export class Overlay {
 	#toolbarFits(beside: boolean): boolean {
 		const bar = this.toolbar;
 		if (beside) return bar.scrollWidth <= bar.clientWidth;
-		const tops = [...bar.querySelectorAll<HTMLElement>("button, input")].map(
+		const tops = [...bar.querySelectorAll<HTMLElement>("button")].map(
 			(b) => b.offsetTop,
 		);
 		return Math.max(...tops) - Math.min(...tops) < 8;

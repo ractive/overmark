@@ -52,19 +52,40 @@ class FakeConnection extends EventTarget implements KeptConnection {
 
 let wanted: boolean;
 let changes: number;
+/** What KeepOn said at each change: its problem and whether a try waits. */
+let seen: { problem: string | undefined; retrying: boolean }[];
 let connection: FakeConnection;
 let keep: KeepOn;
+
+/** A KeepOn that waits `delaysMs` between tries, watching `connection`. */
+function keepOn(delaysMs: number[]): KeepOn {
+	const kept = new KeepOn(
+		() => wanted,
+		() => {
+			changes++;
+			seen.push({ problem: kept.problem, retrying: kept.retrying });
+		},
+		delaysMs,
+	);
+	kept.watch(connection);
+	return kept;
+}
+
+/**
+ * Until `done` holds, two seconds at most: what a test waits for is a state,
+ * not a number of turns of the event loop a promise chain happens to take.
+ */
+async function until(done: () => boolean): Promise<void> {
+	for (let i = 0; i < 2000 && !done(); i++) await Bun.sleep(1);
+	expect(done()).toBe(true);
+}
 
 beforeEach(() => {
 	wanted = true;
 	changes = 0;
+	seen = [];
 	connection = new FakeConnection();
-	keep = new KeepOn(
-		() => wanted,
-		() => changes++,
-		[1, 2],
-	);
-	keep.watch(connection);
+	keep = keepOn([1, 2]);
 });
 
 describe("KeepOn", () => {
@@ -148,12 +169,13 @@ describe("KeepOn", () => {
 	test("says why a connect failed and tries again until it works", async () => {
 		connection.errors = [new Error("relay down"), new Error("still down")];
 		keep.connect();
-		await Bun.sleep(0);
-		await Bun.sleep(0);
-		expect(keep.problem).toBe("relay down");
-		expect(keep.retrying).toBe(true);
-		while (connection.state !== "connected") await Bun.sleep(1);
-		await Bun.sleep(0);
+		await until(() => connection.state === "connected");
+		await until(() => keep.problem === undefined);
+		// As each try failed it said why, with the next one waiting.
+		expect(seen.filter((s) => s.problem !== undefined)).toEqual([
+			{ problem: "relay down", retrying: true },
+			{ problem: "still down", retrying: true },
+		]);
 		expect(connection.calls).toHaveLength(3);
 		expect(keep.problem).toBeUndefined();
 		expect(keep.retrying).toBe(false);
@@ -168,20 +190,21 @@ describe("KeepOn", () => {
 	});
 
 	test("no longer wanted: the next try does not happen", async () => {
+		// A wait long enough to change one's mind in.
+		keep = keepOn([50]);
 		connection.errors = [new Error("relay down")];
 		keep.connect();
-		await Bun.sleep(0);
-		await Bun.sleep(0);
+		await until(() => keep.retrying);
 		wanted = false;
-		await Bun.sleep(10);
+		await Bun.sleep(80);
 		expect(connection.calls).toHaveLength(1);
 	});
 
 	test("stop drops the waiting try, the reason, and a try on its way", async () => {
+		keep = keepOn([50]);
 		connection.errors = [new Error("relay down")];
 		keep.connect();
-		await Bun.sleep(0);
-		await Bun.sleep(0);
+		await until(() => keep.retrying);
 		keep.stop();
 		expect(keep.problem).toBeUndefined();
 		expect(keep.retrying).toBe(false);
@@ -201,6 +224,8 @@ describe("KeepOn", () => {
 			Object.assign(new Error("taken over"), { reason: "replaced" }),
 		];
 		keep.connect();
+		await until(() => keep.problem !== undefined);
+		// And no try after it.
 		await Bun.sleep(10);
 		expect(keep.problem).toBe("taken over");
 		expect(keep.retrying).toBe(false);

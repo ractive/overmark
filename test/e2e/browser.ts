@@ -246,6 +246,32 @@ interface TargetInfo {
 	url: string;
 }
 
+/** What is at a point, and whether it is the element meant (or inside it). */
+interface Hit {
+	ok: boolean;
+	at: string;
+}
+
+/** The element at a point, through open shadow roots, against `expression`'s. */
+const hitTest = (expression: string, { x, y }: { x: number; y: number }) =>
+	`(() => {
+		const target = ${expression};
+		let hit = document.elementFromPoint(${x}, ${y});
+		while (hit?.shadowRoot) {
+			const inner = hit.shadowRoot.elementFromPoint(${x}, ${y});
+			if (inner === null || inner === hit) break;
+			hit = inner;
+		}
+		const name = (e) => e === null ? "nothing" : e.tagName.toLowerCase() + (e.dataset?.action ? "[data-action=" + e.dataset.action + "]" : e.className && typeof e.className === "string" ? "." + e.className.split(" ").join(".") : "");
+		const box = target.getBoundingClientRect();
+		// Not laid out yet (hidden, not drawn): nothing to press.
+		if (box.width === 0 && box.height === 0) return { ok: false, at: "the element without a box yet" };
+		// A page element under Overmark's layer, which a tool puts over the
+		// page on purpose: the press is for the layer.
+		const through = target.getRootNode() === document && hit !== null && hit.getRootNode() !== document;
+		return { ok: hit !== null && (hit === target || target.contains(hit) || through), at: name(hit) };
+	})()`;
+
 export class Browser {
 	readonly #proc: ChromeProcess;
 	readonly #profile: string;
@@ -630,19 +656,27 @@ export class Page {
 	/** Click the element an expression returns (also inside a shadow root). */
 	async click(expression: string): Promise<void> {
 		// Sent at once, a click lands on what was at that spot before a scroll or a
-		// late list moved it: wait until the element has stayed put for two frames.
+		// late list moved it: wait until the element has stayed put for two frames,
+		// and until it is what is at that spot (not covered, not moved away by a
+		// layout of its own), then press. What was there instead is said.
 		let at = await this.centreOf(expression);
-		for (let tries = 0; tries < 20; tries++) {
+		let hit: Hit = { ok: false, at: "" };
+		for (let tries = 0; tries < 40; tries++) {
 			await this.eval(
 				"new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 200); })",
 			);
 			const now = await this.centreOf(expression);
 			const stayed = now.x === at.x && now.y === at.y;
 			at = now;
-			if (stayed) break;
+			if (!stayed) continue;
+			hit = await this.eval<Hit>(hitTest(expression, at));
+			if (hit.ok) break;
 		}
-		const { x, y } = at;
-		await this.clickAt(x, y);
+		if (!hit.ok)
+			throw new Error(
+				`click: at (${Math.round(at.x)}, ${Math.round(at.y)}) is ${hit.at}, not ${expression}`,
+			);
+		await this.clickAt(at.x, at.y);
 	}
 
 	/** Type text into the focused element. */
