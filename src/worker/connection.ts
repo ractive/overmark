@@ -197,27 +197,53 @@ export function badgeOf(
 	return "off";
 }
 
+/** What the worker knows when `revoke()` rejected. */
+export interface RevokeFailure {
+	error: unknown;
+	/** The library's state then. */
+	state: ConnectionState;
+	/** The relay's error may answer an earlier revoke (`unattributed`). */
+	unattributed: boolean;
+}
+
 /**
- * What the card says when Disconnect for `app` did not work: `revoke()`
- * rejected with `error`; `sent`: it was sent while connected, so the relay
- * may have done it before the session ended.
+ * Whether a relay's `error` may answer another revoke than the one it
+ * rejected: it names no request (a relay before 0.10.2), and a revoke of
+ * this session timed out before, whose answer may still come. The queue
+ * pairs answers only while every revoke waits for its own.
  */
+export function unattributed(error: unknown, timedOut: boolean): boolean {
+	const e = error as { code?: unknown; for?: unknown } | undefined;
+	return (
+		timedOut &&
+		e?.for === undefined &&
+		(e?.code === "unknown_id" || e?.code === "store_unavailable")
+	);
+}
+
+/** What the card says when Disconnect for `app` did not work. */
 export function revokeProblem(
-	error: unknown,
+	{ error, state, unattributed }: RevokeFailure,
 	app: string,
-	sent = false,
 ): string {
 	const not = `${app} was not disconnected`;
+	if (unattributed)
+		return `${not}: the relay's answer may be for an earlier Disconnect it was slow to answer. Try again.`;
 	const code = (error as { code?: unknown } | undefined)?.code;
 	if (code === "store_unavailable")
 		return `${not}: the relay could not save this. Try again.`;
 	if (code === "unknown_id")
 		return `The relay no longer knows ${app}, so it cannot reach Overmark any more. It leaves this list when AI access next connects.`;
 	const name = (error as { name?: unknown } | undefined)?.name;
+	// Nothing was sent: AI access is off, or the connection is on its way
+	// back (or closing, a moment before the state says so).
 	if (name === "InvalidStateError")
-		return sent
-			? `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`
-			: `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`;
+		return state === "disconnected"
+			? `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`
+			: `${not}: the connection to the relay is being restored. Try again once it is connected.`;
+	// Sent, and the session ended before the answer: the relay may have done it.
+	if (name === "NetworkError")
+		return `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`;
 	if (name === "TimeoutError")
 		return `${not}: the relay did not answer. Try again.`;
 	return `${not}: ${message(error)}`;
@@ -246,13 +272,14 @@ export class Connection {
 	#problem: string | undefined;
 	#lastCall: CallView | undefined;
 	/** Why Disconnect did not work, by grant: until it goes, or connected again. */
-	readonly #revokeProblems = new Map<
-		string,
-		{ error: unknown; sent: boolean }
-	>();
+	readonly #revokeProblems = new Map<string, RevokeFailure>();
+	/** A revoke of this session timed out: its answer may still come. */
+	#revokeTimedOut = false;
 	/**
-	 * Disconnects, one at a time: the relay's error does not say which
-	 * revoke it answers, so the library rejects every revoke waiting for it.
+	 * Disconnects, one at a time. Relays from 0.10.2 name the grant their
+	 * error answers and the library pairs it; an older one (the user may set
+	 * any relay) names nothing, and the library then rejects every revoke
+	 * waiting with that error, another app's included.
 	 */
 	#revokes: Promise<void> = Promise.resolve();
 	/** Panel commands, one after the other. */
@@ -462,8 +489,9 @@ export class Connection {
 			({ detail }) => {
 				if (detail.state === "connected") {
 					this.#problem = undefined;
-					// "Not connected" no longer holds.
+					// "Not connected" no longer holds; a new session owes no answers.
 					this.#revokeProblems.clear();
+					this.#revokeTimedOut = false;
 					void this.#setReplaced(undefined);
 				}
 				const on = sessionOnAfter(detail, this.#settings.keepOn);
@@ -793,7 +821,8 @@ export class Connection {
 	 * whoever took it; then it connects with the new one if it was on. After
 	 * a takeover AI access is off, and a new worker's library knows nothing
 	 * of the takeover: the new address connects, so the card shows it to
-	 * pair again.
+	 * pair again. Once the address is new, the takeover notice goes, also
+	 * when connecting with it fails (`addressChanged`, client 0.16.1).
 	 */
 	async #newAddress(): Promise<void> {
 		const replaced = this.#settings.replaced !== undefined;
@@ -808,14 +837,21 @@ export class Connection {
 			if (replaced) await this.#mcp.connect({ resume: true });
 		} catch (error) {
 			this.#problem = message(error);
+			// The address changed, and only connecting with it failed (the
+			// library connects itself after a takeover it saw).
+			if ((error as { addressChanged?: unknown }).addressChanged === true)
+				await this.#setReplaced(undefined).catch(() => {});
 		}
 		this.#changed();
 	}
 
 	/**
 	 * Disconnect one AI app (DEC-017). Its Always allow goes with the grant,
-	 * once the relay's list no longer has it (`#keepGrants`, DEC-018), or
-	 * when the relay says it does not know the grant at all.
+	 * once the library's list no longer has it (`#keepGrants`, DEC-018): also
+	 * for a grant the relay does not know (expired), which client 0.16.1
+	 * drops from the list when relay 0.10.2 says so. A relay before 0.10.2
+	 * names no grant in its `unknown_id`: the library rejects, the app stays
+	 * listed, and only then does the worker forget it and say why.
 	 */
 	#revoke(grantId: string): void {
 		const mcp = this.#mcp;
@@ -823,11 +859,22 @@ export class Connection {
 		this.#changed();
 		this.#revokes = this.#revokes.then(() => {
 			if (mcp !== this.#mcp) return;
-			const sent = mcp.state === "connected";
 			return mcp.revoke(grantId).catch((error: unknown) => {
 				if (mcp !== this.#mcp) return;
-				this.#revokeProblems.set(grantId, { error, sent });
-				if ((error as { code?: unknown }).code === "unknown_id")
+				const failure: RevokeFailure = {
+					error,
+					state: mcp.state,
+					unattributed: unattributed(error, this.#revokeTimedOut),
+				};
+				if ((error as { name?: unknown }).name === "TimeoutError")
+					this.#revokeTimedOut = true;
+				this.#revokeProblems.set(grantId, failure);
+				// A relay before 0.10.2: the queue makes it this grant's answer,
+				// unless an earlier one's may still come.
+				if (
+					(error as { code?: unknown }).code === "unknown_id" &&
+					!failure.unattributed
+				)
 					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
 				this.#changed();
 			});
@@ -896,11 +943,7 @@ export class Connection {
 				const problem =
 					failed === undefined
 						? undefined
-						: revokeProblem(
-								failed.error,
-								g.client.name || g.client.host,
-								failed.sent,
-							);
+						: revokeProblem(failed, g.client.name || g.client.host);
 				return {
 					grantId: g.grantId,
 					name: g.client.name,
