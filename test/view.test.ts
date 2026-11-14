@@ -651,6 +651,59 @@ describe("Verify (DEC-023)", () => {
 		expect(window.document.querySelector(".all-done")).toBeNull();
 	});
 
+	test("the status block and Show marks sit in the marks' section, under its heading", () => {
+		const c = fourMarks();
+		render(caseState(c), noActions);
+		const marks = window.document.querySelector("section.marks");
+		const bar = marks?.querySelector(".marks-bar");
+		// The chips filter this list: straight under its bar, above the marks.
+		const holder = el("case-status").parentElement;
+		expect(holder?.parentElement).toBe(marks as never);
+		expect(holder?.previousElementSibling).toBe(bar as never);
+		expect(
+			window.document.querySelector(".case-header #case-status"),
+		).toBeNull();
+		// Show marks is what is done with the list: in its bar.
+		expect(bar?.contains(el("load-case") as never)).toBe(true);
+		expect(window.document.querySelector("#this-tab #load-case")).toBeNull();
+		// A redraw of the list keeps both, and the focus on the button pressed.
+		el("load-case").focus();
+		render(
+			caseState({ ...c, updatedAt: "2026-11-14T10:00:00.000Z" }),
+			noActions,
+		);
+		expect(window.document.querySelectorAll("#load-case").length).toBe(1);
+		expect(window.document.querySelectorAll("#case-status").length).toBe(1);
+		expect(
+			window.document
+				.querySelector("section.marks .marks-bar")
+				?.contains(el("load-case") as never),
+		).toBe(true);
+		expect(window.document.activeElement?.id).toBe("load-case");
+		// A chip drawn anew after its click has the focus still.
+		(
+			window.document.querySelector(
+				'#case-status .chip[data-group="open"]',
+			) as unknown as HTMLElement
+		).focus();
+		render(
+			caseState(c, (s) => {
+				s.markFilter = { caseId: c.id, group: "open", upTo: 4 };
+			}),
+			noActions,
+		);
+		const at = window.document.activeElement;
+		expect(at?.getAttribute("data-group")).toBe("open");
+		expect(at?.getAttribute("aria-pressed")).toBe("true");
+		// A case without marks: no block, no gap for one.
+		render(caseState({ ...c, id: "c_none", annotations: [] }), noActions);
+		expect(window.document.querySelector("#case-status")).toBeNull();
+		expect(
+			window.document.querySelector<HTMLElement>("section.marks .case-status")
+				?.hidden,
+		).toBe(true);
+	});
+
 	test("a chip filters the list, a second click or Show all shows all", () => {
 		const c = fourMarks();
 		const filters: unknown[] = [];
@@ -1040,9 +1093,11 @@ describe("Load and Hide", () => {
 		});
 		render(caseState(c), actions);
 		expect(el("load-case").textContent).toBe("Show marks");
-		// A quiet button: Add marks is the case's one primary (DEC-023).
+		// A button with an edge, so it is seen, but not the case's primary:
+		// that is Add marks (DEC-023).
 		expect(el("load-case").classList.contains("primary")).toBe(false);
-		expect(el("load-case").classList.contains("quiet")).toBe(true);
+		expect(el("load-case").classList.contains("quiet")).toBe(false);
+		expect(el("load-case").classList.contains("link")).toBe(false);
 		el("load-case").click();
 		const loadedOn = (front: number) =>
 			caseState(c, (s) => {
@@ -2213,7 +2268,22 @@ describe("the case view's actions and this tab (DEC-023)", () => {
 	});
 
 	test("drawing, hidden, found: each says so, Hide or Show where it applies", () => {
-		const c = sampleCase("c_tabline");
+		// With a mark: a case without one has nothing to show or hide.
+		const c: Case = {
+			...sampleCase("c_tabline"),
+			annotations: [
+				{
+					id: "a1",
+					number: 1,
+					shot: "s1",
+					comment: "Here",
+					author: "user",
+					shape: { kind: "note", at: { x: 1, y: 1 } },
+					crop: "crops/a1.webp",
+					element: null,
+				},
+			],
+		};
 		render(
 			caseState(c, (s) => {
 				s.tab = tab;
@@ -2233,6 +2303,16 @@ describe("the case view's actions and this tab (DEC-023)", () => {
 		expect(line()).toBe("Marks are hidden on this tab.");
 		expect(el("load-case").hidden).toBe(false);
 		expect(el("load-case").textContent).toBe("Show marks");
+		// A case without marks has nothing to show or hide: no button, also
+		// while the toolbar adds to it.
+		const empty = { ...c, id: "c_empty", annotations: [] };
+		render(
+			caseState(empty, (s) => {
+				s.tab = tab;
+			}),
+			noActions,
+		);
+		expect(el("load-case").hidden).toBe(true);
 		render(
 			caseState(c, (s) => {
 				s.tab = tab;

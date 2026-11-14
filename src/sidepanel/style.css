@@ -1073,6 +1073,12 @@ ul.cases .title {
 	gap: var(--s2);
 }
 
+/* Under the marks' heading: the chips filter the list below. */
+.marks > .case-status {
+	padding: var(--s3) var(--s4);
+	border-bottom: 1px solid var(--rule);
+}
+
 .chips {
 	display: flex;
 	flex-wrap: wrap;
@@ -1117,7 +1123,7 @@ ul.cases .title {
 	flex: 1;
 }
 
-/* What the tab in front shows of the case: a line and a quiet button. */
+/* What the tab in front shows of the case, in words. */
 .this-tab {
 	display: grid;
 	justify-items: start;
@@ -1127,6 +1133,11 @@ ul.cases .title {
 .this-tab > * {
 	margin: 0;
 	min-width: 0;
+}
+
+/* Nothing to say about this tab: no empty row in the header. */
+.this-tab:not(:has(> :not([hidden]))) {
+	display: none;
 }
 
 .this-tab > .notice {
@@ -1223,6 +1234,16 @@ ul.cases .title {
 
 .marks-bar h2 {
 	margin: 0;
+}
+
+/* Expand all, then Show marks: what is done with the whole list. */
+.marks-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 2px var(--s3);
+	margin-inline-start: auto;
 }
 
 /* "Showing 2 of 5 marks. Show all": the filter of a chip is on. */
@@ -1365,10 +1386,16 @@ ol.annotations {
 	background: none;
 }
 
-.mark-toggle:hover .comment {
-	text-decoration: underline;
-	text-decoration-color: var(--edge);
-	text-underline-offset: 3px;
+/*
+ * The whole head answers the pointer, as one block: an underline made each
+ * line of a comment look like a link of its own (the owner).
+ */
+.mark-head:has(.mark-toggle:hover) {
+	background: var(--wash);
+}
+
+.mark-toggle:hover .chevron {
+	border-color: var(--ink);
 }
 
 .mark-toggle:focus-visible {

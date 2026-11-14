@@ -854,7 +854,8 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		about,
 		madeAt,
 		madeOn,
-		// Holds the status block (#case-status), drawn in renderCase.
+		// Holds the status block (#case-status), drawn in renderCase. It sits
+		// in the marks' section, under its heading: the chips filter that list.
 		status: h("div", { class: "case-status" }),
 		statusKey: "",
 		size: h(
@@ -891,9 +892,11 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			),
 		),
 		tabLine: h("p", { class: "tab-line", id: "tab-line", hidden: true }),
+		// A button with an edge, not a link: it was overlooked (the owner). It
+		// sits in the marks' bar: the marks are what it shows.
 		loadButton: h("button", {
 			type: "button",
-			class: "quiet",
+			class: "small",
 			id: "load-case",
 			onclick: () =>
 				created.loadedHere
@@ -954,7 +957,6 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		created.rename,
 		created.meta,
 		created.origin,
-		created.status,
 		h(
 			"div",
 			{ class: "row case-actions" },
@@ -982,7 +984,6 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			created.tabLine,
 			created.hint,
 			created.size,
-			created.loadButton,
 		),
 		// What the whole case comes to: the case's, not a mark's. Stored as
 		// verdict, its name before (DEC-019).
@@ -1630,7 +1631,8 @@ function renderCase(state: PanelState, actions: Actions): void {
 		state.drawing !== undefined &&
 		state.drawing === state.tab?.id &&
 		here === undefined;
-	p.loadButton.hidden = !ok || none || looking;
+	// A case without marks has nothing to show or hide.
+	p.loadButton.hidden = !ok || none || looking || c.annotations.length === 0;
 	p.loadButton.textContent = p.loadedHere ? "Hide marks" : "Show marks";
 	p.loadButton.title = p.loadedHere
 		? "Take this case's marks off the page in this tab; they stay off on this tab until you show them again"
@@ -1664,12 +1666,20 @@ function renderCase(state: PanelState, actions: Actions): void {
 		c.annotations.every((a) => a.number <= f.upTo)
 			? f.group
 			: undefined;
-	// The status block: in the header, above the actions (the spec's place).
+	// The status block: under the marks' heading, where its chips filter the
+	// list (the owner; DEC-023 had it in the header).
 	const statusKey = JSON.stringify([filter ?? null, caseCounts(c)]);
 	if (statusKey !== p.statusKey) {
 		p.statusKey = statusKey;
+		// The chip that was clicked is drawn anew: the focus stays on it.
+		const at = document.activeElement as HTMLElement | null;
+		const group =
+			at !== null && p.status.contains(at) ? at.dataset["group"] : undefined;
 		const block = statusBlock(c, filter, actions);
 		p.status.replaceChildren(...(block === null ? [] : [block]));
+		p.status.hidden = block === null;
+		if (group !== undefined)
+			block?.querySelector<HTMLElement>(`[data-group="${group}"]`)?.focus();
 	}
 
 	const images = state.images?.caseId === c.id ? state.images : undefined;
@@ -1729,6 +1739,14 @@ function renderCase(state: PanelState, actions: Actions): void {
 		};
 		syncToggleAll();
 		toggleAll.hidden = items.length === 0;
+		// The button and the chips move into the new section: a move takes the
+		// focus off them (Show marks was just pressed), so it is given back.
+		const focused = document.activeElement as HTMLElement | null;
+		const kept =
+			focused !== null &&
+			(focused === p.loadButton || p.status.contains(focused))
+				? focused
+				: undefined;
 		const marks = h(
 			"section",
 			{ class: "marks", "aria-labelledby": "marks-heading" },
@@ -1741,8 +1759,10 @@ function renderCase(state: PanelState, actions: Actions): void {
 					"Marks ",
 					h("span", { class: "count" }, String(c.annotations.length)),
 				),
-				toggleAll,
+				// Kept across redraws, like the status block under the bar.
+				h("div", { class: "marks-tools" }, toggleAll, p.loadButton),
 			),
+			p.status,
 			filter === undefined
 				? null
 				: h(
@@ -1772,6 +1792,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		);
 		p.marks.replaceWith(marks);
 		p.marks = marks;
+		if (kept !== undefined && !kept.hidden) kept.focus();
 		p.marksKey = marksKey;
 	}
 
