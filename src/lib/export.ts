@@ -254,7 +254,7 @@ async function readCaseJson(
 	).get(`${folder}case.json`);
 	if (json === undefined)
 		throw new CaseError(
-			"This is not an Sitegloss export: case.json is missing.",
+			"This is not a Sitegloss export: case.json is missing.",
 		);
 	let parsed: unknown;
 	try {
@@ -363,7 +363,7 @@ export async function readExports(
 	);
 	if (folders.length === 0)
 		throw new CaseError(
-			"This is not an Sitegloss export: case.json is missing.",
+			"This is not a Sitegloss export: case.json is missing.",
 		);
 	const tooMuch = new CaseError(
 		`The cases in the file unpack to more than ${mb(limits.maxAllBytes)}.`,
