@@ -602,7 +602,15 @@ class FakeDownloads implements DownloadsApi {
 	async last() {
 		return this.#last;
 	}
+	/** Set: the next `setLast` calls it and never returns, as a worker stopped there. */
+	stopAtSetLast: (() => void) | undefined;
 	async setLast(id: number) {
+		const stop = this.stopAtSetLast;
+		if (stop !== undefined) {
+			this.stopAtSetLast = undefined;
+			stop();
+			return new Promise<void>(() => undefined);
+		}
 		this.#last = id;
 	}
 	async end() {
@@ -711,6 +719,34 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(store.current?.state).toBe("synced");
 		expect(await api.pending()).toBeUndefined();
 		expect(await api.last()).toBe(id);
+	});
+
+	test("a worker stopped after its download ended, before its entry was kept: settled, one entry left, not written again", async () => {
+		const c = await add("c_1", "Login");
+		await sync.request();
+		const changed = { ...c, updatedAt: "2026-11-12T09:00:00Z" };
+		await putCase(cases, changed);
+		// The worker stops while it keeps the new entry: neither the entry
+		// before is erased nor the case recorded.
+		const stopped = new Promise<void>((r) => {
+			api.stopAtSetLast = r;
+		});
+		void sync.request();
+		await stopped;
+		const fresh = new Sync({
+			cases,
+			store,
+			now: () => NOW,
+			downloads: downloadsTarget(api),
+		});
+		await fresh.request();
+		expect(api.downloads).toHaveLength(2);
+		expect([...api.list.keys()]).toEqual([2]);
+		expect(await api.last()).toBe(2);
+		expect(await api.pending()).toBeUndefined();
+		expect(store.records.get("downloads")?.byCase["c_1"]?.version).toBe(
+			versionOf(changed),
+		);
 	});
 
 	test("one that was interrupted meanwhile: its entry goes, and the case is written again", async () => {
