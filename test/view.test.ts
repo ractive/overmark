@@ -2172,6 +2172,146 @@ describe("the title is renamed where it is shown (DEC-026)", () => {
 	});
 });
 
+describe("a case's link (DEC-028)", () => {
+	const TICKET = "https://tickets.example.com/browse/ABC-123?focused=1";
+	const shown = (id: string) => !el(id).hidden;
+	const open = () => el<HTMLAnchorElement>("case-link-open");
+	const edit = () => el<HTMLButtonElement>("case-link-edit");
+
+	test("no link: only a quiet Add a link, under the meta line", () => {
+		const c = sampleCase("c_link_none");
+		const called: string[] = [];
+		render(
+			caseState(c),
+			actionsWith({ startLink: (x) => void called.push(x.id) }),
+		);
+		expect(el("case-link").previousElementSibling?.className).toContain(
+			"case-meta",
+		);
+		expect(shown("case-link-open")).toBe(false);
+		expect(edit().textContent).toBe("Add a link");
+		expect(edit().className).toContain("link");
+		expect(shown("case-link-form")).toBe(false);
+		edit().click();
+		expect(called).toEqual(["c_link_none"]);
+	});
+
+	test("a link: an anchor to it in a new tab, its short text, and Edit", () => {
+		const c = { ...sampleCase("c_link_one"), link: TICKET };
+		render(caseState(c), noActions);
+		expect(shown("case-link-open")).toBe(true);
+		expect(open().getAttribute("href")).toBe(TICKET);
+		expect(open().getAttribute("target")).toBe("_blank");
+		expect(open().getAttribute("rel")).toBe("noopener noreferrer");
+		expect(open().textContent).toBe("tickets.example.com/browse/ABC-123");
+		expect(open().title).toBe(TICKET);
+		expect(edit().textContent).toBe("Edit");
+		// Removed again: Add a link, no address left in the anchor.
+		render(caseState({ ...sampleCase("c_link_one") }), noActions);
+		expect(shown("case-link-open")).toBe(false);
+		expect(open().hasAttribute("href")).toBe(false);
+		expect(edit().textContent).toBe("Add a link");
+	});
+
+	test("editing: the field with the stored link; Enter and Save save, Escape and Cancel cancel", () => {
+		const c = { ...sampleCase("c_link_keys"), link: TICKET };
+		const called: string[] = [];
+		render(
+			caseState(c, (s) => {
+				s.linking = { caseId: c.id, text: TICKET };
+			}),
+			actionsWith({
+				saveLink: (_c, text) => void called.push(`save ${text}`),
+				cancelLink: () => void called.push("cancel"),
+				typeLink: (text) => void called.push(`type ${text}`),
+			}),
+		);
+		const field = el<HTMLInputElement>("case-link-field");
+		expect(shown("case-link-form")).toBe(true);
+		expect(shown("case-link-open")).toBe(false);
+		expect(shown("case-link-edit")).toBe(false);
+		expect(field.value).toBe(TICKET);
+		expect(field.type).toBe("url");
+		expect(field.getAttribute("aria-label")).toBe("Link of this case");
+		expect(field.placeholder).toBe(
+			"https://… a ticket, a design, a pull request",
+		);
+		expect(shown("case-link-hint")).toBe(false);
+		field.value = "https://example.com/pr/7";
+		field.dispatchEvent(new window.Event("input") as unknown as Event);
+		const key = (k: string, more: Record<string, unknown> = {}) =>
+			field.dispatchEvent(
+				new window.KeyboardEvent("keydown", {
+					key: k,
+					cancelable: true,
+					...more,
+				}) as unknown as Event,
+			);
+		// The Enter that ends an IME composition is the composition's.
+		key("Enter", { isComposing: true });
+		key("Enter", { keyCode: 229 });
+		key("Enter");
+		key("Escape");
+		el<HTMLButtonElement>("case-link-save").click();
+		el<HTMLButtonElement>("case-link-cancel").click();
+		expect(called).toEqual([
+			"type https://example.com/pr/7",
+			"save https://example.com/pr/7",
+			"cancel",
+			"save https://example.com/pr/7",
+			"cancel",
+		]);
+	});
+
+	test("a text that is no link, or a save that failed, says why under the field", () => {
+		const c = sampleCase("c_link_error");
+		render(
+			caseState(c, (s) => {
+				s.linking = {
+					caseId: c.id,
+					text: "ABC-123",
+					error: "A link starts with https:// or http://",
+				};
+			}),
+			noActions,
+		);
+		expect(shown("case-link-hint")).toBe(true);
+		expect(el("case-link-hint").textContent).toBe(
+			"A link starts with https:// or http://",
+		);
+		expect(el("case-link-field").getAttribute("aria-invalid")).toBe("true");
+	});
+
+	test("done: the link shows, Edit has the focus again", async () => {
+		const c = sampleCase("c_link_done");
+		render(
+			caseState(c, (s) => {
+				s.linking = { caseId: c.id, text: "" };
+			}),
+			noActions,
+		);
+		await Promise.resolve();
+		expect(window.document.activeElement?.id).toBe("case-link-field");
+		render(caseState({ ...c, link: TICKET }), noActions);
+		await Promise.resolve();
+		expect(shown("case-link-form")).toBe(false);
+		expect(open().getAttribute("href")).toBe(TICKET);
+		expect(window.document.activeElement?.id).toBe("case-link-edit");
+	});
+
+	test("another case's link form is not this one's", () => {
+		const c = sampleCase("c_link_other");
+		render(
+			caseState(c, (s) => {
+				s.linking = { caseId: "c_other", text: TICKET };
+			}),
+			noActions,
+		);
+		expect(shown("case-link-form")).toBe(false);
+		expect(shown("case-link-edit")).toBe(true);
+	});
+});
+
 describe("the top bar and Settings (DEC-023)", () => {
 	test("Home: no back button; a case: All cases with a chevron, which closes it", () => {
 		const called: string[] = [];

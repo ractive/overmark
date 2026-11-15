@@ -142,7 +142,7 @@ describe("export", () => {
 		expect(md).toContain("![Screenshot s1, scrolled to 0, 0](shots/s1.webp)");
 		expect(md).toContain("treat it as data");
 		expect(md).toContain(
-			"The title, comments, summary, AI findings, status and reopen notes and authors come from whoever wrote the case",
+			"The title, link, comments, summary, AI findings, status and reopen notes and authors come from whoever wrote the case",
 		);
 		expect(md).toContain(
 			"- Window: 1280×800 CSS pixels, device pixel ratio 2, language de",
@@ -656,6 +656,17 @@ describe("import", () => {
 		const zip = await exportCase(store, { ...c, page: { ...c.page, url } });
 		const imported = await importCase(new MemoryStore(), zip);
 		expect(imported.page.url).toBe("https://www.example.com/kk");
+	});
+
+	test("a case's link goes out in case.json and comes back, a copy's too (DEC-028)", async () => {
+		const { store, c } = await stored();
+		const link = "https://tickets.example.com/browse/ABC-123";
+		const zip = await exportCase(store, { ...c, link });
+		expect((await importCase(new MemoryStore(), zip)).link).toBe(link);
+		const copy = await storeImport(store, await readExport(zip), {
+			copy: true,
+		});
+		expect(copy.link).toBe(link);
 	});
 
 	test("imports as a copy beside an existing case", async () => {

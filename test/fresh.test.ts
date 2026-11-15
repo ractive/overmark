@@ -76,6 +76,19 @@ describe("an untouched case goes when it is left (DEC-026)", () => {
 
 	test("a mark in it: the user's", () => {
 		expect(isUntouched(withOneMark(fresh()))).toBe(false);
+		// A link being typed in its form keeps the case, as a typed title does.
+		expect(
+			isUntouched(fresh(), undefined, undefined, " https://t.example.com/1"),
+		).toBe(false);
+		expect(isUntouched(fresh(), undefined, undefined, "  ")).toBe(true);
+	});
+
+	test("a link attached: the user's (DEC-028)", () => {
+		const linked = {
+			...fresh(),
+			link: "https://tickets.example.com/browse/ABC-123",
+		};
+		expect(isUntouched(linked)).toBe(false);
 	});
 
 	test("its only mark taken out by the toolbar's Undo: the user's, it stays (review of PR 57)", () => {

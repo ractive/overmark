@@ -150,6 +150,11 @@ export interface PanelState {
 	 */
 	renaming: { caseId: string; text: string; error?: string } | undefined;
 	/**
+	 * The open case's link being added or changed (DEC-028): the text typed,
+	 * and why the last save failed or the text is no link.
+	 */
+	linking: { caseId: string; text: string; error?: string } | undefined;
+	/**
 	 * The status chip pressed: the open case's list shows only those marks,
 	 * while there are any and no mark above `upTo` (the highest number when
 	 * it was pressed) was added.
@@ -246,6 +251,7 @@ export const initialState = (): PanelState => ({
 	deleteArmedAt: undefined,
 	markEdit: undefined,
 	renaming: undefined,
+	linking: undefined,
 	markFilter: undefined,
 	picked: undefined,
 	markDeleteArmed: undefined,

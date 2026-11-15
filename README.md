@@ -1,7 +1,7 @@
 # Overmark
 
-Annotate any web page, load the annotations onto another build of the page, and talk
-them through with your AI app.
+Mark what is wrong on a web page, open the marks in another environment to fix it, and
+talk them through with your AI app.
 
 A PO marks an issue on the live site: picks an element, draws a box, an arrow or a
 freehand mark, writes a comment, and saves it all as a named case with annotated
@@ -40,7 +40,9 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    in the side panel and shows the toolbar on the page: Element (click one), Box, Arrow,
    Pen and Note, each followed by a comment. Overmark takes screenshots with the marks
    on them and records each marked element's details. "Rename" beside the case's title
-   changes it (Enter saves, Escape cancels). There is no save step: everything is
+   changes it (Enter saves, Escape cancels). "Add a link" under it attaches a link to
+   the case, a ticket or a design, which then opens with a click ("Edit" changes it,
+   an empty field removes it). There is no save step: everything is
    stored as you do it. A case you leave without a single mark, as it was made, is
    deleted again.
 3. The toolbar adds to a case only while that case is open in the side panel: after
