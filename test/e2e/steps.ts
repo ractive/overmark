@@ -210,6 +210,7 @@ export async function showToolbar(
 	tabId: number,
 ): Promise<string> {
 	await page.activate();
+	await besideSidePanel(h, page, tabId);
 	const info = await h.control.eval<PageInfo>(
 		toTab(tabId, { type: "page:info" }),
 	);
@@ -223,6 +224,43 @@ export async function showToolbar(
 	);
 	await page.waitFor(shadow('[data-action="tool-box"]'));
 	return c.id;
+}
+
+/**
+ * Until the page has the room its window's side panel leaves it, 3 s at
+ * most. Chrome lays out a tab that comes to the front at the window's full
+ * width and gives the panel its room only a moment later (0.7 s after a new
+ * tab, seen here): a toolbar shown meanwhile sits in the middle of the wider
+ * page and moves when the page narrows, so a click aimed at one of its
+ * buttons presses beside it. (`tabSettled` in ai.ts, after the panel opens,
+ * waits for three equal reads; a new tab keeps its full width longer.)
+ */
+async function besideSidePanel(
+	h: Harness,
+	page: Page,
+	tabId: number,
+): Promise<void> {
+	// The window's width, and whether the extension's side panel is open in
+	// it, asked of its view: runtime.getContexts gives a panel no window.
+	const win = await h.control.eval<{ width: number; panel: boolean }>(
+		`chrome.tabs.get(${tabId}).then(async (t) => {
+			const w = await chrome.windows.get(t.windowId);
+			const panels = await Promise.all(chrome.extension.getViews().map(async (v) => {
+				if (v === window || v.location.pathname !== "/sidepanel/index.html") return false;
+				// A tab showing the panel's page is no side panel.
+				if ((await v.chrome.tabs.getCurrent()) !== undefined) return false;
+				return (await v.chrome.windows.getCurrent()).id === w.id;
+			}));
+			return { width: w.width, panel: panels.includes(true) };
+		})`,
+	);
+	if (!win.panel) return;
+	// A panel is at least 320 px wide.
+	await until(
+		() => page.eval<number>("innerWidth"),
+		(width) => win.width - width >= 200,
+		3000,
+	).catch(() => undefined);
 }
 
 /**
