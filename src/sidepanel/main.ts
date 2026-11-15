@@ -627,8 +627,10 @@ async function adopt(): Promise<void> {
 		if (!now?.visible || now.target?.caseId !== caseId) return;
 		if (state.view.kind !== "home" || (await activeTab())?.id !== tabId) return;
 		// Its case was deleted meanwhile (elsewhere, the tab not in front): the
-		// toolbar ends, as clearDeleted ends it (DEC-026).
-		if (c === undefined) return await endDeleted(caseId, undefined);
+		// toolbar ends, as clearDeleted ends it (DEC-026), and with the title
+		// the panel last knew: whichever of the two ends it says the same.
+		if (c === undefined)
+			return await endDeleted(caseId, lastTitles.get(caseId));
 		toolbarOn.add(tabId);
 		update((s) => {
 			if (s.tab?.id === tabId) s.overlay = now;
@@ -2018,20 +2020,34 @@ byId<HTMLButtonElement>("import-dismiss").addEventListener("click", () =>
 
 /** A tool, or another panel, changed or deleted a case: show it. */
 function caseChanged(caseId: string): void {
-	// Its title, as the panel knew it, in case it is gone.
+	// Its title, as the panel knew it, in case it is gone. Kept: the panel is
+	// on Home before the read below is back, and a toolbar adding to the case
+	// is then ended by `adopt`, which has no case to read a title from.
 	const title =
-		state.current?.id === caseId
+		(state.current?.id === caseId
 			? state.current.title
-			: state.cases.find((c) => c.id === caseId)?.title;
+			: state.cases.find((c) => c.id === caseId)?.title) ??
+		lastTitles.get(caseId);
+	if (title !== undefined) lastTitles.set(caseId, title);
 	if (state.view.kind === "case" && state.view.id === caseId)
 		void refreshCase();
 	void refreshCases();
-	void store.getCase(caseId).then((c) => {
-		if (c === undefined) return clearDeleted(caseId, title);
-		// A mark settled or deleted elsewhere (an AI app, another window).
-		return redrawLoaded(c);
-	});
+	void store
+		.getCase(caseId)
+		.then((c) =>
+			c === undefined
+				? clearDeleted(caseId, title)
+				: // A mark settled or deleted elsewhere (an AI app, another window).
+					redrawLoaded(c),
+		)
+		.finally(() => lastTitles.delete(caseId));
 }
+
+/**
+ * The titles of cases that just changed, until it is known whether they are
+ * gone: what a deleted case was called, for the sentence about its loss.
+ */
+const lastTitles = new Map<string, string>();
 
 /**
  * The case changed while its marks are on a page: they follow, and the
