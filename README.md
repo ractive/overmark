@@ -1,4 +1,4 @@
-# Overmark
+# Sitegloss
 
 Mark what is wrong on a web page, open the marks in another environment to fix it, and
 talk them through with your AI app.
@@ -22,23 +22,23 @@ bun run build      # builds dist/ (extension ID fphhchhlgklidhnodoleiebmdhnfdadg
 ```
 
 In Chrome, open `chrome://extensions`, turn on Developer mode, click "Load unpacked" and
-choose `dist/`. Click the Overmark icon on a tab (or press Alt+Shift+O) to open the side
+choose `dist/`. Click the Sitegloss icon on a tab (or press Alt+Shift+O) to open the side
 panel there.
 
-`bun run zip` packs `overmark-<version>.zip` for sharing; unzip it and load the folder
+`bun run zip` packs `sitegloss-<version>.zip` for sharing; unzip it and load the folder
 the same way.
 
-Without building: every CI run has the zip as the artifact `overmark-unpacked` on its
+Without building: every CI run has the zip as the artifact `sitegloss-unpacked` on its
 page (Actions → the run → Artifacts), and every release has it under Releases. Each also
-has `overmark-store`, the package for the Chrome Web Store; publishing it is described
+has `sitegloss-store`, the package for the Chrome Web Store; publishing it is described
 in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
 ## Use
 
-1. Click the Overmark icon on a tab. The side panel opens there.
+1. Click the Sitegloss icon on a tab. The side panel opens there.
 2. "New case for this page" creates a case at once, named after the page's title, opens it
    in the side panel and shows the toolbar on the page: Element (click one), Box, Arrow,
-   Pen and Note, each followed by a comment. Overmark takes screenshots with the marks
+   Pen and Note, each followed by a comment. Sitegloss takes screenshots with the marks
    on them and records each marked element's details. "Rename" beside the case's title
    changes it (Enter saves, Escape cancels). "Add a link" under it attaches a link to
    the case, a ticket or a design, which then opens with a click ("Edit" changes it,
@@ -71,15 +71,15 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    "Hide marks" takes them off, and they stay off on that tab, also through a reload,
    until "Show marks" or the case is opened again. When none of the case's marks is
    found, the case says it is probably for another page and offers to open the case's
-   page. On a tab Overmark may not run on yet (after reloading the extension, say),
+   page. On a tab Sitegloss may not run on yet (after reloading the extension, say),
    Chrome hides the address, and the side panel says so with a warning: click the
-   Overmark icon there (or press Alt+Shift+O) and the marks are drawn, or press "Allow
+   Sitegloss icon there (or press Alt+Shift+O) and the marks are drawn, or press "Allow
    on all sites" in that notice; until then what needs the page is off. The case's
-   address opens its page in a new tab (Chrome asks whether Overmark may run on that
+   address opens its page in a new tab (Chrome asks whether Sitegloss may run on that
    site from then on) and draws the marks there (marks a script draws late are looked
    for again for a few seconds), and when the
    tab's size is not the one the marks were made at, Match size resizes the window to it
-   (as far as the screen allows; page zoom is counted). Overmark looks for each mark's element and draws the mark on it again,
+   (as far as the screen allows; page zoom is counted). Sitegloss looks for each mark's element and draws the mark on it again,
    moved and scaled with the element: solid when found, dashed when probable or unsure.
    Its colour is its status: the pink of the screenshot while it is open, indigo when it
    is fixed and to verify, green once verified, grey when closed without a fix (verified
@@ -107,35 +107,35 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    Delete twice).
 6. The case's "Summary for the developer" says what should change overall, as agreed;
    whoever loads the case sees it first. You or the AI app write it.
-7. Export writes `<title>.overmark.zip` (`case.json`, `case.md` and the images) to pass
+7. Export writes `<title>.sitegloss.zip` (`case.json`, `case.md` and the images) to pass
    on; "Import a case…" reads one back, opens it and draws its marks on the tab in
    front. An AI app can read `case.md` and the images without the extension.
    "Export all cases", next to "Import a case…", writes every case into one
-   `overmark-cases-<date>.overmark.zip`, a folder per case laid out as a single export;
+   `sitegloss-cases-<date>.sitegloss.zip`, a folder per case laid out as a single export;
    "Import a case…" reads that too, case by case, asking about each case that is here
    already (Replace it, Keep both or Skip). At the first Export, Chrome asks whether
-   Overmark may manage your downloads (an optional permission): with a yes the side
+   Sitegloss may manage your downloads (an optional permission): with a yes the side
    panel shows where the file went, with Copy (its full path) and Show in folder; with
    a no the file is saved as before and Chrome asks again only at the next Export.
 8. Sync, under the case list, keeps a copy of every case as a file: each case as its own
-   file, the same `<title>.overmark.zip` as Export writes, and again whenever the case
-   changes, also when an AI app changed it. The files are a mirror: Overmark never reads
+   file, the same `<title>.sitegloss.zip` as Export writes, and again whenever the case
+   changes, also when an AI app changed it. The files are a mirror: Sitegloss never reads
    them, and a deleted case keeps its file, so "Import a case…" can bring it back. Two
    cases of the same title get `-2`, `-3`. Where to:
-   - **Sync to Downloads** (the default) writes to a folder `Overmark` in Chrome's
-     downloads folder. Chrome asks once whether Overmark may manage your downloads; then
+   - **Sync to Downloads** (the default) writes to a folder `Sitegloss` in Chrome's
+     downloads folder. Chrome asks once whether Sitegloss may manage your downloads; then
      it writes with the side panel closed too, also after a browser restart. Each write
-     shows in Chrome's download list; Overmark keeps only its newest entry there, for
+     shows in Chrome's download list; Sitegloss keeps only its newest entry there, for
      "Show in folder". A case keeps the file name it was first written under, also after
      a rename (nothing can be removed there, so a new name would leave the old file). Files deleted there are written again at their case's next change, or
      all at once with Change… and Sync to Downloads. The folder is one for every Chrome
      profile and browser on the computer: two of them syncing to Downloads write into the
-     same `Overmark` folder, and a case of the same title in each overwrites the other's
+     same `Sitegloss` folder, and a case of the same title in each overwrites the other's
      file; give each its own folder with Choose a folder…. With Chrome's "Ask where to save each file before downloading" on, Chrome
      would ask at every write: the sync then says so and fails until it is off.
    - **Choose a folder…** writes to any folder (one in iCloud Drive or Dropbox, say). A
-     renamed case's old file goes there, and a file Overmark did not write is never
-     overwritten. Chrome lets Overmark write to it only while its side panel is open, and
+     renamed case's old file goes there, and a file Sitegloss did not write is never
+     overwritten. Chrome lets Sitegloss write to it only while its side panel is open, and
      asks for the folder again after the side panel was closed or the browser restarted.
    The side panel shows where it syncs with when it last synced, "Change…" and "Stop
    syncing" (the files stay). When the sync is paused (the folder needs your OK again, or
@@ -148,10 +148,10 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
 ## With an AI app
 
-Overmark offers the cases to an AI app (Claude Code, Claude, ChatGPT, Codex) through a
+Sitegloss offers the cases to an AI app (Claude Code, Claude, ChatGPT, Codex) through a
 [tab-mcp](https://github.com/ractive/tab-mcp) relay. The connection is held by the
 extension's background service worker, so it stays while the side panel is closed; the
-side panel shows it and sets it up. Overmark uses the hosted relay
+side panel shows it and sets it up. Sitegloss uses the hosted relay
 `https://tab-mcp.ractive.ch` unless you enter another one in the side panel. It allows
 only builds with the fixed key in `manifest-key.txt` (ID
 `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`); the store package has none, so
@@ -182,7 +182,7 @@ and URLs without their query string, fragment or user name and password.
 
 ### A relay on your computer, for Claude Code
 
-The relay must allow Overmark's origin, `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`.
+The relay must allow Sitegloss's origin, `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`.
 Relay 0.7.0 and later take it as a site:
 
 ```sh
@@ -190,7 +190,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   -e NODE_ENV=development \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_STORE=memory \
-  -e TAB_MCP_SITES='[{"origin":"chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg","name":"Overmark"}]' \
+  -e TAB_MCP_SITES='[{"origin":"chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg","name":"Sitegloss"}]' \
   ractive/tab-mcp:0.10.3
 ```
 
@@ -203,7 +203,7 @@ command with its own Copy, and a link to the step-by-step guide. Add the address
 Claude Code, then run `/mcp` there and choose Authenticate:
 
 ```sh
-claude mcp add --transport http overmark <address>
+claude mcp add --transport http sitegloss <address>
 ```
 
 Your browser opens the relay's page; type the code from the side panel. The connection
@@ -225,9 +225,9 @@ opens), does so for every tool that changes something, deleting a case too. The 
 across browser restarts. An AI app can be steered by text on a page it reads, so allow
 always only what you would not need to check.
 
-Overmark needs Chrome 116 or later. The connection's settings and its address secret
+Sitegloss needs Chrome 116 or later. The connection's settings and its address secret
 are in a database of the extension's own (IndexedDB in the extension's origin), which
-only its background service worker uses and the scripts Overmark runs in web pages
+only its background service worker uses and the scripts Sitegloss runs in web pages
 cannot reach; the side panel changes them through the worker. Whether AI access is on
 until the browser closes is in Chrome's session storage, also out of those scripts'
 reach.
@@ -235,14 +235,10 @@ reach.
 Permissions for this: `alarms` wakes the service worker once a minute while AI access is
 on, so the connection comes back after a sleep; `notifications` asks the questions when
 the side panel is not in front (Chrome mentions it when installing: "Display
-notifications"). In earlier builds the connection lived in the side panel, and its
-address secret in the panel's own storage; the first time the side panel opens after the
-update, it hands the secret over, so the address an AI app has stays the same. An
-unreleased build kept the settings in the extension's local storage; Overmark deletes
-them there and does not take them over, so such a build's AI apps pair once more.
+notifications").
 
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
-relay with a public HTTPS address that allows Overmark's ID, such as the hosted one.
+relay with a public HTTPS address that allows Sitegloss's ID, such as the hosted one.
 
 ## Development
 

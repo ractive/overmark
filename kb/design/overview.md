@@ -1,8 +1,8 @@
 ---
 type: design
-title: "Overmark design"
+title: "Sitegloss design"
 description: >-
-  What Overmark is for, the workflow from a PO's annotation on prod to a dev's fix on
+  What Sitegloss is for, the workflow from a PO's annotation on prod to a dev's fix on
   localhost and the check on dev and prod, the parts of the extension, the case format,
   how an element is found again in another environment, and the tools an AI app gets through
   tab-mcp.
@@ -12,9 +12,9 @@ tags:
 timestamp: 2026-11-05T08:00:00+01:00
 ---
 
-# Overmark design
+# Sitegloss design
 
-Overmark is a Chrome (and Edge) extension for annotating any web page: pick an element,
+Sitegloss is a Chrome (and Edge) extension for annotating any web page: pick an element,
 draw boxes, arrows and freehand marks, and comment on each. The annotations are saved
 as a named **case**. A case can be loaded onto the same page in another environment (localhost,
 dev, prod), exported as a file, and read or extended by an AI app such as Claude through
@@ -23,7 +23,7 @@ a [tab-mcp](https://github.com/ractive/tab-mcp) relay.
 ## Workflow
 
 1. A PO, designer or PM sees an issue on `https://www.example.com/…`, clicks the
-   Overmark icon, annotates the page and saves the case. They talk it through with
+   Sitegloss icon, annotates the page and saves the case. They talk it through with
    their AI app, which adds its findings to the marks and records the summary for the
    developer in the case (DEC-019).
 2. A dev opens `http://localhost:3000/…` themselves, loads the case onto that tab
@@ -32,7 +32,7 @@ a [tab-mcp](https://github.com/ractive/tab-mcp) relay.
 3. After the rollout the PO loads the case onto
    `https://dev.example.com/…`, later prod, and checks the fix.
 
-Overmark never opens or switches environments itself: a case's marks are drawn on
+Sitegloss never opens or switches environments itself: a case's marks are drawn on
 whatever tab is in front (DEC-022). Forwarding cases to a team (tickets, links) is out of scope for now.
 
 ## The screenshot is the record
@@ -42,7 +42,7 @@ change, generated ids change, content differs between environments, layouts diff
 window size, and the fix itself changes the element. So the **annotated screenshot**
 is what a case is about, and finding the element again is a best-effort extra:
 
-- When a mark is drawn, Overmark captures the visible part of the page as the user sees
+- When a mark is drawn, Sitegloss captures the visible part of the page as the user sees
   it (DEC-012); marks drawn while nothing scrolled or changed share that capture.
   Adding a mark draws it onto its copy of the screenshot and cuts its crop.
 - A case is created the moment "New case for this page" is clicked, with the page's title
@@ -92,13 +92,13 @@ look on every page and in both schemes: ink bars with a white ring, every stroke
 white casing, solid when the mark's element is found and dashed when it is unsure.
 `test/contrast.test.ts` holds every colour pair to its WCAG ratio.
 
-Storage is IndexedDB in the extension's origin (database `overmark`, stores `cases` and
+Storage is IndexedDB in the extension's origin (database `sitegloss`, stores `cases` and
 `images`), shared by the service worker and the side panel. A content script runs in
 the page's origin and never touches it directly.
 
 ### Permissions
 
-- `activeTab`: clicking the icon (or the keyboard shortcut) on a tab allows Overmark on
+- `activeTab`: clicking the icon (or the keyboard shortcut) on a tab allows Sitegloss on
   that tab until it navigates: injecting the content script and `captureVisibleTab`.
 - `scripting`, `sidePanel`.
 - `alarms`: wakes the service worker once a minute while AI access is on, so the
@@ -107,9 +107,8 @@ the page's origin and never touches it directly.
   (DEC-015). Chrome's install warning "Display notifications".
 - `storage`: `chrome.storage.session` for the toolbar's Undo and for AI access being on
   until the browser closes. The AI connection's settings and its address secret are in
-  the worker's own IndexedDB (`overmark-settings`, DEC-016), not in `chrome.storage.local`,
-  which content scripts may reach; the worker deletes what overmark#26 kept there and
-  takes none of it over.
+  the worker's own IndexedDB (`sitegloss-settings`, DEC-016), not in `chrome.storage.local`,
+  which content scripts may reach.
 - `offscreen`: the sync to Downloads makes its blob URLs in an offscreen document
   (DEC-025). No install warning.
 - `unlimitedStorage`: IndexedDB holds the only copy of the cases, so the browser must not
@@ -117,10 +116,10 @@ the page's origin and never touches it directly.
   and eviction, and it adds no install warning, which keeps DEC-003's small warning.
 - Optional `downloads`, asked in the click of Export (to show where the file went,
   DEC-020) or of "Sync to Downloads" (DEC-025), which writes every case to
-  `Overmark/` in Chrome's downloads folder through it. The test build has it at install.
+  `Sitegloss/` in Chrome's downloads folder through it. The test build has it at install.
 - Optional `<all_urls>`, asked for in the side panel ("Allow on all sites", in the options
-  in Settings and in the notice the panel shows on a tab Overmark may not run on yet, DEC-022) only
-  when the user wants Overmark without clicking the icon on each tab. `captureVisibleTab` accepts
+  in Settings and in the notice the panel shows on a tab Sitegloss may not run on yet, DEC-022) only
+  when the user wants Sitegloss without clicking the icon on each tab. `captureVisibleTab` accepts
   `activeTab` or `<all_urls>`, not a single site's permission.
 
 No JavaScript from an AI app or a server ever runs: the tools are fixed (Chrome Web Store
@@ -146,12 +145,12 @@ builds share one ID.
 
 ## Case format
 
-A case is JSON (`format: "overmark/1"`) with its images referenced by relative path. The
+A case is JSON (`format: "sitegloss/1"`) with its images referenced by relative path. A file of another format (such as `overmark/1`) is not read. The
 same JSON is stored in IndexedDB and written into the export, so an export is the case
 plus its images:
 
 ```text
-<title>.overmark.zip
+<title>.sitegloss.zip
   case.json      the case
   case.md        generated: summary, comments, AI findings, element details, image links
   shots/s1.webp  annotated screenshots
@@ -160,7 +159,7 @@ plus its images:
 
 ```json
 {
-  "format": "overmark/1",
+  "format": "sitegloss/1",
   "id": "c_…", "title": "Login button contrast",
   "createdAt": "…", "updatedAt": "…",
   "page": { "url": "https://www.example.com/…", "title": "…", "lang": "de",
@@ -213,7 +212,7 @@ on import whatever the file says.
 
 ## Finding an element again
 
-Overmark stores a fingerprint of the element, not a selector, and scores every candidate
+Sitegloss stores a fingerprint of the element, not a selector, and scores every candidate
 on the new page by weighted similarity (after Similo, see
 [prior art](../research/prior-art.md)):
 
