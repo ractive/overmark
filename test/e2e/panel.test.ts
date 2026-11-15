@@ -161,9 +161,11 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.loadedCase ?? null, () => null)`,
 		);
 
+	// A page Overmark is not in yet (the panel puts it there as a case opens)
+	// shows no case: asked a moment early, that is the answer, not a failure.
 	const overlayOf = (tabId: number) =>
 		h.control.eval<{ loadedCase?: string }>(
-			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" })`,
+			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).catch(() => ({}))`,
 		);
 
 	/** Both clicks of a deliberate Delete. */

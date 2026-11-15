@@ -112,6 +112,12 @@ const annotate = byId<HTMLButtonElement>("annotate");
 /** Its title in index.html, for when Overmark may run on the tab. */
 const annotateTitle = annotate.title;
 const casesList = byId<HTMLDivElement>("cases");
+const casesHeading = byId<HTMLHeadingElement>("cases-heading");
+/** The cases of the page in front, under "This page", with the offer to open one. */
+const here = byId<HTMLDivElement>("here");
+const hereText = byId<HTMLParagraphElement>("here-text");
+const hereCases = byId<HTMLDivElement>("here-cases");
+const openHere = byId<HTMLButtonElement>("open-here");
 const allSites = byId<HTMLInputElement>("all-sites");
 const aiStatus = byId<HTMLSpanElement>("ai-status");
 const aiLabel = byId<HTMLSpanElement>("ai-label");
@@ -409,41 +415,52 @@ function renderCases(state: PanelState, actions: Actions): void {
 	]);
 	if (key === casesKey) return;
 	casesKey = key;
-	if (state.cases.length === 0) {
-		casesList.replaceChildren(
-			h(
-				"p",
-				{ class: "empty" },
-				"No cases yet. Start one with “New case for this page”, or import a case someone sent you.",
-			),
-		);
-		return;
-	}
-	const here = state.cases.filter((c) => url && samePath(c.page.url, url));
-	const other = state.cases.filter((c) => !here.includes(c));
-	casesList.replaceChildren(
-		...(here.length > 0
+	// The page's own cases stand under "This page" (the owner): going on with
+	// the case a page has is what is done most, a second case for it rarely.
+	const own = state.cases.filter((c) => url && samePath(c.page.url, url));
+	const other = state.cases.filter((c) => !own.includes(c));
+	const one = own.length === 1 ? own[0] : undefined;
+	here.hidden = own.length === 0;
+	hereText.textContent =
+		own.length === 0
+			? ""
+			: one
+				? "This page already has a case. Open it to go on with its marks, or start a new one."
+				: `This page already has ${own.length} cases. Open one to go on with its marks, or start a new one.`;
+	hereCases.replaceChildren(
+		...(own.length > 0
 			? [
-					h("p", { class: "group-title" }, "For this page"),
 					h(
 						"ul",
 						{ class: "cases", "data-group": "here" },
-						...here.map((c) => caseItem(c, actions)),
+						...own.map((c) => caseItem(c, actions)),
 					),
 				]
 			: []),
-		...(other.length > 0
-			? [
-					here.length > 0
-						? h("p", { class: "group-title" }, "Other pages")
-						: "",
-					h(
+	);
+	// One case: opening it is the view's one amber button, a new case steps
+	// back. Several: each row opens its case, and none is the one.
+	openHere.hidden = one === undefined;
+	openHere.onclick = one ? () => actions.openCase(one.id) : null;
+	openHere.title = one
+		? `Open “${one.title}” and show its marks on the page in this tab`
+		: "";
+	annotate.classList.toggle("primary", own.length === 0);
+	casesHeading.textContent = own.length > 0 ? "Other cases" : "Cases";
+	casesList.replaceChildren(
+		state.cases.length === 0
+			? h(
+					"p",
+					{ class: "empty" },
+					"No cases yet. Start one with “New case for this page”, or import a case someone sent you.",
+				)
+			: other.length === 0
+				? h("p", { class: "empty" }, "No cases for other pages.")
+				: h(
 						"ul",
 						{ class: "cases", "data-group": "other" },
 						...other.map((c) => caseItem(c, actions)),
 					),
-				]
-			: []),
 	);
 }
 

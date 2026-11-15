@@ -1940,6 +1940,78 @@ describe("the annotate button (DEC-023, DEC-026)", () => {
 		expect(home(overlay({ target }), []).label).toBe("New case for this page");
 	});
 
+	test("a page that has a case: Home says so and offers to open it; a new case steps back", () => {
+		const opened: string[] = [];
+		const actions = actionsWith({ openCase: (id) => void opened.push(id) });
+		const at = (url: string, cases: Case[]) => {
+			const state = initialState();
+			state.tab = { id: 1, url, title: "", size: undefined };
+			state.cases = cases;
+			render(state, actions);
+		};
+		const own = { ...c, id: "c_own", title: "The form" };
+		const second = { ...c, id: "c_second", title: "The footer" };
+		const elsewhere: Case = {
+			...c,
+			id: "c_else",
+			title: "Elsewhere",
+			page: { ...c.page, url: "https://example.com/other" },
+		};
+		const rows = (group: string) =>
+			[
+				...window.document.querySelectorAll(
+					`ul.cases[data-group="${group}"] [data-case]`,
+				),
+			].map((b) => b.getAttribute("data-case"));
+		const primary = (id: string) => el(id).classList.contains("primary");
+
+		// No case for the page: as before, the new case is the one primary.
+		at("https://example.com/none", [own, elsewhere]);
+		expect(el("here").hidden).toBe(true);
+		expect(primary("annotate")).toBe(true);
+		expect(el("cases-heading").textContent).toBe("Cases");
+		expect(rows("other")).toEqual(["c_own", "c_else"]);
+
+		// One: said in words, its row under This page, and Open this case is
+		// the one amber button.
+		at(c.page.url, [own, elsewhere]);
+		expect(el("here").hidden).toBe(false);
+		expect(el("here-text").textContent).toBe(
+			"This page already has a case. Open it to go on with its marks, or start a new one.",
+		);
+		expect(rows("here")).toEqual(["c_own"]);
+		expect(el("here").contains(el("open-here") as never)).toBe(true);
+		expect(el("open-here").hidden).toBe(false);
+		expect(primary("open-here")).toBe(true);
+		expect(primary("annotate")).toBe(false);
+		expect(el("annotate").textContent).toBe("New case for this page");
+		// The list below holds the others, and says so.
+		expect(el("cases-heading").textContent).toBe("Other cases");
+		expect(rows("other")).toEqual(["c_else"]);
+		el("open-here").click();
+		expect(opened).toEqual(["c_own"]);
+
+		// Several: each row opens its case, no button picks one of them.
+		at(c.page.url, [own, second, elsewhere]);
+		expect(el("here-text").textContent).toBe(
+			"This page already has 2 cases. Open one to go on with its marks, or start a new one.",
+		);
+		expect(rows("here")).toEqual(["c_own", "c_second"]);
+		expect(el("open-here").hidden).toBe(true);
+		expect(primary("annotate")).toBe(false);
+
+		// Every case is the page's: the list below says there are no others.
+		at(c.page.url, [own]);
+		expect(window.document.querySelector("#cases .empty")?.textContent).toBe(
+			"No cases for other pages.",
+		);
+		// Back on a page without one.
+		at("https://example.com/none", [own]);
+		expect(el("here").hidden).toBe(true);
+		expect(el("open-here").hidden).toBe(true);
+		expect(primary("annotate")).toBe(true);
+	});
+
 	test("no hint lines for drafts: there are no drafts (DEC-026)", () => {
 		home(overlay({ visible: true, drafts: 3 }));
 		expect(el("annotate-hint")).toBeNull();

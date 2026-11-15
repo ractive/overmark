@@ -1042,6 +1042,15 @@ wouldn't have drafts — which is ok I think."
   page" named what one does next and hid what the click does: it always creates a case,
   also on a page that has one in the list, where it read as "continue". The entries
   above and the log keep the old name where they were written with it.
+- **The owner, 2026-11-15: Home offers the page's case.** "Hey look, for this page we
+  already have a case, do you want to open it? Maybe this is more common than having
+  multiple cases for one page." A page's own cases stand under "This page", with the
+  sentence "This page already has a case. Open it to go on with its marks, or start a
+  new one." For one case, "Open this case" is the view's one amber button (DEC-024) and
+  "New case for this page" a plain one under it; for several, each row opens its case
+  and no button picks one. The list below holds the cases of other pages under "Other
+  cases", so the small "For this page" and "Other pages" headings are gone; the headings
+  within a section (Files, Sync) are 13 px bold in ink, where they were 12 px in grey.
 - **After the review of PR 57.** *Never delete on doubt:* an untouched case is deleted
   only when every tab in every window has answered that it holds nothing of the case (no
   toolbar adding to it); a tab that does not answer in time, or an `overlay:end` that
