@@ -97,7 +97,7 @@ export function createManifest(
 		name: "Overmark",
 		version,
 		description:
-			"Annotate any web page, load the annotations onto another build of it, and talk them through with your AI app.",
+			"Mark what is wrong on a web page, open the marks in another environment to fix it, and talk them through with your AI app.",
 		minimum_chrome_version: "116",
 		icons,
 		action: { default_title: "Overmark", default_icon: icons },
