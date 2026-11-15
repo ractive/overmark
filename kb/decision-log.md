@@ -948,7 +948,12 @@ cannot be missed.
   version and name), a top-level `downloads.onChanged` wakes a new worker at its end,
   and the next run settles it from Chrome's list (complete in `Overmark/`: written;
   otherwise its entry goes and the case is written again; still under way: waited for)
-  before it closes a document left open. A failure only the user can end (a Save
+  before it closes a document left open. *Amended after an end-to-end failure on CI,
+  2026-11-15:* `downloads:pending` is cleared only once the new entry is kept (the one
+  before erased) or a failed one erased, not as soon as the wait is over: a worker
+  stopped in between left the entry before in Chrome's list beside the new one and
+  wrote the case again. A worker stopped after that, before its record is saved, still
+  writes the case again (one entry stays: the newest). A failure only the user can end (a Save
   dialog cancelled, the file saved elsewhere) is not tried again until Try again or a
   new choice. Changes in a row wait 2 s of quiet before a run to Downloads; a folder is
   written at once. Only an entry this extension wrote into `Overmark/` is erased or

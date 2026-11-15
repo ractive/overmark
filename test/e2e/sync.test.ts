@@ -71,6 +71,17 @@ const SYNC_KV = (
 	};
 })`;
 
+/** `key` in the sync's database (`null` when it is not there). */
+const SYNC_GET = (key: string) => `new Promise((resolve, reject) => {
+	const open = indexedDB.open("overmark-sync", 1);
+	open.onerror = () => reject(open.error);
+	open.onsuccess = () => {
+		const get = open.result.transaction("settings").objectStore("settings").get(${JSON.stringify(key)});
+		get.onsuccess = () => { open.result.close(); resolve(get.result ?? null); };
+		get.onerror = () => reject(get.error);
+	};
+})`;
+
 const PANEL_PAGE = (h: Harness) =>
 	`chrome-extension://${h.extensionId}/sidepanel/index.html`;
 const SYNC = `document.getElementById("sync")`;
@@ -235,6 +246,23 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 
 		// The case without marks was not written, while everything else was.
 		expect(await Bun.file(downloaded(PAGE_FILE)).exists()).toBe(false);
+		// Chrome stops a worker once it has been idle a while, not in the
+		// middle of a run: the file is there before the worker has recorded
+		// it, and a worker stopped then writes the case again, after the
+		// page's (newer) one, whose entry it then takes out of the list. So
+		// the run is over first: recorded, nothing pending, no offscreen
+		// document.
+		await until(
+			async () => ({
+				status: await w.eval<{ state?: string } | null>(SYNC_GET("status")),
+				pending: await w.eval<unknown>(SYNC_GET("downloads:pending")),
+				offscreen: (await h.browser.targets()).some((t) =>
+					t.url.startsWith(`chrome-extension://${h.extensionId}/offscreen/`),
+				),
+			}),
+			(s) => s.status?.state === "synced" && s.pending === null && !s.offscreen,
+			10_000,
+		);
 
 		// The worker stopped, as Chrome stops an idle one; the first mark on
 		// the page goes into its case and starts a new one, which writes the
