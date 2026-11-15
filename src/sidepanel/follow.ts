@@ -7,6 +7,8 @@
 
 import { type Case, samePath } from "../lib/case.ts";
 import type { AnnotationMatch } from "../lib/messages.ts";
+import { shortUrl } from "./dom.ts";
+import type { Loaded } from "./state.ts";
 
 /** Where the panel's own marks of a case are drawn. */
 export interface Drawn {
@@ -158,6 +160,27 @@ export function foundText(
 	const found = matches.filter(isFound).length;
 	const said = `${found} of ${matches.length} marks found on ${page}.`;
 	return dashed ? `${said} Dashed: unsure.` : said;
+}
+
+/**
+ * The line under the case's buttons for what the panel's draw of `c` found
+ * (`foundText`), from its matches as they are now: a mark saved to the case
+ * since counts, as the next draw would count it. None where none was found
+ * and the search is over (the case view says so), and none for a case
+ * without marks yet (just created, DEC-026).
+ */
+export function foundLine(
+	c: Case,
+	loaded: Pick<Loaded, "matches" | "url" | "settling">,
+): string | undefined {
+	const matches = [...loaded.matches.values()];
+	if (matches.length === 0 || (noneFound(matches) && !loaded.settling))
+		return undefined;
+	return foundText(
+		matches,
+		shortUrl(loaded.url),
+		dashDrawn(c, matches, loaded.url),
+	);
 }
 
 /**

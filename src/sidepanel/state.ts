@@ -36,9 +36,18 @@ export interface Loaded {
 	caseId: string;
 	tabId: number;
 	matches: Map<string, AnnotationMatch>;
+	/** The page's address where they were found. */
+	url: string;
 	/** The marks not found are looked for again in a moment. */
 	settling?: boolean;
 }
+
+/**
+ * Under the open case's buttons: a sentence, or `found`, what the panel's
+ * draw found there, which the case view words from `loaded` as it is now
+ * (`foundLine`): a mark saved since counts as the next draw would count it.
+ */
+export type CaseHint = string | { kind: "found" };
 
 /** Object URLs of one version of a case's images, by path. */
 export interface CaseImages {
@@ -111,7 +120,7 @@ export interface PanelState {
 	current: Case | undefined;
 	images: CaseImages | undefined;
 	/** Under the open case's buttons. */
-	caseHint: string | undefined;
+	caseHint: CaseHint | undefined;
 	loaded: Loaded | undefined;
 	/**
 	 * An import that would replace a case that is here already; in a file of

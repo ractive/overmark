@@ -32,7 +32,7 @@ import {
 import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
-import { noneFound } from "./follow.ts";
+import { foundLine, noneFound } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
 import type { AiCall, AiProblem, Exported, PanelState } from "./state.ts";
 import {
@@ -1823,7 +1823,17 @@ function renderCase(state: PanelState, actions: Actions): void {
 		of(state.askingDownloads),
 		actions,
 	);
-	setHint(p.hint, state.caseHint);
+	// What the draw found counts the matches as they are now: a mark saved
+	// since, while adding, is counted as the next draw would count it.
+	const caseHint = state.caseHint;
+	setHint(
+		p.hint,
+		typeof caseHint !== "object"
+			? caseHint
+			: state.loaded?.caseId === c.id
+				? foundLine(c, state.loaded)
+				: undefined,
+	);
 
 	// A filter ends once none of its marks are left (nothing to show), or a
 	// mark was added (it would not show, as if it was not saved).

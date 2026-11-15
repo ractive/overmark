@@ -435,6 +435,7 @@ describe("a mark's status and actions", () => {
 					s.loaded = {
 						caseId: c.id,
 						tabId: 1,
+						url: "https://www.example.com/kk",
 						matches,
 					};
 			});
@@ -545,6 +546,7 @@ describe("a mark's status and actions", () => {
 				s.loaded = {
 					caseId: c.id,
 					tabId: 1,
+					url: "https://www.example.com/kk",
 					matches: new Map([["a1", found]]),
 				};
 			}),
@@ -1150,7 +1152,12 @@ describe("Load and Hide", () => {
 					title: "",
 					size: undefined,
 				};
-				s.loaded = { caseId: c.id, tabId: 1, matches: new Map() };
+				s.loaded = {
+					caseId: c.id,
+					tabId: 1,
+					matches: new Map(),
+					url: "https://www.example.com/kk",
+				};
 			});
 		render(loadedOn(1), actions);
 		expect(el("load-case").textContent).toBe("Hide marks");
@@ -1206,6 +1213,7 @@ describe("a case on a tab Sitegloss may not run on", () => {
 		state.loaded = {
 			caseId: c.id,
 			tabId: 1,
+			url: "https://www.example.com/kk",
 			matches: new Map([
 				[
 					"a1",
@@ -1344,6 +1352,7 @@ describe("none of the case's marks found (DEC-022)", () => {
 			s.loaded = {
 				caseId: c.id,
 				tabId: 1,
+				url: "https://www.example.com/kk",
 				matches: new Map(matches.map((m) => [m.annotationId, m])),
 				settling,
 			};
@@ -1391,6 +1400,69 @@ describe("none of the case's marks found (DEC-022)", () => {
 		expect(el("none-found").hidden).toBe(true);
 		render(on(url, [match(1, "no-element")]), noActions);
 		expect(el("none-found").hidden).toBe(true);
+	});
+});
+
+describe("what the panel's draw found, under the case's buttons", () => {
+	const found = (n: number): AnnotationMatch => ({
+		annotationId: `a${n}`,
+		number: n,
+		status: "found",
+		score: 1,
+		current: 0,
+		candidates: [
+			{
+				score: 1,
+				summary: "button",
+				selector: "button",
+				visible: true,
+				found: true,
+			},
+		],
+	});
+	const drawnWith = (n: number) => {
+		const c = sampleCase("c_adding");
+		return caseState(c, (s) => {
+			s.tab = { id: 1, url: c.page.url, title: "", size: undefined };
+			s.loaded = {
+				caseId: c.id,
+				tabId: 1,
+				url: c.page.url,
+				matches: new Map(
+					Array.from({ length: n }, (_, i) => found(i + 1)).map((m) => [
+						m.annotationId,
+						m,
+					]),
+				),
+			};
+			s.caseHint = { kind: "found" };
+		});
+	};
+
+	test("a mark saved while adding is counted at once, as the next draw would count it", () => {
+		const state = drawnWith(1);
+		render(state, noActions);
+		expect(el("case-hint").textContent).toBe(
+			"1 of 1 marks found on www.example.com/kk.",
+		);
+		// Marks 2 to 4 saved: the page's answer to the case's update is in
+		// `loaded` (redrawLoaded), and no draw wrote under the buttons since.
+		for (const n of [2, 3, 4]) state.loaded?.matches.set(`a${n}`, found(n));
+		render(state, noActions);
+		expect(el("case-hint").textContent).toBe(
+			"4 of 4 marks found on www.example.com/kk.",
+		);
+	});
+
+	test("an action's sentence stays; with the results gone, so is the line", () => {
+		const said = drawnWith(2);
+		said.caseHint = "Exported.";
+		render(said, noActions);
+		expect(el("case-hint").textContent).toBe("Exported.");
+		const gone = drawnWith(2);
+		gone.loaded = undefined;
+		render(gone, noActions);
+		expect(el("case-hint").hidden).toBe(true);
 	});
 });
 
@@ -2571,7 +2643,12 @@ describe("the case view's actions and this tab (DEC-023)", () => {
 		render(
 			caseState(c, (s) => {
 				s.tab = tab;
-				s.loaded = { caseId: c.id, tabId: tab.id, matches: new Map() };
+				s.loaded = {
+					caseId: c.id,
+					tabId: tab.id,
+					matches: new Map(),
+					url: tab.url,
+				};
 				s.caseHint = "3 of 4 marks found on 127.0.0.1/v2.";
 			}),
 			noActions,
@@ -2622,6 +2699,7 @@ describe("a loaded mark", () => {
 			s.loaded = {
 				caseId: "c_m",
 				tabId: 1,
+				url: "https://www.example.com/kk",
 				matches: new Map([
 					[
 						"a1",
@@ -2711,6 +2789,7 @@ describe("a loaded mark", () => {
 				s.loaded = {
 					caseId: "c_pin",
 					tabId: 1,
+					url: "https://www.example.com/kk",
 					matches: new Map([
 						match(1, "found", [candidate(true)]),
 						match(2, "probable", [candidate(false)]),
