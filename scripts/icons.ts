@@ -13,7 +13,10 @@ import {
 	LOGO_COLOURS,
 	type LogoDrawing,
 	type LogoPoint,
+	lockupWordmark,
 	pathData,
+	pathPoints,
+	pointBounds,
 	SMALL_LOGO,
 	TILE,
 } from "../src/lib/logo.ts";
@@ -180,21 +183,71 @@ export function drawStoreIcon(): Uint8Array {
 	return drawLogo(128, FULL_LOGO, 16, 96);
 }
 
-/** The logo as SVG, on the dark tile or on the white one for dark backgrounds. */
-export function logoSvg(drawing: LogoDrawing, light = false): string {
+/** The tile, the glyph and the loop as SVG elements, in the tile's 128 units. */
+function logoElements(drawing: LogoDrawing, light: boolean): string[] {
 	const side = 128 - 2 * TILE.inset;
 	const tile = light ? LOGO_COLOURS.lightTile : LOGO_COLOURS.tile;
 	const glyph = light ? LOGO_COLOURS.ink : LOGO_COLOURS.paper;
 	const round = 'fill="none" stroke-linecap="round" stroke-linejoin="round"';
 	return [
-		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">',
-		"<title>Sitegloss</title>",
 		`<rect x="${TILE.inset}" y="${TILE.inset}" width="${side}" height="${side}" rx="${TILE.radius}" fill="${tile}"/>`,
 		`<path d="${drawing.glyph.map(pathData).join(" ")}" ${round} stroke="${glyph}" stroke-width="${drawing.glyphWidth}"/>`,
 		`<path d="${pathData(drawing.loop)}" ${round} stroke="${LOGO_COLOURS.amber}" stroke-width="${drawing.loopWidth}"/>`,
+	];
+}
+
+const svg = (viewBox: readonly number[], body: string[]): string =>
+	[
+		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox.join(" ")}">`,
+		"<title>Sitegloss</title>",
+		...body,
 		"</svg>",
 		"",
 	].join("\n");
+
+/** The logo as SVG, on the dark tile or on the white one for dark backgrounds. */
+export function logoSvg(drawing: LogoDrawing, light = false): string {
+	return svg([0, 0, 128, 128], logoElements(drawing, light));
+}
+
+/** The wordmark where the lockup has it; the wordmark alone is cropped from it. */
+const LOCKUP_WORDMARK = lockupWordmark();
+
+/** The swipe and the two words, "Site" in ink or, for dark backgrounds, in paper. */
+function wordmarkElements(light: boolean): string[] {
+	const w = LOCKUP_WORDMARK;
+	const text = light ? LOGO_COLOURS.paper : LOGO_COLOURS.ink;
+	return [
+		`<path d="${w.swipe.d}" fill="${LOGO_COLOURS.amber}"/>`,
+		`<path d="${w.site}" fill="${text}"/>`,
+		`<path d="${w.gloss}" fill="${LOGO_COLOURS.ink}"/>`,
+	];
+}
+
+/** The box round the wordmark's ink and swipe, out to whole units. */
+function wordmarkBox(): [number, number, number, number] {
+	const w = LOCKUP_WORDMARK;
+	const [x, y, width, height] = pointBounds([
+		...w.swipe.points,
+		...pathPoints(w.site),
+	]);
+	const x0 = Math.floor(x);
+	const y0 = Math.floor(y);
+	return [x0, y0, Math.ceil(x + width) - x0, Math.ceil(y + height) - y0];
+}
+
+/** The wordmark alone: for light backgrounds, or (`light`) for dark ones. */
+export function wordmarkSvg(light = false): string {
+	return svg(wordmarkBox(), wordmarkElements(light));
+}
+
+/** The tile, then the wordmark; `light` is the white tile with paper "Site", for dark backgrounds. */
+export function lockupSvg(light = false): string {
+	const [x, , width] = wordmarkBox();
+	return svg(
+		[0, 0, x + width, 128],
+		[...logoElements(FULL_LOGO, light), ...wordmarkElements(light)],
+	);
 }
 
 /** Every file this script writes, by its path from the repository's root. */
@@ -207,6 +260,10 @@ export function iconFiles(): Record<string, Uint8Array | string> {
 	files["assets/brand/icon-small.svg"] = logoSvg(SMALL_LOGO);
 	files["assets/brand/icon-light.svg"] = logoSvg(FULL_LOGO, true);
 	files["assets/brand/icon-light-small.svg"] = logoSvg(SMALL_LOGO, true);
+	files["assets/brand/wordmark.svg"] = wordmarkSvg();
+	files["assets/brand/wordmark-light.svg"] = wordmarkSvg(true);
+	files["assets/brand/lockup.svg"] = lockupSvg();
+	files["assets/brand/lockup-light.svg"] = lockupSvg(true);
 	return files;
 }
 
