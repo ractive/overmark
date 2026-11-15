@@ -1040,10 +1040,11 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
 			);
 
+			// The relay comes with the worker's first state: the default one.
 			const panel = await openSidePanel(h);
-			expect(
-				await panel.eval<string>(`document.getElementById("relay").value`),
-			).toBe("https://tab-mcp.ractive.ch");
+			await panel.waitFor(
+				`document.getElementById("relay").value === "https://tab-mcp.ractive.ch"`,
+			);
 
 			// The side panel connects to the test relay ("keep AI access on").
 			const address = await connectAi(panel, relay.url, { keepOn: true });
