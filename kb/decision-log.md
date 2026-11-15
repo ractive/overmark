@@ -1214,4 +1214,9 @@ that the old name had namesakes among annotation tools.
   2.5 KB. `bun scripts/icons.ts` draws `assets/brand/wordmark.svg` and `lockup.svg` (for
   light backgrounds) and their `-light` versions (for dark ones); `assets/store/` gets
   nothing new until the store graphics are made.
+- **The fresh start ends two parts of DEC-016:** the removal of setting keys from
+  `chrome.storage.local` at every worker start, and the panel's hand-over from its
+  `localStorage`. Both served only builds before 0.2.0, and nothing reads either place now.
+- **What 0.1.0 stored under the same extension ID stays in the browser** until the
+  extension is removed; the README says so.
 - **Earlier entries, the log and finished iterations keep the old name.**

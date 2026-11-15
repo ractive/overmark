@@ -38,6 +38,17 @@ page (Actions → the run → Artifacts), and every release has it under Release
 has `sitegloss-store`, the package for the Chrome Web Store; publishing it is described
 in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
+## Coming from Overmark 0.1.0
+
+Sitegloss 0.2.0 takes nothing over: cases, settings and the pairing with AI apps start
+empty, and a `.overmark.zip` file is not read. Because the extension keeps its ID, what
+Overmark 0.1.0 stored in the browser (its cases with their screenshots, its settings)
+stays there, where Sitegloss neither shows nor deletes it: remove Overmark in
+`chrome://extensions` before loading Sitegloss (removing an extension deletes what it
+stored), or remove and load Sitegloss again later. Reload the tabs that were open during
+the change, or Overmark's toolbar may stay on them until then. Files Overmark wrote to
+`Downloads/Overmark/` stay until you delete them.
+
 ## Use
 
 1. Click the Sitegloss icon on a tab. The side panel opens there.
@@ -101,11 +112,9 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    case's bar (Open, To verify, Verified, Closed) count the marks and filter the list:
    the developer works through Open, the tester through To verify. On a loaded page a
    mark to verify is drawn in full in indigo; a verified one is drawn green and a closed
-   one grey, both faded, and no longer counted. Both sides should run this version: an older one
-   reading the file shows a verified mark as Fixed and a reopened one as open without
-   its note (`case.md` in the file still has them). A mark can also have its comment
-   edited, or be deleted. A deleted mark's
-   number is not given again, and its pin stays on screenshots that other marks share.
+   one grey, both faded, and no longer counted. A mark can also have its comment
+   edited, or be deleted. A deleted mark's number is not given again, and its pin
+   stays on screenshots that other marks share.
    Under the comment a mark shows its AI findings: what a connected AI app found out
    about it, each with the app's name and when it was written. An AI app never changes
    your comment, and changes only its own findings; you can delete any finding (click

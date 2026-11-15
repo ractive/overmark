@@ -744,8 +744,13 @@ function language(v: unknown, path: string): string {
 /** Check that `value` is a case in format `sitegloss/1` and return it typed. */
 export function validateCase(value: unknown): Case {
 	const o = obj(value, "case");
-	if (o["format"] !== CASE_FORMAT)
-		fail("case.format", `must be "${CASE_FORMAT}"`);
+	const format = o["format"];
+	if (typeof format === "string" && format !== CASE_FORMAT)
+		fail(
+			"case.format",
+			`is "${format.slice(0, 40)}"; Sitegloss reads "${CASE_FORMAT}" only`,
+		);
+	if (format !== CASE_FORMAT) fail("case.format", `must be "${CASE_FORMAT}"`);
 	const page = obj(o["page"], "case.page");
 	const shotIds = new Set<string>();
 	const shots = arr(o["shots"], "case.shots", MAX_SHOTS).map((v, i): Shot => {

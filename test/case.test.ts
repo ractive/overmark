@@ -89,6 +89,22 @@ describe("validateCase", () => {
 		expect(() => validateCase(c)).toThrow("case.shots[1].id: is used twice");
 	});
 
+	test("a file of another format says what it is and what is read", () => {
+		const c = { ...withMarks(), format: "other/9" };
+		expect(() => validateCase(c)).toThrow(
+			'case.format: is "other/9"; Sitegloss reads "sitegloss/1" only',
+		);
+		const long = { ...withMarks(), format: "x".repeat(60) };
+		expect(() => validateCase(long)).toThrow(
+			`case.format: is "${"x".repeat(40)}"; Sitegloss`,
+		);
+	});
+
+	test("a format that is no string must be the format", () => {
+		const c = { ...withMarks(), format: 1 };
+		expect(() => validateCase(c)).toThrow('case.format: must be "sitegloss/1"');
+	});
+
 	test("refuses a verdict over 50,000 characters", () => {
 		const c = withMarks();
 		c.verdict = "x".repeat(50_001);

@@ -274,4 +274,17 @@ describe(".gitignore", () => {
 		expect(await ignored(".env.local")).toBe(true);
 		expect(await ignored(".env.example")).toBe(false);
 	});
+
+	test("keeps the files of Overmark 0.1.0 out of git too", async () => {
+		const ignored = async (path: string) =>
+			(
+				await Bun.$`git check-ignore --no-index -q ${path}`
+					.cwd(join(import.meta.dir, ".."))
+					.nothrow()
+					.quiet()
+			).exitCode === 0;
+		expect(await ignored("a.overmark.zip")).toBe(true);
+		expect(await ignored("overmark-0.1.0.zip")).toBe(true);
+		expect(await ignored("a.sitegloss.zip")).toBe(true);
+	});
 });
