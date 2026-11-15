@@ -595,7 +595,15 @@ class FakeDownloads implements DownloadsApi {
 	async cancel(id: number) {
 		this.cancelled.push(id);
 	}
+	/** Set: the next `erase` calls it and never returns, as a worker stopped there. */
+	stopAtErase: (() => void) | undefined;
 	async erase(id: number) {
+		const stop = this.stopAtErase;
+		if (stop !== undefined) {
+			this.stopAtErase = undefined;
+			stop();
+			return new Promise<void>(() => undefined);
+		}
 		this.erased.push(id);
 		this.list.delete(id);
 	}
@@ -726,8 +734,8 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await sync.request();
 		const changed = { ...c, updatedAt: "2026-11-12T09:00:00Z" };
 		await putCase(cases, changed);
-		// The worker stops while it keeps the new entry: neither the entry
-		// before is erased nor the case recorded.
+		// The worker stops while it keeps the new entry: the entry before is
+		// erased, the new one not yet recorded as the newest, nor the case.
 		const stopped = new Promise<void>((r) => {
 			api.stopAtSetLast = r;
 		});
@@ -747,6 +755,27 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(store.records.get("downloads")?.byCase["c_1"]?.version).toBe(
 			versionOf(changed),
 		);
+	});
+
+	test("a worker stopped before the entry before was erased: settled, one entry left", async () => {
+		const c = await add("c_1", "Login");
+		await sync.request();
+		await putCase(cases, { ...c, updatedAt: "2026-11-12T09:00:00Z" });
+		const stopped = new Promise<void>((r) => {
+			api.stopAtErase = r;
+		});
+		void sync.request();
+		await stopped;
+		await new Sync({
+			cases,
+			store,
+			now: () => NOW,
+			downloads: downloadsTarget(api),
+		}).request();
+		expect(api.downloads).toHaveLength(2);
+		expect([...api.list.keys()]).toEqual([2]);
+		expect(await api.last()).toBe(2);
+		expect(await api.pending()).toBeUndefined();
 	});
 
 	test("one that was interrupted meanwhile: its entry goes, and the case is written again", async () => {

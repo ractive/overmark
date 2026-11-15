@@ -464,9 +464,11 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 	/** The newest entry stays in Chrome's list, for Show in folder; the one before goes. */
 	const keepNewest = async (id: number) => {
 		const before = await api.last().catch(() => undefined);
-		await api.setLast(id);
+		// The one before goes first: a worker stopped in between still has it
+		// recorded, and the next run erases it again.
 		if (before !== undefined && before !== id)
 			await api.erase(before).catch(() => undefined);
+		await api.setLast(id);
 	};
 	return {
 		id: DOWNLOADS_ID,

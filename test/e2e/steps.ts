@@ -255,12 +255,21 @@ async function besideSidePanel(
 		})`,
 	);
 	if (!win.panel) return;
-	// A panel is at least 320 px wide.
+	// A panel is at least 320 px wide. Not narrowed in time: go on, and say
+	// so, as a press beside a button later has this cause.
+	let last = 0;
 	await until(
-		() => page.eval<number>("innerWidth"),
+		async () => {
+			last = await page.eval<number>("innerWidth");
+			return last;
+		},
 		(width) => win.width - width >= 200,
 		3000,
-	).catch(() => undefined);
+	).catch(() =>
+		console.warn(
+			`the page did not narrow beside the side panel within 3 s: window ${win.width} px, page ${last} px`,
+		),
+	);
 }
 
 /**
