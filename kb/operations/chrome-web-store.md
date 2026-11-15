@@ -167,8 +167,8 @@ data only, and no tool runs code an AI app sends.
 - Collected:
   - **Web history:** the address, title and time of each page a case is started on, and the
     address and title of the tab in front when an AI app asks for them.
-  - **Website content:** screenshots, page text excerpts and element details (see
-    PRIVACY.md for the full list); when the AI app asks about a mark, also the marked
+  - **Website content:** screenshots, page text excerpts and element details (the
+    exact fields are defined in `src/lib/`); when the AI app asks about a mark, also the marked
     element's (or an element around or inside it) trimmed HTML, computed styles and
     matching CSS rules from the page in front, sent to the AI app and not stored,
     without form field values, text typed into editable regions, hidden elements or
