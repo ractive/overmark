@@ -464,9 +464,11 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 	/** The newest entry stays in Chrome's list, for Show in folder; the one before goes. */
 	const keepNewest = async (id: number) => {
 		const before = await api.last().catch(() => undefined);
-		await api.setLast(id);
+		// The one before goes first: a worker stopped in between still has it
+		// recorded, and the next run erases it again.
 		if (before !== undefined && before !== id)
 			await api.erase(before).catch(() => undefined);
+		await api.setLast(id);
 	};
 	return {
 		id: DOWNLOADS_ID,
@@ -503,7 +505,9 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 						`Chrome would not save it to your downloads: ${message(error)}`,
 					);
 				}
-				// Should the worker stop while it waits, the next run settles it.
+				// Should the worker stop before its entry is kept, the next run
+				// settles it: kept until then, or the entry before stays in the
+				// list beside this one.
 				await api.setPending({
 					id,
 					caseId: c.id,
@@ -518,28 +522,28 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 						`Chrome did not finish saving “${name}” to your downloads within a minute. Overmark tries again at the next change, or click Try again.`,
 					);
 				}
+				if (end.state === "interrupted") {
+					// A failed write leaves no entry in Chrome's list.
+					await api.erase(id).catch(() => undefined);
+					throw new TargetFailed(
+						downloadProblem(end.error, name),
+						end.error === "USER_CANCELED",
+					);
+				}
+				// Saved somewhere else: the user chose another place in Chrome's
+				// Save dialog, or another extension or a setting moved it.
+				if (!savedAs(end.filename, name)) {
+					await api.erase(id).catch(() => undefined);
+					throw new TargetFailed(
+						`Chrome saved “${name}” as “${end.filename}”, not in Downloads/${DOWNLOADS_FOLDER}: the place was chosen in its Save dialog (“Ask where to save each file before downloading” in its settings), or another extension moved it. Turn that off, or choose a folder instead, then click Try again.`,
+						true,
+					);
+				}
+				await keepNewest(id);
 			} finally {
 				await api.revoke(url).catch(() => undefined);
 				await api.setPending(undefined).catch(() => undefined);
 			}
-			if (end.state === "interrupted") {
-				// A failed write leaves no entry in Chrome's list.
-				await api.erase(id).catch(() => undefined);
-				throw new TargetFailed(
-					downloadProblem(end.error, name),
-					end.error === "USER_CANCELED",
-				);
-			}
-			// Saved somewhere else: the user chose another place in Chrome's
-			// Save dialog, or another extension or a setting moved it.
-			if (!savedAs(end.filename, name)) {
-				await api.erase(id).catch(() => undefined);
-				throw new TargetFailed(
-					`Chrome saved “${name}” as “${end.filename}”, not in Downloads/${DOWNLOADS_FOLDER}: the place was chosen in its Save dialog (“Ask where to save each file before downloading” in its settings), or another extension moved it. Turn that off, or choose a folder instead, then click Try again.`,
-					true,
-				);
-			}
-			await keepNewest(id);
 		},
 		async settle() {
 			const p = await api.pending().catch(() => undefined);
@@ -552,14 +556,19 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 			} catch {
 				end = undefined;
 			}
-			await api.setPending(undefined).catch(() => undefined);
-			if (end?.state === "complete" && savedAs(end.filename, p.file)) {
-				await keepNewest(p.id);
-				return { caseId: p.caseId, version: p.version, file: p.file };
+			// Settled once its entry is kept or erased, not before: a worker
+			// stopped meanwhile settles it again.
+			try {
+				if (end?.state === "complete" && savedAs(end.filename, p.file)) {
+					await keepNewest(p.id);
+					return { caseId: p.caseId, version: p.version, file: p.file };
+				}
+				// Not written: the run writes the case again.
+				await api.erase(p.id).catch(() => undefined);
+				return undefined;
+			} finally {
+				await api.setPending(undefined).catch(() => undefined);
 			}
-			// Not written: the run writes the case again.
-			await api.erase(p.id).catch(() => undefined);
-			return undefined;
 		},
 		end: async () => api.end?.(),
 	};
