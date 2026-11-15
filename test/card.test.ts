@@ -19,7 +19,6 @@ const base: AiState = {
 	grants: [],
 	pairing: false,
 	questions: [],
-	migrated: true,
 };
 const ADDRESS = "https://relay.example/a/x/mcp";
 const claude = {

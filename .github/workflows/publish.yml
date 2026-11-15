@@ -45,7 +45,7 @@ jobs:
           echo "$TAG" | grep -Eq '^v(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){0,3}$' \
             || { echo "not a version tag: $TAG"; exit 1; }
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "overmark-${TAG#v}-store.zip" --output store.zip
+            --pattern "sitegloss-${TAG#v}-store.zip" --output store.zip
       - name: The zip is a store build of that version
         env:
           TAG: ${{ github.ref_name }}

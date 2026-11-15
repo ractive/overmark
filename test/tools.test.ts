@@ -911,10 +911,10 @@ describe("tools", () => {
 				"This will change nothing: Mark 2 is verified already.",
 			);
 			expect(await asks("wontfix")).toContain(
-				"Overmark will refuse this whatever you answer: Mark 2 is verified: reopen it first",
+				"Sitegloss will refuse this whatever you answer: Mark 2 is verified: reopen it first",
 			);
 			expect(await asks("verified", "a note")).toContain(
-				"Overmark will refuse this whatever you answer: verified takes no note",
+				"Sitegloss will refuse this whatever you answer: verified takes no note",
 			);
 			// A call that changes the mark gets neither line.
 			const reopen = await asks("open", "Not fixed after all");
@@ -971,7 +971,7 @@ describe("tools", () => {
 						client,
 					),
 				).rejects.toThrow(
-					"Only an AI app connected through Overmark's relay may set a mark's status",
+					"Only an AI app connected through Sitegloss's relay may set a mark's status",
 				);
 			expect(await store.getCase("c_1")).toEqual(before as Case);
 		});
@@ -1306,9 +1306,9 @@ describe("tools", () => {
 	test("highlight passes on that the page is busy", async () => {
 		await seed();
 		await call("load_case", { caseId: "c_1" });
-		tab.showError = "Overmark is saving on this page; try again.";
+		tab.showError = "Sitegloss is saving on this page; try again.";
 		await expect(call("highlight", { caseId: "c_1", mark: 1 })).rejects.toThrow(
-			"Overmark is saving on this page; try again.",
+			"Sitegloss is saving on this page; try again.",
 		);
 	});
 
@@ -1451,7 +1451,7 @@ describe("findings", () => {
 		);
 		const signal = new AbortController().signal;
 		const webmcp: ToolCallClient = { kind: "webmcp" };
-		const refusal = "Only an AI app connected through Overmark's relay";
+		const refusal = "Only an AI app connected through Sitegloss's relay";
 		await expect(
 			call(
 				"add_finding",
@@ -1638,7 +1638,7 @@ describe("findings", () => {
 		expect(own).toContain("Mark 2: “Comment 2”, now open.");
 		expect(own).toContain("Finding by Claude (claude.ai): “Padding”.");
 		expect((await ask(OTHER)).join("\n")).toContain(
-			"It is not this AI app's own, so Overmark will refuse the change",
+			"It is not this AI app's own, so Sitegloss will refuse the change",
 		);
 		const add = await confirmLines(store, tab, {
 			tool: { name: "add_finding", description: "Does it." },
@@ -1740,7 +1740,7 @@ describe("through a relay", () => {
 		const mcp = new TabMcp({
 			relay: relay.url,
 			server: {
-				name: "overmark",
+				name: "sitegloss",
 				version: "0.1.0",
 				instructions: INSTRUCTIONS,
 			},

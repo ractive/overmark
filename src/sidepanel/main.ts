@@ -94,9 +94,9 @@ const DELETE_CLICK_GAP_MS = 500;
 const DELETE_ARMED_MS = 4000;
 
 /**
- * Chrome's prompt to let Overmark run on the site of `url` from now on. It
+ * Chrome's prompt to let Sitegloss run on the site of `url` from now on. It
  * shows only during a click, so call it before anything is awaited; it
- * answers yes at once where Overmark may run already.
+ * answers yes at once where Sitegloss may run already.
  */
 function askForSite(url: string): Promise<boolean> {
 	const pattern = sitePattern(url);
@@ -109,7 +109,7 @@ function askForSite(url: string): Promise<boolean> {
 		},
 		(error: unknown) => {
 			// Not the user's no: a call outside a click, say.
-			console.warn(`Overmark could not ask for ${pattern}: ${message(error)}`);
+			console.warn(`Sitegloss could not ask for ${pattern}: ${message(error)}`);
 			return false;
 		},
 	);
@@ -237,7 +237,7 @@ function takeOff(d: Drawn): void {
 }
 
 /**
- * A tab Overmark may not run on yet, with the open case to draw there once
+ * A tab Sitegloss may not run on yet, with the open case to draw there once
  * the icon's click (or "Allow on all sites") lets it in.
  */
 let pendingLoad: { tabId: number; caseId: string } | undefined;
@@ -810,7 +810,7 @@ async function endToolbars(
 
 /**
  * What every tab, in every window, says of its overlay: `none` where no
- * content script answers (nothing of Overmark's is there), `unsure` where
+ * content script answers (nothing of Sitegloss's is there), `unsure` where
  * it does not answer in time.
  */
 async function askAllTabs(): Promise<TabAnswer[]> {
@@ -1109,7 +1109,7 @@ async function startAnnotating(target: Case, tabId?: number): Promise<boolean> {
 		});
 		say(
 			overlay.saving
-				? "Overmark is still saving the last marks on this page; the toolbar switches once that is done."
+				? "Sitegloss is still saving the last marks on this page; the toolbar switches once that is done."
 				: undefined,
 		);
 		return true;
@@ -1449,7 +1449,7 @@ const actions: Actions = {
 	closeSettings: () => update((s) => (s.settings = false)),
 
 	loadOntoTab(c) {
-		// Off while Overmark may not run on the tab (view.ts): the notice
+		// Off while Sitegloss may not run on the tab (view.ts): the notice
 		// above it says what lets it.
 		const hint = caseHintWriter();
 		void (async () => {
@@ -1515,7 +1515,7 @@ const actions: Actions = {
 		const hint = caseHintWriter();
 		// Now, while the click allows Chrome's prompt. The tab opens meanwhile;
 		// once it has loaded, the case's marks follow it there (DEC-022), and
-		// without a yes the icon's click lets Overmark run there.
+		// without a yes the icon's click lets Sitegloss run there.
 		void askForSite(c.page.url);
 		void chrome.tabs
 			.create({ url: c.page.url })
@@ -2000,7 +2000,7 @@ chrome.permissions.onAdded.addListener(() => {
 	void refreshAllSites();
 	void refreshDownloads();
 	void refreshTab();
-	// Overmark may run on the tab in front now: the open case's marks go there.
+	// Sitegloss may run on the tab in front now: the open case's marks go there.
 	void follow();
 });
 chrome.permissions.onRemoved.addListener(() => {
@@ -2315,7 +2315,7 @@ chrome.runtime.onMessage.addListener(
 function hear(news: Broadcast, sender: chrome.runtime.MessageSender): false {
 	if (news?.type === "overlay:changed") {
 		const from = sender.tab?.id;
-		// Overmark runs on the tab the open case waits for: the icon was clicked.
+		// Sitegloss runs on the tab the open case waits for: the icon was clicked.
 		if (newsLetsIn(from, pendingLoad?.tabId, state.tab)) {
 			pendingLoad = undefined;
 			void follow();
@@ -2353,7 +2353,7 @@ function hear(news: Broadcast, sender: chrome.runtime.MessageSender): false {
 			void adopt();
 			// A refresh may have read the page before this news, or be finding
 			// out that another tab is in front now: it starts over. A tab whose
-			// address Chrome hid lets Overmark in now: the icon was clicked.
+			// address Chrome hid lets Sitegloss in now: the icon was clicked.
 			if (refreshing > 0 || state.tab.url === "") void refreshTab();
 		}
 	} else if (news?.type === "cases:changed") {
@@ -2410,7 +2410,7 @@ chrome.tabs.onRemoved.addListener((id) => {
 void refreshTab();
 void refreshAllSites();
 void refreshDownloads();
-// Turning "Allow access to file URLs" on or off reloads Overmark: once is enough.
+// Turning "Allow access to file URLs" on or off reloads Sitegloss: once is enough.
 void chrome.extension.isAllowedFileSchemeAccess().then(
 	(allowed) => update((s) => (s.fileAccess = allowed)),
 	() => undefined,

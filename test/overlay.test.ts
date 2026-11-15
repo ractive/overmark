@@ -306,7 +306,7 @@ describe("the overlay's style", () => {
 		expect(y).toBeGreaterThan(0);
 		expect(w).toBeGreaterThan(h);
 		expect(w).toBeLessThan(128);
-		expect(el.querySelector("title")?.textContent).toBe("Overmark");
+		expect(el.querySelector("title")?.textContent).toBe("Sitegloss");
 		// The forced-colours rule still paints it in the system's text colour.
 		const source = await Bun.file(
 			new URL("../src/content/overlay.ts", import.meta.url),

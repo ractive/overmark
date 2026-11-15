@@ -74,7 +74,7 @@ export interface Actions extends SyncActions {
 	openPage(c: Case): void;
 	/** Chrome's prompt for "Allow on all sites"; call it in the click. */
 	allowAllSites(): void;
-	/** Overmark's page in chrome://extensions ("Allow access to file URLs"). */
+	/** Sitegloss's page in chrome://extensions ("Allow access to file URLs"). */
 	openDetails(): void;
 	matchSize(c: Case): void;
 	addMarks(c: Case): void;
@@ -116,7 +116,7 @@ const settingsView = byId<HTMLElement>("settings");
 const pageText = byId<HTMLParagraphElement>("page");
 const hint = byId<HTMLParagraphElement>("hint");
 const annotate = byId<HTMLButtonElement>("annotate");
-/** Its title in index.html, for when Overmark may run on the tab. */
+/** Its title in index.html, for when Sitegloss may run on the tab. */
 const annotateTitle = annotate.title;
 const casesList = byId<HTMLDivElement>("cases");
 const casesHeading = byId<HTMLHeadingElement>("cases-heading");
@@ -158,24 +158,24 @@ export const IMPORT_BUSY =
 export const EXPORT_ALL_BUSY =
 	"An import is at work: wait for it, or answer its question below, before exporting all cases.";
 
-/** Why Overmark does not work on a tab yet, and what to do about it. */
+/** Why Sitegloss does not work on a tab yet, and what to do about it. */
 export const NO_ACCESS =
-	"Overmark may not run on this tab yet. Click the Overmark icon in the toolbar (or press Alt+Shift+O) while this tab is in front.";
+	"Sitegloss may not run on this tab yet. Click the Sitegloss icon in the toolbar (or press Alt+Shift+O) while this tab is in front.";
 
-/** A tab Overmark is not let onto even with "Allow on all sites". */
+/** A tab Sitegloss is not let onto even with "Allow on all sites". */
 export const CANNOT_RUN =
-	"Overmark cannot run on this tab: Chrome keeps its own pages and the Chrome Web Store off limits to extensions.";
+	"Sitegloss cannot run on this tab: Chrome keeps its own pages and the Chrome Web Store off limits to extensions.";
 
-/** The same, where Overmark may not read files either: that is the toggle for them. */
+/** The same, where Sitegloss may not read files either: that is the toggle for them. */
 export const CANNOT_RUN_FILES =
-	"Overmark cannot run on this tab. A page of Chrome's own or the Chrome Web Store is off limits to extensions. A file on your computer needs “Allow access to file URLs” in Overmark's details.";
+	"Sitegloss cannot run on this tab. A page of Chrome's own or the Chrome Web Store is off limits to extensions. A file on your computer needs “Allow access to file URLs” in Sitegloss's details.";
 
-/** The title of a button that needs the page, while Overmark may not run there. */
+/** The title of a button that needs the page, while Sitegloss may not run there. */
 export const NEEDS_ACCESS =
-	"Overmark may not run on this tab yet: see the notice.";
+	"Sitegloss may not run on this tab yet: see the notice.";
 
 /**
- * Whether Overmark may run on the tab in front, as far as the panel knows:
+ * Whether Sitegloss may run on the tab in front, as far as the panel knows:
  * Chrome tells the address only of a tab it may run on (a tab still loading
  * has none yet). `never`: not even with "Allow on all sites".
  */
@@ -251,7 +251,7 @@ function notice(id: string, button: HTMLButtonElement): Notice {
 	return { el, text, button };
 }
 
-/** The notice when Overmark may not run on the tab in front, with "Allow on all sites". */
+/** The notice when Sitegloss may not run on the tab in front, with "Allow on all sites". */
 function accessNotice(id: string, actions: () => Actions): Notice {
 	return notice(
 		id,
@@ -267,12 +267,12 @@ function accessNotice(id: string, actions: () => Actions): Notice {
 }
 
 const ALLOW_ALL_SITES_TITLE =
-	"Let Overmark run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options, in Settings (the AI pill at the top).";
+	"Let Sitegloss run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options, in Settings (the AI pill at the top).";
 const DETAILS_TITLE =
-	"Open Overmark's page in chrome://extensions, where “Allow access to file URLs” is";
+	"Open Sitegloss's page in chrome://extensions, where “Allow access to file URLs” is";
 
 /**
- * Overmark may not run on the tab: "Allow on all sites" helps, or, where it
+ * Sitegloss may not run on the tab: "Allow on all sites" helps, or, where it
  * may run on all sites already, Chrome keeps the tab off limits; for a file
  * that is the "Allow access to file URLs" toggle, which the panel cannot
  * tell apart (Chrome hides the address), so it says both.
@@ -288,7 +288,7 @@ function renderAccess(n: Notice, state: PanelState): void {
 	n.button.hidden = now === "never" && !files;
 	n.button.dataset["action"] = files ? "file-access" : "allow-all-sites";
 	n.button.textContent = files
-		? "Open Overmark's details"
+		? "Open Sitegloss's details"
 		: "Allow on all sites";
 	n.button.title = files ? DETAILS_TITLE : ALLOW_ALL_SITES_TITLE;
 }
@@ -309,7 +309,7 @@ function setHint(el: HTMLElement, text: string | undefined): void {
 
 /** Under Export while Chrome's prompt is open: what the answer does. */
 export const ASKING_DOWNLOADS =
-	"Chrome asks whether Overmark may manage your downloads. With a yes, Overmark shows here where the file went; with a no, it saves the file as before.";
+	"Chrome asks whether Sitegloss may manage your downloads. With a yes, Sitegloss shows here where the file went; with a no, it saves the file as before.";
 
 /**
  * Under an Export button: where the file went, with Copy and Show in folder
@@ -553,7 +553,7 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 function renderHome(state: PanelState, actions: Actions): void {
 	const tab = state.tab;
 	// Under "This page": its address, else its title (Chrome tells the
-	// address only of a tab Overmark may run on).
+	// address only of a tab Sitegloss may run on).
 	pageText.textContent = tab?.url ? shortUrl(tab.url) : (tab?.title ?? "");
 	pageText.hidden = pageText.textContent === "";
 	renderAccess(homeAccess, state);
@@ -750,7 +750,7 @@ interface CaseParts {
 	size: HTMLElement;
 	sizeText: HTMLSpanElement;
 	origin: HTMLElement;
-	/** Overmark may not run on the tab in front. */
+	/** Sitegloss may not run on the tab in front. */
 	access: Notice;
 	/** None of the case's marks were found on the tab in front (DEC-022). */
 	noneFound: Notice;
@@ -1089,7 +1089,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 					type: "button",
 					id: "export-case",
 					title:
-						"Save this case as one .zip file: its marks, comments, AI findings, summary and screenshots, and case.md to read them without Overmark. Someone imports it with Import a case…",
+						"Save this case as one .zip file: its marks, comments, AI findings, summary and screenshots, and case.md to read them without Sitegloss. Someone imports it with Import a case…",
 					onclick: () => actions.exportCase(created.current),
 				},
 				"Export",
@@ -2030,7 +2030,7 @@ interface MarkContext {
 	/** The finding of this mark whose Delete was clicked once. */
 	findingArmed: string | undefined;
 	actions: Actions;
-	/** Overmark may run on the tab in front: Show can scroll it. */
+	/** Sitegloss may run on the tab in front: Show can scroll it. */
 	canReach: boolean;
 	/** A mark opened or closed by its own head. */
 	changed: () => void;

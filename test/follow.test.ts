@@ -105,7 +105,7 @@ describe("the open case's marks follow it to the tab in front", () => {
 		});
 	});
 
-	test("a tab Overmark may not run on: wait for the icon or Allow on all sites", () => {
+	test("a tab Sitegloss may not run on: wait for the icon or Allow on all sites", () => {
 		expect(followStep(input({ tab: { ...web, url: "" } }))).toEqual({
 			clear: undefined,
 			action: "wait",
@@ -171,7 +171,7 @@ describe("news from a tab's overlay after the icon's click", () => {
 		expect(newsLetsIn(4, undefined, hidden)).toBe(true);
 	});
 
-	test("not news from another tab, nor from one Overmark ran on already", () => {
+	test("not news from another tab, nor from one Sitegloss ran on already", () => {
 		expect(newsLetsIn(5, undefined, hidden)).toBe(false);
 		expect(
 			newsLetsIn(4, undefined, { id: 4, url: "https://example.com/" }),

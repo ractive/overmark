@@ -1,11 +1,11 @@
 /**
  * End to end: the sync (DEC-021, DEC-025). "Sync to Downloads" writes each
- * case to `Overmark/` in the profile's downloads folder (the test build has
+ * case to `Sitegloss/` in the profile's downloads folder (the test build has
  * `downloads`, so Chrome asks nothing), and the worker writes it again after
  * an AI app's change with no extension page open, through its offscreen
  * document. Chrome's folder picker cannot be answered over the DevTools
  * Protocol, so the test build hands the side panel a folder of the
- * extension's private file system (`overmarkUseFolder`) instead; that folder
+ * extension's private file system (`siteglossUseFolder`) instead; that folder
  * never needs Chrome's OK, so `test:access` in the sync's database makes the
  * test build's worker see one that does. Paused, the banner sits above Home
  * and the case and the icon shows "!"; Allow access (a stubbed
@@ -41,7 +41,7 @@ import {
 } from "./steps.ts";
 
 const FOLDER = "synced";
-const FILE = "synced-case.overmark.zip";
+const FILE = "synced-case.sitegloss.zip";
 
 /** The folder of the private file system, as the panel gets it. */
 const FOLDER_HANDLE = `navigator.storage.getDirectory().then((root) => root.getDirectoryHandle(${JSON.stringify(FOLDER)}, { create: true }))`;
@@ -59,7 +59,7 @@ const SYNC_KV = (
 	key: string,
 	value?: string,
 ) => `new Promise((resolve, reject) => {
-	const open = indexedDB.open("overmark-sync", 1);
+	const open = indexedDB.open("sitegloss-sync", 1);
 	open.onupgradeneeded = () => open.result.createObjectStore("settings");
 	open.onerror = () => reject(open.error);
 	open.onsuccess = () => {
@@ -73,7 +73,7 @@ const SYNC_KV = (
 
 /** `key` in the sync's database (`null` when it is not there). */
 const SYNC_GET = (key: string) => `new Promise((resolve, reject) => {
-	const open = indexedDB.open("overmark-sync", 1);
+	const open = indexedDB.open("sitegloss-sync", 1);
 	open.onerror = () => reject(open.error);
 	open.onsuccess = () => {
 		const get = open.result.transaction("settings").objectStore("settings").get(${JSON.stringify(key)});
@@ -103,7 +103,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 	const relay = startTestRelay();
 
 	const downloaded = (name: string) =>
-		join(h.browser.downloads, "Overmark", name);
+		join(h.browser.downloads, "Sitegloss", name);
 	/** The case in the downloads' file `name`, as Import a case… would read it. */
 	const caseIn = async (name: string): Promise<Case | undefined> => {
 		const file = Bun.file(downloaded(name));
@@ -155,7 +155,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await relay.stop();
 	});
 
-	test("Sync to Downloads writes Overmark/<name>.overmark.zip into the downloads folder", async () => {
+	test("Sync to Downloads writes Sitegloss/<name>.sitegloss.zip into the downloads folder", async () => {
 		const { page, tabId } = await h.open("v1");
 		await showToolbar(h, page, tabId);
 		await markElement(page, "[data-truth=submit]", "Too pale");
@@ -183,7 +183,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		);
 		expect(written?.id).toBe(caseId);
 		await panel.waitFor(
-			`${SYNC_STATE} === "Syncing to Downloads/Overmark" && ${SYNC}.querySelector(".sync-line")?.textContent.startsWith("Last synced ")`,
+			`${SYNC_STATE} === "Syncing to Downloads/Sitegloss" && ${SYNC}.querySelector(".sync-line")?.textContent.startsWith("Last synced ")`,
 			10_000,
 		);
 		expect(await panel.eval(`Boolean(${IN_SYNC("sync-show")})`)).toBe(true);
@@ -208,7 +208,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		// case has no mark yet: no file for it (DEC-026).
 		const later = await h.open("v1");
 		const laterCase = await showToolbar(h, later.page, later.tabId);
-		const PAGE_FILE = "krankenkasse-vergleichen-v1.overmark.zip";
+		const PAGE_FILE = "krankenkasse-vergleichen-v1.sitegloss.zip";
 		// No extension page open: the panel closed, the control page elsewhere.
 		await (await h.open("v2")).page.activate();
 		await closeSidePanel(h, panel);
@@ -233,7 +233,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		).then(Object.keys);
 		// After the guard against a click that came too soon.
 		await Bun.sleep(600);
-		await w.eval(`overmarkNotificationButton(${JSON.stringify(question)}, 0)`);
+		await w.eval(`siteglossNotificationButton(${JSON.stringify(question)}, 0)`);
 		const result = await call;
 		expect((result as { isError?: boolean }).isError).toBeFalsy();
 		const written = await until(
@@ -306,7 +306,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		);
 		expect(renamed?.id).toBe(laterCase);
 		expect(
-			await Bun.file(downloaded("checkout-contrast.overmark.zip")).exists(),
+			await Bun.file(downloaded("checkout-contrast.sitegloss.zip")).exists(),
 		).toBe(false);
 		await h.control.eval(`document.getElementById("back").click()`);
 		await h.control.waitFor(`!document.getElementById("home").hidden`);
@@ -317,7 +317,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 	test("a paused folder shows the banner on Home and in the case, and “!” on the icon", async () => {
 		await panel.eval(SYNC_KV("test:access", "prompt"));
 		await panel.eval(
-			`${FOLDER_HANDLE}.then((dir) => window.overmarkUseFolder(dir))`,
+			`${FOLDER_HANDLE}.then((dir) => window.siteglossUseFolder(dir))`,
 		);
 		await panel.waitFor(`!${BANNER}.hidden`, 10_000);
 		expect(await panel.eval(`${BANNER}.querySelector("p").textContent`)).toBe(
@@ -329,7 +329,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		);
 		await until(badge, (b) => b === "!");
 		expect(await title()).toBe(
-			"Overmark: sync is paused. Click to allow access. AI access is on.",
+			"Sitegloss: sync is paused. Click to allow access. AI access is on.",
 		);
 
 		await openCase(panel, "Synced case");
@@ -350,7 +350,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await panel.click(IN_BANNER("sync-allow"));
 		await panel.waitFor(`${BANNER}.hidden`, 10_000);
 		await until(badge, (b) => b === "");
-		expect(await title()).toBe("Overmark: AI access is on");
+		expect(await title()).toBe("Sitegloss: AI access is on");
 		await until(
 			() => panel.eval<string[]>(FOLDER_FILES),
 			(files) => files.includes(FILE),
@@ -368,7 +368,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await until(badge, (b) => b === "");
 		// Home, in the control page: the section says where it syncs now.
 		await h.control.waitFor(
-			`${SYNC_STATE} === "Syncing to Downloads/Overmark"`,
+			`${SYNC_STATE} === "Syncing to Downloads/Sitegloss"`,
 			10_000,
 		);
 		expect(await panel.eval<string[]>(FOLDER_FILES)).toContain(FILE);
@@ -404,8 +404,8 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 			(db) => db.cases.some((c) => c.title === "Not synced"),
 		);
 		await Bun.sleep(1000);
-		expect(await Bun.file(downloaded("not-synced.overmark.zip")).exists()).toBe(
-			false,
-		);
+		expect(
+			await Bun.file(downloaded("not-synced.sitegloss.zip")).exists(),
+		).toBe(false);
 	}, 60_000);
 });

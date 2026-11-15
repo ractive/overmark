@@ -301,9 +301,9 @@ function countElements(nodes: Iterable<Node>): number {
 }
 
 export const LEFT_OUT_INPUT =
-	"<!-- overmark: content left out (form field or editable region) -->";
+	"<!-- sitegloss: content left out (form field or editable region) -->";
 const leftOut = (n: number) =>
-	`<!-- overmark: ${n} more element${n === 1 ? "" : "s"} left out (size limit) -->`;
+	`<!-- sitegloss: ${n} more element${n === 1 ? "" : "s"} left out (size limit) -->`;
 
 export interface Markup {
 	html: string;
@@ -324,7 +324,7 @@ export function isHidden(el: Element): boolean {
 }
 
 const HIDDEN_NOTE = (tag: string) =>
-	`<!-- overmark: hidden ${tag} left out -->`;
+	`<!-- sitegloss: hidden ${tag} left out -->`;
 
 /** A node written whole, in part (the limit was reached inside), or not at all. */
 type Written = "whole" | "part" | "none";
@@ -333,8 +333,8 @@ type Written = "whole" | "part" | "none";
  * The outer HTML of `el` as it may leave the page (see the top of this file),
  * at most about `max` characters, well formed also when cut. Open shadow
  * roots and, from an extension, closed ones come as `<template
- * shadowrootmode>`. `skip` leaves out an element (Overmark's own overlay).
- * The only comments are Overmark's own.
+ * shadowrootmode>`. `skip` leaves out an element (Sitegloss's own overlay).
+ * The only comments are Sitegloss's own.
  */
 export function markupOf(
 	el: Element,
@@ -742,7 +742,7 @@ function holds(test: () => boolean): boolean | undefined {
 
 /**
  * The style rules of the element's document (or shadow root) that match it,
- * in the order the cascade sees them, at most `LIMITS.rules`; Overmark's own
+ * in the order the cascade sees them, at most `LIMITS.rules`; Sitegloss's own
  * overlay has its rules in its own shadow root, so none of them comes along.
  */
 export function matchedRules(el: Element): MatchedRules {
@@ -1004,7 +1004,7 @@ function neighbour(el: Element, set: StyleSet, withText: boolean): Neighbour {
 	return out;
 }
 
-/** Everything `get_mark_element` reports about `el`; `skip` is Overmark's overlay. */
+/** Everything `get_mark_element` reports about `el`; `skip` is Sitegloss's overlay. */
 export function inspectElement(el: Element, skip?: Element): Inspection {
 	const doc = el.ownerDocument;
 	const win = doc.defaultView;

@@ -2,7 +2,7 @@
  * The AI connection's pieces in the service worker (DEC-015): who may send
  * what, the questions of tools that change something, the address secret's
  * storage, the settings in IndexedDB (and what an unreleased build left in
- * chrome.storage.local removed), the panel's old settings handed over, and
+ * chrome.storage.local removed), and
  * bundles: one a service worker can run, a side panel that keeps no setting.
  */
 
@@ -13,7 +13,7 @@ import { join } from "node:path";
 import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
-import { oldSettings, problemOf, statusText } from "../src/sidepanel/ai.ts";
+import { problemOf, statusText } from "../src/sidepanel/ai.ts";
 import { stopFirst, stopProblem } from "../src/worker/connection.ts";
 import {
 	DATABASE,
@@ -60,13 +60,6 @@ const COMMANDS: PanelCommand[] = [
 	{ type: "set-relay", relay: "https://relay.example" },
 	{ type: "answer", id: "q", answer: "allow" },
 	{ type: "answer", id: "q", answer: "always" },
-	{
-		type: "migrate",
-		relay: "https://relay.example",
-		keepOn: true,
-		blurForms: false,
-		secrets: { "tab-mcp:secret:https://relay.example:overmark": "s" },
-	},
 ];
 
 describe("who may send what", () => {
@@ -132,16 +125,10 @@ describe("who may send what", () => {
 			{ type: "ask-again", grantId: "g" },
 			{ type: "ask-again", tool: "delete_case" },
 			{ type: "answer", id: 1, answer: "allow" },
-			{ type: "migrate" },
-			{ type: "migrate", secrets: {}, keepOn: "true" },
-			{ type: "migrate", secrets: {}, relay: 5 },
 		])
 			expect(parseCommand(bad)).toBeUndefined();
-		// Extra fields are dropped; secrets that are no strings too.
+		// Extra fields are dropped.
 		expect(parseCommand({ type: "stop", extra: 1 })).toEqual({ type: "stop" });
-		expect(
-			parseCommand({ type: "migrate", secrets: { a: "1", b: 2 } }),
-		).toEqual({ type: "migrate", secrets: { a: "1" } });
 	});
 });
 
@@ -227,7 +214,7 @@ describe("questions", () => {
 		expect(text).toEqual({
 			title: "Allow Delete case?",
 			message: `Claude (claude.ai) wants to run delete_case: ${CASE[0]} Arguments: {"caseId":"c_1"}`,
-			contextMessage: "Overmark · close it to not allow",
+			contextMessage: "Sitegloss · close it to not allow",
 			buttons: ["Allow", "Always allow"],
 		});
 		host.advance(NOTIFICATION_GUARD_MS);
@@ -303,8 +290,8 @@ describe("questions", () => {
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
 		expect(text).toEqual({
 			title: "Allow Delete case?",
-			message: `Claude (claude.ai) wants to run set_summary: ${CASE[0]} Its arguments (${compact.length.toLocaleString("en-US")} characters) do not fit here: open Overmark's side panel to read all of them and answer there.`,
-			contextMessage: "Overmark · close it to not allow",
+			message: `Claude (claude.ai) wants to run set_summary: ${CASE[0]} Its arguments (${compact.length.toLocaleString("en-US")} characters) do not fit here: open Sitegloss's side panel to read all of them and answer there.`,
+			contextMessage: "Sitegloss · close it to not allow",
 			buttons: ["Don't allow"],
 		});
 		// No button of it allows, whenever it is clicked.
@@ -372,7 +359,7 @@ describe("questions", () => {
 		expect(fits.buttons).toEqual(["Allow", "Always allow"]);
 		const named = notificationText({ ...view, app: "C".repeat(280) }, args);
 		expect(named.buttons).toEqual(["Don't allow"]);
-		expect(named.message).toContain("open Overmark's side panel");
+		expect(named.message).toContain("open Sitegloss's side panel");
 	});
 
 	test("the buttons are Allow and Always allow; closing it or a click on the body is Don't allow", async () => {
@@ -609,7 +596,7 @@ describe("Stop AI access (CR-08)", () => {
 			{ stopped: no, session: no },
 		])
 			expect(stopProblem(failed)).toEndWith(
-				"It may come on again the next time Chrome starts Overmark in the background.",
+				"It may come on again the next time Chrome starts Sitegloss in the background.",
 			);
 		// With Keep AI access on off, nothing says it comes on again.
 		expect(stopProblem({ stopped: no })).toBe(
@@ -619,8 +606,7 @@ describe("Stop AI access (CR-08)", () => {
 });
 
 describe("the address secret in the worker", () => {
-	const KEY = "tab-mcp:secret:https://relay:overmark";
-	const SECRET = "a".repeat(43);
+	const KEY = "tab-mcp:secret:https://relay:sitegloss";
 
 	test("loaded once, read from memory, written through to the worker's database", async () => {
 		const kv = memoryKv({ [KEY]: "s1", relay: "x" });
@@ -628,27 +614,12 @@ describe("the address secret in the worker", () => {
 		expect(storage.getItem(KEY)).toBe("s1");
 		// Only the library's keys.
 		expect(storage.getItem("relay")).toBeNull();
-		storage.setItem("tab-mcp:secret:https://other:overmark", "s2");
-		expect(storage.getItem("tab-mcp:secret:https://other:overmark")).toBe("s2");
-		await storage.written;
-		expect(kv.data.get("tab-mcp:secret:https://other:overmark")).toBe("s2");
-	});
-
-	test("the panel's old secret is taken over only where the worker has none", async () => {
-		const kv = memoryKv();
-		const storage = await CachedSecretStorage.load(kv);
-		expect(storage.adopt(KEY, SECRET)).toBe(true);
-		await storage.written;
-		expect(kv.data.get(KEY)).toBe(SECRET);
-		// Never over one it has, never another key, never a value that is no secret.
-		expect(storage.adopt(KEY, "b".repeat(43))).toBe(false);
-		expect(storage.getItem(KEY)).toBe(SECRET);
-		expect(storage.adopt("relay", SECRET)).toBe(false);
-		expect(storage.adopt("tab-mcp:secret:https://x:overmark", "short")).toBe(
-			false,
+		storage.setItem("tab-mcp:secret:https://other:sitegloss", "s2");
+		expect(storage.getItem("tab-mcp:secret:https://other:sitegloss")).toBe(
+			"s2",
 		);
-		expect(storage.adopt("tab-mcp:secret:https://x:overmark", 42)).toBe(false);
-		expect(storage.getItem("relay")).toBeNull();
+		await storage.written;
+		expect(kv.data.get("tab-mcp:secret:https://other:sitegloss")).toBe("s2");
 	});
 });
 
@@ -672,10 +643,10 @@ describe("what an unreleased build kept in chrome.storage.local", () => {
 	}
 
 	test("is removed at every start and never taken over", async () => {
-		// As overmark#26 wrote it, or a content script where Chrome lets it:
-		// a relay of theirs, keep-on, a secret, the handover marked done.
+		// As an unreleased build wrote it, or a content script where Chrome lets it:
+		// a relay of theirs, keep-on, a secret, a marker.
 		const old = oldArea({
-			"tab-mcp:secret:https://evil.example:overmark": "E".repeat(43),
+			"tab-mcp:secret:https://evil.example:sitegloss": "E".repeat(43),
 			relay: "https://evil.example",
 			keepAiOn: true,
 			blurForms: false,
@@ -690,61 +661,13 @@ describe("what an unreleased build kept in chrome.storage.local", () => {
 				"migrated",
 				"relay",
 				"replaced",
-				"tab-mcp:secret:https://evil.example:overmark",
+				"tab-mcp:secret:https://evil.example:sitegloss",
 			].sort(),
 		);
 		expect(old.data).toEqual({ somethingElse: 1 });
 		// Again, and on a start with nothing there: nothing to do.
 		expect(await removeOldSettings(old)).toEqual([]);
 		expect(await removeOldSettings(oldArea({}))).toEqual([]);
-	});
-});
-
-/** A `localStorage` with these entries. */
-function local(entries: Record<string, string>) {
-	const keys = Object.keys(entries);
-	return {
-		length: keys.length,
-		key: (i: number) => keys[i] ?? null,
-		getItem: (key: string) => entries[key] ?? null,
-	};
-}
-
-describe("the side panel's old settings", () => {
-	test("none: nothing to hand over", () => {
-		expect(oldSettings(local({ other: "1" }))).toBeUndefined();
-	});
-
-	test("settings and secrets go to the worker once", () => {
-		expect(
-			oldSettings(
-				local({
-					"overmark:relay": "https://relay.example",
-					"overmark:keep-ai-on": "true",
-					"overmark:blur-forms": "false",
-					"tab-mcp:secret:https://relay.example:overmark": "s",
-					unrelated: "x",
-				}),
-			),
-		).toEqual({
-			type: "migrate",
-			relay: "https://relay.example",
-			keepOn: true,
-			blurForms: false,
-			secrets: { "tab-mcp:secret:https://relay.example:overmark": "s" },
-		});
-	});
-
-	test("a panel that connected to the old default relay on this computer stays with it", () => {
-		expect(
-			oldSettings(
-				local({ "tab-mcp:secret:http://localhost:8080:overmark": "s" }),
-			),
-		).toEqual({
-			type: "migrate",
-			relay: "http://localhost:8080",
-			secrets: { "tab-mcp:secret:http://localhost:8080:overmark": "s" },
-		});
 	});
 });
 
@@ -758,7 +681,6 @@ describe("the panel's status line", () => {
 		grants: [],
 		pairing: false,
 		questions: [],
-		migrated: true,
 	};
 
 	test.each([
@@ -824,7 +746,7 @@ describe("the panel's status line", () => {
 
 describe("the service worker's bundle", () => {
 	test("has no dynamic import(), which a service worker refuses", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "overmark-build-"));
+		const dir = mkdtempSync(join(tmpdir(), "sitegloss-build-"));
 		try {
 			const { outdir } = await build({ outdir: join(dir, "dist"), test: true });
 			const code = await Bun.file(join(outdir, "background.js")).text();
@@ -837,7 +759,7 @@ describe("the service worker's bundle", () => {
 
 describe("the side panel's bundle", () => {
 	test("touches no storage of the settings: it changes them only over the port", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "overmark-build-"));
+		const dir = mkdtempSync(join(tmpdir(), "sitegloss-build-"));
 		try {
 			const { outdir } = await build({ outdir: join(dir, "dist"), test: true });
 			const files = [

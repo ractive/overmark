@@ -18,8 +18,8 @@ function hits(root: Document | ShadowRoot, elements: () => Element[]): void {
 beforeEach(() => {
 	const window = new Window({ url: "https://www.example.com/kk" });
 	doc = window.document as unknown as Document;
-	doc.body.innerHTML = `<main><app-shell></app-shell><p>Text</p></main><div id="overmark-root"></div>`;
-	overlay = doc.getElementById("overmark-root") as HTMLElement;
+	doc.body.innerHTML = `<main><app-shell></app-shell><p>Text</p></main><div id="sitegloss-root"></div>`;
+	overlay = doc.getElementById("sitegloss-root") as HTMLElement;
 	closed.clear();
 	Object.assign(globalThis, {
 		chrome: {
@@ -54,7 +54,7 @@ function shadowHost(mode: ShadowRootMode): {
 }
 
 describe("pageElementsAt", () => {
-	test("leaves out Overmark's own, the body and the root", () => {
+	test("leaves out Sitegloss's own, the body and the root", () => {
 		hits(doc, () => [overlay, $("p"), ...page()]);
 		same(pageElementsAt(0, 0, overlay, doc), [$("p"), $("main")]);
 	});
@@ -88,7 +88,7 @@ describe("pageElementsAt", () => {
 		same([elementAt(0, 0, overlay, doc)], [span]);
 	});
 
-	test("does not go into Overmark's own shadow root", () => {
+	test("does not go into Sitegloss's own shadow root", () => {
 		const root = overlay.attachShadow({ mode: "open" });
 		root.innerHTML = `<button>Save</button>`;
 		hits(doc, () => [overlay, $("p"), ...page()]);

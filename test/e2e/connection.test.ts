@@ -70,12 +70,12 @@ describe.skipIf(browserBinary === undefined)(
 			const w = await worker(h);
 			for (let i = 0; i < 50; i++) {
 				const shown = await w.eval<string | null>(
-					"globalThis.overmarkIcon ?? null",
+					"globalThis.siteglossIcon ?? null",
 				);
 				if (shown === "spark") return shown;
 				await Bun.sleep(100);
 			}
-			return w.eval<string | null>("globalThis.overmarkIcon ?? null");
+			return w.eval<string | null>("globalThis.siteglossIcon ?? null");
 		};
 
 		beforeAll(async () => {
@@ -122,7 +122,7 @@ describe.skipIf(browserBinary === undefined)(
 			expect((await asked).isError).toBeFalsy();
 			expect(await verdictOf(h, "c_1")).toBe("Panel");
 			expect(await badge()).toBe("");
-			expect(await title()).toBe("Overmark: AI access is on");
+			expect(await title()).toBe("Sitegloss: AI access is on");
 			expect(await icon()).toBe("spark");
 			expect(await w.eval("globalThis.e2eCreated")).toEqual([]);
 			await panel.waitFor(`!document.querySelector("[data-question]")`);
@@ -241,7 +241,7 @@ describe.skipIf(browserBinary === undefined)(
 			expect(result.isError).toBeFalsy();
 			expect(result.content[0]?.text).toContain("c_1");
 			expect(await badge()).toBe("");
-			expect(await title()).toBe("Overmark: AI access is on");
+			expect(await title()).toBe("Sitegloss: AI access is on");
 			expect(await icon()).toBe("spark");
 		});
 
@@ -333,7 +333,7 @@ describe.skipIf(browserBinary === undefined)(
 				await panel.eval<string>(
 					`${byId("setup-steps")}.querySelector('li[data-app="claude-code"] pre').textContent`,
 				),
-			).toBe(`claude mcp add --transport http overmark ${address}`);
+			).toBe(`claude mcp add --transport http sitegloss ${address}`);
 			if (paired) {
 				await panel.eval(`${byId("pair-done")}.click()`);
 				expect(await panel.eval(`${byId("pairing")}.hidden`)).toBe(true);
@@ -429,13 +429,13 @@ describe.skipIf(browserBinary === undefined)(
 		});
 
 		test("after a takeover, New address in the notice drops the address taken over", async () => {
-			const key = `tab-mcp:secret:${relay.url}:overmark`;
+			const key = `tab-mcp:secret:${relay.url}:sitegloss`;
 			const secret = (await settingsOf(h))[key];
 			expect(typeof secret).toBe("string");
 			// Another program with a copy of the address secret takes it over.
 			const other = new TabMcp({
 				relay: relay.url,
-				server: { name: "overmark", version: "1.0.0" },
+				server: { name: "sitegloss", version: "1.0.0" },
 				storage: {
 					getItem: (k) => (k === key ? (secret as string) : null),
 					setItem() {},
@@ -526,7 +526,7 @@ describe.skipIf(browserBinary === undefined)("who may command it", () => {
 			await h.control.eval(
 				`${byId("ai-problem")}.getClientRects().length > 0 && ${byId("ai-problem-text")}.textContent`,
 			),
-		).toBe("Open the side panel from the Overmark icon for AI access.");
+		).toBe("Open the side panel from the Sitegloss icon for AI access.");
 		expect(await h.control.eval(`${byId("ai-label")}.textContent`)).toBe(
 			"AI: side panel only",
 		);
@@ -544,140 +544,6 @@ describe.skipIf(browserBinary === undefined)("who may command it", () => {
 		).toBe("state");
 	});
 });
-
-describe.skipIf(browserBinary === undefined)(
-	"the address the panel had",
-	() => {
-		let h: Harness;
-		let panel: Page;
-		let address: string;
-		const relay = startTestRelay();
-		// A secret the panel kept before the connection moved into the worker.
-		const secret = "Q".repeat(43);
-		const key = () => `tab-mcp:secret:${relay.url}:overmark`;
-		/** What the panel kept in its localStorage. */
-		const OLD_PANEL = () => `(() => {
-			localStorage.setItem(${JSON.stringify(key())}, ${JSON.stringify(secret)});
-			localStorage.setItem("overmark:relay", ${JSON.stringify(relay.url)});
-			localStorage.setItem("overmark:keep-ai-on", "true");
-			localStorage.setItem("overmark:blur-forms", "true");
-		})()`;
-
-		beforeAll(async () => {
-			h = await startHarness(browserBinary as string);
-		}, 60_000);
-
-		afterAll(async () => {
-			await h?.stop();
-			await relay.stop();
-		});
-
-		const answers = async () => {
-			const client = await mcpClient(relay.store, address);
-			try {
-				return !(
-					(await client.callTool({
-						name: "list_cases",
-						arguments: {},
-					})) as CallResult
-				).isError;
-			} finally {
-				await client.close();
-			}
-		};
-
-		test("the side panel hands its localStorage secret and settings to the worker once", async () => {
-			const key_ = key();
-			const before = new TabMcp({
-				relay: relay.url,
-				server: { name: "overmark", version: "1.0.0" },
-				storage: {
-					getItem: (k) => (k === key_ ? secret : null),
-					setItem() {},
-				},
-			});
-			({ address } = await before.connect({ resume: true }));
-			before.disconnect();
-			await h.control.eval(OLD_PANEL());
-			await (await h.open("v1")).page.activate();
-			panel = await openSidePanel(h);
-			// Keep AI access on: it connects by itself, with the old address.
-			await panel.waitFor(
-				`document.documentElement.dataset.aiState === "connected"`,
-				10_000,
-			);
-			await panel.eval(`${byId("ai-button")}.click()`);
-			await panel.waitFor(
-				`${byId("pair-address")}.textContent === ${JSON.stringify(address)}`,
-			);
-			expect(await panel.eval(`${byId("keep-on")}.checked`)).toBe(true);
-			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(true);
-			// Taken over: the panel keeps nothing of it any more.
-			await panel.waitFor(`localStorage.length === 0`);
-			const client = await mcpClient(relay.store, address);
-			try {
-				expect(
-					(
-						(await client.callTool({
-							name: "list_cases",
-							arguments: {},
-						})) as CallResult
-					).isError,
-				).toBeFalsy();
-			} finally {
-				await client.close();
-			}
-			// Only once: what a panel sends later changes nothing.
-			await panel.eval(`(() => {
-			const port = chrome.runtime.connect({ name: "ai" });
-			port.postMessage({ type: "migrate", keepOn: false, secrets: {} });
-		})()`);
-			await Bun.sleep(300);
-			expect((await settingsOf(h))["keepAiOn"]).toBe(true);
-		}, 60_000);
-
-		test("a handover cut short before its settings were written runs again, whole", async () => {
-			// As a crash right after the secret's write left it: the secret, no
-			// settings, no marker; the panel still has its copy.
-			await h.control.eval(
-				KV(
-					`for (const k of ["panelHandedOver", "keepAiOn", "relay", "blurForms"]) store.delete(k)`,
-					"readwrite",
-				),
-			);
-			const settingKeys = (kv: Record<string, unknown>) =>
-				Object.keys(kv).filter((k) => !k.startsWith("tab-mcp:secret:"));
-			const left = await settingsOf(h);
-			expect(settingKeys(left)).toEqual([]);
-			expect(left[key()]).toBe(secret);
-			await panel.eval(OLD_PANEL());
-			// The next worker start: the panel's port connects again and hands over.
-			await restartWorker(h);
-			await until(
-				() => settingsOf(h),
-				(kv) => kv["panelHandedOver"] === true,
-				10_000,
-			);
-			const after = await settingsOf(h);
-			expect(after[key()]).toBe(secret);
-			expect(
-				Object.fromEntries(settingKeys(after).map((k) => [k, after[k]])),
-			).toEqual({
-				relay: relay.url,
-				keepAiOn: true,
-				blurForms: true,
-				panelHandedOver: true,
-			});
-			await panel.waitFor(`localStorage.length === 0`);
-			// Keep AI access on again: the same address answers.
-			await until(
-				() => answers().catch(() => false),
-				(ok) => ok,
-				20_000,
-			);
-		}, 60_000);
-	},
-);
 
 describe.skipIf(browserBinary === undefined)(
 	"what an unreleased build kept in chrome.storage.local",
@@ -707,15 +573,14 @@ describe.skipIf(browserBinary === undefined)(
 		test("is removed at the next start and never taken over: the relay and the address stay", async () => {
 			const before = await settingsOf(h);
 			expect(before["relay"]).toBe(relay.url);
-			// overmark#26's layout (only the owner's build wrote it), here with a
+			// the layout of an unreleased build (only the owner's build wrote it), here with a
 			// relay and a secret of someone else's, as a content script could.
 			const old = {
-				"tab-mcp:secret:https://evil.example:overmark": "E".repeat(43),
+				"tab-mcp:secret:https://evil.example:sitegloss": "E".repeat(43),
 				relay: "https://evil.example",
 				keepAiOn: false,
 				blurForms: true,
 				replaced: { sibling: true },
-				migrated: true,
 			};
 			// From a content script: Chrome refuses it where it closes the area.
 			const { tabId } = await h.open("v1");
@@ -864,7 +729,7 @@ describe.skipIf(browserBinary === undefined)(
 			// or this upgrade would be blocked.
 			await h.control.eval(KV(`store.put(false, "blurForms")`, "readwrite"));
 			await h.control.eval(`new Promise((resolve, reject) => {
-				const open = indexedDB.open("overmark-settings", 2);
+				const open = indexedDB.open("sitegloss-settings", 2);
 				open.onsuccess = () => { open.result.close(); resolve(true); };
 				open.onerror = () => reject(open.error);
 				open.onblocked = () => reject(new Error("blocked"));

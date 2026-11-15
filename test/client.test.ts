@@ -44,11 +44,11 @@ class FlakyStore extends MemoryTokenStore {
 	}
 }
 
-/** A page of Overmark's kind on `relay`, and the `statechange` details it heard. */
+/** A page of Sitegloss's kind on `relay`, and the `statechange` details it heard. */
 function page(relay: string, storage: Map<string, string> | null = null) {
 	const mcp = new TabMcp({
 		relay,
-		server: { name: "overmark", version: "0.0.0" },
+		server: { name: "sitegloss", version: "0.0.0" },
 		storage:
 			storage === null
 				? null
@@ -136,14 +136,14 @@ describe("the library's state, as the worker reads it", () => {
 			"Claude was not disconnected: the relay could not save this. Try again.",
 		);
 		expect(problem(relayError("unknown_id"))).toBe(
-			"The relay no longer knows Claude, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
+			"The relay no longer knows Claude, so it cannot reach Sitegloss any more. It leaves this list when AI access next connects.",
 		);
 		const notSent = new DOMException(
 			"TabMcp: not connected",
 			"InvalidStateError",
 		);
 		expect(problem(notSent, "disconnected")).toBe(
-			"Claude was not disconnected: Overmark is not connected to the relay. Turn on AI access and try again.",
+			"Claude was not disconnected: Sitegloss is not connected to the relay. Turn on AI access and try again.",
 		);
 		// AI access is on: the connection is on its way back, or closing.
 		for (const state of ["reconnecting", "connecting", "connected"] as const)
@@ -165,7 +165,7 @@ describe("the library's state, as the worker reads it", () => {
 				"disconnected",
 			),
 		).toBe(
-			"Overmark could not confirm that Claude was disconnected: the connection ended first. It shows when AI access is next on.",
+			"Sitegloss could not confirm that Claude was disconnected: the connection ended first. It shows when AI access is next on.",
 		);
 		expect(problem(new Error("odd"))).toBe("Claude was not disconnected: odd");
 		// An older relay's answer after an earlier revoke timed out.
@@ -419,13 +419,13 @@ describe("tab-mcp client 0.16 with a relay", () => {
 		}
 	});
 
-	test('tools/list: no "usually in the page\'s browser tab" for a page that asks with its own onConfirm, as Overmark does', async () => {
+	test('tools/list: no "usually in the page\'s browser tab" for a page that asks with its own onConfirm, as Sitegloss does', async () => {
 		const SENTENCE =
 			"The page may ask the user to allow each call, usually in the page's browser tab.";
 		const description = async (onConfirm: boolean) => {
 			const mcp = new TabMcp({
 				relay: relay.url,
-				server: { name: "overmark", version: "0.0.0" },
+				server: { name: "sitegloss", version: "0.0.0" },
 				storage: null,
 				...(onConfirm ? { onConfirm: () => true } : {}),
 			});

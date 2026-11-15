@@ -16,7 +16,7 @@ const KEEP_ON_DELAYS_MS = [5000, 10_000, 20_000, 40_000, 60_000];
  * Why a session ended, in the user's words, for every reason nobody here
  * chose (`user`, `new_address`, a takeover) that is not the end of an idle
  * or old session either. The last three come only without the library's
- * reconnecting, which Overmark leaves on.
+ * reconnecting, which Sitegloss leaves on.
  */
 const ENDED: Record<
 	Exclude<
@@ -26,7 +26,7 @@ const ENDED: Record<
 	string
 > = {
 	rate_limited:
-		"The relay ended the connection: Overmark sent it too many messages at once.",
+		"The relay ended the connection: Sitegloss sent it too many messages at once.",
 	too_large: "The relay ended the connection: a message was too large for it.",
 	policy: "The relay ended the connection: it refused a message.",
 	closed: "The relay closed the connection.",

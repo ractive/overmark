@@ -1,7 +1,7 @@
 node_modules/
 dist/
-*.overmark.zip
-overmark-*.zip
+*.sitegloss.zip
+sitegloss-*.zip
 .DS_Store
 .env
 .env.*

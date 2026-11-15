@@ -113,7 +113,7 @@ interface Launch {
 }
 
 async function start(binary: string, launch: Launch): Promise<Harness> {
-	const outdir = mkdtempSync(join(tmpdir(), "overmark-dist-"));
+	const outdir = mkdtempSync(join(tmpdir(), "sitegloss-dist-"));
 	let server: ReturnType<typeof Bun.serve> | undefined;
 	let browser: Browser | undefined;
 	const cleanUp = async () => {
@@ -129,7 +129,7 @@ async function start(binary: string, launch: Launch): Promise<Harness> {
 		);
 		server = servePages();
 		const base = `http://127.0.0.1:${server.port}`;
-		// Chrome is not Overmark: a start that failed (it gives up after 20 s and
+		// Chrome is not Sitegloss: a start that failed (it gives up after 20 s and
 		// is killed) is tried once more.
 		const startChrome = () =>
 			step("start Chrome", () => launch.browser(outdir), 30_000);

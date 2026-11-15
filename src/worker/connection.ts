@@ -1,6 +1,6 @@
 /**
  * The connection to the user's AI app, in the service worker (DEC-015): the
- * library's `TabMcp` with Overmark's tools, the questions of tools that
+ * library's `TabMcp` with Sitegloss's tools, the questions of tools that
  * change something, and the state the side panels show. A WebSocket that
  * carries messages keeps the worker alive (Chrome 116), and the relay's
  * heartbeat (a ping every 25 s, answered) carries some even when nothing
@@ -58,7 +58,7 @@ import {
 } from "./tools.ts";
 
 /** Wakes the worker while AI access is on, should the connection be down. */
-export const ALARM = "overmark-ai";
+export const ALARM = "sitegloss-ai";
 
 /** One open side panel. */
 interface Panel {
@@ -103,7 +103,7 @@ async function restrictStorage(): Promise<void> {
 			accessLevel: "TRUSTED_CONTEXTS",
 		});
 	} catch (error) {
-		console.warn("Overmark: storage access level", error);
+		console.warn("Sitegloss: storage access level", error);
 	}
 }
 
@@ -160,7 +160,7 @@ export function stopProblem(
 	const said = `AI access is off now, but a setting could not be saved (${message(errors[0])}).`;
 	// The session's stop holds over the rest until the browser closes.
 	if ("stopped" in failed && ("keepOn" in failed || "session" in failed))
-		return `${said} It may come on again the next time Chrome starts Overmark in the background.`;
+		return `${said} It may come on again the next time Chrome starts Sitegloss in the background.`;
 	if ("keepOn" in failed)
 		return `${said} Keep AI access on is still saved as on: AI access comes on again when Chrome restarts.`;
 	return said;
@@ -233,17 +233,17 @@ export function revokeProblem(
 	if (code === "store_unavailable")
 		return `${not}: the relay could not save this. Try again.`;
 	if (code === "unknown_id")
-		return `The relay no longer knows ${app}, so it cannot reach Overmark any more. It leaves this list when AI access next connects.`;
+		return `The relay no longer knows ${app}, so it cannot reach Sitegloss any more. It leaves this list when AI access next connects.`;
 	const name = (error as { name?: unknown } | undefined)?.name;
 	// Nothing was sent: AI access is off, or the connection is on its way
 	// back (or closing, a moment before the state says so).
 	if (name === "InvalidStateError")
 		return state === "disconnected"
-			? `${not}: Overmark is not connected to the relay. Turn on AI access and try again.`
+			? `${not}: Sitegloss is not connected to the relay. Turn on AI access and try again.`
 			: `${not}: the connection to the relay is being restored. Try again once it is connected.`;
 	// Sent, and the session ended before the answer: the relay may have done it.
 	if (name === "NetworkError")
-		return `Overmark could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`;
+		return `Sitegloss could not confirm that ${app} was disconnected: the connection ended first. It shows when AI access is next on.`;
 	if (name === "TimeoutError")
 		return `${not}: the relay did not answer. Try again.`;
 	return `${not}: ${message(error)}`;
@@ -334,7 +334,7 @@ export class Connection {
 		// every start, never taken over (DEC-016).
 		const kv = deps.kv ?? (await openKv());
 		await removeOldSettings(chrome.storage.local).catch((error: unknown) =>
-			console.warn("Overmark: removing the old settings", error),
+			console.warn("Sitegloss: removing the old settings", error),
 		);
 		// A previous worker's questions died with it.
 		await clearNotifications();
@@ -365,18 +365,18 @@ export class Connection {
 
 	/** A connection to `relay`; throws a `TypeError` for an address the library refuses. */
 	#create(relay: string): TabMcp {
-		// The library's own "Always allow" stays off: Overmark asks itself, and
+		// The library's own "Always allow" stays off: Sitegloss asks itself, and
 		// keeps Always allow per AI app and tool (DEC-018).
 		const mcp: TabMcp = new TabMcp({
 			relay,
 			server: {
 				name: SERVER_NAME,
-				title: "Overmark",
+				title: "Sitegloss",
 				version: chrome.runtime.getManifest().version,
 				instructions: INSTRUCTIONS,
 				icons: [],
 			},
-			appName: "Overmark",
+			appName: "Sitegloss",
 			storage: this.#storage,
 			onConfirm: (request) => this.#decide(mcp, request),
 		});
@@ -429,10 +429,10 @@ export class Connection {
 				kept: () => this.#allowCovered(),
 				refused: (r) =>
 					console.warn(
-						`Overmark: refused ${r.tool.name} through WebMCP: only an AI app connected through the relay may change something`,
+						`Sitegloss: refused ${r.tool.name} through WebMCP: only an AI app connected through the relay may change something`,
 					),
 				notKept: (error) => {
-					console.warn("Overmark: keeping Always allow", error);
+					console.warn("Sitegloss: keeping Always allow", error);
 					this.#problem = `Always allow could not be saved: ${message(error)}`;
 				},
 			},
@@ -445,7 +445,7 @@ export class Connection {
 		this.#always.keepGrants(grants.map((g) => g.grantId)).then(
 			() => this.#changed(),
 			(error: unknown) =>
-				console.warn("Overmark: forgetting Always allow", error),
+				console.warn("Sitegloss: forgetting Always allow", error),
 		);
 	}
 
@@ -575,7 +575,7 @@ export class Connection {
 					await chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 			} else await chrome.alarms.clear(ALARM);
 		} catch (error) {
-			console.warn("Overmark: alarm", error);
+			console.warn("Sitegloss: alarm", error);
 		}
 	}
 
@@ -757,61 +757,7 @@ export class Connection {
 			case "answer":
 				this.#questions.answer(command.id, command.answer);
 				return;
-			case "migrate":
-				await this.#migrate(command);
-				return;
 		}
-	}
-
-	/**
-	 * The settings and the address secret the side panel kept in its
-	 * `localStorage` before the connection moved here, taken over once, so
-	 * the address an AI app was given stays the same.
-	 */
-	async #migrate(
-		command: Extract<PanelCommand, { type: "migrate" }>,
-	): Promise<void> {
-		if (this.#settings.panelHandedOver) return;
-		// The secrets first: a crash after them leaves no marker, and the
-		// panel, which deletes its copy only once the marker is set, hands
-		// everything over again at its next start (taking no secret twice).
-		for (const [key, value] of Object.entries(command.secrets))
-			this.#storage.adopt(key, value);
-		await this.#storage.written;
-		const problem =
-			command.relay === undefined ? undefined : relayProblem(command.relay);
-		let next: TabMcp | undefined;
-		let note: string | undefined;
-		if (problem !== undefined)
-			note = `The saved relay ${command.relay} cannot be used (${problem}); using ${this.#relay}.`;
-		else if (command.relay !== undefined && command.relay !== this.#relay)
-			try {
-				next = this.#create(command.relay);
-			} catch (error) {
-				note = `The saved relay ${command.relay} cannot be used (${message(error)}); using ${this.#relay}.`;
-			}
-		// The settings and the marker in one transaction: all or none.
-		const keepOn = command.keepOn ?? this.#settings.keepOn;
-		const blurForms = command.blurForms ?? this.#settings.blurForms;
-		await this.#kv.set({
-			[KEYS.keepOn]: keepOn,
-			[KEYS.blurForms]: blurForms,
-			...(next !== undefined ? { [KEYS.relay]: command.relay } : {}),
-			[KEYS.panelHandedOver]: true,
-		});
-		this.#settings = {
-			...this.#settings,
-			keepOn,
-			blurForms,
-			panelHandedOver: true,
-		};
-		this.#tellBlur();
-		await this.#syncAlarm();
-		if (next !== undefined && command.relay !== undefined)
-			await this.#switchTo(command.relay, next);
-		else this.#keep.connect();
-		if (note !== undefined) this.#relayNote = note;
-		this.#changed();
 	}
 
 	/**
@@ -963,7 +909,6 @@ export class Connection {
 				: {}),
 			...(this.#lastCall !== undefined ? { lastCall: this.#lastCall } : {}),
 			questions: this.#questions.list,
-			migrated: this.#settings.panelHandedOver,
 		};
 	}
 

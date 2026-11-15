@@ -7,7 +7,7 @@ import { IdbStore } from "../../src/lib/store.ts";
 import { storeContract } from "../store-contract.ts";
 
 declare global {
-	var __overmarkStore: unknown;
+	var __siteglossStore: unknown;
 }
 
 /** An `IdbStore` on an empty database. */
@@ -15,7 +15,7 @@ async function emptyStore(): Promise<IdbStore> {
 	const store = new IdbStore();
 	await store.listCases(); // creates the database
 	const db = await new Promise<IDBDatabase>((resolve, reject) => {
-		const open = indexedDB.open("overmark");
+		const open = indexedDB.open("sitegloss");
 		open.onsuccess = () => resolve(open.result);
 		open.onerror = () => reject(open.error);
 	});
@@ -58,7 +58,7 @@ async function recordReads(work: () => Promise<unknown>): Promise<string[]> {
 	return reads;
 }
 
-globalThis.__overmarkStore = {
+globalThis.__siteglossStore = {
 	names: Object.keys(storeContract),
 	async run(name: string) {
 		await storeContract[name]?.(await emptyStore());

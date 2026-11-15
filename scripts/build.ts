@@ -4,7 +4,7 @@
  *   bun scripts/build.ts            development build with the fixed key (DEC-006)
  *   bun scripts/build.ts --store    no `key`, for the Chrome Web Store
  *   bun scripts/build.ts --test     grants `<all_urls>` and `downloads` at install, for the end-to-end tests
- *   bun scripts/build.ts --zip      also packs overmark-<version>.zip
+ *   bun scripts/build.ts --zip      also packs sitegloss-<version>.zip
  */
 
 import { readdir, rm } from "node:fs/promises";
@@ -69,11 +69,11 @@ export function mitText(name: string, file: string): string {
 	return file.slice(start);
 }
 
-/** Overmark's licence and those of `packages`; a package without one stops the build. */
+/** Sitegloss's licence and those of `packages`; a package without one stops the build. */
 export async function notices(packages: Iterable<string>): Promise<string> {
 	const text = (path: string) => Bun.file(join(ROOT, path)).text();
 	const parts = [
-		`Overmark\n\n${await text("LICENSE")}\n${await text("AI_NOTICE")}`,
+		`Sitegloss\n\n${await text("LICENSE")}\n${await text("AI_NOTICE")}`,
 	];
 	for (const name of [...packages].sort()) {
 		const path = LICENCES[name];
@@ -93,13 +93,13 @@ export function createManifest(
 	);
 	return {
 		manifest_version: 3,
-		name: "Overmark",
+		name: "Sitegloss",
 		version,
 		description:
 			"Mark what is wrong on a web page, open the marks in another environment to fix it, and talk them through with your AI app.",
 		minimum_chrome_version: "116",
 		icons,
-		action: { default_title: "Overmark", default_icon: icons },
+		action: { default_title: "Sitegloss", default_icon: icons },
 		background: { service_worker: "background.js", type: "module" },
 		side_panel: { default_path: "sidepanel/index.html" },
 		permissions: [
@@ -122,7 +122,7 @@ export function createManifest(
 		commands: {
 			_execute_action: {
 				suggested_key: { default: "Alt+Shift+O" },
-				description: "Open Overmark on this tab",
+				description: "Open Sitegloss on this tab",
 			},
 		},
 		...(options.key ? { key: options.key } : {}),
@@ -145,7 +145,7 @@ async function bundle(
 		...(naming ? { naming } : {}),
 		// Always defined: left to run time, an element with that id on the page
 		// would answer for it and open the overlay's shadow root.
-		define: { OVERMARK_TEST_BUILD: test ? "true" : "false" },
+		define: { SITEGLOSS_TEST_BUILD: test ? "true" : "false" },
 		minify,
 		splitting: format === "esm" && entrypoint.endsWith(".html"),
 		sourcemap: "linked",
@@ -286,7 +286,7 @@ if (import.meta.main) {
 	if (values.zip) {
 		const target = join(
 			ROOT,
-			`overmark-${result.manifest["version"]}${values.store ? "-store" : ""}.zip`,
+			`sitegloss-${result.manifest["version"]}${values.store ? "-store" : ""}.zip`,
 		);
 		await zipBuild(result.outdir, target);
 		console.log(`Packed ${relative(process.cwd(), target)}`);

@@ -188,7 +188,7 @@ export function logoSvg(drawing: LogoDrawing, light = false): string {
 	const round = 'fill="none" stroke-linecap="round" stroke-linejoin="round"';
 	return [
 		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">',
-		"<title>Overmark</title>",
+		"<title>Sitegloss</title>",
 		`<rect x="${TILE.inset}" y="${TILE.inset}" width="${side}" height="${side}" rx="${TILE.radius}" fill="${tile}"/>`,
 		`<path d="${drawing.glyph.map(pathData).join(" ")}" ${round} stroke="${glyph}" stroke-width="${drawing.glyphWidth}"/>`,
 		`<path d="${pathData(drawing.loop)}" ${round} stroke="${LOGO_COLOURS.amber}" stroke-width="${drawing.loopWidth}"/>`,

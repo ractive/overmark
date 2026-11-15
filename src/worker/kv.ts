@@ -4,7 +4,7 @@
  * Content scripts run in the page's origin and cannot reach it, whatever
  * Chrome's version; `chrome.storage.local` they can read and write by
  * default, and whether `setAccessLevel` closes it to them depends on the
- * Chrome. A database of its own: the cases' ("overmark") stays as it is.
+ * Chrome. A database of its own: the cases' ("sitegloss") stays as it is.
  */
 
 import { type Kv, openKv as openDatabase } from "../lib/kv.ts";
@@ -12,14 +12,14 @@ import { SECRET_PREFIX } from "./settings.ts";
 
 export { type Kv, kvWhenOpen, memoryKv } from "../lib/kv.ts";
 
-export const DATABASE = "overmark-settings";
+export const DATABASE = "sitegloss-settings";
 
 /** The settings database, opened (and made the first time). */
 export const openKv = (name = DATABASE): Promise<Kv> => openDatabase(name);
 
 /**
- * The keys an unreleased build (overmark#26) kept in `chrome.storage.local`.
- * Only the owner's own build ever wrote them there.
+ * The keys an unreleased build kept in `chrome.storage.local`. Only the
+ * owner's own build ever wrote them there.
  */
 const OLD_KEYS = new Set([
 	"relay",

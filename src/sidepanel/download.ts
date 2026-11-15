@@ -10,7 +10,7 @@ export const DOWNLOADS: chrome.permissions.Permissions = {
 
 /**
  * Chrome's prompt for "downloads". It shows only during a click, so call it
- * before anything is awaited; where Overmark has it already, the answer is yes
+ * before anything is awaited; where Sitegloss has it already, the answer is yes
  * at once and nothing shows. Asked again at the next click after a no, never
  * otherwise.
  */
@@ -20,12 +20,12 @@ export function askForDownloads(): Promise<boolean> {
 			(granted) => granted === true,
 			(error: unknown) => {
 				// Not the user's no: outside a click, say. The file is saved anyway.
-				console.warn(`Overmark could not ask for downloads: ${error}`);
+				console.warn(`Sitegloss could not ask for downloads: ${error}`);
 				return false;
 			},
 		);
 	} catch (error) {
-		console.warn(`Overmark could not ask for downloads: ${error}`);
+		console.warn(`Sitegloss could not ask for downloads: ${error}`);
 		return Promise.resolve(false);
 	}
 }
@@ -107,7 +107,7 @@ export async function saveFile(
 			id = await chrome.downloads.download({ url, filename: name });
 		} catch (error) {
 			// The file still gets saved, the old way.
-			console.warn(`Overmark could not save through downloads: ${error}`);
+			console.warn(`Sitegloss could not save through downloads: ${error}`);
 		}
 	}
 	if (id === undefined) {

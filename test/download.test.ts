@@ -79,9 +79,12 @@ describe("saving an export", () => {
 		const fake = fakeChrome({});
 		const allowed = askForDownloads();
 		expect(fake.requested).toEqual([{ permissions: ["downloads"] }]);
-		const saved = await saveFile(bytes, "a.overmark.zip", allowed);
-		expect(saved).toEqual({ downloadId: 1, path: "/Downloads/a.overmark.zip" });
-		expect(fake.calls[0]?.filename).toBe("a.overmark.zip");
+		const saved = await saveFile(bytes, "a.sitegloss.zip", allowed);
+		expect(saved).toEqual({
+			downloadId: 1,
+			path: "/Downloads/a.sitegloss.zip",
+		});
+		expect(fake.calls[0]?.filename).toBe("a.sitegloss.zip");
 		expect(fake.calls[0]?.url.startsWith("blob:")).toBe(true);
 		expect(fake.listeners.size).toBe(0);
 		expect(clicked).toEqual([]);
@@ -89,10 +92,10 @@ describe("saving an export", () => {
 
 	test("declined: saved the old way, and nothing to show", async () => {
 		const fake = fakeChrome({}, false);
-		const saved = await saveFile(bytes, "b.overmark.zip", askForDownloads());
+		const saved = await saveFile(bytes, "b.sitegloss.zip", askForDownloads());
 		expect(saved).toBeUndefined();
 		expect(fake.calls).toEqual([]);
-		expect(clicked).toEqual(["b.overmark.zip"]);
+		expect(clicked).toEqual(["b.sitegloss.zip"]);
 	});
 
 	test("downloads refusing the file: saved the old way all the same", async () => {
@@ -101,26 +104,26 @@ describe("saving an export", () => {
 		console.warn = () => undefined;
 		const saved = await saveFile(
 			bytes,
-			"c.overmark.zip",
+			"c.sitegloss.zip",
 			Promise.resolve(true),
 		).finally(() => {
 			console.warn = warn;
 		});
 		expect(saved).toBeUndefined();
-		expect(clicked).toEqual(["c.overmark.zip"]);
+		expect(clicked).toEqual(["c.sitegloss.zip"]);
 	});
 
 	test("Save as cancelled: nothing to show, and no error", async () => {
 		fakeChrome({ state: "interrupted", error: "USER_CANCELED" });
 		expect(
-			await saveFile(bytes, "d.overmark.zip", Promise.resolve(true)),
+			await saveFile(bytes, "d.sitegloss.zip", Promise.resolve(true)),
 		).toBeUndefined();
 	});
 
 	test("Chrome stopping the download says why", async () => {
 		fakeChrome({ state: "interrupted", error: "FILE_NO_SPACE" });
 		await expect(
-			saveFile(bytes, "e.overmark.zip", Promise.resolve(true)),
+			saveFile(bytes, "e.sitegloss.zip", Promise.resolve(true)),
 		).rejects.toThrow("Chrome stopped saving the file (FILE_NO_SPACE).");
 	});
 
