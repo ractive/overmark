@@ -5,8 +5,8 @@ talk them through with your AI app.
 
 A PO marks an issue on the live site: picks an element, draws a box, an arrow or a
 freehand mark, writes a comment, and saves it all as a named case with annotated
-screenshots. A dev loads the case onto `localhost:3000` and sees what was meant on their
-own build. After the rollout the PO loads it onto the dev and prod sites and checks the
+screenshots. A dev loads the case onto `localhost:3000` and sees what was meant in their
+own environment. After the rollout the PO loads it onto the dev and prod sites and checks the
 fix. An AI app such as Claude reads and extends cases through a
 [tab-mcp](https://github.com/ractive/tab-mcp) relay, or a case travels as a zip file.
 
@@ -64,7 +64,7 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    and a second click leaves without it. A new case starts there, with "New case for
    this page". Closing the side panel leaves marks and toolbar on the page; opening it again
    opens the case the page shows.
-4. On another build of the page (say `localhost:3000`), click the case in the side panel:
+4. On the same page in another environment (say `localhost:3000`), click the case in the side panel:
    its marks are drawn on the tab in front, whatever page that is. While the case is open
    they follow the tab in front: another tab, a reload or a navigation draws them there
    and takes them off the tab before; "← All cases" takes them off the page.
@@ -90,7 +90,7 @@ in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
    stay the record, so a mark makes sense even when its element is not found.
 5. Each mark in the side panel has a status: open, fixed and to verify, verified, won't
    fix or can't reproduce. Resolve… sets it (Fixed, to verify; Fixed and verified; Won't
-   fix; Can't reproduce; with an optional note). The tester on the new build then
+   fix; Can't reproduce; with an optional note). The tester, where the fix is deployed, then
    clicks Verified on a fix that holds, or Reopen… with a note on what is still wrong;
    the claimed fix and its note stay in the mark's history. The status chips under the
    case's bar (Open, To verify, Verified, Closed) count the marks and filter the list:
