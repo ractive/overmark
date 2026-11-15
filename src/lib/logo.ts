@@ -16,8 +16,8 @@ export const LOGO_COLOURS = {
 	lightTile: "#ffffff",
 } as const;
 
-/** The rounded tile: inset a little so its edge is smoothed inside the image. */
-export const TILE = { inset: 1.28, radius: 20.48 } as const;
+/** The rounded tile, as the owner chose it from the drawings: the whole square, corners of 26. */
+export const TILE = { inset: 0, radius: 26 } as const;
 
 /** One drawing of the logo: polylines stroked with round caps and joins. */
 export interface LogoDrawing {
