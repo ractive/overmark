@@ -18,6 +18,7 @@ import { type Kv, memoryKv } from "../src/lib/kv.ts";
 import type { CaseStore } from "../src/lib/store.ts";
 import { Connection } from "../src/worker/connection.ts";
 import type { AiState } from "../src/worker/protocol.ts";
+import { DEFAULT_RELAY } from "../src/worker/settings.ts";
 import type { Capture } from "../src/worker/tab.ts";
 
 /**
@@ -420,6 +421,18 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "connect" });
 		await until(() => w.last().state === "connected");
 		expect(w.last().address).not.toBe(first.address);
+	});
+
+	test("a stored relay the library refuses gives a note, and the default relay", async () => {
+		const w = await startWorker(
+			memoryKv({ relay: "http://192.168.1.20:8080" }),
+		);
+		workers.push(w);
+		expect(w.last().relay).toBe(DEFAULT_RELAY);
+		expect(w.last().relayNote).toContain(
+			"The saved relay http://192.168.1.20:8080 cannot be used",
+		);
+		expect(w.last().relayNote).toContain(`using ${DEFAULT_RELAY}.`);
 	});
 
 	test("New address after a takeover this worker saw: a rejection after the address changed clears the takeover", async () => {

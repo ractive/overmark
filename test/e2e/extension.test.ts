@@ -1040,15 +1040,7 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
 			);
 
-			// A saved relay the library refuses must not stop the connection:
-			// one the panel kept before (taken over by the worker once).
-			await h.control.eval(
-				`localStorage.setItem("sitegloss:relay", "http://192.168.1.20:8080")`,
-			);
 			const panel = await openSidePanel(h);
-			await panel.waitFor(
-				`document.getElementById("ai-status").textContent.includes("cannot be used")`,
-			);
 			expect(
 				await panel.eval<string>(`document.getElementById("relay").value`),
 			).toBe("https://tab-mcp.ractive.ch");
