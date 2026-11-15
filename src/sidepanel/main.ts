@@ -7,8 +7,11 @@
 import {
 	type Annotation,
 	type Case,
+	cleanLink,
 	cleanTitle,
+	linkProblem,
 	MAX_COMMENT,
+	MAX_LINK,
 	markStatus,
 	newId,
 	nextNumbers,
@@ -16,6 +19,7 @@ import {
 	validateCase,
 	withChoice,
 	withComment,
+	withLink,
 	withoutAnnotation,
 	withoutFinding,
 	withReopen,
@@ -740,6 +744,7 @@ function openCase(id: string): void {
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
 		s.renaming = undefined;
+		s.linking = undefined;
 		s.markFilter = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
@@ -905,6 +910,7 @@ function closeCase(): void {
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.renaming = undefined;
+		s.linking = undefined;
 		s.loaded = undefined;
 		s.leaving = undefined;
 		// Where the case's export went is the case's.
@@ -1024,8 +1030,9 @@ async function forgetUntouched(caseId: string): Promise<boolean> {
 	if (mayHold(await askAllTabs(), caseId)) return false;
 	const typed = state.verdictDrafts.get(caseId);
 	const title = typedTitle(caseId);
+	const link = typedLink(caseId);
 	const gone = await store
-		.deleteCaseIf(caseId, (c) => isUntouched(c, typed, title))
+		.deleteCaseIf(caseId, (c) => isUntouched(c, typed, title, link))
 		.catch(() => false);
 	if (!gone) return false;
 	update((s) => {
@@ -1040,6 +1047,8 @@ async function forgetUntouched(caseId: string): Promise<boolean> {
 /** A title typed in the case's Rename field and not saved yet. */
 const typedTitle = (caseId: string) =>
 	state.renaming?.caseId === caseId ? state.renaming.text : undefined;
+const typedLink = (caseId: string) =>
+	state.linking?.caseId === caseId ? state.linking.text : undefined;
 
 /**
  * The last tab with the open case's toolbar closed: an untouched case is
@@ -1052,7 +1061,12 @@ async function leaveIfUntouched(caseId: string): Promise<void> {
 	const c = await store.getCase(caseId);
 	if (
 		c === undefined ||
-		!isUntouched(c, state.verdictDrafts.get(caseId), typedTitle(caseId))
+		!isUntouched(
+			c,
+			state.verdictDrafts.get(caseId),
+			typedTitle(caseId),
+			typedLink(caseId),
+		)
 	)
 		return;
 	if (showing(caseId) && toolbarOn.size === 0) await leaveCase();
@@ -1141,6 +1155,59 @@ async function renameCase(caseId: string, text: string): Promise<void> {
 					caseId,
 					text: s.renaming.text,
 					error: `Not renamed: ${message(error)}`,
+				};
+		});
+	}
+}
+
+/** Under the link's field for a text that is no link (DEC-028). */
+const NOT_A_LINK = "A link starts with https:// or http://";
+const LINK_TOO_LONG = `A link has at most ${MAX_LINK} characters.`;
+
+/**
+ * The case's link (DEC-028): stored at once, as every change is; an empty
+ * field removes it. Text that is no http or https address keeps the form
+ * open and says so.
+ */
+async function linkCase(caseId: string, text: string): Promise<void> {
+	const link = text.trim() === "" ? undefined : cleanLink(text);
+	if (link === undefined && text.trim() !== "") {
+		update((s) => {
+			if (s.linking?.caseId === caseId)
+				s.linking = {
+					caseId,
+					text: s.linking.text,
+					error: linkProblem(text) === "long" ? LINK_TOO_LONG : NOT_A_LINK,
+				};
+		});
+		return;
+	}
+	if (state.current?.id === caseId && state.current.link === link) {
+		update((s) => (s.linking = undefined));
+		return;
+	}
+	// The form this save is for: one opened or typed in meanwhile stays.
+	const saving = state.linking;
+	try {
+		const saved = await store.updateCase(caseId, (current) => {
+			if (current === undefined) throw new Error("the case no longer exists");
+			return {
+				value: validateCase(withLink(current, link, new Date().toISOString())),
+			};
+		});
+		update((s) => {
+			if (s.linking === saving) s.linking = undefined;
+			if (s.current?.id === caseId) s.current = saved;
+		});
+		announce(caseId);
+		void refreshCases();
+	} catch (error) {
+		update((s) => {
+			if (s.linking?.caseId === caseId)
+				s.linking = {
+					caseId,
+					text: s.linking.text,
+					error: `Not saved: ${message(error)}`,
 				};
 		});
 	}
@@ -1568,6 +1635,20 @@ const actions: Actions = {
 	saveRename: (c, text) => void renameCase(c.id, text),
 
 	cancelRename: () => update((s) => (s.renaming = undefined)),
+
+	startLink: (c) =>
+		update((s) => (s.linking = { caseId: c.id, text: c.link ?? "" })),
+
+	typeLink(text) {
+		update((s) => {
+			if (s.linking !== undefined)
+				s.linking = { caseId: s.linking.caseId, text };
+		});
+	},
+
+	saveLink: (c, text) => void linkCase(c.id, text),
+
+	cancelLink: () => update((s) => (s.linking = undefined)),
 
 	doneAdding(c) {
 		const hint = caseHintWriter();

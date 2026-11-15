@@ -45,15 +45,17 @@ export function newCase(id: string, page: PageInfo, now: string): Case {
 /**
  * The case is as "New case for this page" made it: no marks and no screenshots,
  * no mark ever stored (`lastNumber`: a delete in the panel and the toolbar's
- * Undo both set it), not from a file, no summary stored or typed (`typed`,
- * the summary not saved yet), and the title it was given, with no other
- * typed in Rename and not saved yet (`typedTitle`). A case that has once had
- * a mark, a rename or a summary is the user's, and it stays.
+ * Undo both set it), not from a file, no link (DEC-028), no summary stored
+ * or typed (`typed`, the summary not saved yet), and the title it was
+ * given, with no other typed in Rename and not saved yet (`typedTitle`). A
+ * case that has once had a mark, a rename, a link or a summary is the
+ * user's, and it stays.
  */
 export function isUntouched(
 	c: Case,
 	typed?: string,
 	typedTitle?: string,
+	typedLink?: string,
 ): boolean {
 	const title = cleanTitle(typedTitle ?? "");
 	return (
@@ -61,8 +63,11 @@ export function isUntouched(
 		c.shots.length === 0 &&
 		c.lastNumber === undefined &&
 		c.importedAt === undefined &&
+		c.link === undefined &&
 		(c.verdict ?? "").trim() === "" &&
 		(typed ?? "").trim() === "" &&
+		// A link being typed in the form, not saved yet (DEC-028).
+		(typedLink ?? "").trim() === "" &&
 		(title === "" || title === c.title) &&
 		c.title === firstTitle(c.page)
 	);

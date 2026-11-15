@@ -243,6 +243,27 @@ describe("addresses and paths in case.md link only where they are what they say"
 		expect(page(url)).toBe(`- Page: ${shown}`);
 	});
 
+	test("the case's link, under the page, written as the page's address (DEC-028)", () => {
+		const lines = (c: Case) => caseMarkdown(c).split("\n");
+		const plain = lines(caseWith("plain"));
+		expect(plain.some((l) => l.startsWith("- Link:"))).toBe(false);
+		const md = lines({
+			...caseWith("plain"),
+			link: "https://tickets.example.com/browse/ABC-123",
+		});
+		const at = md.findIndex((l) => l.startsWith("- Page:"));
+		expect(md[at + 1]).toBe(
+			"- Link: <https://tickets.example.com/browse/ABC-123>",
+		);
+		// A file's link that is no web address is no link in case.md either.
+		expect(
+			line(
+				caseMarkdown({ ...caseWith("plain"), link: "javascript:alert(1)" }),
+				"- Link:",
+			),
+		).toBe("- Link: `javascript:alert(1)`");
+	});
+
 	test("a crop, a shot or a screenshot path that is not Overmark's is no link", () => {
 		const c = caseWith("plain");
 		const a = c.annotations[0] as Case["annotations"][number];

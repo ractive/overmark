@@ -4,16 +4,19 @@ import {
 	type Case,
 	CaseError,
 	caseCounts,
+	cleanLink,
 	cleanTitle,
 	cutText,
 	type Finding,
 	findingsTextOf,
 	isOwnFinding,
 	isPageOf,
+	linkProblem,
 	MAX_COMMENT,
 	MAX_FINDING,
 	MAX_FINDINGS,
 	MAX_FINDINGS_TEXT,
+	MAX_LINK,
 	MAX_REOPEN_NOTE,
 	MAX_REOPENS,
 	MAX_TITLE,
@@ -30,6 +33,7 @@ import {
 	withComment,
 	withFinding,
 	withFindingText,
+	withLink,
 	withoutAnnotation,
 	withoutFinding,
 	withReopen,
@@ -1098,5 +1102,108 @@ describe("a case's title (DEC-026)", () => {
 		expect(textLength(long.title)).toBe(MAX_TITLE);
 		expect(long.title).toBe("😀".repeat(MAX_TITLE));
 		expect(validateCase(long).title).toBe(long.title);
+	});
+});
+
+describe("a case's link (DEC-028)", () => {
+	const NOW = "2026-11-15T10:00:00.000Z";
+	const TICKET = "https://tickets.example.com/browse/ABC-123";
+
+	test("an http or https address is a link, trimmed", () => {
+		expect(cleanLink(`  ${TICKET}\n`)).toBe(TICKET);
+		expect(cleanLink("http://example.com/pr/7?tab=files#c1")).toBe(
+			"http://example.com/pr/7?tab=files#c1",
+		);
+		expect(cleanLink("HTTPS://Example.com")).toBe("https://example.com/");
+	});
+
+	test("anything else is no link: another scheme, relative text, empty, too long", () => {
+		for (const text of [
+			"",
+			"   ",
+			"javascript:alert(1)",
+			" JavaScript:alert(1)",
+			"\u0001javascript:alert(1)",
+			"data:text/html,<b>x</b>",
+			"file:///etc/passwd",
+			"chrome://settings",
+			"mailto:someone@example.com",
+			"tickets.example.com/browse/ABC-123",
+			"/browse/ABC-123",
+			"ABC-123",
+			"https://",
+			`https://example.com/${"a".repeat(MAX_LINK)}`,
+		])
+			expect(cleanLink(text)).toBeUndefined();
+		const longest = `https://example.com/${"a".repeat(MAX_LINK - 20)}`;
+		expect(longest.length).toBe(MAX_LINK);
+		expect(cleanLink(longest)).toBe(longest);
+	});
+
+	test("set, changed and removed, the case changed now; nothing else", () => {
+		const c = withMarks();
+		const linked = withLink(c, TICKET, NOW);
+		expect(linked).toEqual({ ...c, link: TICKET, updatedAt: NOW });
+		const changed = withLink(linked, "https://example.com/pr/7", NOW);
+		expect(changed.link).toBe("https://example.com/pr/7");
+		const removed = withLink(changed, undefined, NOW);
+		expect("link" in removed).toBe(false);
+		expect(removed).toEqual({ ...c, updatedAt: NOW });
+	});
+
+	test("nothing changed: the same case", () => {
+		const c = withMarks();
+		expect(withLink(c, undefined, NOW)).toBe(c);
+		const linked = withLink(c, TICKET, NOW);
+		expect(withLink(linked, TICKET, "2026-11-16T10:00:00.000Z")).toBe(linked);
+	});
+
+	test("stored: none is fine, a link is kept", () => {
+		expect("link" in validateCase(sampleCase())).toBe(false);
+		const linked = withLink(sampleCase(), TICKET, NOW);
+		expect(validateCase(JSON.parse(JSON.stringify(linked))).link).toBe(TICKET);
+	});
+
+	test("a user name and password in the address are not kept; the query is", () => {
+		expect(
+			cleanLink("https://user:token@tickets.example.com/t/1?tab=2#c"),
+		).toBe("https://tickets.example.com/t/1?tab=2#c");
+	});
+
+	test("why a text is no link: too long as the browser reads it, or no address", () => {
+		const long = `https://example.com/${"ä".repeat(400)}`;
+		expect(long.length).toBeLessThan(MAX_LINK);
+		expect(cleanLink(long)).toBeUndefined();
+		expect(linkProblem(long)).toBe("long");
+		expect(linkProblem("tickets.example.com/1")).toBe("address");
+		expect(linkProblem("javascript:alert(1)")).toBe("address");
+		expect(linkProblem(`ftp://example.com/${"a".repeat(3000)}`)).toBe(
+			"address",
+		);
+	});
+
+	test("a file's link spelled another way is kept as the browser reads it", () => {
+		const read = validateCase({
+			...sampleCase(),
+			link: "  HTTPS://Tickets.Example.com/browse/ABC-123  ",
+		});
+		expect(read.link).toBe("https://tickets.example.com/browse/ABC-123");
+	});
+
+	test("a file's link that is no string, too long or no http(s) address is refused", () => {
+		for (const link of [
+			42,
+			null,
+			{},
+			"javascript:alert(1)",
+			"data:text/html,x",
+			"file:///etc/passwd",
+			"ABC-123",
+			`https://example.com/${"a".repeat(MAX_LINK)}`,
+		])
+			expect(() => validateCase({ ...sampleCase(), link })).toThrow(CaseError);
+		expect(() =>
+			validateCase({ ...sampleCase(), link: "javascript:alert(1)" }),
+		).toThrow("case.link: must be an http or https address");
 	});
 });

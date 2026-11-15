@@ -507,6 +507,80 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 		await page.send("Page.close");
 	}, 90_000);
 
+	test("a link added, edited and removed in the case view is stored at once (DEC-028)", async () => {
+		const { page } = await savedCase("Linked");
+		const panel = await panelHome(h);
+		await openCase(panel, "Linked");
+		const linkOf = async () => (await caseTitled("Linked")).c.link;
+		const anchor = `document.getElementById("case-link-open")`;
+		const edit = `document.getElementById("case-link-edit")`;
+		await panel.waitFor(
+			`${edit}.textContent === "Add a link" && ${anchor}.hidden`,
+		);
+		const typeLink = (text: string, key: string) =>
+			panel.eval(`(() => {
+				const f = document.getElementById("case-link-field");
+				f.value = ${JSON.stringify(text)};
+				f.dispatchEvent(new Event("input"));
+				f.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, cancelable: true }));
+			})()`);
+		const form = `document.getElementById("case-link-form")`;
+
+		// Text that is no link keeps the form open and says why; nothing stored.
+		await panel.eval(`${edit}.click()`);
+		await panel.waitFor(`document.activeElement?.id === "case-link-field"`);
+		await typeLink("javascript:alert(1)", "Enter");
+		await panel.waitFor(
+			`document.getElementById("case-link-hint").textContent === "A link starts with https:// or http://"`,
+		);
+		expect(await panel.eval<boolean>(`${form}.hidden`)).toBe(false);
+		expect(await linkOf()).toBeUndefined();
+
+		// Added: stored, an anchor to it, and Edit has the focus again.
+		const ticket = "https://tickets.example.com/browse/ABC-123";
+		await typeLink(ticket, "Enter");
+		await panel.waitFor(
+			`${form}.hidden && ${anchor}.getAttribute("href") === ${JSON.stringify(ticket)} && !${anchor}.hidden`,
+		);
+		expect(await linkOf()).toBe(ticket);
+		expect(
+			await panel.eval<string[]>(
+				`[${anchor}.target, ${anchor}.rel, ${anchor}.textContent, ${edit}.textContent, document.activeElement?.id]`,
+			),
+		).toEqual([
+			"_blank",
+			"noopener noreferrer",
+			"tickets.example.com/browse/ABC-123",
+			"Edit",
+			"case-link-edit",
+		]);
+
+		// Edited: the field starts with the stored link; Escape keeps it.
+		await panel.eval(`${edit}.click()`);
+		await panel.waitFor(
+			`document.getElementById("case-link-field").value === ${JSON.stringify(ticket)}`,
+		);
+		await typeLink("https://example.com/not-this", "Escape");
+		await panel.waitFor(`${form}.hidden`);
+		expect(await linkOf()).toBe(ticket);
+		const pr = "https://code.example.com/pull/7";
+		await panel.eval(`${edit}.click()`);
+		await typeLink(pr, "Enter");
+		await panel.waitFor(
+			`${anchor}.getAttribute("href") === ${JSON.stringify(pr)}`,
+		);
+		expect(await linkOf()).toBe(pr);
+
+		// Saved empty: gone from the store and from the view.
+		await panel.eval(`${edit}.click()`);
+		await typeLink("   ", "Enter");
+		await panel.waitFor(
+			`${form}.hidden && ${anchor}.hidden && !${anchor}.hasAttribute("href") && ${edit}.textContent === "Add a link"`,
+		);
+		expect(await linkOf()).toBeUndefined();
+		await page.send("Page.close");
+	}, 60_000);
+
 	test("All cases with no mark: the case goes again; with one mark it stays (DEC-026)", async () => {
 		const { page, tabId } = await h.open("v1");
 		const title = "Krankenkasse vergleichen (v1)";

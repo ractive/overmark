@@ -335,6 +335,11 @@ export interface Case {
 	annotations: Annotation[];
 	/** The summary for the developer: what should change, as agreed (DEC-019). */
 	verdict: string | null;
+	/**
+	 * A link the user attaches (DEC-028): a ticket, a design, a pull request.
+	 * Only http or https, as it is shown as a link.
+	 */
+	link?: string;
 	/** When this copy came in from a file: its texts are whoever wrote the file's. */
 	importedAt?: string;
 	/**
@@ -346,6 +351,9 @@ export interface Case {
 
 /** The longest case title. */
 export const MAX_TITLE = 500;
+
+/** The longest link a case may carry (DEC-028). */
+export const MAX_LINK = 2048;
 
 /**
  * The most marks and screenshots a case holds. Marks added one by one have a
@@ -813,6 +821,7 @@ export function validateCase(value: unknown): Case {
 	const verdict = o["verdict"];
 	const importedAt = o["importedAt"];
 	const lastNumber = o["lastNumber"];
+	const link = o["link"];
 	return {
 		format: CASE_FORMAT,
 		id: id(o["id"], "case.id"),
@@ -832,6 +841,7 @@ export function validateCase(value: unknown): Case {
 			verdict === null || verdict === undefined
 				? null
 				: str(verdict, "case.verdict", MAX_VERDICT),
+		...(link === undefined ? {} : { link: linkOf(link, "case.link") }),
 		...(importedAt === undefined
 			? {}
 			: { importedAt: str(importedAt, "case.importedAt", 64) }),
@@ -839,6 +849,18 @@ export function validateCase(value: unknown): Case {
 			? {}
 			: { lastNumber: highest(lastNumber, annotations) }),
 	};
+}
+
+/**
+ * A case's link as stored: a file Overmark wrote only has one `cleanLink`
+ * gives, and one in another scheme (`javascript:`) never becomes a link.
+ * What is kept is `cleanLink`'s reading of it, so what was checked here is
+ * what opens: a file from elsewhere may spell an address another way.
+ */
+function linkOf(value: unknown, path: string): string {
+	const link = cleanLink(str(value, path, MAX_LINK));
+	if (link === undefined) return fail(path, "must be an http or https address");
+	return link;
 }
 
 function resolution(value: unknown, path: string): Resolution {
@@ -1215,6 +1237,59 @@ export function withTitle(c: Case, title: string, now: string): Case {
 	const text = cutText(cleanTitle(title), MAX_TITLE);
 	if (text === "") throw new CaseError("A case needs a title.");
 	return { ...c, title: text, updatedAt: now };
+}
+
+/**
+ * `text` as a case's link (DEC-028): trimmed, an http or https address of at
+ * most `MAX_LINK` characters as the browser reads it; anything else is no
+ * link. It is shown as a link that opens, so no other scheme (`javascript:`,
+ * `data:`, `file:`) and no address relative to the panel.
+ */
+export function cleanLink(text: string): string | undefined {
+	const trimmed = text.trim();
+	if (trimmed === "") return undefined;
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		return undefined;
+	}
+	if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+	// As the page's address is kept: a user name and password in an address
+	// would go to the export, the synced file and a connected AI app.
+	url.username = "";
+	url.password = "";
+	return url.href.length <= MAX_LINK ? url.href : undefined;
+}
+
+/**
+ * Why `text` is no link, for the form: too long as the browser reads it, or
+ * no http or https address at all.
+ */
+export function linkProblem(text: string): "long" | "address" {
+	try {
+		const url = new URL(text.trim());
+		if (
+			(url.protocol === "https:" || url.protocol === "http:") &&
+			url.href.length > MAX_LINK
+		)
+			return "long";
+	} catch {
+		// Not an address.
+	}
+	return "address";
+}
+
+/**
+ * The case with `link` attached, or without one for `undefined` (DEC-028);
+ * the same case when nothing changes. `link` is one `cleanLink` gave.
+ */
+export function withLink(c: Case, link: string | undefined, now: string): Case {
+	if (c.link === link) return c;
+	const { link: _old, ...rest } = c;
+	return link === undefined
+		? { ...rest, updatedAt: now }
+		: { ...rest, link, updatedAt: now };
 }
 
 /**

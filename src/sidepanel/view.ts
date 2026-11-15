@@ -87,6 +87,13 @@ export interface Actions extends SyncActions {
 	saveRename(c: Case, text: string): void;
 	/** Escape or Cancel. */
 	cancelRename(): void;
+	/** "Add a link" or "Edit": the case's link becomes a field (DEC-028). */
+	startLink(c: Case): void;
+	typeLink(text: string): void;
+	/** Enter or Save: stored at once; an empty field removes the link. */
+	saveLink(c: Case, text: string): void;
+	/** Escape or Cancel. */
+	cancelLink(): void;
 	exportCase(c: Case): void;
 	/** Copy an exported file's path; whether it worked. */
 	copyPath(path: string): Promise<boolean>;
@@ -721,6 +728,15 @@ interface CaseParts {
 	/** The rename form was shown at the last render. */
 	renameOpen: boolean;
 	meta: HTMLElement;
+	/** The case's link and its Edit (or Add a link); its form while editing. */
+	linkRow: HTMLElement;
+	linkOpen: HTMLAnchorElement;
+	linkEdit: HTMLButtonElement;
+	linkForm: HTMLElement;
+	linkField: HTMLInputElement;
+	linkHint: HTMLElement;
+	/** The link form was shown at the last render. */
+	linkFormOpen: boolean;
 	/** The case's address, a link where it is a web page. */
 	page: HTMLButtonElement;
 	/** The address where it is not a web page (only text, never a link). */
@@ -838,6 +854,78 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		role: "status",
 		hidden: true,
 	});
+	const linkOpen = h("a", {
+		id: "case-link-open",
+		target: "_blank",
+		rel: "noopener noreferrer",
+	});
+	const linkEdit = h("button", {
+		type: "button",
+		class: "link",
+		id: "case-link-edit",
+		title:
+			"A ticket, a design or a pull request this case is about; it is saved at once",
+		onclick: () => actions.startLink(created.current),
+	});
+	const linkField: HTMLInputElement = h("input", {
+		type: "url",
+		id: "case-link-field",
+		"aria-label": "Link of this case",
+		"aria-describedby": "case-link-hint",
+		placeholder: "https://… a ticket, a design, a pull request",
+		autocomplete: "off",
+		spellcheck: "false",
+		oninput: () => actions.typeLink(linkField.value),
+		onkeydown: (e) => {
+			const k = e as KeyboardEvent;
+			// The Enter (or Escape) that ends an IME composition is the
+			// composition's, not a save.
+			if (k.isComposing || k.keyCode === 229) return;
+			if (k.key === "Enter") {
+				k.preventDefault();
+				actions.saveLink(created.current, linkField.value);
+			} else if (k.key === "Escape") {
+				k.preventDefault();
+				actions.cancelLink();
+			}
+		},
+	});
+	const linkHint = h("p", {
+		class: "hint",
+		id: "case-link-hint",
+		role: "status",
+		hidden: true,
+	});
+	const linkForm = h(
+		"div",
+		{ class: "case-link-form", id: "case-link-form", hidden: true },
+		linkField,
+		h(
+			"div",
+			{ class: "row" },
+			h(
+				"button",
+				{
+					type: "button",
+					class: "strong small",
+					id: "case-link-save",
+					onclick: () => actions.saveLink(created.current, linkField.value),
+				},
+				"Save",
+			),
+			h(
+				"button",
+				{
+					type: "button",
+					class: "small",
+					id: "case-link-cancel",
+					onclick: () => actions.cancelLink(),
+				},
+				"Cancel",
+			),
+		),
+		linkHint,
+	);
 	const created: CaseParts = {
 		current: c,
 		title,
@@ -869,6 +957,19 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		renameHint,
 		renameOpen: false,
 		meta: h("p", { class: "meta case-meta" }, page, about, madeAt, madeOn),
+		linkRow: h(
+			"div",
+			{ class: "case-link", id: "case-link" },
+			linkOpen,
+			linkEdit,
+			linkForm,
+		),
+		linkOpen,
+		linkEdit,
+		linkForm,
+		linkField,
+		linkHint,
+		linkFormOpen: false,
 		page,
 		about,
 		madeAt,
@@ -976,6 +1077,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		created.titleRow,
 		created.rename,
 		created.meta,
+		created.linkRow,
 		created.origin,
 		h(
 			"div",
@@ -1095,6 +1197,51 @@ function renderTitle(state: PanelState, p: CaseParts, c: Case): void {
 	queueMicrotask(() => {
 		p.renameField.focus();
 		p.renameField.select();
+	});
+}
+
+/**
+ * Draw the case's link and its Edit, or Add a link where it has none; the
+ * link's form in their place while it is edited (DEC-028).
+ */
+function renderLink(state: PanelState, p: CaseParts, c: Case): void {
+	const editing = state.linking?.caseId === c.id ? state.linking : undefined;
+	const link = c.link;
+	p.linkOpen.hidden = editing !== undefined || link === undefined;
+	if (link === undefined) {
+		p.linkOpen.removeAttribute("href");
+		p.linkOpen.removeAttribute("title");
+		p.linkOpen.textContent = "";
+	} else {
+		if (p.linkOpen.getAttribute("href") !== link)
+			p.linkOpen.setAttribute("href", link);
+		p.linkOpen.title = link;
+		p.linkOpen.textContent = shortUrl(link);
+	}
+	p.linkEdit.hidden = editing !== undefined;
+	p.linkEdit.textContent = link === undefined ? "Add a link" : "Edit";
+	p.linkEdit.setAttribute(
+		"aria-label",
+		link === undefined ? "Add a link to this case" : "Edit this case's link",
+	);
+	p.linkForm.hidden = editing === undefined;
+	if (editing === undefined) {
+		if (!p.linkFormOpen) return;
+		p.linkFormOpen = false;
+		// The keyboard is back where the edit started.
+		const at = document.activeElement;
+		if (at === null || at === document.body || p.linkForm.contains(at))
+			queueMicrotask(() => p.linkEdit.focus());
+		return;
+	}
+	if (p.linkField.value !== editing.text) p.linkField.value = editing.text;
+	p.linkField.setAttribute("aria-invalid", String(editing.error !== undefined));
+	setHint(p.linkHint, editing.error);
+	if (p.linkFormOpen) return;
+	p.linkFormOpen = true;
+	queueMicrotask(() => {
+		p.linkField.focus();
+		p.linkField.select();
 	});
 }
 
@@ -1603,6 +1750,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	p.saveVerdict.hidden = draft === undefined;
 
 	renderTitle(state, p, c);
+	renderLink(state, p, c);
 	const web = isWebPage(c.page.url);
 	p.page.hidden = !web;
 	p.page.textContent = web ? shortUrl(c.page.url) : "";
@@ -1619,7 +1767,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		p.origin,
 		c.importedAt === undefined
 			? undefined
-			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, statuses and reopen notes, summary and findings are as the file says: whoever wrote it, whatever author or AI app it names.`,
+			: `Imported from a file on ${formatDate(c.importedAt)}. Its link, comments, statuses and reopen notes, summary and findings are as the file says: whoever wrote it, whatever author or AI app it names.`,
 	);
 	// Marks the panel loaded, or an AI app (the page says so).
 	const here =
