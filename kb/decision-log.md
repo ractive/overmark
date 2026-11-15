@@ -1,7 +1,7 @@
 ---
 type: decision-log
 title: "Decision log"
-description: Decisions for Sitegloss (Overmark until DEC-030) with their reasons, newest last. Owner decisions are marked as such and are not reopened.
+description: Decisions for Sitegloss with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
 timestamp: 2026-11-04T17:00:00+01:00
@@ -1218,5 +1218,7 @@ that the old name had namesakes among annotation tools.
   `chrome.storage.local` at every worker start, and the panel's hand-over from its
   `localStorage`. Both served only builds before 0.2.0, and nothing reads either place now.
 - **What 0.1.0 stored under the same extension ID stays in the browser** until the
-  extension is removed; the README says so.
+  extension is removed. Only the owner ran 0.1.0, so no current text says so.
+- **Current texts do not mention the old name** (the owner, 2026-11-15): it stays in the
+  git history, in this entry and in the notes that keep it, nowhere else.
 - **Earlier entries, the log and finished iterations keep the old name.**

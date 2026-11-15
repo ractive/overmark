@@ -38,17 +38,6 @@ page (Actions → the run → Artifacts), and every release has it under Release
 has `sitegloss-store`, the package for the Chrome Web Store; publishing it is described
 in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
 
-## Coming from Overmark 0.1.0
-
-Sitegloss 0.2.0 takes nothing over: cases, settings and the pairing with AI apps start
-empty, and a `.overmark.zip` file is not read. Because the extension keeps its ID, what
-Overmark 0.1.0 stored in the browser (its cases with their screenshots, its settings)
-stays there, where Sitegloss neither shows nor deletes it: remove Overmark in
-`chrome://extensions` before loading Sitegloss (removing an extension deletes what it
-stored), or remove and load Sitegloss again later. Reload the tabs that were open during
-the change, or Overmark's toolbar may stay on them until then. Files Overmark wrote to
-`Downloads/Overmark/` stay until you delete them.
-
 ## Use
 
 1. Click the Sitegloss icon on a tab. The side panel opens there.

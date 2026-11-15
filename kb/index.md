@@ -11,7 +11,7 @@
 
 ## decision-log
 
-* [Decision log](decision-log.md) - Decisions for Sitegloss (Overmark until DEC-030) with their reasons, newest last. Owner decisions are marked as such and are not reopened.
+* [Decision log](decision-log.md) - Decisions for Sitegloss with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 
 ## questions
 

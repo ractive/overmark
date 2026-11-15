@@ -145,9 +145,9 @@ builds share one ID.
 
 ## Case format
 
-A case is JSON (`format: "sitegloss/1"`) with its images referenced by relative path. A file of another
-format (such as `overmark/1`) is not read. The same JSON is stored in IndexedDB and
-written into the export, so an export is the case plus its images:
+A case is JSON (`format: "sitegloss/1"`) with its images referenced by relative path. A
+file of another format is not read. The same JSON is stored in IndexedDB and written into
+the export, so an export is the case plus its images:
 
 ```text
 <title>.sitegloss.zip
