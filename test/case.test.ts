@@ -11,6 +11,7 @@ import {
 	findingsTextOf,
 	isOwnFinding,
 	isPageOf,
+	linkProblem,
 	MAX_COMMENT,
 	MAX_FINDING,
 	MAX_FINDINGS,
@@ -1161,6 +1162,24 @@ describe("a case's link (DEC-028)", () => {
 		expect("link" in validateCase(sampleCase())).toBe(false);
 		const linked = withLink(sampleCase(), TICKET, NOW);
 		expect(validateCase(JSON.parse(JSON.stringify(linked))).link).toBe(TICKET);
+	});
+
+	test("a user name and password in the address are not kept; the query is", () => {
+		expect(
+			cleanLink("https://user:token@tickets.example.com/t/1?tab=2#c"),
+		).toBe("https://tickets.example.com/t/1?tab=2#c");
+	});
+
+	test("why a text is no link: too long as the browser reads it, or no address", () => {
+		const long = `https://example.com/${"ä".repeat(400)}`;
+		expect(long.length).toBeLessThan(MAX_LINK);
+		expect(cleanLink(long)).toBeUndefined();
+		expect(linkProblem(long)).toBe("long");
+		expect(linkProblem("tickets.example.com/1")).toBe("address");
+		expect(linkProblem("javascript:alert(1)")).toBe("address");
+		expect(linkProblem(`ftp://example.com/${"a".repeat(3000)}`)).toBe(
+			"address",
+		);
 	});
 
 	test("a file's link spelled another way is kept as the browser reads it", () => {

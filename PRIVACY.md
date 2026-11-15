@@ -13,9 +13,9 @@ without a mark, as it was made, is deleted again:
 
 - the case's title, your comments, the summary for the developer, when the case and its
   screenshots were made and changed, and for an imported case when it was imported;
-- the link you attach to a case (a ticket, a design, a pull request), whole, as you
-  entered it: it is in the case's export and synced file, and a connected AI app reads
-  it with the case;
+- the link you attach to a case (a ticket, a design, a pull request), whole, as the
+  browser reads the address you entered, without a user name and password in it: it is
+  in the case's export and synced file, and a connected AI app reads it with the case;
 - the findings a connected AI app wrote on a mark: their text, when they were written
   and changed, and the app's id, name and host as the relay gave them;
 - the page's address, its title, its language, the window size and pixel density, and

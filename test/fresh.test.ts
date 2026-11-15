@@ -76,6 +76,11 @@ describe("an untouched case goes when it is left (DEC-026)", () => {
 
 	test("a mark in it: the user's", () => {
 		expect(isUntouched(withOneMark(fresh()))).toBe(false);
+		// A link being typed in its form keeps the case, as a typed title does.
+		expect(
+			isUntouched(fresh(), undefined, undefined, " https://t.example.com/1"),
+		).toBe(false);
+		expect(isUntouched(fresh(), undefined, undefined, "  ")).toBe(true);
 	});
 
 	test("a link attached: the user's (DEC-028)", () => {

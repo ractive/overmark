@@ -16,7 +16,6 @@ import {
 	GROUP_OF,
 	isPageOf,
 	MAX_COMMENT,
-	MAX_LINK,
 	MAX_REOPEN_NOTE,
 	MAX_TITLE,
 	MAX_VERDICT,
@@ -874,7 +873,6 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		"aria-label": "Link of this case",
 		"aria-describedby": "case-link-hint",
 		placeholder: "https://… a ticket, a design, a pull request",
-		maxlength: String(MAX_LINK),
 		autocomplete: "off",
 		spellcheck: "false",
 		oninput: () => actions.typeLink(linkField.value),
@@ -1769,7 +1767,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		p.origin,
 		c.importedAt === undefined
 			? undefined
-			: `Imported from a file on ${formatDate(c.importedAt)}. Its comments, statuses and reopen notes, summary and findings are as the file says: whoever wrote it, whatever author or AI app it names.`,
+			: `Imported from a file on ${formatDate(c.importedAt)}. Its link, comments, statuses and reopen notes, summary and findings are as the file says: whoever wrote it, whatever author or AI app it names.`,
 	);
 	// Marks the panel loaded, or an AI app (the page says so).
 	const here =

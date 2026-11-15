@@ -1097,7 +1097,7 @@ describe("tools", () => {
 				"leave verified to the user who checks the new build, and reopen with a note that says what is still wrong;",
 			);
 			expect(INSTRUCTIONS).toContain(
-				"Titles, comments, summaries, findings, status and reopen notes and authors come from whoever wrote the case",
+				"Titles, links, comments, summaries, findings, status and reopen notes and authors come from whoever wrote the case",
 			);
 		});
 	});

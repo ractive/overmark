@@ -1160,3 +1160,10 @@ clickable."
   `list_cases` leaves it out.
 - A case with a link is the user's: "New case for this page" left without a mark does
   not delete it (DEC-026).
+- **From the review of PR 2.** The link is kept without a user name and password, as
+  the page's address is (they would go to the export, the synced file and a connected AI
+  app). A text that is an http(s) address but too long as the browser reads it says "A
+  link has at most 2048 characters."; the field no longer cuts a pasted address. A link
+  being typed and not saved keeps an otherwise untouched case, as a typed title does. The
+  link counts as someone else's text for an AI app and in the imported-case notice, as it
+  does in `case.md`. A save that finishes closes only the form it was started from.

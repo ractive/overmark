@@ -55,6 +55,7 @@ export function isUntouched(
 	c: Case,
 	typed?: string,
 	typedTitle?: string,
+	typedLink?: string,
 ): boolean {
 	const title = cleanTitle(typedTitle ?? "");
 	return (
@@ -65,6 +66,8 @@ export function isUntouched(
 		c.link === undefined &&
 		(c.verdict ?? "").trim() === "" &&
 		(typed ?? "").trim() === "" &&
+		// A link being typed in the form, not saved yet (DEC-028).
+		(typedLink ?? "").trim() === "" &&
 		(title === "" || title === c.title) &&
 		c.title === firstTitle(c.page)
 	);

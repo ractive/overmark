@@ -1255,7 +1255,29 @@ export function cleanLink(text: string): string | undefined {
 		return undefined;
 	}
 	if (url.protocol !== "https:" && url.protocol !== "http:") return undefined;
+	// As the page's address is kept: a user name and password in an address
+	// would go to the export, the synced file and a connected AI app.
+	url.username = "";
+	url.password = "";
 	return url.href.length <= MAX_LINK ? url.href : undefined;
+}
+
+/**
+ * Why `text` is no link, for the form: too long as the browser reads it, or
+ * no http or https address at all.
+ */
+export function linkProblem(text: string): "long" | "address" {
+	try {
+		const url = new URL(text.trim());
+		if (
+			(url.protocol === "https:" || url.protocol === "http:") &&
+			url.href.length > MAX_LINK
+		)
+			return "long";
+	} catch {
+		// Not an address.
+	}
+	return "address";
 }
 
 /**
