@@ -24,7 +24,8 @@ be fixed and the result tested in the browser.
 - [x] Screenshots at the mark; marks follow their element; unsaved marks ask before leaving
 - [x] Matching, side panel and AI tools, build and documents
 - [x] Review of the fixes (claude 7, glm 4, 9 distinct), merge (PR #9)
-- [x] More testing in the browser: [results](../research/pilot-dev-pages.md)
+- [x] More testing in the browser: the store package on a real site's dev pages, the
+  measurement of iteration 6 again with the stricter matching
 
 ## Left open
 

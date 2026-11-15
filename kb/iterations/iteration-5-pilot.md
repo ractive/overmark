@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 5: pilot and store"
 status: in-progress
-description: "A first pilot with a PO and a dev on real Acme pages, measuring how often elements are found; the privacy policy and the store listing; the extension unlisted in the Chrome Web Store and the store's key in the manifest."
+description: "A first pilot with a PO and a dev on the pages of a real site, measuring how often elements are found; the privacy policy and the store listing; the extension unlisted in the Chrome Web Store and the store's key in the manifest."
 timestamp: 2026-11-04T17:00:00+01:00
 tags: [iteration, release]
 ---

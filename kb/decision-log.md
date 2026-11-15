@@ -19,7 +19,7 @@ Owner, 2026-11-04, in the planning conversation:
   elsewhere.
 - The user opens the other environment's page themselves and loads the case; there are
   no "open on local/dev/prod" buttons and no environment settings.
-- Its own repository, `ractive/overmark`, not under Acme. The name is Overmark
+- Its own repository, `ractive/overmark`, not an employer's. The name is Overmark
   ("Folie" was dropped: hard to say for English speakers).
 - Vibe Annotations was checked and found too limited ([prior art](research/prior-art.md)).
 - Before/after evidence per check, a backend with share links, and links to Jira and

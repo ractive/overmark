@@ -15,6 +15,6 @@
 
 ## questions
 
-* [Open questions for the owner](open-questions.md) - Decisions the plan needs from the owner or from Acme IT before the pilot and the store listing.
+* [Open questions for the owner](open-questions.md) - Decisions the plan needs from the owner, or from the IT of an organisation that tries Overmark, before the pilot and the store listing.
 
 <!-- okf:index:end -->

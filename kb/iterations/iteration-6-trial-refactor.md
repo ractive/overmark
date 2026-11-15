@@ -2,7 +2,7 @@
 type: iteration
 title: "Iteration 6: trial on dev pages and the refactor"
 status: completed
-description: "Overmark on real Acme dev pages (matching measured, a scale bug found and fixed), then three refactors the reviews asked for: an allow-list of recorded details, one state machine per page, and a side panel drawn from one state."
+description: "Overmark on the dev pages of a real site (matching measured, a scale bug found and fixed), then three refactors the reviews asked for: an allow-list of recorded details, one state machine per page, and a side panel drawn from one state."
 timestamp: 2026-11-04T23:00:00+01:00
 tags: [iteration, pilot, refactor]
 ---
@@ -13,8 +13,9 @@ refactor of the three areas the findings kept coming from, instead of a third ro
 
 ## Scope
 
-- Trial on `dev.example.com` ([results](../research/pilot-dev-pages.md)),
-  with a reusable measurement `test/e2e/pilot.ts` that uses the extension's own search
+- Trial on four dev pages of a real site: 24 or 25 of 25 marks found their element
+  again after a reload, 22 to 24 at phone width, in about 30 ms; with a reusable
+  measurement `test/e2e/pilot.ts` that uses the extension's own search
   (`src/lib/candidates.ts`, moved out of the reviewer).
 - Fixes from the trial: crops at the captured image's scale; of tied candidates the
   visible one wins.

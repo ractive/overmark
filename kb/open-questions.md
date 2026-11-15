@@ -1,7 +1,7 @@
 ---
 type: questions
 title: "Open questions for the owner"
-description: Decisions the plan needs from the owner or from Acme IT before the pilot and the store listing.
+description: Decisions the plan needs from the owner, or from the IT of an organisation that tries Overmark, before the pilot and the store listing.
 tags:
   - questions
 timestamp: 2026-11-04T17:00:00+01:00
@@ -13,11 +13,11 @@ timestamp: 2026-11-04T17:00:00+01:00
    need a relay with a public HTTPS address that allows Overmark's extension ID. The
    hosted `tab-mcp.ractive.ch` allows the development build's ID since relay 0.7.1 and is
    the side panel's default; the store build's ID still has to be added there
-   (`kb/operations/chrome-web-store.md`, step 5). Open: does Acme accept that relay
-   for POs, or run its own?
-2. **Acme IT.** Is Developer mode allowed on company machines ("Load unpacked")? Is
+   (`kb/operations/chrome-web-store.md`, step 5). Open: does an organisation that
+   tries Overmark accept that relay for POs, or run its own?
+2. **An organisation's IT.** Is Developer mode allowed on company machines ("Load unpacked")? Is
    Chrome managed by policy, so IT could install Overmark?
-3. **Test ids.** Do the Acme frontends have `data-testid` (or similar) attributes?
+3. **Test ids.** Do the frontends it is used on have `data-testid` (or similar) attributes?
    They make finding elements again far more reliable.
 4. **Visibility.** The repository was created private. Make it public (MIT, like
    tab-mcp)?
