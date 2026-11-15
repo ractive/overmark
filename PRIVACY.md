@@ -148,7 +148,7 @@ Sitegloss does not sell data, use it for advertising, or pass it to anyone else.
   browser closes: Sitegloss notes there which marks the toolbar on a tab just added (case,
   mark, screenshot and comment), so that the toolbar's Undo can take back those marks
   and no others, and whether AI access is on. Sitegloss keeps nothing in the extension's
-  local storage any more: it only deletes what an unreleased build kept there.
+  local storage.
 - **alarms:** while AI access is on, Sitegloss's background service worker wakes once a
   minute, so the connection to the AI app comes back after the computer slept.
 - **notifications:** to ask whether the AI app may make a change when the side panel is
