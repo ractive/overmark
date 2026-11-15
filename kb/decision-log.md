@@ -1167,3 +1167,23 @@ clickable."
   being typed and not saved keeps an otherwise untouched case, as a typed title does. The
   link counts as someone else's text for an AI app and in the imported-case notice, as it
   does in `case.md`. A save that finishes closes only the form it was started from.
+
+## DEC-029: The logo: a pen loop round </> (owner)
+
+The owner, 2026-11-15, after many rounds: the amber ring on a dark square was "ok-ish
+but a bit boring".
+
+- **What it shows.** A light `</>` on the dark tile with a hand-drawn amber pen loop
+  round it: marks on a web page, a tag circled by hand. The loop starts near the top,
+  runs counterclockwise once and ends just above its own start.
+- **Two drawings.** The full one from 48 px; at 16 and 32 px a simpler one, `< >`
+  without the slash and a heavier loop, because `</>` is illegible there.
+- **A white tile for dark backgrounds,** with the glyph in ink and the same amber loop.
+- **The store's icon** is the full drawing in the middle 96 × 96 of 128 px, with 16 px
+  of transparent padding on every side, as the Chrome Web Store asks.
+- **One geometry.** It lives in `src/lib/logo.ts`; `bun scripts/icons.ts` draws the
+  icons (`assets/icons/`), the store's icon (`assets/store/`) and SVGs (`assets/brand/`)
+  from it, and a test fails when a committed file differs from what the script draws.
+  The bars on the page show the small drawing's loop alone.
+- **The wordmark** is the plain name "Overmark" with a marker swipe over "mark". It
+  comes with the store graphics, not in this change.

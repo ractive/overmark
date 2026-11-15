@@ -12,6 +12,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { CONTENT_SCRIPT } from "../src/lib/messages.ts";
 import { writeZip } from "../src/lib/zip.ts";
+import { ICON_SIZES } from "./icons.ts";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -46,8 +47,6 @@ export function extensionId(base64Key: string): string {
 export async function readKey(): Promise<string> {
 	return (await Bun.file(join(ROOT, "manifest-key.txt")).text()).trim();
 }
-
-const ICON_SIZES = [16, 32, 48, 128] as const;
 
 /** The licences of all that a build contains, in the build and so in its zips. */
 export const NOTICES_FILE = "LICENSES.txt";

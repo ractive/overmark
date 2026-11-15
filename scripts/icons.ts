@@ -1,16 +1,31 @@
 /**
- * Draws the extension icons into `assets/icons/` (committed): a dark rounded
- * square with an amber ring, as if something on the page were circled. A
- * small PNG encoder keeps this free of image packages (DEC-007).
+ * Draws the logo's files from its geometry in `src/lib/logo.ts` (DEC-029), all
+ * committed: the extension icons in `assets/icons/`, the store's icon in
+ * `assets/store/` and SVGs in `assets/brand/`. From one geometry, so a PNG and
+ * an SVG never disagree. A small PNG encoder keeps this free of image
+ * packages (DEC-007).
  */
 
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
+import {
+	FULL_LOGO,
+	LOGO_COLOURS,
+	type LogoDrawing,
+	type LogoPoint,
+	pathData,
+	SMALL_LOGO,
+	TILE,
+} from "../src/lib/logo.ts";
 import { crc32 } from "../src/lib/zip.ts";
 
-const BACKGROUND = [0x1d, 0x24, 0x33] as const;
-const RING = [0xff, 0xb0, 0x00] as const;
+export const ICON_SIZES = [16, 32, 48, 128] as const;
 
+const rgb = (hex: string): readonly number[] =>
+	[1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+const BACKGROUND = rgb(LOGO_COLOURS.tile);
+const AMBER = rgb(LOGO_COLOURS.amber);
+const PAPER = rgb(LOGO_COLOURS.paper);
 function chunk(type: string, data: Uint8Array): Uint8Array {
 	const out = new Uint8Array(12 + data.length);
 	const view = new DataView(out.buffer);
@@ -67,43 +82,137 @@ function roundedSquare(x: number, y: number, h: number, r: number): number {
 	);
 }
 
-export function drawIcon(size: number): Uint8Array {
+/** A polyline's segments, each with the box it reaches with the stroke. */
+interface Stroke {
+	segments: [number, number, number, number][];
+	boxes: [number, number, number, number][];
+	half: number;
+}
+
+function stroke(points: readonly LogoPoint[], width: number): Stroke {
+	const half = width / 2;
+	const segments: Stroke["segments"] = [];
+	const boxes: Stroke["boxes"] = [];
+	for (let i = 1; i < points.length; i++) {
+		const [ax, ay] = points[i - 1] as LogoPoint;
+		const [bx, by] = points[i] as LogoPoint;
+		segments.push([ax, ay, bx, by]);
+		boxes.push([
+			Math.min(ax, bx) - half,
+			Math.min(ay, by) - half,
+			Math.max(ax, bx) + half,
+			Math.max(ay, by) + half,
+		]);
+	}
+	return { segments, boxes, half };
+}
+
+/** Within half the width of a segment: a round cap and join at every point. */
+function inside(s: Stroke, x: number, y: number): boolean {
+	const h2 = s.half * s.half;
+	for (let i = 0; i < s.segments.length; i++) {
+		const [x0, y0, x1, y1] = s.boxes[i] as Stroke["boxes"][number];
+		if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+		const [ax, ay, bx, by] = s.segments[i] as Stroke["segments"][number];
+		const dx = bx - ax;
+		const dy = by - ay;
+		const len2 = dx * dx + dy * dy;
+		const t = len2 === 0 ? 0 : clamp(((x - ax) * dx + (y - ay) * dy) / len2);
+		const ex = x - ax - t * dx;
+		const ey = y - ay - t * dy;
+		if (ex * ex + ey * ey <= h2) return true;
+	}
+	return false;
+}
+
+/**
+ * The logo on a transparent `size` × `size` image, its 128-unit tile in the
+ * square from `at` to `at + side` pixels: the tile, the glyph, the loop over
+ * them, each sample in or out (16 per pixel).
+ */
+function drawLogo(
+	size: number,
+	drawing: LogoDrawing,
+	at = 0,
+	side = size,
+): Uint8Array {
+	const loop = stroke(drawing.loop, drawing.loopWidth);
+	const glyph = drawing.glyph.map((g) => stroke(g, drawing.glyphWidth));
+	const h = 64 - TILE.inset;
 	const rgba = new Uint8Array(size * size * 4);
 	const samples = 4;
 	for (let py = 0; py < size; py++) {
 		for (let px = 0; px < size; px++) {
 			let cover = 0;
-			let ring = 0;
+			const sum = [0, 0, 0];
 			for (let sy = 0; sy < samples; sy++) {
 				for (let sx = 0; sx < samples; sx++) {
-					// coordinates in -1..1
-					const x = ((px + (sx + 0.5) / samples) / size) * 2 - 1;
-					const y = ((py + (sy + 0.5) / samples) / size) * 2 - 1;
-					if (roundedSquare(x, y, 0.98, 0.32) <= 0) {
-						cover++;
-						const d = Math.abs(Math.hypot(x * 1.08, y) - 0.52);
-						if (d <= (size <= 16 ? 0.16 : 0.12)) ring++;
-					}
+					// in tile units, 0..128
+					const x = ((px + (sx + 0.5) / samples - at) / side) * 128;
+					const y = ((py + (sy + 0.5) / samples - at) / side) * 128;
+					if (roundedSquare(x - 64, y - 64, h, TILE.radius) > 0) continue;
+					cover++;
+					const colour = inside(loop, x, y)
+						? AMBER
+						: glyph.some((g) => inside(g, x, y))
+							? PAPER
+							: BACKGROUND;
+					for (let c = 0; c < 3; c++) sum[c] = (sum[c] ?? 0) + (colour[c] ?? 0);
 				}
 			}
-			const n = samples * samples;
-			const t = cover === 0 ? 0 : ring / cover;
 			const i = (py * size + px) * 4;
-			for (let c = 0; c < 3; c++) {
-				rgba[i + c] = Math.round(
-					(BACKGROUND[c] ?? 0) * (1 - t) + (RING[c] ?? 0) * t,
-				);
-			}
-			rgba[i + 3] = Math.round(clamp(cover / n) * 255);
+			if (cover === 0) continue;
+			for (let c = 0; c < 3; c++)
+				rgba[i + c] = Math.round((sum[c] ?? 0) / cover);
+			rgba[i + 3] = Math.round((cover / (samples * samples)) * 255);
 		}
 	}
 	return encodePng(size, size, rgba);
 }
 
+/** The toolbar's sizes draw the simpler logo, the larger ones the full one. */
+export function drawIcon(size: number): Uint8Array {
+	return drawLogo(size, size <= 32 ? SMALL_LOGO : FULL_LOGO);
+}
+
+/** The Chrome Web Store's icon: the logo in the middle 96 × 96, 16 px clear around it. */
+export function drawStoreIcon(): Uint8Array {
+	return drawLogo(128, FULL_LOGO, 16, 96);
+}
+
+/** The logo as SVG, on the dark tile or on the white one for dark backgrounds. */
+export function logoSvg(drawing: LogoDrawing, light = false): string {
+	const side = 128 - 2 * TILE.inset;
+	const tile = light ? LOGO_COLOURS.lightTile : LOGO_COLOURS.tile;
+	const glyph = light ? LOGO_COLOURS.ink : LOGO_COLOURS.paper;
+	const round = 'fill="none" stroke-linecap="round" stroke-linejoin="round"';
+	return [
+		'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">',
+		"<title>Overmark</title>",
+		`<rect x="${TILE.inset}" y="${TILE.inset}" width="${side}" height="${side}" rx="${TILE.radius}" fill="${tile}"/>`,
+		`<path d="${drawing.glyph.map(pathData).join(" ")}" ${round} stroke="${glyph}" stroke-width="${drawing.glyphWidth}"/>`,
+		`<path d="${pathData(drawing.loop)}" ${round} stroke="${LOGO_COLOURS.amber}" stroke-width="${drawing.loopWidth}"/>`,
+		"</svg>",
+		"",
+	].join("\n");
+}
+
+/** Every file this script writes, by its path from the repository's root. */
+export function iconFiles(): Record<string, Uint8Array | string> {
+	const files: Record<string, Uint8Array | string> = {};
+	for (const size of ICON_SIZES)
+		files[`assets/icons/icon-${size}.png`] = drawIcon(size);
+	files["assets/store/icon-128.png"] = drawStoreIcon();
+	files["assets/brand/icon.svg"] = logoSvg(FULL_LOGO);
+	files["assets/brand/icon-small.svg"] = logoSvg(SMALL_LOGO);
+	files["assets/brand/icon-light.svg"] = logoSvg(FULL_LOGO, true);
+	files["assets/brand/icon-light-small.svg"] = logoSvg(SMALL_LOGO, true);
+	return files;
+}
+
 if (import.meta.main) {
-	for (const size of [16, 32, 48, 128]) {
-		const path = join(import.meta.dir, "../assets/icons", `icon-${size}.png`);
-		await Bun.write(path, drawIcon(size));
+	for (const [path, data] of Object.entries(iconFiles())) {
+		await Bun.write(join(import.meta.dir, "..", path), data);
 		console.log(`Wrote ${path}`);
 	}
 }
