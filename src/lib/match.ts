@@ -1,5 +1,5 @@
 /**
- * Finding an annotation's element on another build: every candidate is
+ * Finding an annotation's element in another environment: every candidate is
  * scored by the weighted similarity of its details to the stored ones (after
  * Similo; see kb/design/overview.md). Pure, so it is tested without a browser.
  */
@@ -139,7 +139,7 @@ function repeatedNames(
  * test id or id, else its accessible name or text, else its image or link.
  * `undefined` when nothing tells: the stored element has none of these, or
  * only a value repeated on the page (`repeated`) or an image or link that
- * differs, which another build may simply have renamed.
+ * differs, which another environment may simply have renamed.
  */
 export function identity(
 	stored: ElementDetails,
