@@ -49,7 +49,7 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 	});
 
 	test("has the fixed extension ID", () => {
-		expect(h.extensionId).toBe("fphhchhlgklidhnodoleiebmdhnfdadg");
+		expect(h.extensionId).toBe("ldmcfigcnobhnbaigehcaodheklibeon");
 	});
 
 	test("the content script shows and hides the overlay, once per page", async () => {

@@ -23,7 +23,7 @@ Requires [Bun](https://bun.sh) 1.4.
 
 ```sh
 bun install
-bun run build      # builds dist/ (extension ID fphhchhlgklidhnodoleiebmdhnfdadg)
+bun run build      # builds dist/ (extension ID ldmcfigcnobhnbaigehcaodheklibeon)
 ```
 
 In Chrome, open `chrome://extensions`, turn on Developer mode, click "Load unpacked" and
@@ -156,9 +156,8 @@ Sitegloss offers the cases to an AI app (Claude Code, Claude, ChatGPT, Codex) th
 extension's background service worker, so it stays while the side panel is closed; the
 side panel shows it and sets it up. Sitegloss uses the hosted relay
 `https://tab-mcp.ractive.ch` unless you enter another one in the side panel. It allows
-only builds with the fixed key in `manifest-key.txt` (ID
-`chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`); the store package has none, so
-it gets another ID and needs a relay of its own until the store's key is set.
+only Sitegloss's ID, `chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon`: the store
+version's, which unpacked builds share through the store's key in `manifest-key.txt`.
 The tools:
 
 | Tool | What it does |
@@ -185,7 +184,7 @@ and URLs without their query string, fragment or user name and password.
 
 ### A relay on your computer, for Claude Code
 
-The relay must allow Sitegloss's origin, `chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg`.
+The relay must allow Sitegloss's origin, `chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon`.
 Relay 0.7.0 and later take it as a site:
 
 ```sh
@@ -193,7 +192,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   -e NODE_ENV=development \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_STORE=memory \
-  -e TAB_MCP_SITES='[{"origin":"chrome-extension://fphhchhlgklidhnodoleiebmdhnfdadg","name":"Sitegloss"}]' \
+  -e TAB_MCP_SITES='[{"origin":"chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon","name":"Sitegloss"}]' \
   ractive/tab-mcp:0.10.3
 ```
 
