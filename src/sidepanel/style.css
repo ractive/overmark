@@ -140,13 +140,14 @@ h2 {
 	font-weight: 700;
 }
 
+/* A heading within a section: smaller than the section's, not fainter (the owner: "really small"). */
 h3,
 .group-title {
 	margin: var(--s4) 0 var(--s2);
-	font-size: 12px;
-	line-height: 16px;
-	font-weight: 600;
-	color: var(--ink-2);
+	font-size: 13px;
+	line-height: 18px;
+	font-weight: 700;
+	color: var(--ink);
 }
 
 p {
@@ -872,8 +873,19 @@ main {
 
 /* --- home: the cases ---------------------------------------------------------- */
 
-#cases > .group-title:first-child {
-	margin-top: 0;
+/*
+ * The page in front has a case already: said in words, its rows, and the
+ * button that opens it, above "New case for this page".
+ */
+.here {
+	display: grid;
+	gap: var(--s3);
+	margin-bottom: var(--s3);
+}
+
+.here-text {
+	margin: 0;
+	font-weight: 600;
 }
 
 /* Rows from edge to edge of the panel, a rule between them. */

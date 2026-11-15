@@ -133,13 +133,14 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 			20_000,
 		);
 
-		// Home, with the case in its list.
+		// Home, with the page's case under This page: opening it is the one
+		// amber button, a new case a plain one.
 		await panel.eval(`${id("back")}.click()`);
 		await panel.waitFor(
-			`!${id("home")}.hidden && document.querySelectorAll("[data-case]").length === 1`,
+			`!${id("home")}.hidden && document.querySelectorAll("[data-case]").length === 1 && !${id("here")}.hidden`,
 			20_000,
 		);
-		await holds(["annotate"]);
+		await holds(["open-here"]);
 
 		// The case, opened from the list: its marks are drawn on the page.
 		await panel.eval(`document.querySelector("[data-case]").click()`);
