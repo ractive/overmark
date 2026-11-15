@@ -289,6 +289,33 @@ describe("the overlay's style", () => {
 		// No page width decides the toolbar's layout: it is measured.
 		expect(source).not.toMatch(/@media \((max|min)-width/);
 	});
+
+	test("the bars' logo is the small icon's pen loop, cropped to it (DEC-029)", async () => {
+		const { SMALL_LOGO } = await import("../src/lib/logo.ts");
+		const el = o.ring(window.document as unknown as Document);
+		expect(el.tagName.toLowerCase()).toBe("svg");
+		expect(el.getAttribute("class")).toBe("ring");
+		expect(el.querySelector("circle")).toBeNull();
+		const d = el.querySelector("path")?.getAttribute("d") ?? "";
+		expect(d.split("L").length).toBe(SMALL_LOGO.loop.length);
+		// Cropped: the loop's stroke fills the box, wider than high.
+		const [x, y, w, h] = (el.getAttribute("viewBox") ?? "")
+			.split(" ")
+			.map(Number) as [number, number, number, number];
+		expect(x).toBeGreaterThan(0);
+		expect(y).toBeGreaterThan(0);
+		expect(w).toBeGreaterThan(h);
+		expect(w).toBeLessThan(128);
+		expect(el.querySelector("title")?.textContent).toBe("Overmark");
+		// The forced-colours rule still paints it in the system's text colour.
+		const source = await Bun.file(
+			new URL("../src/content/overlay.ts", import.meta.url),
+		).text();
+		const forced = source.slice(
+			source.indexOf("@media (forced-colors: active)"),
+		);
+		expect(forced).toContain(".ring { stroke: CanvasText; }");
+	});
 });
 
 describe("the toolbar's layout is measured, not guessed from the page's width", () => {

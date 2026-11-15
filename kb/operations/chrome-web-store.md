@@ -93,6 +93,8 @@ PRs (`.github/dependabot.yml`).
 ## Listing
 
 - **Name:** Overmark
+- **Store icon:** `assets/store/icon-128.png`, 128 × 128 with 16 px of transparent
+  padding (DEC-029). `bun scripts/icons.ts` draws it.
 - **Summary:** the store takes it from the manifest's `description`, which
   `createManifest` in `scripts/build.ts` sets: "Annotate any web page, load the
   annotations onto another build of it, and talk them through with your AI app." (at
