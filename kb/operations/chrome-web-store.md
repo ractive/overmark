@@ -19,7 +19,9 @@ timestamp: 2026-11-05T08:00:00+01:00
    trader declaration). Which account is an open question
    ([open questions](../open-questions.md)).
 2. Publish [PRIVACY.md](https://github.com/ractive/overmark/blob/main/PRIVACY.md) at a
-   stable URL (a page on ractive.ch).
+   stable URL: it is the page `https://ractive.ch/overmark/privacy/`, kept in
+   `ractive/ractive.ch` (`src/pages/overmark/privacy/`); a change of `PRIVACY.md` goes
+   there too.
 3. Build the store package: `bun scripts/build.ts --store --zip --outdir dist-store`
    writes `overmark-<version>-store.zip` (no `key` in the manifest; the store would
    reject it). Without `--outdir` it would replace `dist/`, the unpacked development
@@ -94,36 +96,48 @@ PRs (`.github/dependabot.yml`).
 
 - **Name:** Overmark
 - **Summary:** the store takes it from the manifest's `description`, which
-  `createManifest` in `scripts/build.ts` sets: "Annotate any web page, load the
-  annotations onto another build of it, and talk them through with your AI app." (at
-  most 132 characters). Change it there.
+  `createManifest` in `scripts/build.ts` sets: "Mark what is wrong on a web page, open
+  the marks in another environment to fix it, and talk them through with your AI app."
+  (at most 132 characters). Change it there; the store reads it from the uploaded
+  package, so a new summary needs a new version. The repository's About text on GitHub
+  is a fourth copy (`gh repo edit ractive/overmark --description "…"`).
 - **Category:** Developer Tools
 - **Language:** English
+- **Official URL:** `ractive.ch`. The dashboard offers only sites verified in Search
+  Console by the Google account of the store's developer account; `ractive.ch` is
+  verified in the owner's.
+- **Homepage URL:** `https://ractive.ch/overmark/`, beside tab-mcp's page.
+- **Support URL:** `https://github.com/ractive/overmark/issues`.
+- **Privacy policy:** `https://ractive.ch/overmark/privacy/` (step 2).
 
 **Description:**
 
-> Mark what is wrong on a web page and carry the marks to the build where it gets fixed.
+> Mark what is wrong on a web page, and take the marks to where it gets fixed.
 >
-> Pick an element, draw a box, an arrow or a freehand mark, add a note, and comment on
-> each. Overmark keeps them in a case, each the moment you comment on it, with
-> screenshots of the page with the marks on them, and records each marked element's
-> details.
+> Pick an element, draw a box, an arrow or a freehand line, or drop a note, and write a
+> comment. Every mark is saved to a case right away, with a screenshot and the details
+> of the element you marked.
 >
-> Open the same page on another build, such as localhost or a test environment, and
-> load the case: Overmark finds each mark's element and outlines it, solid when found,
-> dashed when only probable. The screenshots stay the record, so every mark makes sense
-> even when the page has changed.
+> Then hand the case over. A developer opens it on the same page in their own
+> environment, such as localhost or a test system. Overmark finds each marked element
+> again and outlines it: solid when it is sure, dashed when it is a likely match. The
+> screenshots stay as the record, so every mark still makes sense when the page has
+> changed.
 >
-> Export a case, or all of them, as a zip with a Markdown summary and the images, keep
-> every case synced to your downloads or a folder you choose (in iCloud Drive or Dropbox, say), or connect an AI app
-> such as Claude through a tab-mcp relay: it can read the cases, find the marks on the
-> page in front, read a marked element's HTML and CSS there, take screenshots, and
-> record what should change. Changes it wants to
-> make are shown to you first, every time.
+> For the full experience, connect your AI app. With an app such as Claude connected
+> both to your browser and to Overmark, it looks at the live page and at your marks
+> together: it reads your comments, finds the marked elements on the page in front of
+> you, inspects their HTML and CSS, and works out what should change. Overmark connects
+> through a tab-mcp relay, and anything the app wants to change in a case is shown to
+> you first, unless you chose to always allow it.
 >
-> Your cases stay in your browser unless you export one, sync them to your downloads or a folder or connect an AI app. Overmark
-> works inside the page, so that page's own scripts can see what it shows there and the
-> keys you press there.
+> Export a case, or all of them, as a zip with a Markdown summary and the images, or
+> keep every case synced to your Downloads or a folder of your choice, in iCloud Drive
+> or Dropbox for example.
+>
+> Your cases stay in your browser unless you export them, sync them or connect an AI
+> app. Overmark works inside the page, so that page's own scripts can see what it shows
+> there and the keys you press there.
 
 **Single purpose:** Annotating web pages and reviewing the annotations on other builds
 of the same pages, alone or with an AI app the user connects.
