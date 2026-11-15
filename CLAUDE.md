@@ -116,7 +116,7 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 
 ## This project
 
-Overmark: a Chrome (and Edge) Manifest V3 extension for annotating web pages, loading the
+Sitegloss: a Chrome (and Edge) Manifest V3 extension for annotating web pages, loading the
 annotations onto another build of the page, and talking them through with an AI app over
 a tab-mcp relay. Design, plans and decisions live in `kb/` (hyalo, OKF profile): start
 with `kb/design/overview.md` and `kb/iterations/`.

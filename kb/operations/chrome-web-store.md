@@ -2,7 +2,7 @@
 type: operations
 title: "Publishing in the Chrome Web Store"
 description: >-
-  The store listing for Overmark: texts, category, single purpose, permission
+  The store listing for Sitegloss: texts, category, single purpose, permission
   justifications, data disclosures, and the steps to submit it unlisted and to take
   over the store's key afterwards.
 tags:
@@ -18,12 +18,12 @@ timestamp: 2026-11-05T08:00:00+01:00
 1. A Chrome Web Store developer account (one-time US$5, two-step verification, the
    trader declaration). Which account is an open question
    ([open questions](../open-questions.md)).
-2. Publish [PRIVACY.md](https://github.com/ractive/overmark/blob/main/PRIVACY.md) at a
-   stable URL: it is the page `https://ractive.ch/overmark/privacy/`, kept in
-   `ractive/ractive.ch` (`src/pages/overmark/privacy/`); a change of `PRIVACY.md` goes
+2. Publish [PRIVACY.md](https://github.com/ractive/sitegloss/blob/main/PRIVACY.md) at a
+   stable URL: it is the page `https://ractive.ch/sitegloss/privacy/`, kept in
+   `ractive/ractive.ch` (`src/pages/sitegloss/privacy/`); a change of `PRIVACY.md` goes
    there too.
 3. Build the store package: `bun scripts/build.ts --store --zip --outdir dist-store`
-   writes `overmark-<version>-store.zip` (no `key` in the manifest; the store would
+   writes `sitegloss-<version>-store.zip` (no `key` in the manifest; the store would
    reject it). Without `--outdir` it would replace `dist/`, the unpacked development
    build, with a keyless one: Chrome would give that a new ID, and its cases and relay
    origin would seem gone. A release attaches the same zip (`release.yml`).
@@ -38,8 +38,8 @@ timestamp: 2026-11-05T08:00:00+01:00
 ## Where the packages come from
 
 - **Every CI run** (each push to a PR or to main) attaches two artifacts to its run
-  page: `overmark-unpacked` (the zip for "Load unpacked", with the fixed key) and
-  `overmark-store` (the store package, without it).
+  page: `sitegloss-unpacked` (the zip for "Load unpacked", with the fixed key) and
+  `sitegloss-store` (the store package, without it).
 - **A release:** bump `version` in `package.json` in a PR, merge it, then
   `git tag vX.Y.Z <merge commit> && git push origin vX.Y.Z`. The release workflow
   checks the tag, runs `verify`, and creates the GitHub release with both zips. It stops
@@ -47,11 +47,11 @@ timestamp: 2026-11-05T08:00:00+01:00
 - **Attestations:** once the repository is public, the release workflow attests both
   zips before it creates the release (build provenance, signed through Sigstore): that
   this workflow built a file with that digest from that commit. Check a downloaded zip
-  with `gh attestation verify overmark-X.Y.Z.zip --repo ractive/overmark`. While the
+  with `gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss`. While the
   repository is private the step is skipped: GitHub has attestations for private
   repositories only on Enterprise Cloud.
 
-Every build, and so every zip, holds `LICENSES.txt`: Overmark's licence and those of the
+Every build, and so every zip, holds `LICENSES.txt`: Sitegloss's licence and those of the
 packages in its bundles. A bundled package whose licence the build does not know stops
 the build (`LICENCES` in `scripts/build.ts`).
 
@@ -94,7 +94,7 @@ PRs (`.github/dependabot.yml`).
 
 ## Listing
 
-- **Name:** Overmark
+- **Name:** Sitegloss
 - **Store icon:** `assets/store/icon-128.png`, 128 × 128 with 16 px of transparent
   padding (DEC-029). `bun scripts/icons.ts` draws it.
 - **Summary:** the store takes it from the manifest's `description`, which
@@ -102,15 +102,15 @@ PRs (`.github/dependabot.yml`).
   the marks in another environment to fix it, and talk them through with your AI app."
   (at most 132 characters). Change it there; the store reads it from the uploaded
   package, so a new summary needs a new version. The repository's About text on GitHub
-  is a fourth copy (`gh repo edit ractive/overmark --description "…"`).
+  is a fourth copy (`gh repo edit ractive/sitegloss --description "…"`).
 - **Category:** Developer Tools
 - **Language:** English
 - **Official URL:** `ractive.ch`. The dashboard offers only sites verified in Search
   Console by the Google account of the store's developer account; `ractive.ch` is
   verified in the owner's.
-- **Homepage URL:** `https://ractive.ch/overmark/`, beside tab-mcp's page.
-- **Support URL:** `https://github.com/ractive/overmark/issues`.
-- **Privacy policy:** `https://ractive.ch/overmark/privacy/` (step 2).
+- **Homepage URL:** `https://ractive.ch/sitegloss/`, beside tab-mcp's page.
+- **Support URL:** `https://github.com/ractive/sitegloss/issues`.
+- **Privacy policy:** `https://ractive.ch/sitegloss/privacy/` (step 2).
 
 **Description:**
 
@@ -121,15 +121,15 @@ PRs (`.github/dependabot.yml`).
 > of the element you marked.
 >
 > Then hand the case over. A developer opens it on the same page in their own
-> environment, such as localhost or a test system. Overmark finds each marked element
+> environment, such as localhost or a test system. Sitegloss finds each marked element
 > again and outlines it: solid when it is sure, dashed when it is a likely match. The
 > screenshots stay as the record, so every mark still makes sense when the page has
 > changed.
 >
 > For the full experience, connect your AI app. With an app such as Claude connected
-> both to your browser and to Overmark, it looks at the live page and at your marks
+> both to your browser and to Sitegloss, it looks at the live page and at your marks
 > together: it reads your comments, finds the marked elements on the page in front of
-> you, inspects their HTML and CSS, and works out what should change. Overmark connects
+> you, inspects their HTML and CSS, and works out what should change. Sitegloss connects
 > through a tab-mcp relay, and anything the app wants to change in a case is shown to
 > you first, unless you chose to always allow it.
 >
@@ -138,7 +138,7 @@ PRs (`.github/dependabot.yml`).
 > or Dropbox for example.
 >
 > Your cases stay in your browser unless you export them, sync them or connect an AI
-> app. Overmark works inside the page, so that page's own scripts can see what it shows
+> app. Sitegloss works inside the page, so that page's own scripts can see what it shows
 > there and the keys you press there.
 
 **Single purpose:** Annotating web pages and reviewing the annotations on the same pages
@@ -156,8 +156,8 @@ in other environments, alone or with an AI app the user connects.
 | `sidePanel` | The side panel lists cases, loads them onto the tab, and shows the AI app's connection and its questions. |
 | `storage` | Session storage, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others, and whether AI access is on. (The AI connection's settings and the secret from which its address is derived are in the extension's own IndexedDB, used by its service worker only; local storage only to delete what an unreleased build kept there.) |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
-| `downloads` (optional) | Asked for when the user clicks Export (or Export all cases) or "Sync to Downloads" in the side panel. Overmark saves its own export file through `chrome.downloads.download` and reads that one download's path (`downloads.search` by its id), to show the user where the file went with Copy and "Show in folder" (`downloads.show`). With the sync to Downloads it writes each case as its own file to `Overmark/` in the downloads folder, overwriting that case's file when the case changes, and erases its own previous entry from the download list (`downloads.erase`, the file stays). It reads no other download. Without it the export is saved as a plain download, without the path, and the sync can only go to a folder the user chooses. |
-| `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page in a new tab (the case's address in its header, or "Open the case's page" when none of its marks were found on the tab in front), so the case's marks are drawn there without clicking the icon. All sites only when the user clicks "Allow on all sites" (in the side panel's notice on a tab Overmark may not run on yet) or turns on the option "Allow on all sites, without clicking the icon on each tab". |
+| `downloads` (optional) | Asked for when the user clicks Export (or Export all cases) or "Sync to Downloads" in the side panel. Sitegloss saves its own export file through `chrome.downloads.download` and reads that one download's path (`downloads.search` by its id), to show the user where the file went with Copy and "Show in folder" (`downloads.show`). With the sync to Downloads it writes each case as its own file to `Sitegloss/` in the downloads folder, overwriting that case's file when the case changes, and erases its own previous entry from the download list (`downloads.erase`, the file stays). It reads no other download. Without it the export is saved as a plain download, without the path, and the sync can only go to a folder the user chooses. |
+| `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page in a new tab (the case's address in its header, or "Open the case's page" when none of its marks were found on the tab in front), so the case's marks are drawn there without clicking the icon. All sites only when the user clicks "Allow on all sites" (in the side panel's notice on a tab Sitegloss may not run on yet) or turns on the option "Allow on all sites, without clicking the icon on each tab". |
 
 **Remote code:** No. All code is in the package; the connection to the relay carries
 data only, and no tool runs code an AI app sends.
