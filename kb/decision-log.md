@@ -1,7 +1,7 @@
 ---
 type: decision-log
 title: "Decision log"
-description: Decisions for Overmark with their reasons, newest last. Owner decisions are marked as such and are not reopened.
+description: Decisions for Sitegloss (Overmark until DEC-030) with their reasons, newest last. Owner decisions are marked as such and are not reopened.
 tags:
   - decisions
 timestamp: 2026-11-04T17:00:00+01:00
@@ -1192,3 +1192,31 @@ but a bit boring".
   The bars on the page show the small drawing's loop alone.
 - **The wordmark** is the plain name "Overmark" with a marker swipe over "mark". It
   comes with the store graphics, not in this change.
+
+## DEC-030: Overmark is renamed Sitegloss (owner)
+
+The owner, 2026-11-15: the product is called Sitegloss from version 0.2.0. The reason is
+that the old name had namesakes among annotation tools.
+
+- **New name from 0.2.0:** the product, the repository (`ractive/sitegloss`), the site
+  path (`/sitegloss/`), the case format (`sitegloss/1`, files `<title>.sitegloss.zip`), the
+  databases (`sitegloss`, `sitegloss-sync`, `sitegloss-settings`), the downloads folder
+  (`Sitegloss/`) and the AI app's server name (`sitegloss`; the tools keep their names).
+- **Nothing is migrated.** Data under the old name is not read, and nothing is forwarded
+  from the old addresses; Sitegloss starts empty. 0.1.0 stays as released under the old
+  name. The extension ID is unchanged.
+- **The icon is unchanged;** the wordmark's swipe now lies over "gloss" (this supersedes
+  the wordmark line of DEC-029).
+- **The wordmark's letters are outlines,** not text: "Sitegloss" in Inter Bold (SIL OFL
+  1.1), the nearest free font to the system fonts the site uses, taken once from the
+  font file into `src/lib/logo.ts` with the swipe's geometry. An SVG cannot count on a
+  font, and with outlines the swipe covers "gloss" wherever the file is opened, for about
+  2.5 KB. `bun scripts/icons.ts` draws `assets/brand/wordmark.svg` and `lockup.svg` (for
+  light backgrounds) and their `-light` versions (for dark ones); `assets/store/` gets
+  nothing new until the store graphics are made.
+- **The fresh start ends two parts of DEC-016:** the removal of setting keys from
+  `chrome.storage.local` at every worker start, and the panel's hand-over from its
+  `localStorage`. Both served only builds before 0.2.0, and nothing reads either place now.
+- **What 0.1.0 stored under the same extension ID stays in the browser** until the
+  extension is removed; the README says so.
+- **Earlier entries, the log and finished iterations keep the old name.**

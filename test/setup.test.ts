@@ -71,7 +71,7 @@ describe("How do I add it?", () => {
 		).toBe(1);
 	});
 
-	test("each AI app with its text; commands for Claude Code and Codex, naming overmark", () => {
+	test("each AI app with its text; commands for Claude Code and Codex, naming sitegloss", () => {
 		setup.show(ADDRESS);
 		expect(
 			steps().map((li) => li.querySelector("strong")?.textContent),
@@ -91,7 +91,7 @@ describe("How do I add it?", () => {
 		] as const) {
 			const pre = step(app)?.querySelector("pre");
 			expect(pre?.getAttribute("dir")).toBe("ltr");
-			expect(pre?.textContent).toContain("overmark");
+			expect(pre?.textContent).toContain("sitegloss");
 			expect(pre?.textContent).toContain(ADDRESS);
 			const copy = step(app)?.querySelector("button");
 			expect(copy?.textContent).toBe("Copy");

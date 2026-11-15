@@ -42,9 +42,9 @@ const act = (pick: (a: SyncActions) => void) => () => {
 export const DOWNLOADS_PLACE = `Downloads/${DOWNLOADS_FOLDER}`;
 
 /** The tooltips of the sync's buttons. */
-export const SYNC_DOWNLOADS_TITLE = `Write each case to the folder “${DOWNLOADS_FOLDER}” in your downloads, as its own .zip file as Export does, and again whenever it changes. Chrome asks once whether Overmark may manage your downloads. A deleted case keeps its file. Nothing is read back.`;
+export const SYNC_DOWNLOADS_TITLE = `Write each case to the folder “${DOWNLOADS_FOLDER}” in your downloads, as its own .zip file as Export does, and again whenever it changes. Chrome asks once whether Sitegloss may manage your downloads. A deleted case keeps its file. Nothing is read back.`;
 export const SYNC_CHOOSE_TITLE =
-	"Choose a folder, in iCloud Drive or Dropbox say: Overmark writes each case there as its own .zip file, as Export does, and again whenever it changes. A deleted case keeps its file. Nothing is read from the folder.";
+	"Choose a folder, in iCloud Drive or Dropbox say: Sitegloss writes each case there as its own .zip file, as Export does, and again whenever it changes. A deleted case keeps its file. Nothing is read from the folder.";
 const SYNC_CHANGE_TITLE =
 	"Sync to Downloads or to another folder: the files written so far stay";
 const SYNC_CANCEL_TITLE = "Keep syncing where it syncs now";
@@ -52,17 +52,17 @@ const SYNC_STOP_TITLE = "Stop writing the cases; the files written so far stay";
 const SYNC_SHOW_TITLE =
 	"Open the folder with the synced files in your system's file manager";
 const SYNC_ALLOW_TITLE =
-	"Chrome asks whether Overmark may edit files in the folder again; then the cases changed meanwhile are written";
+	"Chrome asks whether Sitegloss may edit files in the folder again; then the cases changed meanwhile are written";
 const SYNC_ALLOW_DOWNLOADS_TITLE =
-	"Chrome asks whether Overmark may manage your downloads again; then the cases changed meanwhile are written";
+	"Chrome asks whether Sitegloss may manage your downloads again; then the cases changed meanwhile are written";
 const SYNC_USE_DOWNLOADS_TITLE = `Write the cases to ${DOWNLOADS_PLACE} from now on, which needs no OK after a restart; the files in the folder stay`;
 const SYNC_RETRY_TITLE = "Write the cases that are not written yet";
 
 const SYNC_OFF_TEXT =
 	"Keep a copy of every case as a file, written again whenever the case changes. One way: nothing is read back.";
 export const SYNC_OFF_NOTE =
-	"Downloads: a folder “Overmark” in your downloads, asked once, works with this panel closed. A folder of your choice (iCloud Drive, Dropbox): Chrome asks for access again after each restart.";
-export const SYNC_ASKING_TEXT = `Chrome asks whether Overmark may manage your downloads. With a yes, the cases are written to ${DOWNLOADS_PLACE}.`;
+	"Downloads: a folder “Sitegloss” in your downloads, asked once, works with this panel closed. A folder of your choice (iCloud Drive, Dropbox): Chrome asks for access again after each restart.";
+export const SYNC_ASKING_TEXT = `Chrome asks whether Sitegloss may manage your downloads. With a yes, the cases are written to ${DOWNLOADS_PLACE}.`;
 
 /** The banner's text, after its bold "Sync is paused." or "Sync failed.". */
 export function bannerText(sync: Sync): string | undefined {
@@ -70,7 +70,7 @@ export function bannerText(sync: Sync): string | undefined {
 	if (sync.target === undefined || status === undefined) return undefined;
 	if (status.state === "paused")
 		return status.reason === "downloads"
-			? "Overmark may no longer save to your downloads."
+			? "Sitegloss may no longer save to your downloads."
 			: `Chrome needs your OK to write to “${sync.folder ?? ""}” again.`;
 	if (status.state === "failed") return status.problem ?? "";
 	return undefined;
@@ -143,7 +143,7 @@ function helpButtons(sync: Sync): HTMLButtonElement[] {
 	];
 }
 
-/** "Syncing to Downloads/Overmark", or to “<folder>”. */
+/** "Syncing to Downloads/Sitegloss", or to “<folder>”. */
 function place(sync: Sync): HTMLElement {
 	return h(
 		"p",
@@ -225,7 +225,7 @@ function sectionParts(sync: Sync): HTMLElement[] {
 				"p",
 				{ class: "sync-state" },
 				status?.reason === "downloads"
-					? "Paused: Overmark may no longer save to your downloads."
+					? "Paused: Sitegloss may no longer save to your downloads."
 					: `Paused: Chrome wants your OK for “${sync.folder ?? ""}” again.`,
 			),
 		);

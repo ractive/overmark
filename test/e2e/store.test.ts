@@ -35,29 +35,29 @@ describe.skipIf(browserBinary === undefined)("IdbStore and openKv", () => {
 	});
 
 	test("the page runs every case of the contract", async () => {
-		expect(await page.eval<string[]>("__overmarkStore.names")).toEqual(
+		expect(await page.eval<string[]>("__siteglossStore.names")).toEqual(
 			Object.keys(storeContract),
 		);
 	});
 
 	for (const name of Object.keys(storeContract))
 		test(name, async () => {
-			await page.eval(`__overmarkStore.run(${JSON.stringify(name)})`);
+			await page.eval(`__siteglossStore.run(${JSON.stringify(name)})`);
 		});
 
 	test("the page runs every case of the settings contract", async () => {
-		expect(await page.eval<string[]>("__overmarkKv.names")).toEqual(
+		expect(await page.eval<string[]>("__siteglossKv.names")).toEqual(
 			Object.keys(kvContract),
 		);
 	});
 
 	for (const name of Object.keys(kvContract))
 		test(`settings: ${name}`, async () => {
-			await page.eval(`__overmarkKv.run(${JSON.stringify(name)})`);
+			await page.eval(`__siteglossKv.run(${JSON.stringify(name)})`);
 		});
 
 	test("settings: a database deleted under an open Kv is opened again", async () => {
-		expect(await page.eval("__overmarkKv.reopens()")).toEqual({
+		expect(await page.eval("__siteglossKv.reopens()")).toEqual({
 			afterDelete: {},
 			afterWrite: { relay: "https://after.test" },
 		});
@@ -66,7 +66,7 @@ describe.skipIf(browserBinary === undefined)("IdbStore and openKv", () => {
 	test("sweepPending reads the pending records only, and no image of a finished case", async () => {
 		expect(
 			await page.eval<{ swept: number; reads: string[] }>(
-				"__overmarkStore.sweepReads()",
+				"__siteglossStore.sweepReads()",
 			),
 		).toEqual({
 			swept: 1,

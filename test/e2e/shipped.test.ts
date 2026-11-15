@@ -200,7 +200,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		);
 	}, 60_000);
 
-	test("a click on the icon while the site's next page loads runs Overmark on that page", async () => {
+	test("a click on the icon while the site's next page loads runs Sitegloss on that page", async () => {
 		const { page } = await h.open("v1?next=1");
 		const tab = await h.browser.waitForTarget(
 			(t) => t.type === "tab" && t.url === `${h.base}/v1?next=1`,
@@ -248,16 +248,16 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 			(await h.browser.targets()).filter((t) => t.type === "tab");
 		const before = new Set((await tabTargets()).map((t) => t.targetId));
 		await panel.click(`document.getElementById("open-page")`);
-		// No host access: Chrome hides the new tab from Overmark until the click.
+		// No host access: Chrome hides the new tab from Sitegloss until the click.
 		await panel.waitFor(
-			`!document.getElementById("case-access").hidden && document.getElementById("case-access").textContent.includes("Click the Overmark icon")`,
+			`!document.getElementById("case-access").hidden && document.getElementById("case-access").textContent.includes("Click the Sitegloss icon")`,
 			15_000,
 		);
 		// The case's address has no query: the new tab is the one not there before.
 		const opened = (await tabTargets()).find((t) => !before.has(t.targetId));
 		expect(opened?.url).toBe(`${h.base}/v1`);
 		// The notice above may still be about the tab in front before (the
-		// closed page's neighbour, hidden from Overmark too). A click before
+		// closed page's neighbour, hidden from Sitegloss too). A click before
 		// the new tab's first page has come grants that page nothing, as for
 		// a person: click once it has loaded, as the panel then asks.
 		await until(
@@ -364,7 +364,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await page.send("Page.close");
 	}, 60_000);
 
-	test("a case opened on a tab Overmark may not see yet loads at the icon's click", async () => {
+	test("a case opened on a tab Sitegloss may not see yet loads at the icon's click", async () => {
 		// As after reloading the extension: the tab shows the case's page, and
 		// Chrome hides its address until the icon is clicked there.
 		const tabTargets = async () =>
@@ -432,7 +432,7 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		await toAllCases(panel, "As the owner uses it");
 		await first.page.send("Page.close");
 
-		// A tab on the case's page that Overmark may not see yet.
+		// A tab on the case's page that Sitegloss may not see yet.
 		const before = new Set((await tabTargets()).map((t) => t.targetId));
 		const page = await h.browser.newPage(`${h.base}/v1`);
 		await page.activate();

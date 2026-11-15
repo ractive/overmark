@@ -6,7 +6,7 @@
  * Closing the panel changes nothing but pairing, which stops.
  *
  * The card is the tab-mcp extension's (its `sidepanel/card.ts`), with
- * Overmark's relay and "Keep AI access on" under it.
+ * Sitegloss's relay and "Keep AI access on" under it.
  * "Blur form fields in screenshots" goes the same way: the worker keeps it,
  * and the panel neither reads nor writes it in storage (DEC-016), as do
  * Always allow and "Allow all changes" for each AI app (DEC-018).
@@ -20,11 +20,7 @@ import {
 	type QuestionView,
 	type WorkerMessage,
 } from "../worker/protocol.ts";
-import {
-	DEFAULT_RELAY,
-	relayProblem,
-	SECRET_PREFIX,
-} from "../worker/settings.ts";
+import { DEFAULT_RELAY, relayProblem } from "../worker/settings.ts";
 import {
 	cardView,
 	confirms,
@@ -72,13 +68,6 @@ export function blurFormsNow(): Promise<boolean> {
 		.then(() => blurValue ?? true);
 }
 
-/** What the panel kept in `localStorage` before the connection moved. */
-const OLD_KEYS = {
-	relay: "overmark:relay",
-	keepOn: "overmark:keep-ai-on",
-	blurForms: "overmark:blur-forms",
-} as const;
-
 /** The panel's header text for the connection's state. */
 export function statusText(a: AiState): string {
 	if (a.state === "connected")
@@ -114,61 +103,6 @@ export function problemOf(a: AiState): "connection" | undefined {
 }
 
 /**
- * The settings and address secrets this panel kept in `localStorage`, for
- * the worker to take over once; `undefined` if there are none. Until
- * 2026-11-09 the default relay was one on this computer, and nothing was
- * saved for it: a panel that connected there (the library keeps a secret per
- * relay) stays with it.
- */
-export function oldSettings(
-	storage: Pick<Storage, "getItem" | "key" | "length">,
-): Extract<PanelCommand, { type: "migrate" }> | undefined {
-	const secrets: Record<string, string> = {};
-	for (let i = 0; i < storage.length; i++) {
-		const key = storage.key(i);
-		if (key?.startsWith(SECRET_PREFIX)) {
-			const value = storage.getItem(key);
-			if (value !== null) secrets[key] = value;
-		}
-	}
-	const relay = storage.getItem(OLD_KEYS.relay);
-	const keepOn = storage.getItem(OLD_KEYS.keepOn);
-	const blurForms = storage.getItem(OLD_KEYS.blurForms);
-	if (
-		relay === null &&
-		keepOn === null &&
-		blurForms === null &&
-		Object.keys(secrets).length === 0
-	)
-		return undefined;
-	const old = "http://localhost:8080";
-	const legacy =
-		relay === null && `${SECRET_PREFIX}${old}:overmark` in secrets
-			? old
-			: undefined;
-	const chosen = relay ?? legacy;
-	return {
-		type: "migrate",
-		...(chosen !== undefined ? { relay: chosen } : {}),
-		...(keepOn !== null ? { keepOn: keepOn === "true" } : {}),
-		...(blurForms !== null ? { blurForms: blurForms === "true" } : {}),
-		secrets,
-	};
-}
-
-function forgetOldSettings(): void {
-	try {
-		for (const key of Object.values(OLD_KEYS)) localStorage.removeItem(key);
-		for (let i = localStorage.length - 1; i >= 0; i--) {
-			const key = localStorage.key(i);
-			if (key?.startsWith(SECRET_PREFIX)) localStorage.removeItem(key);
-		}
-	} catch {
-		// Storage blocked: nothing kept there either.
-	}
-}
-
-/**
  * Start the panel's side of the connection; `update` changes the panel's
  * state, `showSettings` opens the Settings view, where the card is (an open
  * case stays open underneath, DEC-023).
@@ -194,7 +128,7 @@ export async function startAi(
 			(s) =>
 				(s.ai = {
 					...s.ai,
-					status: "Open the side panel from the Overmark icon for AI access",
+					status: "Open the side panel from the Sitegloss icon for AI access",
 					problem: "tab",
 				}),
 		);
@@ -250,7 +184,7 @@ export async function startAi(
 				(s) =>
 					(s.ai = {
 						...s.ai,
-						status: "Overmark was updated: close and open this panel again.",
+						status: "Sitegloss was updated: close and open this panel again.",
 						// Nothing it showed before holds: it can reach nothing.
 						problem: "updated",
 						connected: false,
@@ -272,13 +206,6 @@ export async function startAi(
 		if (windowId !== undefined) send({ type: "hello", windowId });
 		sendVisible();
 		if (pairing) send({ type: "pair", on: true });
-		let old: PanelCommand | undefined;
-		try {
-			old = oldSettings(localStorage);
-		} catch {
-			// Storage blocked: nothing kept there either.
-		}
-		if (old !== undefined) send(old);
 	}
 
 	/** The worker's connection could not start: nothing here can work. */
@@ -308,7 +235,6 @@ export async function startAi(
 		current = a;
 		// The library's state, as the worker last said it.
 		document.documentElement.dataset["aiState"] = a.state;
-		if (a.migrated) forgetOldSettings();
 		const connected = a.state === "connected";
 		update((s) => {
 			s.ai = {
@@ -474,7 +400,7 @@ export async function startAi(
 				"data-armed": armed ? "" : false,
 				title: armed
 					? "Click again to disconnect this app"
-					: "Remove this app (click twice): it can no longer reach Overmark, and must be added and paired again to come back",
+					: "Remove this app (click twice): it can no longer reach Sitegloss, and must be added and paired again to come back",
 				onclick: () => {
 					const first = disconnectArmed.get(grant.grantId);
 					if (first === undefined) {
@@ -583,7 +509,7 @@ export async function startAi(
 		byId("connect").hidden = !view.turnOn;
 		byId("pair-replaced").hidden = a.replaced === undefined;
 		byId("pair-replaced-text").textContent = a.replaced?.sibling
-			? "Overmark's address is in use elsewhere in this browser."
+			? "Sitegloss's address is in use elsewhere in this browser."
 			: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.";
 		const problem = [
 			a.relayNote,

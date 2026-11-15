@@ -8,14 +8,14 @@ import type { Page } from "./browser.ts";
 import { type Harness, opened } from "./harness.ts";
 import { step } from "./trace.ts";
 
-export const HOST = `document.getElementById("overmark-root")`;
+export const HOST = `document.getElementById("sitegloss-root")`;
 
-/** An element inside Overmark's shadow root. */
+/** An element inside Sitegloss's shadow root. */
 export const shadow = (selector: string) =>
 	`${HOST}.shadowRoot.querySelector(${JSON.stringify(selector)})`;
 
 export const READ_DB = `new Promise((resolve, reject) => {
-	const open = indexedDB.open("overmark");
+	const open = indexedDB.open("sitegloss");
 	open.onerror = () => reject(open.error);
 	open.onsuccess = () => {
 		let tx;
@@ -41,7 +41,7 @@ export const READ_DB = `new Promise((resolve, reject) => {
 export function putCases(h: Harness, cases: Case[]): Promise<unknown> {
 	return step("put the cases", () =>
 		h.control.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark", 1);
+			const open = indexedDB.open("sitegloss", 1);
 			open.onupgradeneeded = () => {
 				open.result.createObjectStore("cases", { keyPath: "id" });
 				open.result.createObjectStore("images");
@@ -111,7 +111,7 @@ interface DomNode {
 
 function hostNode(node: DomNode): DomNode | undefined {
 	const at = node.attributes?.indexOf("id") ?? -1;
-	if (at >= 0 && node.attributes?.[at + 1] === "overmark-root") return node;
+	if (at >= 0 && node.attributes?.[at + 1] === "sitegloss-root") return node;
 	for (const child of node.children ?? []) {
 		const found = hostNode(child);
 		if (found !== undefined) return found;
@@ -180,7 +180,7 @@ const toTab = (tabId: number, message: object) =>
  * Opened as `putCases` opens it: the stores made if the extension has not.
  */
 export const PUT_CASE = (c: Case) => `new Promise((resolve, reject) => {
-	const open = indexedDB.open("overmark", 1);
+	const open = indexedDB.open("sitegloss", 1);
 	open.onupgradeneeded = () => {
 		open.result.createObjectStore("cases", { keyPath: "id" });
 		open.result.createObjectStore("images");
@@ -314,8 +314,8 @@ export async function markElement(
 		// clicks inside it and the tool's aria-pressed as it changed.
 		await page.eval(`(() => {
 			const root = ${HOST}.shadowRoot;
-			globalThis.overmarkHeard = [];
-			const heard = (what) => globalThis.overmarkHeard.push(Math.round(performance.now()) + " " + what);
+			globalThis.siteglossHeard = [];
+			const heard = (what) => globalThis.siteglossHeard.push(Math.round(performance.now()) + " " + what);
 			root.addEventListener("click", (e) => heard("click " + (e.target.closest?.("[data-action]")?.dataset.action ?? e.target.tagName)), true);
 			new MutationObserver((list) => list.forEach((m) => heard("pressed " + m.target.dataset.action + "=" + m.target.getAttribute("aria-pressed")))).observe(${shadow(".toolbar")}, { subtree: true, attributes: true, attributeFilter: ["aria-pressed"] });
 		})()`);
@@ -326,7 +326,7 @@ export async function markElement(
 		.waitFor(`${tool}.getAttribute("aria-pressed") === "true"`)
 		.catch(async (error: unknown) => {
 			const heard = await page
-				.eval<string[]>("globalThis.overmarkHeard ?? []")
+				.eval<string[]>("globalThis.siteglossHeard ?? []")
 				.catch(() => []);
 			throw new Error(
 				`the element tool did not come on; the toolbar heard: ${heard.join("; ") || "nothing"}`,
@@ -465,7 +465,7 @@ export async function nameCase(
 /** Run `body` (an expression using `image`, the stored `{ blob, width, height }`) on a case's image. */
 function withImage(title: string, path: string, body: string): string {
 	return `new Promise((resolve, reject) => {
-	const open = indexedDB.open("overmark");
+	const open = indexedDB.open("sitegloss");
 	open.onerror = () => reject(open.error);
 	open.onsuccess = () => {
 		const tx = open.result.transaction(["cases", "images"]);
@@ -529,7 +529,7 @@ export function countColour(
  */
 export const KV = (code = "", mode: "readonly" | "readwrite" = "readonly") =>
 	`new Promise((resolve, reject) => {
-		const open = indexedDB.open("overmark-settings", 1);
+		const open = indexedDB.open("sitegloss-settings", 1);
 		open.onupgradeneeded = () => open.result.createObjectStore("settings");
 		open.onerror = () => reject(open.error);
 		open.onsuccess = () => {

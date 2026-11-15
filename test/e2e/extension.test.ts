@@ -71,7 +71,7 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		expect(state.title).toBe("Krankenkasse vergleichen (v1)");
 		expect(
 			await page.eval<number>(
-				`document.querySelectorAll("#overmark-root").length`,
+				`document.querySelectorAll("#sitegloss-root").length`,
 			),
 		).toBe(1);
 		await page.click(
@@ -90,7 +90,7 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		// longer be reached, but its overlay stays in the page.
 		const { page, tabId } = await h.open("v1");
 		await page.eval(
-			`(() => { const old = document.createElement("div"); old.id = "overmark-root"; old.dataset.orphan = "true"; document.documentElement.append(old); })()`,
+			`(() => { const old = document.createElement("div"); old.id = "sitegloss-root"; old.dataset.orphan = "true"; document.documentElement.append(old); })()`,
 		);
 		await h.control.eval(PUT_CASE(sampleCase("c_shown")));
 		const state = await h.control.eval<{ visible: boolean }>(
@@ -99,7 +99,7 @@ describe.skipIf(browserBinary === undefined)("extension", () => {
 		expect(state.visible).toBe(true);
 		expect(
 			await page.eval<string[]>(
-				`[...document.querySelectorAll("#overmark-root")].map((e) => e.dataset.orphan ?? "live")`,
+				`[...document.querySelectorAll("#sitegloss-root")].map((e) => e.dataset.orphan ?? "live")`,
 			),
 		).toEqual(["live"]);
 		await page.send("Page.close");
@@ -867,7 +867,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 				(up) => !up,
 			);
 			await h.control.eval(`new Promise((resolve, reject) => {
-				const open = indexedDB.open("overmark");
+				const open = indexedDB.open("sitegloss");
 				open.onsuccess = () => {
 					const tx = open.result.transaction("cases", "readwrite");
 					tx.objectStore("cases").delete(${JSON.stringify(gone?.id)});
@@ -1040,18 +1040,11 @@ describe.skipIf(browserBinary === undefined)(
 				`chrome.scripting.executeScript({ target: { tabId: ${v2.tabId} }, files: ["content.js"] })`,
 			);
 
-			// A saved relay the library refuses must not stop the connection:
-			// one the panel kept before (taken over by the worker once).
-			await h.control.eval(
-				`localStorage.setItem("overmark:relay", "http://192.168.1.20:8080")`,
-			);
+			// The relay comes with the worker's first state: the default one.
 			const panel = await openSidePanel(h);
 			await panel.waitFor(
-				`document.getElementById("ai-status").textContent.includes("cannot be used")`,
+				`document.getElementById("relay").value === "https://tab-mcp.ractive.ch"`,
 			);
-			expect(
-				await panel.eval<string>(`document.getElementById("relay").value`),
-			).toBe("https://tab-mcp.ractive.ch");
 
 			// The side panel connects to the test relay ("keep AI access on").
 			const address = await connectAi(panel, relay.url, { keepOn: true });
@@ -1187,7 +1180,7 @@ describe.skipIf(browserBinary === undefined)("screenshot scale", () => {
 		const sizes = await h.control.eval<
 			Record<string, { width: number; height: number }>
 		>(
-			`new Promise((resolve) => { const o = indexedDB.open("overmark"); o.onsuccess = () => { const tx = o.result.transaction(["cases", "images"]); const cases = tx.objectStore("cases").getAll(); const images = tx.objectStore("images").getAll(); const keys = tx.objectStore("images").getAllKeys(); tx.oncomplete = () => { const id = cases.result.find((c) => c.title === "Scale").id; const out = {}; keys.result.forEach((k, i) => { if (k.startsWith(id + "/")) out[k.slice(id.length + 1)] = { width: images.result[i].width, height: images.result[i].height }; }); resolve(out); }; }; })`,
+			`new Promise((resolve) => { const o = indexedDB.open("sitegloss"); o.onsuccess = () => { const tx = o.result.transaction(["cases", "images"]); const cases = tx.objectStore("cases").getAll(); const images = tx.objectStore("images").getAll(); const keys = tx.objectStore("images").getAllKeys(); tx.oncomplete = () => { const id = cases.result.find((c) => c.title === "Scale").id; const out = {}; keys.result.forEach((k, i) => { if (k.startsWith(id + "/")) out[k.slice(id.length + 1)] = { width: images.result[i].width, height: images.result[i].height }; }); resolve(out); }; }; })`,
 		);
 		const shot = sizes["shots/s1.webp"];
 		const crop = sizes["crops/a1.webp"];

@@ -8,16 +8,16 @@ import { openKv } from "../../src/worker/kv.ts";
 import { kvContract } from "../kv-contract.ts";
 
 declare global {
-	var __overmarkKv: unknown;
+	var __siteglossKv: unknown;
 }
 
 let runs = 0;
 
-globalThis.__overmarkKv = {
+globalThis.__siteglossKv = {
 	names: Object.keys(kvContract),
 	async run(name: string) {
 		runs++;
-		await kvContract[name]?.(await openKv(`overmark-settings-test-${runs}`));
+		await kvContract[name]?.(await openKv(`sitegloss-settings-test-${runs}`));
 	},
 	/**
 	 * Another context deletes the database under an open `Kv` (Chrome asks
@@ -25,7 +25,7 @@ globalThis.__overmarkKv = {
 	 * they read.
 	 */
 	async reopens() {
-		const name = "overmark-settings-reopen";
+		const name = "sitegloss-settings-reopen";
 		const kv = await openKv(name);
 		await kv.set({ relay: "https://before.test" });
 		await new Promise<void>((resolve, reject) => {

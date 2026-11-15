@@ -214,7 +214,7 @@ export async function clickNotification(
 	index: number,
 ): Promise<void> {
 	const w = await worker(h);
-	await w.eval(`overmarkNotificationButton(${JSON.stringify(id)}, ${index})`);
+	await w.eval(`siteglossNotificationButton(${JSON.stringify(id)}, ${index})`);
 }
 
 /**
@@ -226,7 +226,7 @@ export async function dismissNotification(
 	id: string,
 ): Promise<void> {
 	const w = await worker(h);
-	await w.eval(`overmarkNotificationDismissed(${JSON.stringify(id)})`);
+	await w.eval(`siteglossNotificationDismissed(${JSON.stringify(id)})`);
 }
 
 /** Answer the panel's oldest question, once its Allow (or Always allow) counts. */

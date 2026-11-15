@@ -64,7 +64,7 @@ export type AskPanel = (request: MarkRequest) => Promise<MarkAnswer>;
 
 /** No panel shows the case: nothing changes it from the page. */
 export const NO_PANEL =
-	"Open this case in Overmark's side panel to change its marks.";
+	"Open this case in Sitegloss's side panel to change its marks.";
 
 const askPanel: AskPanel = async (request) => {
 	try {
@@ -546,7 +546,7 @@ export class Reviewer {
 		let focus: HTMLElement;
 		if (open.mode === "resolve") {
 			label.append(pin, `Mark ${annotation.number} is`);
-			const name = `overmark-resolution-${annotation.id}`;
+			const name = `sitegloss-resolution-${annotation.id}`;
 			const chosen: ResolveChoice =
 				open.status === "open" ? "fixed" : open.status;
 			const choices = doc.createElement("div");

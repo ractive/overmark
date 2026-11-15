@@ -39,13 +39,13 @@ jobs:
       - run: bun scripts/build.ts --store --zip --outdir dist-store
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: overmark-unpacked
+          name: sitegloss-unpacked
           path: |
-            overmark-*.zip
-            !overmark-*-store.zip
+            sitegloss-*.zip
+            !sitegloss-*-store.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: overmark-store
-          path: overmark-*-store.zip
+          name: sitegloss-store
+          path: sitegloss-*-store.zip
           if-no-files-found: error

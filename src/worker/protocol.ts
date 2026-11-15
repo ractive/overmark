@@ -12,10 +12,10 @@
 export const PANEL_PORT = "ai";
 
 /**
- * The MCP server's name, which Overmark registers with the relay: the side
+ * The MCP server's name, which Sitegloss registers with the relay: the side
  * panel's setup steps name the server by it in their commands.
  */
-export const SERVER_NAME = "overmark";
+export const SERVER_NAME = "sitegloss";
 
 /** The side panel's page in the build. */
 export const PANEL_PATH = "/sidepanel/index.html";
@@ -51,18 +51,7 @@ export type PanelCommand =
 	| { type: "ask-again"; grantId: string; tool: string }
 	| { type: "new-address" }
 	| { type: "set-relay"; relay: string }
-	| { type: "answer"; id: string; answer: Answer }
-	/**
-	 * Once: what the panel kept in its `localStorage` before the connection
-	 * moved into the worker, so the address and the settings stay.
-	 */
-	| {
-			type: "migrate";
-			relay?: string;
-			keepOn?: boolean;
-			blurForms?: boolean;
-			secrets: Record<string, string>;
-	  };
+	| { type: "answer"; id: string; answer: Answer };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -128,8 +117,6 @@ export interface AiState {
 	replaced?: { sibling: boolean };
 	lastCall?: CallView;
 	questions: QuestionView[];
-	/** The panel's old `localStorage` settings were taken over. */
-	migrated: boolean;
 }
 
 /** From the service worker. */
@@ -213,29 +200,6 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 					m["answer"] === "always")
 				? { type: "answer", id: m["id"], answer: m["answer"] }
 				: undefined;
-		case "migrate": {
-			const raw = m["secrets"];
-			if (typeof raw !== "object" || raw === null) return undefined;
-			const secrets: Record<string, string> = {};
-			for (const [key, value] of Object.entries(raw))
-				if (isString(value)) secrets[key] = value;
-			const relay = m["relay"];
-			const keepOn = m["keepOn"];
-			const blurForms = m["blurForms"];
-			if (
-				(relay !== undefined && !isString(relay)) ||
-				(keepOn !== undefined && !isBoolean(keepOn)) ||
-				(blurForms !== undefined && !isBoolean(blurForms))
-			)
-				return undefined;
-			return {
-				type: "migrate",
-				...(relay !== undefined ? { relay } : {}),
-				...(keepOn !== undefined ? { keepOn } : {}),
-				...(blurForms !== undefined ? { blurForms } : {}),
-				secrets,
-			};
-		}
 		default:
 			return undefined;
 	}

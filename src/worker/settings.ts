@@ -2,10 +2,7 @@
  * The AI connection's settings, kept by the service worker in its own
  * IndexedDB (`kv.ts`, DEC-016): the relay, "Keep AI access on", "Blur form
  * fields in screenshots" and a takeover of the address. Whether AI access is
- * on for this browser session is in `chrome.storage.session`. Before the
- * connection moved into the worker they were in the side panel's
- * `localStorage`, which the worker cannot read; the panel hands them over
- * once (the `migrate` command, `panelHandedOver`).
+ * on for this browser session is in `chrome.storage.session`.
  */
 
 import type { Kv } from "./kv.ts";
@@ -41,14 +38,12 @@ export const KEYS = {
 	keepOn: "keepAiOn",
 	blurForms: "blurForms",
 	replaced: "replaced",
-	/** The panel's `localStorage` settings were taken over (or there were none). */
-	panelHandedOver: "panelHandedOver",
 } as const;
 
 /**
  * In `chrome.storage.session`: AI access is on until the browser closes, or
  * the extension is updated, reloaded or disabled. That area is for trusted
- * contexts only unless the extension opens it, which Overmark never does.
+ * contexts only unless the extension opens it, which Sitegloss never does.
  */
 export const SESSION_ON = "aiOn";
 /**
@@ -72,7 +67,6 @@ export interface Settings {
 	keepOn: boolean;
 	blurForms: boolean;
 	replaced: Replaced | undefined;
-	panelHandedOver: boolean;
 }
 
 function replacedOf(value: unknown): Replaced | undefined {
@@ -91,7 +85,6 @@ export async function loadSettings(kv: Kv): Promise<Settings> {
 		keepOn: s[KEYS.keepOn] === true,
 		blurForms: s[KEYS.blurForms] === true,
 		replaced: replacedOf(s[KEYS.replaced]),
-		panelHandedOver: s[KEYS.panelHandedOver] === true,
 	};
 }
 

@@ -215,7 +215,7 @@ describe("a call of a tool that changes something", () => {
 		expect(d.asked).toBe(0);
 		expect(refused).toEqual(["delete_case"]);
 		// So is a caller over a message port (`serve`, client 0.15), which
-		// Overmark never opens: only an AI app through the relay is asked about.
+		// Sitegloss never opens: only an AI app through the relay is asked about.
 		const local: ConfirmRequest = {
 			...request(),
 			client: { kind: "local", id: "port-1" },

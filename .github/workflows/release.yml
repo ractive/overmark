@@ -15,7 +15,7 @@ name: Release
 # statement (SLSA build provenance, through Sigstore) that this workflow built
 # a file with that digest from that commit. Whoever has a zip checks it with
 #
-#   gh attestation verify overmark-X.Y.Z.zip --repo ractive/overmark
+#   gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss
 #
 # GitHub offers attestations in private repositories only on Enterprise Cloud,
 # so while this repository is private the step is skipped and the release is
@@ -80,7 +80,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-zips
-          path: overmark-*.zip
+          path: sitegloss-*.zip
           if-no-files-found: error
 
   release:
@@ -113,12 +113,12 @@ jobs:
         if: ${{ !github.event.repository.private }}
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: overmark-*.zip
+          subject-path: sitegloss-*.zip
       - name: Create the release with both zips
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          ls overmark-*.zip
-          gh release create "$TAG" overmark-*.zip --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --title "Overmark ${TAG#v}" --generate-notes
+          ls sitegloss-*.zip
+          gh release create "$TAG" sitegloss-*.zip --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "Sitegloss ${TAG#v}" --generate-notes

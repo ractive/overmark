@@ -39,7 +39,7 @@ import {
 
 /** Run `body` (an expression using `tx`) in a transaction on the extension's database. */
 const write = (body: string) => `new Promise((resolve, reject) => {
-	const open = indexedDB.open("overmark");
+	const open = indexedDB.open("sitegloss");
 	open.onerror = () => reject(open.error);
 	open.onsuccess = () => {
 		const tx = open.result.transaction(["cases", "images"], "readwrite");
@@ -62,7 +62,7 @@ describe.skipIf(browserBinary === undefined)(
 
 		beforeAll(async () => {
 			h = await startHarness(browserBinary as string);
-			folder = mkdtempSync(join(tmpdir(), "overmark-export-"));
+			folder = mkdtempSync(join(tmpdir(), "sitegloss-export-"));
 		}, 60_000);
 
 		afterAll(async () => {
@@ -93,10 +93,10 @@ describe.skipIf(browserBinary === undefined)(
 			await openCase(panel, "Round trip");
 			const file = await exportOpenCase(h, panel);
 			// Where it went (DEC-020: the test build has "downloads"): the name
-			// Overmark gave it, in Chrome's downloads folder, with Copy and Show
+			// Sitegloss gave it, in Chrome's downloads folder, with Copy and Show
 			// in folder.
 			expect(realpathSync(file)).toBe(
-				realpathSync(join(h.browser.downloads, "round-trip.overmark.zip")),
+				realpathSync(join(h.browser.downloads, "round-trip.sitegloss.zip")),
 			);
 			const shown = file;
 			// The system's clipboard and file manager stay out of the test.
@@ -233,7 +233,7 @@ describe.skipIf(browserBinary === undefined)(
 				into,
 				`document.getElementById("export-case")`,
 			);
-			expect(file.endsWith("round-trip-copy.overmark.zip")).toBe(true);
+			expect(file.endsWith("round-trip-copy.sitegloss.zip")).toBe(true);
 			const zip = await readZip(
 				new Uint8Array(await Bun.file(file).arrayBuffer()),
 			);
@@ -274,7 +274,7 @@ describe.skipIf(browserBinary === undefined)(
 				`document.getElementById("export-all")`,
 				"export-all-saved",
 			);
-			expect(file).toMatch(/overmark-cases-\d{4}-\d\d-\d\d\.overmark\.zip$/);
+			expect(file).toMatch(/sitegloss-cases-\d{4}-\d\d-\d\d\.sitegloss\.zip$/);
 			expect(
 				await panel.eval<number>(
 					`document.querySelectorAll('#export-all-saved [data-action="copy-path"], #export-all-saved [data-action="show-file"]').length`,
@@ -352,7 +352,7 @@ describe.skipIf(browserBinary === undefined)(
 
 		test("an imported file the panel cannot read changes nothing", async () => {
 			const before = await readDb();
-			const bad = join(folder, "not-a-case.overmark.zip");
+			const bad = join(folder, "not-a-case.sitegloss.zip");
 			await Bun.write(bad, "not a zip");
 			const panel = await panelHome(h);
 			await importFile(panel, bad);

@@ -21,11 +21,11 @@ import { join } from "node:path";
 import type { Subprocess } from "bun";
 
 /**
- * `OVERMARK_E2E_SLOW=<rate>`: every page and worker the tests attach to runs
+ * `SITEGLOSS_E2E_SLOW=<rate>`: every page and worker the tests attach to runs
  * its CPU that many times slower (CDP `Emulation.setCPUThrottlingRate`), as
  * a busy CI machine may; unset or 1, at full speed.
  */
-export const SLOW = Math.max(1, Number(process.env["OVERMARK_E2E_SLOW"]) || 1);
+export const SLOW = Math.max(1, Number(process.env["SITEGLOSS_E2E_SLOW"]) || 1);
 
 /** Chrome for Testing or Chromium; `undefined` if there is none. */
 export function findBrowser(): string | undefined {
@@ -119,7 +119,7 @@ const pipe =
  * `Browser.setDownloadBehavior` "allow".
  */
 function newProfile(): string {
-	const profile = mkdtempSync(join(tmpdir(), "overmark-chrome-"));
+	const profile = mkdtempSync(join(tmpdir(), "sitegloss-chrome-"));
 	mkdirSync(join(profile, "Default"));
 	writeFileSync(
 		join(profile, "Default", "Preferences"),
@@ -148,7 +148,7 @@ function chromeArguments(profile: string): string[] {
 		// Headless Chrome's screen is 800×600 otherwise: no window could grow.
 		"--screen-info={1920x1200}",
 		// A plain http: host that is no secure context, as 127.0.0.1 is.
-		"--host-resolver-rules=MAP overmark.test 127.0.0.1",
+		"--host-resolver-rules=MAP sitegloss.test 127.0.0.1",
 		...(process.platform === "linux" ? ["--no-sandbox"] : []),
 	];
 }
@@ -266,7 +266,7 @@ const hitTest = (expression: string, { x, y }: { x: number; y: number }) =>
 		const box = target.getBoundingClientRect();
 		// Not laid out yet (hidden, not drawn): nothing to press.
 		if (box.width === 0 && box.height === 0) return { ok: false, at: "the element without a box yet" };
-		// A page element under Overmark's layer, which a tool puts over the
+		// A page element under Sitegloss's layer, which a tool puts over the
 		// page on purpose: the press is for the layer.
 		const through = target.getRootNode() === document && hit !== null && hit.getRootNode() !== document;
 		return { ok: hit !== null && (hit === target || target.contains(hit) || through), at: name(hit) };

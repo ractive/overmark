@@ -41,7 +41,7 @@ beforeAll(async () => {
 			},
 		},
 		runtime: {
-			id: "overmark",
+			id: "sitegloss",
 			getPlatformInfo: async () => {
 				fake.pings++;
 				return {};
@@ -95,7 +95,7 @@ describe("the offscreen document (DEC-025)", () => {
 	test("the download under way is kept in the sync's database, for a new worker", async () => {
 		const kv = memoryKv();
 		const api = downloads.chromeDownloads(kv);
-		const p = { id: 3, caseId: "c_1", version: "v", file: "a.overmark.zip" };
+		const p = { id: 3, caseId: "c_1", version: "v", file: "a.sitegloss.zip" };
 		await api.setPending(p);
 		expect(await downloads.chromeDownloads(kv).pending()).toEqual(p);
 		await api.setPending(undefined);
@@ -168,13 +168,13 @@ describe("waiting for a download (DEC-025)", () => {
 	});
 });
 
-describe("Overmark's own entries in Chrome's list (DEC-025)", () => {
-	test("erased only when Overmark wrote it into Overmark/: an id reused later is someone else's", async () => {
+describe("Sitegloss's own entries in Chrome's list (DEC-025)", () => {
+	test("erased only when Sitegloss wrote it into Sitegloss/: an id reused later is someone else's", async () => {
 		const api = downloads.chromeDownloads(memoryKv());
 		fake.items.set(20, {
 			id: 20,
-			byExtensionId: "overmark",
-			filename: "/Users/me/Downloads/Overmark/a.overmark.zip",
+			byExtensionId: "sitegloss",
+			filename: "/Users/me/Downloads/Sitegloss/a.sitegloss.zip",
 		});
 		fake.items.set(21, {
 			id: 21,
@@ -182,8 +182,8 @@ describe("Overmark's own entries in Chrome's list (DEC-025)", () => {
 		});
 		fake.items.set(22, {
 			id: 22,
-			byExtensionId: "overmark",
-			filename: "/Users/me/Downloads/overmark-cases.overmark.zip",
+			byExtensionId: "sitegloss",
+			filename: "/Users/me/Downloads/sitegloss-cases.sitegloss.zip",
 		});
 		await api.erase(20);
 		await api.erase(21);

@@ -9,9 +9,6 @@ import type { SecretStorage } from "@ractive-ch/tab-mcp-client";
 import type { Kv } from "./kv.ts";
 import { SECRET_PREFIX } from "./settings.ts";
 
-/** 32 random bytes in base64url without padding, as the library makes them. */
-const SECRET = /^[A-Za-z0-9_-]{43}$/;
-
 export class CachedSecretStorage implements SecretStorage {
 	readonly #kv: Kv;
 	readonly #cache: Map<string, string>;
@@ -44,25 +41,7 @@ export class CachedSecretStorage implements SecretStorage {
 		this.written = this.written
 			.then(() => this.#kv.set({ [key]: value }))
 			.catch((error: unknown) =>
-				console.warn("Overmark: keeping the address secret", error),
+				console.warn("Sitegloss: keeping the address secret", error),
 			);
-	}
-
-	/**
-	 * Take over a secret the side panel kept in its `localStorage`, so the
-	 * address stays the same: only a key of the library's, only a value that
-	 * is a secret, and never over one the worker has already. Returns whether
-	 * it was taken.
-	 */
-	adopt(key: string, value: unknown): boolean {
-		if (
-			!key.startsWith(SECRET_PREFIX) ||
-			typeof value !== "string" ||
-			!SECRET.test(value) ||
-			this.#cache.has(key)
-		)
-			return false;
-		this.setItem(key, value);
-		return true;
 	}
 }

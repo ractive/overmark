@@ -78,7 +78,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 	/** The panel on an empty store with these cases and no settings. */
 	async function fresh(cases: Case[] = []): Promise<void> {
 		await h.control.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark");
+			const open = indexedDB.open("sitegloss");
 			open.onerror = () => reject(open.error);
 			open.onsuccess = () => {
 				const tx = open.result.transaction(["cases", "images"], "readwrite");
@@ -89,8 +89,6 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			};
 		})`);
 		await putCases(cases);
-		// Blur form fields is the worker's; the blur test turns it off again.
-		await h.control.eval(`localStorage.clear()`);
 		// No page of a test before, the panel on Home: one failing test does
 		// not take the next ones along.
 		await resetPanel(h);
@@ -161,7 +159,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			`chrome.tabs.sendMessage(${tabId}, { type: "overlay:state" }).then((s) => s.loadedCase ?? null, () => null)`,
 		);
 
-	// A page Overmark is not in yet (the panel puts it there as a case opens)
+	// A page Sitegloss is not in yet (the panel puts it there as a case opens)
 	// shows no case: asked a moment early, that is the answer, not a failure.
 	const overlayOf = (tabId: number) =>
 		h.control.eval<{ loadedCase?: string }>(
@@ -373,7 +371,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		const other = await h.browser.newPage(panelUrl());
 		await page.activate();
 		await other.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark");
+			const open = indexedDB.open("sitegloss");
 			open.onerror = () => reject(open.error);
 			open.onsuccess = () => {
 				const tx = open.result.transaction("cases", "readwrite");
@@ -403,11 +401,11 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		await h.control.waitFor(show);
 		await wrapSend(`(tabId, message, send) =>
 			message.type === "case:show"
-				? Promise.resolve({ error: "Overmark is saving on this page." })
+				? Promise.resolve({ error: "Sitegloss is saving on this page." })
 				: send(tabId, message)`);
 		await h.control.eval(`${show}.click()`);
 		await h.control.waitFor(
-			`${id("case-hint")}.textContent === "Overmark is saving on this page."`,
+			`${id("case-hint")}.textContent === "Sitegloss is saving on this page."`,
 		);
 		// The match it showed stays.
 		expect(await h.control.eval(`Boolean(${show})`)).toBe(true);
@@ -522,7 +520,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		async () => {
 			const c: Case = { ...sampleCase("c_file"), verdict: "From the file" };
 			await fresh([{ ...c, verdict: "Stored" }]);
-			await importFile("case.overmark.zip", await zipOf(c));
+			await importFile("case.sitegloss.zip", await zipOf(c));
 			const replace = `document.querySelector('[data-action="import-replace"]')`;
 			await h.control.waitFor(replace);
 
@@ -566,7 +564,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				});
 				return exportCase(store, marked);
 			};
-			await importFile("other.overmark.zip", await onPage("c_far", "v2"));
+			await importFile("other.sitegloss.zip", await onPage("c_far", "v2"));
 			await h.control.waitFor(`${id("verdict")}?.dataset.case === "c_far"`);
 			await until(
 				async () => (await overlayOf(tabId)).loadedCase === "c_far",
@@ -579,7 +577,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				async () => (await overlayOf(tabId)).loadedCase === undefined,
 				"the marks to go",
 			);
-			await importFile("here.overmark.zip", await onPage("c_here", "v1"));
+			await importFile("here.sitegloss.zip", await onPage("c_here", "v1"));
 			await h.control.waitFor(
 				`${id("case-hint")}?.textContent.includes("marks found")`,
 			);
@@ -861,7 +859,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		"an imported case says where it came from, also after a change",
 		async () => {
 			await fresh();
-			await importFile("case.overmark.zip", await zipOf(sampleCase("c_in")));
+			await importFile("case.sitegloss.zip", await zipOf(sampleCase("c_in")));
 			await h.control.waitFor(`${id("verdict")}?.dataset.case === "c_in"`);
 			await h.control.waitFor(
 				`${id("case-origin")}.textContent.includes("Imported from a file")`,
@@ -908,7 +906,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		})()`);
 		await h.control.eval(`${id("annotate")}.click()`);
 		await h.control.waitFor(
-			`${id("hint")}.textContent.includes("Click the Overmark icon")`,
+			`${id("hint")}.textContent.includes("Click the Sitegloss icon")`,
 		);
 		await a.page.goto(`${h.base}/v1`);
 		await Bun.sleep(300);
@@ -1164,7 +1162,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				const caseId = "c_twice";
 				await fresh([manyMarks(caseId)]);
 				const { page, tabId } = await h.open("v1");
-				// Overmark runs there already: the message behind the draw reaches it.
+				// Sitegloss runs there already: the message behind the draw reaches it.
 				await h.control.eval(
 					`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`,
 				);
@@ -1204,7 +1202,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				const caseId = "c_cleared";
 				await fresh([manyMarks(caseId)]);
 				const { page, tabId } = await h.open("v1");
-				// Overmark runs there already: the message behind the draw reaches it.
+				// Sitegloss runs there already: the message behind the draw reaches it.
 				await h.control.eval(
 					`chrome.scripting.executeScript({ target: { tabId: ${tabId} }, files: ["content.js"] })`,
 				);
@@ -1438,7 +1436,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			async () => {
 				const { page, caseId } = await inCaseWithMarks("Open while importing");
 				await importFile(
-					"other.overmark.zip",
+					"other.sitegloss.zip",
 					await zipOf(sampleCase("c_imported_meanwhile")),
 				);
 				await until(
@@ -1683,7 +1681,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				const problem = shadow(".popover .problem");
 				await page.waitFor(`${problem} !== null && !${problem}.hidden`);
 				expect(await page.eval<string>(`${problem}.textContent`)).toBe(
-					"Open this case in Overmark's side panel to change its marks.",
+					"Open this case in Sitegloss's side panel to change its marks.",
 				);
 				expect(await page.eval<string>(`${field}.value`)).toBe(
 					"Nobody stores this",
@@ -1717,7 +1715,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			const elsewhere = await h.browser.newPage(panelUrl());
 			await back.activate();
 			await elsewhere.eval(`new Promise((resolve) => {
-				const open = indexedDB.open("overmark");
+				const open = indexedDB.open("sitegloss");
 				open.onsuccess = () => {
 					const tx = open.result.transaction("cases", "readwrite");
 					tx.objectStore("cases").delete(${JSON.stringify(caseId)});

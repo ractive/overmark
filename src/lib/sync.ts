@@ -4,7 +4,7 @@
  * changes. The files are a mirror: nothing is read back, and a deleted case
  * keeps its file, so a mistaken delete can be undone with Import a case….
  *
- * Two targets: `Overmark/` in Chrome's downloads folder (the default, through
+ * Two targets: `Sitegloss/` in Chrome's downloads folder (the default, through
  * `chrome.downloads`, which works with the side panel closed), or a folder the
  * user chose with the picker (the File System Access API; Chrome takes that
  * permission back when the last extension page closes, so a change made
@@ -71,7 +71,7 @@ export interface ChosenFolder {
 }
 
 /**
- * Where the cases go: `Overmark/` in the downloads (`downloadsTarget`) or a
+ * Where the cases go: `Sitegloss/` in the downloads (`downloadsTarget`) or a
  * folder (`folderTarget`). A write that fails for the target as a whole
  * throws `SyncPaused` or `TargetFailed`; any other error is the case's own
  * (it could not be exported), and the other cases are still written.
@@ -82,7 +82,7 @@ export interface SyncTarget {
 	readonly kind: SyncTargetKind;
 	/** Whether it may be written to now; `false` pauses the sync. */
 	permission(): Promise<boolean>;
-	/** A file of that name there, which Overmark may not have written. */
+	/** A file of that name there, which Sitegloss may not have written. */
 	exists(name: string): Promise<boolean>;
 	write(name: string, c: Case): Promise<void>;
 	/** Remove a renamed case's old file; a target without it keeps the file. */
@@ -104,7 +104,7 @@ export type SyncTargetKind = "downloads" | "folder";
 export const DOWNLOADS_ID = "downloads";
 
 /** The folder in the downloads, as the panel names it. */
-export const DOWNLOADS_FOLDER = "Overmark";
+export const DOWNLOADS_FOLDER = "Sitegloss";
 
 /** No permission (any more): the user allows it again in the panel. */
 export class SyncPaused extends Error {}
@@ -134,7 +134,7 @@ export interface SyncedFile {
 	file: string;
 }
 
-/** What is in a target, as far as Overmark wrote it. */
+/** What is in a target, as far as Sitegloss wrote it. */
 export interface SyncedFiles {
 	/** The target's id (a folder's, or `downloads`); named so before DEC-025. */
 	folderId: string;
@@ -182,7 +182,7 @@ export interface SyncStore {
  * `downloads:last`. Apart from the settings' database, which only the worker
  * uses (DEC-016).
  */
-export const SYNC_DATABASE = "overmark-sync";
+export const SYNC_DATABASE = "sitegloss-sync";
 export const TARGET_KEY = "target";
 export const FOLDER_KEY = "folder";
 export const FOLDERS_KEY = "folders";
@@ -256,7 +256,7 @@ export async function chooseDownloads(kv: Kv): Promise<void> {
 /**
  * Sync to `handle` from now on (the side panel, after the picker). A folder
  * synced before, the current one or any earlier one, gets its id back, so
- * the files Overmark wrote there are its own again and are updated in place.
+ * the files Sitegloss wrote there are its own again and are updated in place.
  * Every folder chosen stays in `folders` for that.
  */
 export async function chooseFolder(
@@ -332,7 +332,7 @@ function folderProblem(error: unknown, folder: string, file: string): Error {
 			);
 		default:
 			return new TargetFailed(
-				`Could not write “${file}” to “${folder}”: ${message(error)} Overmark tries again at the next change, or click Try again.`,
+				`Could not write “${file}” to “${folder}”: ${message(error)} Sitegloss tries again at the next change, or click Try again.`,
 			);
 	}
 }
@@ -387,7 +387,7 @@ export interface PendingDownload {
 
 /** What the Downloads target needs of Chrome (`src/worker/downloads.ts`; fakes in the tests). */
 export interface DownloadsApi {
-	/** Whether Overmark has the `downloads` permission now. */
+	/** Whether Sitegloss has the `downloads` permission now. */
 	granted(): Promise<boolean>;
 	/**
 	 * Allowed, but `chrome.downloads` is not there in this worker: whether a
@@ -424,7 +424,7 @@ export const DOWNLOAD_TIMEOUT_MS = 60_000;
 
 /**
  * An entry of Chrome's download list that the sync wrote: by this
- * extension, into `Overmark/`. An id stored earlier may be another
+ * extension, into `Sitegloss/`. An id stored earlier may be another
  * download's by now (Chrome numbers anew after its history is cleared).
  */
 export const isSyncDownload = (
@@ -434,7 +434,7 @@ export const isSyncDownload = (
 	item?.byExtensionId === extensionId &&
 	(item.filename ?? "").replaceAll("\\", "/").includes(`/${DOWNLOADS_FOLDER}/`);
 
-/** A file that was saved, at `path`, `Overmark/<name>` in the downloads? */
+/** A file that was saved, at `path`, `Sitegloss/<name>` in the downloads? */
 const savedAs = (path: string, name: string) =>
 	path.replaceAll("\\", "/").endsWith(`/${DOWNLOADS_FOLDER}/${name}`);
 
@@ -448,12 +448,12 @@ function downloadProblem(error: string, file: string): string {
 		case "FILE_ACCESS_DENIED":
 			return `Chrome may not write “${file}” to your downloads (${error}). Check that the downloads folder can be written to, then click Try again.`;
 		default:
-			return `Chrome stopped saving “${file}” to your downloads (${error}). Overmark tries again at the next change, or click Try again.`;
+			return `Chrome stopped saving “${file}” to your downloads (${error}). Sitegloss tries again at the next change, or click Try again.`;
 	}
 }
 
 /**
- * `Overmark/` in Chrome's downloads folder (DEC-025): each file through
+ * `Sitegloss/` in Chrome's downloads folder (DEC-025): each file through
  * `chrome.downloads`, overwriting the one before, with no dialog and with
  * the side panel closed. Nothing can be removed there, so a renamed case
  * leaves its old file. Each write is an entry in Chrome's download list:
@@ -483,7 +483,7 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 				// Taken back meanwhile: paused, as at the run's start.
 				if (!(await api.granted().catch(() => false))) throw new SyncPaused();
 				throw new TargetFailed(
-					"Chrome allowed Overmark to save to your downloads, but Overmark's background part does not see it yet. It starts writing once Chrome restarts that part, by itself after a while without use; now, turn Overmark off and on in chrome://extensions.",
+					"Chrome allowed Sitegloss to save to your downloads, but Sitegloss's background part does not see it yet. It starts writing once Chrome restarts that part, by itself after a while without use; now, turn Sitegloss off and on in chrome://extensions.",
 				);
 			}
 			// Its export failing is the case's own problem.
@@ -519,7 +519,7 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 					await api.cancel(id).catch(() => undefined);
 					await api.erase(id).catch(() => undefined);
 					throw new TargetFailed(
-						`Chrome did not finish saving “${name}” to your downloads within a minute. Overmark tries again at the next change, or click Try again.`,
+						`Chrome did not finish saving “${name}” to your downloads within a minute. Sitegloss tries again at the next change, or click Try again.`,
 					);
 				}
 				if (end.state === "interrupted") {
@@ -647,7 +647,7 @@ export class Sync {
 				try {
 					await this.run(force);
 				} catch (error) {
-					console.warn("Overmark: sync", error);
+					console.warn("Sitegloss: sync", error);
 				}
 			}
 		} finally {
@@ -752,7 +752,7 @@ export class Sync {
 				files(),
 			);
 
-		// Which case each file name is Overmark's for, in this target.
+		// Which case each file name is Sitegloss's for, in this target.
 		const owner = new Map<string, string>();
 		for (const [id, f] of Object.entries(byCase)) owner.set(f.file, id);
 		const problems: string[] = [];
@@ -799,7 +799,7 @@ export class Sync {
 				{
 					...base,
 					state: "failed",
-					problem: `${problems.slice(0, 3).join(" ")}${problems.length > 3 ? ` And ${problems.length - 3} more cases could not be written.` : ""} Overmark tries again at the next change, or click Try again.`,
+					problem: `${problems.slice(0, 3).join(" ")}${problems.length > 3 ? ` And ${problems.length - 3} more cases could not be written.` : ""} Sitegloss tries again at the next change, or click Try again.`,
 				},
 				files(),
 			);
@@ -810,9 +810,9 @@ export class Sync {
 	}
 
 	/**
-	 * The file for `c`: Export's name for it (`login-button.overmark.zip`),
+	 * The file for `c`: Export's name for it (`login-button.sitegloss.zip`),
 	 * with `-2`, `-3` when another case has that name already, a deleted one
-	 * too, or when the target has a file of that name Overmark did not write
+	 * too, or when the target has a file of that name Sitegloss did not write
 	 * for this case: such a file is never overwritten. A case keeps its file
 	 * while its title gives the same name; in Downloads, whatever its title.
 	 */
@@ -851,7 +851,7 @@ export class Sync {
 const safeStem = (stem: string) =>
 	/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(stem) ? `_${stem}` : stem;
 
-/** `stem-<n>.overmark.zip`, as `#fileName` numbers a name taken. */
+/** `stem-<n>.sitegloss.zip`, as `#fileName` numbers a name taken. */
 function isNumbered(name: string, stem: string): boolean {
 	if (!name.startsWith(`${stem}-`) || !name.endsWith(EXPORT_SUFFIX))
 		return false;

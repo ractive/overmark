@@ -138,7 +138,7 @@ export interface PanelState {
 	exported: Exported | undefined;
 	/** Chrome's prompt for "downloads" is open for this export. */
 	askingDownloads: Exported["of"] | undefined;
-	/** Overmark may use chrome.downloads (DEC-020). */
+	/** Sitegloss may use chrome.downloads (DEC-020). */
 	downloads: boolean;
 	/** When "Delete" was clicked once. */
 	deleteArmedAt: number | undefined;
@@ -181,9 +181,9 @@ export interface PanelState {
 	verdictStatus: string | undefined;
 	/** Summaries typed and not saved yet, by case. */
 	verdictDrafts: Map<string, string>;
-	/** Overmark may run on every site ("Allow on all sites"). */
+	/** Sitegloss may run on every site ("Allow on all sites"). */
 	allSites: boolean;
-	/** Overmark may read file:// pages ("Allow access to file URLs"); unknown at first. */
+	/** Sitegloss may read file:// pages ("Allow access to file URLs"); unknown at first. */
 	fileAccess: boolean | undefined;
 	/** The sync to Downloads or a folder (DEC-021, DEC-025). */
 	sync: {

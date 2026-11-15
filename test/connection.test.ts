@@ -18,6 +18,7 @@ import { type Kv, memoryKv } from "../src/lib/kv.ts";
 import type { CaseStore } from "../src/lib/store.ts";
 import { Connection } from "../src/worker/connection.ts";
 import type { AiState } from "../src/worker/protocol.ts";
+import { DEFAULT_RELAY } from "../src/worker/settings.ts";
 import type { Capture } from "../src/worker/tab.ts";
 
 /**
@@ -53,7 +54,7 @@ const alarms = new Map<string, unknown>();
 /** The icon's spark needs the built icons, which Bun cannot fetch: only that warning is dropped. */
 const warn = console.warn;
 const warnSpy = spyOn(console, "warn").mockImplementation((...args) => {
-	if (args[0] !== "Overmark: the toolbar icon") warn(...args);
+	if (args[0] !== "Sitegloss: the toolbar icon") warn(...args);
 });
 
 beforeAll(() => {
@@ -201,7 +202,7 @@ describe("the worker's connection with client 0.16", () => {
 		alarms.clear();
 		store.failing = false;
 		store.slowMs = 0;
-		const kv = memoryKv({ relay: relay.url, panelHandedOver: true });
+		const kv = memoryKv({ relay: relay.url });
 		currentKv = kv;
 		const w = await startWorker(kv);
 		workers.push(w);
@@ -292,7 +293,7 @@ describe("the worker's connection with client 0.16", () => {
 			// The library cannot tell which grant it is: One stays listed.
 			expect(w.last().grants.map((g) => g.name)).toEqual(listed);
 			expect(grant(w, "One")?.problem).toBe(
-				"The relay no longer knows One, so it cannot reach Overmark any more. It leaves this list when AI access next connects.",
+				"The relay no longer knows One, so it cannot reach Sitegloss any more. It leaves this list when AI access next connects.",
 			);
 			expect(grant(w, "One")?.allowAll).toBe(false);
 		} finally {
@@ -335,7 +336,7 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "stop" });
 		await until(() => grant(w, "One")?.problem !== undefined);
 		expect(grant(w, "One")?.problem).toBe(
-			"Overmark could not confirm that One was disconnected: the connection ended first. It shows when AI access is next on.",
+			"Sitegloss could not confirm that One was disconnected: the connection ended first. It shows when AI access is next on.",
 		);
 		// The next connection's list is the truth: the relay did revoke it.
 		await Bun.sleep(400);
@@ -352,7 +353,7 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "revoke", grantId: ids["One"] });
 		await until(() => grant(w, "One")?.problem !== undefined);
 		expect(grant(w, "One")?.problem).toBe(
-			"One was not disconnected: Overmark is not connected to the relay. Turn on AI access and try again.",
+			"One was not disconnected: Sitegloss is not connected to the relay. Turn on AI access and try again.",
 		);
 		// Its Allow all changes stays: the grant is not gone.
 		expect(grant(w, "One")?.allowAll).toBe(true);
@@ -374,14 +375,14 @@ describe("the worker's connection with client 0.16", () => {
 			await until(() => w.last().state === "disconnected");
 			await Bun.sleep(100);
 			expect(w.last().problem).toBe(
-				"The relay ended the connection: Overmark sent it too many messages at once.",
+				"The relay ended the connection: Sitegloss sent it too many messages at once.",
 			);
 			// Never at once: the next try waits (5 s first).
 			expect(w.last().retrying).toBe(keepOn);
 			expect(w.last().state).toBe("disconnected");
 			// Without Keep AI access on, it stays off: the alarm does not connect.
 			expect(session.get("aiOn")).toBe(keepOn);
-			expect(alarms.has("overmark-ai")).toBe(keepOn);
+			expect(alarms.has("sitegloss-ai")).toBe(keepOn);
 			w.send({ type: "keep-on", on: false });
 			w.send({ type: "stop" });
 			await until(() => !w.last().retrying);
@@ -422,15 +423,27 @@ describe("the worker's connection with client 0.16", () => {
 		expect(w.last().address).not.toBe(first.address);
 	});
 
+	test("a stored relay the library refuses gives a note, and the default relay", async () => {
+		const w = await startWorker(
+			memoryKv({ relay: "http://192.168.1.20:8080" }),
+		);
+		workers.push(w);
+		expect(w.last().relay).toBe(DEFAULT_RELAY);
+		expect(w.last().relayNote).toContain(
+			"The saved relay http://192.168.1.20:8080 cannot be used",
+		);
+		expect(w.last().relayNote).toContain(`using ${DEFAULT_RELAY}.`);
+	});
+
 	test("New address after a takeover this worker saw: a rejection after the address changed clears the takeover", async () => {
 		const { w, kv, address } = await paired([]);
 		// A program with a copy of the address secret takes the address over.
-		const key = `tab-mcp:secret:${relay.url}:overmark`;
+		const key = `tab-mcp:secret:${relay.url}:sitegloss`;
 		const secret = (await kv.get(key)) as string;
 		expect(typeof secret).toBe("string");
 		const other = new TabMcp({
 			relay: relay.url,
-			server: { name: "overmark", version: "0.0.0" },
+			server: { name: "sitegloss", version: "0.0.0" },
 			storage: {
 				getItem: (k) => (k === key ? secret : null),
 				setItem() {},

@@ -1,10 +1,10 @@
 /**
- * The case format `overmark/1` (see kb/design/overview.md): the same JSON in
+ * The case format `sitegloss/1` (see kb/design/overview.md): the same JSON in
  * IndexedDB and in an export. Images are referenced by paths relative to the
  * case (`shots/s1.webp`, `crops/a1.webp`).
  */
 
-export const CASE_FORMAT = "overmark/1";
+export const CASE_FORMAT = "sitegloss/1";
 
 /** The attributes element details keep (element.ts). */
 export const ELEMENT_ATTRIBUTES = [
@@ -82,7 +82,7 @@ export type Shape =
 
 export type ShapeKind = Shape["kind"];
 
-/** What Overmark knows about an annotation's element (see element.ts). */
+/** What Sitegloss knows about an annotation's element (see element.ts). */
 export interface ElementDetails {
 	tag: string;
 	/** A hand-written id (generated ones are left out). */
@@ -405,7 +405,7 @@ export function imageScale(
 }
 
 /**
- * A page's address as Overmark keeps it and tells an AI app: origin and path,
+ * A page's address as Sitegloss keeps it and tells an AI app: origin and path,
  * since a query or a fragment can carry personal data or tokens, as for links
  * (DEC-009). A hash route (`#/path`, `#!/path`) names the page, so it stays,
  * up to the first character that starts parameters.
@@ -741,11 +741,16 @@ function language(v: unknown, path: string): string {
 	return s;
 }
 
-/** Check that `value` is a case in format `overmark/1` and return it typed. */
+/** Check that `value` is a case in format `sitegloss/1` and return it typed. */
 export function validateCase(value: unknown): Case {
 	const o = obj(value, "case");
-	if (o["format"] !== CASE_FORMAT)
-		fail("case.format", `must be "${CASE_FORMAT}"`);
+	const format = o["format"];
+	if (typeof format === "string" && format !== CASE_FORMAT)
+		fail(
+			"case.format",
+			`is "${format.slice(0, 40)}"; Sitegloss reads "${CASE_FORMAT}" only`,
+		);
+	if (format !== CASE_FORMAT) fail("case.format", `must be "${CASE_FORMAT}"`);
 	const page = obj(o["page"], "case.page");
 	const shotIds = new Set<string>();
 	const shots = arr(o["shots"], "case.shots", MAX_SHOTS).map((v, i): Shot => {
@@ -852,7 +857,7 @@ export function validateCase(value: unknown): Case {
 }
 
 /**
- * A case's link as stored: a file Overmark wrote only has one `cleanLink`
+ * A case's link as stored: a file Sitegloss wrote only has one `cleanLink`
  * gives, and one in another scheme (`javascript:`) never becomes a link.
  * What is kept is `cleanLink`'s reading of it, so what was checked here is
  * what opens: a file from elsewhere may spell an address another way.

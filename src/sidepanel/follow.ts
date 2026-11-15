@@ -18,7 +18,7 @@ export interface FollowInput {
 	/** The case open in the panel, once read. */
 	caseId: string | undefined;
 	/**
-	 * The tab in front; `url` is empty where Chrome hides it (Overmark may not
+	 * The tab in front; `url` is empty where Chrome hides it (Sitegloss may not
 	 * run there yet), `loading` while it loads.
 	 */
 	tab: { id: number; url: string; loading: boolean } | undefined;
@@ -35,7 +35,7 @@ export interface FollowStep {
 	clear: Drawn | undefined;
 	/**
 	 * `draw`: find the case's marks on the tab in front and draw them;
-	 * `wait`: Overmark may not run there, the icon's click or "Allow on all
+	 * `wait`: Sitegloss may not run there, the icon's click or "Allow on all
 	 * sites" lets it (the panel says so); `none`: leave the tab as it is.
 	 */
 	action: "draw" | "wait" | "none";
@@ -97,9 +97,9 @@ function nextAction({
 
 /**
  * Whether news from the overlay of tab `from` should make the open case
- * follow: Overmark runs there now, so the icon was clicked on it. The tab
+ * follow: Sitegloss runs there now, so the icon was clicked on it. The tab
  * the open case waits for (`pending`), or the tab in front whose address
- * Chrome hid from Overmark until now (`front`): the news can come before
+ * Chrome hid from Sitegloss until now (`front`): the news can come before
  * `follow` has found out that it waits, for it reads the tab twice first.
  */
 export function newsLetsIn(

@@ -1,6 +1,6 @@
 /**
  * Where cases and their images live: IndexedDB in the extension's origin,
- * shared by the service worker and the side panel (database `overmark`, stores
+ * shared by the service worker and the side panel (database `sitegloss`, stores
  * `cases` and `images`). `MemoryStore` is the same for tests.
  */
 
@@ -186,7 +186,7 @@ export class IdbStore implements CaseStore {
 
 	#open(): Promise<IDBDatabase> {
 		this.#db ??= new Promise((resolve, reject) => {
-			const req = indexedDB.open("overmark", 1);
+			const req = indexedDB.open("sitegloss", 1);
 			req.onupgradeneeded = () => {
 				req.result.createObjectStore("cases", { keyPath: "id" });
 				req.result.createObjectStore("images");

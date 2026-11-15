@@ -1,6 +1,6 @@
 {
-	"name": "overmark",
-	"version": "0.1.0",
+	"name": "sitegloss",
+	"version": "0.2.0",
 	"private": true,
 	"description": "Mark what is wrong on a web page, open the marks in another environment to fix it, and talk them through with your AI app",
 	"type": "module",
@@ -8,7 +8,7 @@
 	"author": "Jean-Pierre Bergamin <james@ractive.ch>",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/ractive/overmark.git"
+		"url": "git+https://github.com/ractive/sitegloss.git"
 	},
 	"scripts": {
 		"build": "bun scripts/build.ts",

@@ -1,5 +1,5 @@
 /**
- * How well does Overmark find elements again on real pages?
+ * How well does Sitegloss find elements again on real pages?
  *
  *   bun test/e2e/pilot.ts <url> [<the same page in another environment>]
  *
@@ -89,7 +89,7 @@ interface Target {
 async function pickTargets(page: Page): Promise<Target[]> {
 	await page.eval(SETUP);
 	return page.eval<Target[]>(`(() => {
-		const P = globalThis.__overmarkPilot;
+		const P = globalThis.__siteglossPilot;
 		const all = [...document.querySelectorAll("h1, h2, h3, h4, button, a[href], input, select, textarea, img, label, p, li")]
 			.filter((e) => {
 				const r = e.getBoundingClientRect();
@@ -120,7 +120,7 @@ async function search(
 ): Promise<{ outcomes: Outcome[]; ms: number }> {
 	await page.eval(SETUP);
 	return page.eval(`(() => {
-		const P = globalThis.__overmarkPilot;
+		const P = globalThis.__siteglossPilot;
 		const targets = ${JSON.stringify(targets.map((t) => t.details))};
 		const paths = ${JSON.stringify(targets.map((t) => t.path))};
 		const started = performance.now();

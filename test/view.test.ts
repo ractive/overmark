@@ -91,7 +91,7 @@ describe("the tab", () => {
 		const notice = el("access-notice");
 		expect(notice.hidden).toBe(false);
 		expect(notice.querySelector("svg.notice-icon")).not.toBeNull();
-		expect(notice.textContent).toContain("Click the Overmark icon");
+		expect(notice.textContent).toContain("Click the Sitegloss icon");
 		// It stands above New case for this page, and the hint below says nothing.
 		expect(notice.nextElementSibling).toBe(el("annotate"));
 		expect(el("hint").hidden).toBe(true);
@@ -103,7 +103,7 @@ describe("the tab", () => {
 		expect(el("annotate").title).toContain("see the notice");
 	});
 
-	test("without an address although Overmark may run on all sites: Chrome's own pages, no button", () => {
+	test("without an address although Sitegloss may run on all sites: Chrome's own pages, no button", () => {
 		home({ id: 1, url: "", title: "", size: undefined }, (s) => {
 			s.allSites = true;
 		});
@@ -1177,7 +1177,7 @@ describe("Load and Hide", () => {
 	});
 });
 
-describe("a case on a tab Overmark may not run on", () => {
+describe("a case on a tab Sitegloss may not run on", () => {
 	const noAccess = (c: Case, allSites = false) =>
 		caseState(c, (s) => {
 			s.tab = { id: 1, url: "", title: "", size: undefined };
@@ -1223,7 +1223,7 @@ describe("a case on a tab Overmark may not run on", () => {
 		render(state, actionsWith({ allowAllSites: () => void asked.push("all") }));
 		const notice = el("case-access");
 		expect(notice.hidden).toBe(false);
-		expect(notice.textContent).toContain("Click the Overmark icon");
+		expect(notice.textContent).toContain("Click the Sitegloss icon");
 		expect(notice.querySelector("svg.notice-icon")).not.toBeNull();
 		// In the This tab block, which says nothing else.
 		expect(notice.parentElement).toBe(el("this-tab"));
@@ -1281,7 +1281,7 @@ describe("a case on a tab Overmark may not run on", () => {
 			"button",
 		) as unknown as HTMLButtonElement;
 		expect(button.hidden).toBe(false);
-		expect(button.textContent).toBe("Open Overmark's details");
+		expect(button.textContent).toBe("Open Sitegloss's details");
 		button.click();
 		expect(opened).toEqual(["details"]);
 		expect(asked).toEqual([]);
@@ -1665,12 +1665,12 @@ describe("the AI app", () => {
 				{
 					...off,
 					problem: "tab",
-					status: "Open the side panel from the Overmark icon for AI access",
+					status: "Open the side panel from the Sitegloss icon for AI access",
 				},
 				{
 					label: "AI: side panel only",
-					line: "Open the side panel from the Overmark icon for AI access.",
-					title: "Open the side panel from the Overmark icon for AI access.",
+					line: "Open the side panel from the Sitegloss icon for AI access.",
+					title: "Open the side panel from the Sitegloss icon for AI access.",
 				},
 			],
 			[
@@ -1678,12 +1678,12 @@ describe("the AI app", () => {
 				{
 					...off,
 					problem: "updated",
-					status: "Overmark was updated: close and open this panel again.",
+					status: "Sitegloss was updated: close and open this panel again.",
 				},
 				{
 					label: "AI: reopen panel",
-					line: "Overmark was updated: close and open this panel again.",
-					title: "Overmark was updated: close and open this panel again.",
+					line: "Sitegloss was updated: close and open this panel again.",
+					title: "Sitegloss was updated: close and open this panel again.",
 				},
 			],
 			[
@@ -2988,7 +2988,7 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			s.asking = true;
 		});
 		expect(box.textContent).toContain(
-			"Chrome asks whether Overmark may manage your downloads.",
+			"Chrome asks whether Sitegloss may manage your downloads.",
 		);
 		expect(labels(box)).toEqual([]);
 	});
@@ -2997,7 +2997,7 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		let shown = 0;
 		const box = sync(synced, actionsWith({ syncShow: () => shown++ }));
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to Downloads/Overmark",
+			"Syncing to Downloads/Sitegloss",
 		);
 		expect(box.querySelector(".sync-line")?.textContent).toStartWith(
 			"Last synced ",
@@ -3016,11 +3016,11 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		const box = sync((s) => {
 			s.target = "folder";
 			s.targetId = "f";
-			s.folder = "Overmark";
+			s.folder = "Sitegloss";
 			s.status = { folderId: "f", state: "syncing", left: 3 };
 		});
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to “Overmark”",
+			"Syncing to “Sitegloss”",
 		);
 		expect(box.querySelector(".sync-line")?.textContent).toBe(
 			"Writing 3 cases…",
@@ -3034,7 +3034,7 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			s.changing = true;
 		});
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to Downloads/Overmark",
+			"Syncing to Downloads/Sitegloss",
 		);
 		expect(labels(box)).toEqual([
 			"Sync to Downloads",
@@ -3102,13 +3102,13 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		const box = draw(
 			(s) => {
 				pausedFolder(s);
-				s.problem = "Chrome did not allow Overmark to save to your downloads.";
+				s.problem = "Chrome did not allow Sitegloss to save to your downloads.";
 			},
 			noActions,
 			sampleCase("c_1"),
 		);
 		expect(banner().querySelector("[role=alert]")?.textContent).toBe(
-			"Chrome did not allow Overmark to save to your downloads.",
+			"Chrome did not allow Sitegloss to save to your downloads.",
 		);
 		// Once is enough: not again in the section.
 		expect(box.querySelector("[role=alert]")).toBeNull();
@@ -3129,10 +3129,10 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			actionsWith({ syncAllowDownloads: () => asked++ }),
 		);
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Paused: Overmark may no longer save to your downloads.",
+			"Paused: Sitegloss may no longer save to your downloads.",
 		);
 		expect(banner().querySelector("p")?.textContent).toBe(
-			"Sync is paused. Overmark may no longer save to your downloads.",
+			"Sync is paused. Sitegloss may no longer save to your downloads.",
 		);
 		expect(labels(banner())).toEqual(["Allow downloads"]);
 		(
@@ -3147,20 +3147,20 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		const box = sync((s) => {
 			s.target = "folder";
 			s.targetId = "f";
-			s.folder = "Overmark";
+			s.folder = "Sitegloss";
 			s.status = {
 				folderId: "f",
 				state: "failed",
-				problem: "The folder “Overmark” is no longer there.",
+				problem: "The folder “Sitegloss” is no longer there.",
 			};
 		});
 		expect(box.querySelector("[role=alert]")?.textContent).toBe(
-			"The folder “Overmark” is no longer there.",
+			"The folder “Sitegloss” is no longer there.",
 		);
 		expect(labels(box)).toContain("Try again");
 		expect(banner().dataset["sync"]).toBe("failed");
 		expect(banner().querySelector("p")?.textContent).toBe(
-			"Sync failed. The folder “Overmark” is no longer there.",
+			"Sync failed. The folder “Sitegloss” is no longer there.",
 		);
 		expect(labels(banner())).toEqual(["Try again"]);
 	});

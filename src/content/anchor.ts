@@ -27,7 +27,7 @@ function hitsIn(
 	});
 }
 
-/** Page elements at a point of the window, deepest first, without Overmark's own. */
+/** Page elements at a point of the window, deepest first, without Sitegloss's own. */
 export function pageElementsAt(
 	x: number,
 	y: number,

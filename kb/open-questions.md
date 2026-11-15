@@ -1,7 +1,7 @@
 ---
 type: questions
 title: "Open questions for the owner"
-description: Decisions the plan needs from the owner, or from the IT of an organisation that tries Overmark, before the pilot and the store listing.
+description: Decisions the plan needs from the owner, or from the IT of an organisation that tries Sitegloss, before the pilot and the store listing.
 tags:
   - questions
 timestamp: 2026-11-04T17:00:00+01:00
@@ -10,13 +10,13 @@ timestamp: 2026-11-04T17:00:00+01:00
 # Open questions for the owner
 
 1. **Relay for POs.** claude.ai and Claude Desktop connect from Anthropic's servers and
-   need a relay with a public HTTPS address that allows Overmark's extension ID. The
+   need a relay with a public HTTPS address that allows Sitegloss's extension ID. The
    hosted `tab-mcp.ractive.ch` allows the development build's ID since relay 0.7.1 and is
    the side panel's default; the store build's ID still has to be added there
    (`kb/operations/chrome-web-store.md`, step 5). Open: does an organisation that
-   tries Overmark accept that relay for POs, or run its own?
+   tries Sitegloss accept that relay for POs, or run its own?
 2. **An organisation's IT.** Is Developer mode allowed on company machines ("Load unpacked")? Is
-   Chrome managed by policy, so IT could install Overmark?
+   Chrome managed by policy, so IT could install Sitegloss?
 3. **Test ids.** Do the frontends it is used on have `data-testid` (or similar) attributes?
    They make finding elements again far more reliable.
 4. **Visibility.** The repository was created private. Make it public (MIT, like
@@ -27,7 +27,7 @@ timestamp: 2026-11-04T17:00:00+01:00
    browser). (a) In the real build, click "Sync to Downloads" and say yes to Chrome's
    question: are the cases written at once? It is not verified that a service worker
    that is already running gets `chrome.downloads` right after the grant; if it does
-   not, the sync says so and starts when Chrome restarts Overmark's background
+   not, the sync says so and starts when Chrome restarts Sitegloss's background
    (DEC-025). (b) Does Chrome's downloads bubble open on each write (changes are
    gathered for 2 s first)? (c) With Chrome's "Ask where to save each file" on, the
    sync fails and says to turn it off or choose a folder: is that acceptable?
@@ -60,7 +60,7 @@ timestamp: 2026-11-04T17:00:00+01:00
    2-CPU Linux container with Chromium 156: a click while the page loads put the script
    into the page on its way out, and Chrome refuses the script now and then right after
    a click (both fixed in the worker: injected again after the load, tried again after
-   250 ms); the panel dropped the news that the click let Overmark onto the tab when it
+   250 ms); the panel dropped the news that the click let Sitegloss onto the tab when it
    came before the panel had noted that the case waits there (fixed); and the test
    clicked a new tab before its first page had come (fixed in the test, which now
    clicks once the page has loaded and waits for the panel's notice of that tab; the

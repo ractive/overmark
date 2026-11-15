@@ -1,5 +1,5 @@
 /**
- * The toolbar icon while AI access is on: Overmark's icon with a green
+ * The toolbar icon while AI access is on: Sitegloss's icon with a green
  * spark in its corner, instead of the "on" badge (the owner, 2026-11-12).
  * Chrome's badges show text only, so the spark is drawn into the icon.
  */
@@ -134,19 +134,19 @@ export function iconSwitch(deps: IconDeps): (on: boolean) => Promise<void> {
 			deps.shown?.(on);
 		} catch (error) {
 			if (call === latest) wanted = undefined;
-			console.warn("Overmark: the toolbar icon", error);
+			console.warn("Sitegloss: the toolbar icon", error);
 		}
 	};
 }
 
-/** Overmark's toolbar icon. */
+/** Sitegloss's toolbar icon. */
 export const showSpark = iconSwitch({
 	setIcon: (details) => chrome.action.setIcon(details),
 	sparked: sparkedIcon,
 	plain: plainIcon,
 	// For a look in the worker's console, and the end-to-end tests.
 	shown: (on) => {
-		(globalThis as { overmarkIcon?: string }).overmarkIcon = on
+		(globalThis as { siteglossIcon?: string }).siteglossIcon = on
 			? "spark"
 			: "plain";
 	},

@@ -17,7 +17,11 @@ import {
 	FULL_LOGO,
 	LOGO_COLOURS,
 	type LogoPoint,
+	lockupWordmark,
+	pathPoints,
 	SMALL_LOGO,
+	WORDMARK_FONT,
+	wordmark,
 } from "../src/lib/logo.ts";
 
 interface Image {
@@ -146,6 +150,115 @@ describe("the icons", () => {
 		expect(full).toContain(`stroke="${LOGO_COLOURS.paper}" stroke-width="8"`);
 		// Three strokes in the full glyph: `<`, `>` and the slash.
 		expect(full.match(/M/g)?.length).toBe(4);
+	});
+});
+
+describe("the wordmark", () => {
+	const EM = 1000;
+	const w = wordmark(0, 0, EM);
+	const outline = w.swipe.points;
+
+	/** Inside the swipe's outline (even-odd), and how far from its edge. */
+	function inSwipe([x, y]: LogoPoint): boolean {
+		let inside = false;
+		for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
+			const [xi, yi] = outline[i] as LogoPoint;
+			const [xj, yj] = outline[j] as LogoPoint;
+			if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)
+				inside = !inside;
+		}
+		return inside;
+	}
+	function toEdge([x, y]: LogoPoint): number {
+		let best = Number.POSITIVE_INFINITY;
+		for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
+			const [ax, ay] = outline[j] as LogoPoint;
+			const [bx, by] = outline[i] as LogoPoint;
+			const dx = bx - ax;
+			const dy = by - ay;
+			const t = Math.max(
+				0,
+				Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)),
+			);
+			best = Math.min(best, Math.hypot(x - ax - t * dx, y - ay - t * dy));
+		}
+		return best;
+	}
+
+	test('the swipe covers all of "gloss", a clear margin round every letter', () => {
+		// Control points too: the outline lies within their hull.
+		const points = pathPoints(w.gloss);
+		expect(points.length).toBeGreaterThan(100);
+		for (const p of points) {
+			expect(inSwipe(p)).toBe(true);
+			expect(toEdge(p)).toBeGreaterThan(0.06 * EM);
+		}
+	});
+
+	test('"Site" stays off the swipe, near enough to read as one word', () => {
+		const points = pathPoints(w.site);
+		const gaps = points.map((p) => (inSwipe(p) ? 0 : toEdge(p)));
+		expect(Math.min(...gaps)).toBeGreaterThan(0.04 * EM);
+		expect(Math.min(...gaps)).toBeLessThan(0.12 * EM);
+	});
+
+	test("the letters are Inter Bold's outlines, in its units", () => {
+		const { glyphs, unitsPerEm, capHeight } = WORDMARK_FONT;
+		expect(unitsPerEm).toBe(2816);
+		// One outline for every letter of the name, and no more.
+		expect(Object.keys(glyphs).sort()).toEqual(
+			[...new Set("Sitegloss")].sort(),
+		);
+		// "l" is a bare stem from the baseline to the cap height.
+		expect(glyphs.l.d).toBe(
+			`M596 -${capHeight}L170 -${capHeight}L170 0L596 0Z`,
+		);
+	});
+
+	test("in the lockup its cap height is centred on the tile", () => {
+		const l = lockupWordmark();
+		const em = 80;
+		const site = pathPoints(l.site);
+		// The stem of "l" runs from the baseline to the cap height: its middle is the tile's.
+		const stem = l.gloss
+			.split("M")
+			.map((sub) => pathPoints(`M${sub}`))
+			.filter((points) => points.length === 4);
+		expect(stem.length).toBe(1);
+		const ys = (stem[0] as LogoPoint[]).map((p) => p[1]);
+		expect((Math.min(...ys) + Math.max(...ys)) / 2).toBeCloseTo(64, 1);
+		// After the tile and the gap, and the swipe within the tile's height.
+		expect(Math.min(...site.map((p) => p[0]))).toBeGreaterThan(
+			128 + 0.375 * em,
+		);
+		const swipe = l.swipe.points.map((p) => p[1]);
+		expect(Math.min(...swipe)).toBeGreaterThan(0);
+		expect(Math.max(...swipe)).toBeLessThan(128);
+	});
+
+	test('its files: "gloss" in ink on amber always, "Site" in the page\'s colour', () => {
+		for (const [name, site] of [
+			["wordmark", LOGO_COLOURS.ink],
+			["wordmark-light", LOGO_COLOURS.paper],
+			["lockup", LOGO_COLOURS.ink],
+			["lockup-light", LOGO_COLOURS.paper],
+		] as const) {
+			const svg = files[`assets/brand/${name}.svg`] as string;
+			expect(svg).toContain("<title>Sitegloss</title>");
+			const fills = [...svg.matchAll(/<path d="[^"]*" fill="(#[^"]+)"/g)].map(
+				(m) => m[1],
+			);
+			// The swipe, then "Site", then "gloss" over it.
+			expect(fills, name).toEqual([LOGO_COLOURS.amber, site, LOGO_COLOURS.ink]);
+			// Outlines only: nothing depends on a font.
+			expect(svg).not.toContain("<text");
+		}
+		expect(files["assets/brand/lockup-light.svg"]).toContain(
+			`fill="${LOGO_COLOURS.lightTile}"`,
+		);
+		expect(files["assets/brand/lockup.svg"]).toContain(
+			`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 `,
+		);
 	});
 });
 

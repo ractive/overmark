@@ -114,7 +114,7 @@ async function ask<T extends object>(request: WorkerRequest): Promise<T> {
 	const response = (await chrome.runtime.sendMessage(request)) as
 		| WorkerResponse<T>
 		| undefined;
-	if (response === undefined) throw new Error("Overmark did not answer.");
+	if (response === undefined) throw new Error("Sitegloss did not answer.");
 	if (!response.ok) throw new Error(response.error);
 	return response;
 }
@@ -279,7 +279,7 @@ export class Annotator {
 				if (this.#editing !== null) this.#commitComment();
 				else if (this.#tool !== null) this.setTool(null);
 				else return;
-				// It was for Overmark, not for a dialog the page has open.
+				// It was for Sitegloss, not for a dialog the page has open.
 				e.preventDefault();
 				e.stopImmediatePropagation();
 			},

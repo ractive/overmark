@@ -2,7 +2,7 @@
  * Whether a call of a tool that changes something may run (DEC-018): Always
  * allow for that tool, or Allow all changes, for the AI app it came from;
  * otherwise the user's answer to a question. Only for an AI app connected
- * through the relay: a call through the browser's WebMCP (which Overmark
+ * through the relay: a call through the browser's WebMCP (which Sitegloss
  * leaves off) is refused without a question. A question nobody answered in
  * time is `"unanswered"`: the AI app hears that, not that the user declined.
  */
@@ -30,7 +30,7 @@ export async function decide(
 	d: Decider,
 	request: ConfirmRequest,
 ): Promise<ConfirmAnswer> {
-	// Overmark turns WebMCP off; should a call come through it all the same,
+	// Sitegloss turns WebMCP off; should a call come through it all the same,
 	// it is refused: no question, no Always allow (they are per AI app).
 	if (request.client.kind !== "relay") {
 		d.refused?.(request);

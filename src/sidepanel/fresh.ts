@@ -75,7 +75,7 @@ export function isUntouched(
 
 /**
  * What a tab said when asked whether it holds anything of a case: its
- * overlay's state, `none` (no content script there: nothing of Overmark's),
+ * overlay's state, `none` (no content script there: nothing of Sitegloss's),
  * or `unsure` (it did not answer in time: frozen, in a dialog, busy).
  */
 export type TabAnswer = OverlayState | "none" | "unsure";

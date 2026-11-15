@@ -50,7 +50,7 @@ class FakeFolder implements PickedFolder {
 	writes: string[] = [];
 	removed: string[] = [];
 
-	constructor(name = "Overmark cases", same?: FakeFolder) {
+	constructor(name = "Sitegloss cases", same?: FakeFolder) {
 		this.name = name;
 		this.entry = same?.entry ?? {};
 		this.files = same?.files ?? new Map();
@@ -195,10 +195,10 @@ describe("the sync to a folder (DEC-021)", () => {
 		await add("c_2", "Price table");
 		await sync.request();
 		expect([...folder.files.keys()].sort()).toEqual([
-			"login-button-contrast.overmark.zip",
-			"price-table.overmark.zip",
+			"login-button-contrast.sitegloss.zip",
+			"price-table.sitegloss.zip",
 		]);
-		const file = folder.files.get("login-button-contrast.overmark.zip");
+		const file = folder.files.get("login-button-contrast.sitegloss.zip");
 		if (file === undefined) throw new Error("no file");
 		// Import a case… reads it back.
 		expect((await readExport(file)).case.id).toBe("c_1");
@@ -209,7 +209,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		});
 		expect(store.record?.byCase["c_1"]).toEqual({
 			version: versionOf((await cases.getCase("c_1")) as Case),
-			file: "login-button-contrast.overmark.zip",
+			file: "login-button-contrast.sitegloss.zip",
 		});
 		expect(notified).toBeGreaterThan(0);
 	});
@@ -223,8 +223,8 @@ describe("the sync to a folder (DEC-021)", () => {
 		expect(folder.writes).toEqual([]);
 		await change(c, { verdict: "Fixed on dev" });
 		await sync.request();
-		expect(folder.writes).toEqual(["login.overmark.zip"]);
-		const file = folder.files.get("login.overmark.zip") as Uint8Array;
+		expect(folder.writes).toEqual(["login.sitegloss.zip"]);
+		const file = folder.files.get("login.sitegloss.zip") as Uint8Array;
 		expect((await readExport(file)).case.verdict).toBe("Fixed on dev");
 	});
 
@@ -234,7 +234,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		folder.writes = [];
 		await putCase(cases, { ...c, importedAt: "2026-11-12T09:00:00Z" });
 		await sync.request();
-		expect(folder.writes).toEqual(["login.overmark.zip"]);
+		expect(folder.writes).toEqual(["login.sitegloss.zip"]);
 	});
 
 	test("a case without marks gets no file; one written before is kept up to date (DEC-026)", async () => {
@@ -255,12 +255,15 @@ describe("the sync to a folder (DEC-021)", () => {
 			updatedAt: "2026-11-12T08:05:00Z",
 		});
 		await sync.request();
-		expect(folder.writes).toEqual(["login.overmark.zip"]);
+		expect(folder.writes).toEqual(["login.sitegloss.zip"]);
 		// Its marks deleted later: the file it has is written again, empty.
 		await change(marked, { annotations: [], shots: [], lastNumber: 1 });
 		await sync.request();
-		expect(folder.writes).toEqual(["login.overmark.zip", "login.overmark.zip"]);
-		const file = folder.files.get("login.overmark.zip") as Uint8Array;
+		expect(folder.writes).toEqual([
+			"login.sitegloss.zip",
+			"login.sitegloss.zip",
+		]);
+		const file = folder.files.get("login.sitegloss.zip") as Uint8Array;
 		expect((await readExport(file)).case.annotations).toEqual([]);
 	});
 
@@ -269,8 +272,8 @@ describe("the sync to a folder (DEC-021)", () => {
 		await sync.request();
 		await change(c, { title: "Login button" });
 		await sync.request();
-		expect([...folder.files.keys()]).toEqual(["login-button.overmark.zip"]);
-		expect(folder.removed).toEqual(["login.overmark.zip"]);
+		expect([...folder.files.keys()]).toEqual(["login-button.sitegloss.zip"]);
+		expect(folder.removed).toEqual(["login.sitegloss.zip"]);
 	});
 
 	test("a deleted case keeps its file, and its name stays its own", async () => {
@@ -278,16 +281,16 @@ describe("the sync to a folder (DEC-021)", () => {
 		await sync.request();
 		await cases.deleteCase("c_1");
 		await sync.request();
-		expect([...folder.files.keys()]).toEqual(["login.overmark.zip"]);
+		expect([...folder.files.keys()]).toEqual(["login.sitegloss.zip"]);
 		expect(folder.removed).toEqual([]);
 		// A new case of the same title does not overwrite it.
 		await add("c_2", "Login");
 		await sync.request();
 		expect([...folder.files.keys()].sort()).toEqual([
-			"login-2.overmark.zip",
-			"login.overmark.zip",
+			"login-2.sitegloss.zip",
+			"login.sitegloss.zip",
 		]);
-		const kept = folder.files.get("login.overmark.zip") as Uint8Array;
+		const kept = folder.files.get("login.sitegloss.zip") as Uint8Array;
 		expect((await readExport(kept)).case.id).toBe("c_1");
 	});
 
@@ -296,7 +299,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		await add("c_2", "Login", "2026-11-12T08:01:00Z");
 		await sync.request();
 		const names = [...folder.files.keys()].sort();
-		expect(names).toEqual(["login-2.overmark.zip", "login.overmark.zip"]);
+		expect(names).toEqual(["login-2.sitegloss.zip", "login.sitegloss.zip"]);
 		const fileOf = (id: string) => store.record?.byCase[id]?.file;
 		const before = { a: fileOf("c_1"), b: fileOf("c_2") };
 		await change(a, { verdict: "Done" });
@@ -305,15 +308,15 @@ describe("the sync to a folder (DEC-021)", () => {
 		expect([...folder.files.keys()].sort()).toEqual(names);
 	});
 
-	test("a file Overmark did not write is never overwritten", async () => {
-		folder.files.set("login.overmark.zip", new Uint8Array([1, 2, 3]));
-		folder.folders.add("login-2.overmark.zip");
+	test("a file Sitegloss did not write is never overwritten", async () => {
+		folder.files.set("login.sitegloss.zip", new Uint8Array([1, 2, 3]));
+		folder.folders.add("login-2.sitegloss.zip");
 		await add("c_1", "Login");
 		await sync.request();
-		expect(folder.files.get("login.overmark.zip")).toEqual(
+		expect(folder.files.get("login.sitegloss.zip")).toEqual(
 			new Uint8Array([1, 2, 3]),
 		);
-		expect(store.record?.byCase["c_1"]?.file).toBe("login-3.overmark.zip");
+		expect(store.record?.byCase["c_1"]?.file).toBe("login-3.sitegloss.zip");
 	});
 
 	test("another folder starts afresh; what was written to the old one does not count", async () => {
@@ -322,7 +325,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		const other = new FakeFolder("Dropbox");
 		store.useFolder(other, "f_2");
 		await sync.request();
-		expect([...other.files.keys()]).toEqual(["login.overmark.zip"]);
+		expect([...other.files.keys()]).toEqual(["login.sitegloss.zip"]);
 		expect(store.record?.folderId).toBe("f_2");
 	});
 
@@ -338,11 +341,11 @@ describe("the sync to a folder (DEC-021)", () => {
 			reason: "access",
 			lastSyncedAt: NOW.toISOString(),
 		});
-		expect(folder.files.has("price-table.overmark.zip")).toBe(false);
+		expect(folder.files.has("price-table.sitegloss.zip")).toBe(false);
 		folder.permission = "granted";
 		folder.writes = [];
 		await sync.request();
-		expect(folder.writes).toEqual(["price-table.overmark.zip"]);
+		expect(folder.writes).toEqual(["price-table.sitegloss.zip"]);
 		expect(store.current?.state).toBe("synced");
 	});
 
@@ -370,7 +373,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		await sync.request();
 		expect(store.current?.state).toBe("failed");
 		expect(store.current?.problem).toContain(
-			"The folder “Overmark cases” is no longer there",
+			"The folder “Sitegloss cases” is no longer there",
 		);
 		expect(store.current?.problem).toContain("Change…");
 		folder.gone = false;
@@ -384,7 +387,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		await sync.request();
 		expect(store.current?.state).toBe("failed");
 		expect(store.current?.problem).toBe(
-			"There is no space left for “login.overmark.zip” in “Overmark cases”. Free some space, then click Try again.",
+			"There is no space left for “login.sitegloss.zip” in “Sitegloss cases”. Free some space, then click Try again.",
 		);
 		expect(folder.files.size).toBe(0);
 	});
@@ -398,7 +401,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		// c_1's screenshot is not stored.
 		await cases.deleteImages("c_1", ["shots/s1.webp"]);
 		await sync.request();
-		expect([...folder.files.keys()]).toEqual(["fine.overmark.zip"]);
+		expect([...folder.files.keys()]).toEqual(["fine.sitegloss.zip"]);
 		expect(store.current?.state).toBe("failed");
 		expect(store.current?.problem).toContain("“Broken” could not be written");
 	});
@@ -409,7 +412,7 @@ describe("the sync to a folder (DEC-021)", () => {
 		const start = Date.now();
 		await sync.request();
 		expect(Date.now() - start).toBeLessThan(150);
-		expect(folder.writes).toEqual(["login.overmark.zip"]);
+		expect(folder.writes).toEqual(["login.sitegloss.zip"]);
 	});
 
 	test("no folder chosen: nothing happens", async () => {
@@ -455,8 +458,8 @@ describe("the sync to a folder (DEC-021)", () => {
 		await sync.idle();
 		expect(most).toBe(1);
 		expect([...folder.files.keys()].sort()).toEqual([
-			"login.overmark.zip",
-			"price-table.overmark.zip",
+			"login.sitegloss.zip",
+			"price-table.sitegloss.zip",
 		]);
 	});
 
@@ -500,7 +503,7 @@ describe("the sync to a folder (DEC-021)", () => {
 	});
 });
 
-/** Chrome's downloads in memory: the files in `Overmark/`, the list, the URLs. */
+/** Chrome's downloads in memory: the files in `Sitegloss/`, the list, the URLs. */
 class FakeDownloads implements DownloadsApi {
 	allowed = true;
 	/** By path under the downloads folder. */
@@ -648,18 +651,18 @@ describe("the sync to Downloads (DEC-025)", () => {
 		});
 	});
 
-	test("writes each case into Overmark/ in the downloads, overwriting, without a dialog", async () => {
+	test("writes each case into Sitegloss/ in the downloads, overwriting, without a dialog", async () => {
 		await add("c_1", "Login button contrast");
 		await sync.request();
 		expect(api.downloads).toEqual([
 			{
 				url: "blob:x/1",
-				filename: "Overmark/login-button-contrast.overmark.zip",
+				filename: "Sitegloss/login-button-contrast.sitegloss.zip",
 				conflictAction: "overwrite",
 				saveAs: false,
 			},
 		]);
-		const file = api.files.get("Overmark/login-button-contrast.overmark.zip");
+		const file = api.files.get("Sitegloss/login-button-contrast.sitegloss.zip");
 		expect((await readExport(file as Uint8Array)).case.id).toBe("c_1");
 		expect(store.current).toEqual({
 			folderId: "downloads",
@@ -667,7 +670,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 			lastSyncedAt: NOW.toISOString(),
 		});
 		expect(store.records.get("downloads")?.byCase["c_1"]?.file).toBe(
-			"login-button-contrast.overmark.zip",
+			"login-button-contrast.sitegloss.zip",
 		);
 		// The URL is revoked once the download is over, the document closed after the run.
 		expect(api.revoked).toEqual(["blob:x/1"]);
@@ -692,7 +695,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 				id: 1,
 				caseId: "c_1",
 				version: versionOf(c),
-				file: "login.overmark.zip",
+				file: "login.sitegloss.zip",
 			},
 		]);
 		expect(await api.pending()).toBeUndefined();
@@ -704,7 +707,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await api.url(c);
 		const id = await api.download({
 			url: "blob:x/1",
-			filename: "Overmark/login.overmark.zip",
+			filename: "Sitegloss/login.sitegloss.zip",
 			conflictAction: "overwrite",
 			saveAs: false,
 		});
@@ -712,7 +715,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 			id,
 			caseId: "c_1",
 			version: versionOf(c),
-			file: "login.overmark.zip",
+			file: "login.sitegloss.zip",
 		});
 		store.current = {
 			folderId: "downloads",
@@ -722,7 +725,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await sync.request();
 		expect(api.downloads).toHaveLength(1);
 		expect(store.records.get("downloads")?.byCase["c_1"]?.file).toBe(
-			"login.overmark.zip",
+			"login.sitegloss.zip",
 		);
 		expect(store.current?.state).toBe("synced");
 		expect(await api.pending()).toBeUndefined();
@@ -784,7 +787,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await api.url(c);
 		const id = await api.download({
 			url: "blob:x/1",
-			filename: "Overmark/login.overmark.zip",
+			filename: "Sitegloss/login.sitegloss.zip",
 			conflictAction: "overwrite",
 			saveAs: false,
 		});
@@ -792,7 +795,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 			id,
 			caseId: "c_1",
 			version: versionOf(c),
-			file: "login.overmark.zip",
+			file: "login.sitegloss.zip",
 		});
 		await sync.request();
 		expect(api.erased).toContain(id);
@@ -819,8 +822,8 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(api.erased).toEqual([1, 2]);
 		// The files stay: only the list's entries go.
 		expect([...api.files.keys()].sort()).toEqual([
-			"Overmark/login.overmark.zip",
-			"Overmark/other.overmark.zip",
+			"Sitegloss/login.sitegloss.zip",
+			"Sitegloss/other.sitegloss.zip",
 		]);
 	});
 
@@ -835,20 +838,20 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await sync.request();
 		// Nothing can be removed there: the case's one file is written again.
 		expect([...api.files.keys()]).toEqual([
-			"Overmark/example-domain.overmark.zip",
+			"Sitegloss/example-domain.sitegloss.zip",
 		]);
-		const file = api.files.get("Overmark/example-domain.overmark.zip");
+		const file = api.files.get("Sitegloss/example-domain.sitegloss.zip");
 		expect((await readExport(file as Uint8Array)).case.title).toBe(
 			"Login button",
 		);
 		expect(store.records.get("downloads")?.byCase["c_1"]?.file).toBe(
-			"example-domain.overmark.zip",
+			"example-domain.sitegloss.zip",
 		);
 		// A new case of the old title does not take its name.
 		await add("c_2", "Example Domain", "2026-11-12T09:01:00Z");
 		await sync.request();
 		expect(store.records.get("downloads")?.byCase["c_2"]?.file).toBe(
-			"example-domain-2.overmark.zip",
+			"example-domain-2.sitegloss.zip",
 		);
 	});
 
@@ -857,8 +860,8 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await add("c_2", "COM1", "2026-11-12T08:01:00Z");
 		await sync.request();
 		expect([...api.files.keys()].sort()).toEqual([
-			"Overmark/_com1.overmark.zip",
-			"Overmark/_con.overmark.zip",
+			"Sitegloss/_com1.sitegloss.zip",
+			"Sitegloss/_con.sitegloss.zip",
 		]);
 		expect(store.current?.state).toBe("synced");
 	});
@@ -866,9 +869,9 @@ describe("the sync to Downloads (DEC-025)", () => {
 	test("a name Chrome refuses is that case's problem: the others are written", async () => {
 		await add("c_1", "Odd", "2026-11-12T08:01:00Z");
 		await add("c_2", "Fine", "2026-11-12T08:00:00Z");
-		api.refuse = (f) => f.endsWith("/odd.overmark.zip");
+		api.refuse = (f) => f.endsWith("/odd.sitegloss.zip");
 		await sync.request();
-		expect([...api.files.keys()]).toEqual(["Overmark/fine.overmark.zip"]);
+		expect([...api.files.keys()]).toEqual(["Sitegloss/fine.sitegloss.zip"]);
 		expect(store.current?.state).toBe("failed");
 		expect(store.current?.problem).toContain("“Odd” could not be written");
 	});
@@ -878,8 +881,8 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await add("c_2", "Login", "2026-11-12T08:01:00Z");
 		await sync.request();
 		expect([...api.files.keys()].sort()).toEqual([
-			"Overmark/login-2.overmark.zip",
-			"Overmark/login.overmark.zip",
+			"Sitegloss/login-2.sitegloss.zip",
+			"Sitegloss/login.sitegloss.zip",
 		]);
 	});
 
@@ -937,7 +940,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await sync.request();
 		expect(store.current?.state).toBe("failed");
 		expect(store.current?.problem).toBe(
-			"There is no space left in your downloads for “login.overmark.zip”. Free some space, then click Try again.",
+			"There is no space left in your downloads for “login.sitegloss.zip”. Free some space, then click Try again.",
 		);
 		expect(api.revoked).toEqual(["blob:x/1"]);
 		await sync.request();
@@ -983,14 +986,14 @@ describe("the sync to Downloads (DEC-025)", () => {
 		expect(api.erased).toEqual([1]);
 	});
 
-	test("saved somewhere else than Overmark/ (the user answered Save as): failed too", async () => {
+	test("saved somewhere else than Sitegloss/ (the user answered Save as): failed too", async () => {
 		await add("c_1", "Login");
 		api.savedIn = "/Users/me/Desktop";
 		await sync.request();
 		expect(store.current?.state).toBe("failed");
 		// Where it went, and that something else chose it: no dialog need have shown.
 		expect(store.current?.problem).toContain(
-			"/Users/me/Desktop/login.overmark.zip",
+			"/Users/me/Desktop/login.sitegloss.zip",
 		);
 		expect(store.current?.problem).not.toContain("Chrome asked");
 	});
@@ -1013,7 +1016,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 			return url(c);
 		};
 		await sync.request();
-		expect([...api.files.keys()]).toEqual(["Overmark/fine.overmark.zip"]);
+		expect([...api.files.keys()]).toEqual(["Sitegloss/fine.sitegloss.zip"]);
 		expect(store.current?.state).toBe("failed");
 		expect(store.current?.problem).toContain("“Broken” could not be written");
 	});
@@ -1072,13 +1075,13 @@ describe("the sync to Downloads (DEC-025)", () => {
 		await add("c_1", "Login");
 		await chooseDownloads(kv);
 		await sync.request();
-		// The user emptied Downloads/Overmark; then Stop syncing, Sync to Downloads.
+		// The user emptied Downloads/Sitegloss; then Stop syncing, Sync to Downloads.
 		api.files.clear();
 		await stopSyncing(kv);
 		await sync.request();
 		await chooseDownloads(kv);
 		await sync.request();
-		expect([...api.files.keys()]).toEqual(["Overmark/login.overmark.zip"]);
+		expect([...api.files.keys()]).toEqual(["Sitegloss/login.sitegloss.zip"]);
 		expect(api.downloads).toHaveLength(2);
 	});
 
@@ -1099,7 +1102,7 @@ describe("the sync to Downloads (DEC-025)", () => {
 describe("the stored choice (DEC-025)", () => {
 	const folder: ChosenFolder = {
 		handle: new FakeFolder(),
-		name: "Overmark cases",
+		name: "Sitegloss cases",
 		id: "f_1",
 	};
 
@@ -1179,7 +1182,7 @@ describe("choosing a folder synced before (DEC-021)", () => {
 		sync = new Sync({ cases, store: kvSyncStore(kv), now: () => NOW });
 	});
 
-	test("A, then B, then A again: A's files are Overmark's and updated in place", async () => {
+	test("A, then B, then A again: A's files are Sitegloss's and updated in place", async () => {
 		const login = await putMarked(cases, {
 			...sampleCase("c_1"),
 			title: "Login",
@@ -1190,7 +1193,7 @@ describe("choosing a folder synced before (DEC-021)", () => {
 		await sync.request();
 		expect(await choose(b)).toMatchObject({ id: "f_2" });
 		await sync.request();
-		expect([...b.files.keys()]).toEqual(["login.overmark.zip"]);
+		expect([...b.files.keys()]).toEqual(["login.sitegloss.zip"]);
 
 		const changed = await putCase(cases, {
 			...login,
@@ -1199,10 +1202,10 @@ describe("choosing a folder synced before (DEC-021)", () => {
 		const back = a.again();
 		expect((await choose(back)).id).toBe(first.id);
 		await sync.request();
-		expect([...a.files.keys()]).toEqual(["login.overmark.zip"]);
-		expect(back.writes).toEqual(["login.overmark.zip"]);
+		expect([...a.files.keys()]).toEqual(["login.sitegloss.zip"]);
+		expect(back.writes).toEqual(["login.sitegloss.zip"]);
 		const read = await readExport(
-			a.files.get("login.overmark.zip") as Uint8Array,
+			a.files.get("login.sitegloss.zip") as Uint8Array,
 		);
 		expect(read.case.updatedAt).toBe(changed.updatedAt);
 		expect((await kv.get(FOLDERS_KEY)) as ChosenFolder[]).toHaveLength(2);
@@ -1223,7 +1226,7 @@ describe("choosing a folder synced before (DEC-021)", () => {
 		await sync.request();
 		// Unchanged since A was synced: nothing to write, and no `-2` copy.
 		expect(back.writes).toEqual([]);
-		expect([...a.files.keys()]).toEqual(["login.overmark.zip"]);
+		expect([...a.files.keys()]).toEqual(["login.sitegloss.zip"]);
 		expect(((await kv.get(FOLDER_KEY)) as ChosenFolder).handle).toBe(back);
 	});
 

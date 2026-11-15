@@ -22,12 +22,12 @@ import {
 	type RenderedMark,
 } from "../lib/marks.ts";
 
-declare const OVERMARK_TEST_BUILD: boolean | undefined;
+declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
 
-export const HOST_ID = "overmark-root";
+export const HOST_ID = "sitegloss-root";
 export const HOVER_COLOUR = "#1f6feb";
 /**
- * The overlay's one look (DEC-024): it sits on pages Overmark knows nothing
+ * The overlay's one look (DEC-024): it sits on pages Sitegloss knows nothing
  * about, so it is the same on each of them and in both colour schemes. A unit
  * test holds every pair of these to its contrast.
  */
@@ -304,7 +304,7 @@ export function icon(doc: Document, name: IconName): SVGSVGElement {
 }
 
 /**
- * The pen loop of Overmark's small icon (DEC-029), alone and cropped to it,
+ * The pen loop of Sitegloss's small icon (DEC-029), alone and cropped to it,
  * as if something on the page were circled.
  */
 export function ring(doc: Document): SVGSVGElement {
@@ -316,7 +316,7 @@ export function ring(doc: Document): SVGSVGElement {
 		role: "img",
 	});
 	const title = svg(doc, "title", {});
-	title.textContent = "Overmark";
+	title.textContent = "Sitegloss";
 	el.append(title, svg(doc, "path", { d: RING_PATH }));
 	return el;
 }
@@ -425,7 +425,7 @@ export class Overlay {
 		// end-to-end tests reach in through a test build's open root.
 		this.root = this.host.attachShadow({
 			mode:
-				typeof OVERMARK_TEST_BUILD !== "undefined" && OVERMARK_TEST_BUILD
+				typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD
 					? "open"
 					: "closed",
 		});
@@ -448,7 +448,7 @@ export class Overlay {
 		this.toolbar = doc.createElement("div");
 		this.toolbar.className = "toolbar";
 		this.toolbar.setAttribute("role", "toolbar");
-		this.toolbar.setAttribute("aria-label", "Overmark");
+		this.toolbar.setAttribute("aria-label", "Sitegloss");
 		this.reviewBar = doc.createElement("div");
 		this.reviewBar.className = "reviewbar";
 		this.layer.append(
@@ -569,7 +569,7 @@ export class Overlay {
 
 	/**
 	 * Mark one element for a screenshot an AI app takes, with everything else
-	 * of Overmark's hidden; `null` removes it.
+	 * of Sitegloss's hidden; `null` removes it.
 	 */
 	setTemporaryMark(mark: { number: number; rect: Rect } | null): void {
 		this.#marking = mark !== null;
@@ -655,7 +655,7 @@ export class Overlay {
 		if (last || this.host.parentElement !== parent) parent.append(this.host);
 	}
 
-	/** Hide all of Overmark while a screenshot is taken. */
+	/** Hide all of Sitegloss while a screenshot is taken. */
 	setCapturing(on: boolean): void {
 		this.layer.classList.toggle("capturing", on);
 	}

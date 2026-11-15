@@ -1,5 +1,5 @@
 /**
- * Injected into a page by `pilot.ts`: Overmark's element details and
+ * Injected into a page by `pilot.ts`: Sitegloss's element details and
  * matching, the same code the extension runs, as a global for the measurement.
  */
 
@@ -8,10 +8,10 @@ import { createContext, describeElement } from "../../src/lib/element.ts";
 import { classify, rank } from "../../src/lib/match.ts";
 
 declare global {
-	var __overmarkPilot: unknown;
+	var __siteglossPilot: unknown;
 }
 
-globalThis.__overmarkPilot = {
+globalThis.__siteglossPilot = {
 	createContext,
 	createSearch,
 	describeElement,

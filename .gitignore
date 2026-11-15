@@ -1,5 +1,8 @@
 node_modules/
 dist/
+*.sitegloss.zip
+sitegloss-*.zip
+# Files of Overmark 0.1.0 that may still lie around in a checkout.
 *.overmark.zip
 overmark-*.zip
 .DS_Store

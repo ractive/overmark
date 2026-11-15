@@ -38,7 +38,7 @@ export interface PageSearch {
 	readonly context: DescribeContext;
 	/** Element details without the (slow) selector, remembered per element. */
 	describe(el: Element): ElementDetails;
-	/** Elements the search may return (not Overmark's own). */
+	/** Elements the search may return (not Sitegloss's own). */
 	own(el: Element): boolean;
 	/** The page's body and every shadow root, collected once. */
 	trees(): ParentNode[];

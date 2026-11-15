@@ -43,7 +43,7 @@ describe("writeZip and readZip", () => {
 			const zip = await writeZip([
 				{ name: "a/b.txt", data: text("hello ".repeat(100)) },
 			]);
-			const dir = mkdtempSync(join(tmpdir(), "overmark-zip-"));
+			const dir = mkdtempSync(join(tmpdir(), "sitegloss-zip-"));
 			try {
 				await Bun.write(join(dir, "x.zip"), zip);
 				const proc = Bun.spawnSync([
