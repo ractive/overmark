@@ -31,9 +31,11 @@ timestamp: 2026-11-05T08:00:00+01:00
    submit for review.
 5. After the first upload: Package → "View public key". Put that key into
    `manifest-key.txt`, so unpacked builds get the store's ID. Update the README, the
-   design note and `test/build.test.ts` with the new ID, and every relay's
-   `TAB_MCP_SITES` entry, including the hosted relay's `TAB_MCP_ALLOWED_ORIGINS` in
-   ractive/ractive.ch (`infra/tab-mcp/variables.tf`). Edge Add-ons gives the extension a different ID again.
+   design note and the tests with the new ID, and every relay's `TAB_MCP_SITES` entry,
+   including the hosted relay's `TAB_MCP_ALLOWED_ORIGINS` in ractive/ractive.ch
+   (`infra/tab-mcp/variables.tf`). Done on 2026-11-16 for the store item `ldmcfigcnobhnbaigehcaodheklibeon`
+   (DEC-031). Edge Add-ons gives the
+   extension a different ID again.
 
 ## Where the packages come from
 

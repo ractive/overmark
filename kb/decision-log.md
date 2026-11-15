@@ -1222,3 +1222,9 @@ that the old name had namesakes among annotation tools.
 - **Current texts do not mention the old name** (the owner, 2026-11-15): it stays in the
   git history, in this entry and in the notes that keep it, nowhere else.
 - **Earlier entries, the log and finished iterations keep the old name.**
+
+## DEC-031: The store's key replaces the development key
+
+`manifest-key.txt` now holds the public key of the Chrome Web Store item, so unpacked
+builds and the store version share the ID `ldmcfigcnobhnbaigehcaodheklibeon`. This replaces the earlier
+development key, which was published with the repository.

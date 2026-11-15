@@ -35,7 +35,7 @@ import {
 import { CachedSecretStorage } from "../src/worker/secret.ts";
 import { kvContract } from "./kv-contract.ts";
 
-const ID = "fphhchhlgklidhnodoleiebmdhnfdadg";
+const ID = "ldmcfigcnobhnbaigehcaodheklibeon";
 const PANEL = `chrome-extension://${ID}/sidepanel/index.html`;
 const contentScript = { id: ID, url: "https://site.test/page", tab: { id: 1 } };
 

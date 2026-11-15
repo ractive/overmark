@@ -42,7 +42,7 @@ function isWrappedScript(code: string): boolean {
 describe("extension ID", () => {
 	test("the committed key gives the documented ID", async () => {
 		expect(extensionId(await readKey())).toBe(
-			"fphhchhlgklidhnodoleiebmdhnfdadg",
+			"ldmcfigcnobhnbaigehcaodheklibeon",
 		);
 	});
 });
@@ -84,7 +84,7 @@ describe("build", () => {
 	test("writes the bundles, the side panel, the icons and the manifest", async () => {
 		const outdir = tempDir();
 		const result = await build({ outdir });
-		expect(result.id).toBe("fphhchhlgklidhnodoleiebmdhnfdadg");
+		expect(result.id).toBe("ldmcfigcnobhnbaigehcaodheklibeon");
 		for (const file of [
 			"background.js",
 			"content.js",

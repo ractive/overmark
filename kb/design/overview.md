@@ -138,10 +138,9 @@ on" connects at every worker start and after an idle session; without it AI acce
 on until "Stop AI access", the relay's end of the session, the browser closing, or an
 update or reload of the extension (`chrome.storage.session` is cleared then too).
 
-The extension ID is fixed by the `key` in the manifest (`manifest-key.txt`, a public key;
-development ID `fphhchhlgklidhnodoleiebmdhnfdadg`). Store builds leave the key out; once
-the Chrome Web Store has assigned its key, that key replaces ours so unpacked and store
-builds share one ID.
+The extension ID is fixed by the `key` in the manifest (`manifest-key.txt`, a public key).
+It is the Chrome Web Store item's key, so unpacked builds and the store version have the
+same ID, `ldmcfigcnobhnbaigehcaodheklibeon`. The store package itself leaves the key out; the store adds it.
 
 ## Case format
 
