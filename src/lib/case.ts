@@ -854,12 +854,13 @@ export function validateCase(value: unknown): Case {
 /**
  * A case's link as stored: a file Overmark wrote only has one `cleanLink`
  * gives, and one in another scheme (`javascript:`) never becomes a link.
+ * What is kept is `cleanLink`'s reading of it, so what was checked here is
+ * what opens: a file from elsewhere may spell an address another way.
  */
 function linkOf(value: unknown, path: string): string {
-	const text = str(value, path, MAX_LINK);
-	if (cleanLink(text) === undefined)
-		fail(path, "must be an http or https address");
-	return text;
+	const link = cleanLink(str(value, path, MAX_LINK));
+	if (link === undefined) return fail(path, "must be an http or https address");
+	return link;
 }
 
 function resolution(value: unknown, path: string): Resolution {

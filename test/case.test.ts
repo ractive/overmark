@@ -1163,6 +1163,14 @@ describe("a case's link (DEC-028)", () => {
 		expect(validateCase(JSON.parse(JSON.stringify(linked))).link).toBe(TICKET);
 	});
 
+	test("a file's link spelled another way is kept as the browser reads it", () => {
+		const read = validateCase({
+			...sampleCase(),
+			link: "  HTTPS://Tickets.Example.com/browse/ABC-123  ",
+		});
+		expect(read.link).toBe("https://tickets.example.com/browse/ABC-123");
+	});
+
 	test("a file's link that is no string, too long or no http(s) address is refused", () => {
 		for (const link of [
 			42,
