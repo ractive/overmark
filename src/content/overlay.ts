@@ -13,7 +13,7 @@ import {
 	type Shape,
 	type StatusGroup,
 } from "../lib/case.ts";
-import { pathData, SMALL_LOGO, strokeBounds } from "../lib/logo.ts";
+import { BAR_LOOP, pathData, strokeBounds } from "../lib/logo.ts";
 import {
 	arrowHead,
 	badgePosition,
@@ -89,9 +89,9 @@ const SHADOW = `${RING}, 0 6px 24px rgba(13, 18, 30, 0.35)`;
 /** A word that stays the button's name while only its icon shows. */
 const NO_WORD =
 	"position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;";
-/** The bars' logo: its loop's stroke, in the logo's 128-unit tile. */
-const RING_WIDTH = 14;
-const RING_PATH = pathData(SMALL_LOGO.loop);
+/** The bars' logo: the loop alone, in the logo's 128-unit tile. */
+const RING_WIDTH = BAR_LOOP.width;
+const RING_PATH = pathData(BAR_LOOP.points);
 
 const STYLE = `
 /* Important: a page's own rule on the host would beat this otherwise. */
@@ -120,7 +120,7 @@ svg.marks { position: fixed; inset: 0; width: 100%; height: 100%; overflow: visi
 	pointer-events: auto;
 }
 .toolbar.top { top: 16px; bottom: auto; }
-/* The logo's loop is thinner in the icon; at 20 px this weighs about what the old ring did and keeps its end apart. */
+/* The logo's loop is thinner in the icon; at 20 px this weighs about what the old ring did (BAR_LOOP lifts its end, so the two ends stay apart). */
 .ring { flex: none; width: 20px; height: 20px; margin: 0 6px; fill: none; stroke: ${L.amber}; stroke-width: ${RING_WIDTH}; stroke-linecap: round; stroke-linejoin: round; }
 /* Beside the tools it keeps its width (and wraps inside it): what does not fit shows as overflow, which fitToolbar reads. */
 .toolbar .status {
@@ -310,7 +310,7 @@ export function icon(doc: Document, name: IconName): SVGSVGElement {
 export function ring(doc: Document): SVGSVGElement {
 	const el = svg(doc, "svg", {
 		class: "ring",
-		viewBox: strokeBounds(SMALL_LOGO.loop, RING_WIDTH)
+		viewBox: strokeBounds(BAR_LOOP.points, RING_WIDTH)
 			.map((v) => Math.round(v * 100) / 100)
 			.join(" "),
 		role: "img",

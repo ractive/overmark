@@ -13,6 +13,7 @@ import {
 	iconFiles,
 } from "../scripts/icons.ts";
 import {
+	BAR_LOOP,
 	FULL_LOGO,
 	LOGO_COLOURS,
 	type LogoPoint,
@@ -80,6 +81,8 @@ function count(img: Image, hex: string): number {
 	return n;
 }
 
+/** Every generated file, drawn once. */
+const files = iconFiles();
 const icons = new Map(ICON_SIZES.map((s) => [s, decodePng(drawIcon(s))]));
 const icon = (size: number): Image => icons.get(size as 16) as Image;
 
@@ -125,7 +128,7 @@ describe("the icons", () => {
 
 	test("the committed files are what the script draws now", async () => {
 		const root = join(import.meta.dir, "..");
-		for (const [path, made] of Object.entries(iconFiles())) {
+		for (const [path, made] of Object.entries(files)) {
 			const file = await Bun.file(join(root, path)).bytes();
 			if (typeof made === "string")
 				expect(new TextDecoder().decode(file), path).toBe(made);
@@ -134,15 +137,30 @@ describe("the icons", () => {
 	});
 
 	test("the SVGs draw the same tile, glyph and loop", () => {
-		const svg = iconFiles()["assets/brand/icon-light-small.svg"] as string;
+		const svg = files["assets/brand/icon-light-small.svg"] as string;
 		expect(svg).toContain(`fill="${LOGO_COLOURS.lightTile}"`);
 		expect(svg).toContain(`stroke="${LOGO_COLOURS.ink}" stroke-width="12"`);
 		expect(svg).toContain(`stroke="${LOGO_COLOURS.amber}" stroke-width="11"`);
-		const full = iconFiles()["assets/brand/icon.svg"] as string;
+		const full = files["assets/brand/icon.svg"] as string;
 		expect(full).toContain(`fill="${LOGO_COLOURS.tile}"`);
 		expect(full).toContain(`stroke="${LOGO_COLOURS.paper}" stroke-width="8"`);
 		// Three strokes in the full glyph: `<`, `>` and the slash.
 		expect(full.match(/M/g)?.length).toBe(4);
+	});
+});
+
+describe("the loop on the page's bars", () => {
+	test("its two ends stay apart at the bars' stroke width", () => {
+		const { points, width } = BAR_LOOP;
+		const head = points.slice(0, 30);
+		const tail = points.slice(-20);
+		const gap = Math.min(
+			...tail.flatMap(([x, y]) =>
+				head.map(([hx, hy]) => Math.hypot(x - hx, y - hy)),
+			),
+		);
+		// Centre lines further apart than one stroke: paper shows between them.
+		expect(gap).toBeGreaterThan(width + 3);
 	});
 });
 

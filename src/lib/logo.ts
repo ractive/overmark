@@ -133,6 +133,16 @@ export const SMALL_LOGO: LogoDrawing = {
 	glyphWidth: 12,
 };
 
+/**
+ * On the page's bars, at 20 px: the small drawing's loop with a heavier pen.
+ * Its end lifts further than in the icon, or a stroke this wide would close
+ * the loop into a ring.
+ */
+export const BAR_LOOP = {
+	points: loopPoints({ end: 22, from: 0.72, rx: 44, ry: 29 }),
+	width: 14,
+} as const;
+
 const num = (v: number): string => String(Math.round(v * 100) / 100);
 
 /** A polyline as an SVG path `d`, to two decimals. */

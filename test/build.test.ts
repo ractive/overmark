@@ -2,7 +2,6 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { inflateSync } from "node:zlib";
 import {
 	build,
 	checkOutdir,
@@ -14,7 +13,6 @@ import {
 	readKey,
 	zipBuild,
 } from "../scripts/build.ts";
-import { drawIcon } from "../scripts/icons.ts";
 import { readZip } from "../src/lib/zip.ts";
 
 const dirs: string[] = [];
@@ -275,39 +273,5 @@ describe("checkOutdir", () => {
 		writeFileSync(join(dir, "old", "manifest.json"), "{}");
 		writeFileSync(join(dir, "old", "content.js"), "");
 		await checkOutdir(join(dir, "old"));
-	});
-});
-
-/** The decoded scanlines of a PNG: IHDR plus the inflated IDAT data. */
-function pngPixels(png: Uint8Array): { header: number[]; data: Buffer } {
-	const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
-	const idat: Uint8Array[] = [];
-	let header: number[] = [];
-	for (let at = 8; at < png.length; ) {
-		const length = view.getUint32(at);
-		const type = new TextDecoder().decode(png.subarray(at + 4, at + 8));
-		const data = png.subarray(at + 8, at + 8 + length);
-		if (type === "IHDR") header = [...data];
-		if (type === "IDAT") idat.push(data);
-		at += 12 + length;
-	}
-	return { header, data: inflateSync(Buffer.concat(idat)) };
-}
-
-describe("icons", () => {
-	test("are PNGs of the right size and match the committed ones", async () => {
-		for (const size of [16, 128]) {
-			const png = drawIcon(size);
-			expect([...png.subarray(1, 4)]).toEqual([0x50, 0x4e, 0x47]); // "PNG"
-			const view = new DataView(png.buffer);
-			expect(view.getUint32(16)).toBe(size);
-			const committed = new Uint8Array(
-				await Bun.file(
-					join(import.meta.dir, `../assets/icons/icon-${size}.png`),
-				).arrayBuffer(),
-			);
-			// Compare pixels, not bytes: another zlib may deflate them differently.
-			expect(pngPixels(committed)).toEqual(pngPixels(png));
-		}
 	});
 });
