@@ -1,7 +1,7 @@
 # Overmark
 
-Annotate any web page, load the annotations onto another build of the page, and talk
-them through with your AI app.
+Mark what is wrong on a web page, open the marks in another environment to fix it, and
+talk them through with your AI app.
 
 A PO marks an issue on the live site: picks an element, draws a box, an arrow or a
 freehand mark, writes a comment, and saves it all as a named case with annotated

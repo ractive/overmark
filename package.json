@@ -2,7 +2,7 @@
 	"name": "overmark",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Annotate any web page, load the annotations onto another build of the page, and talk them through with your AI app",
+	"description": "Mark what is wrong on a web page, open the marks in another environment to fix it, and talk them through with your AI app",
 	"type": "module",
 	"license": "MIT",
 	"author": "Jean-Pierre Bergamin <james@ractive.ch>",
