@@ -835,7 +835,7 @@ describe("all cases in one file", () => {
 			readExports(
 				await writeZip([{ name: "a/b/case.json", data: text("{}") }]),
 			),
-		).rejects.toThrow("This is not an Sitegloss export: case.json is missing.");
+		).rejects.toThrow("This is not a Sitegloss export: case.json is missing.");
 		await expect(readExports(await writeZip([]))).rejects.toThrow(
 			"case.json is missing",
 		);
