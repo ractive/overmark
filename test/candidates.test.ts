@@ -310,7 +310,7 @@ describe("findCandidates", () => {
 			);
 		});
 
-		test("Overmark's own shadow root is left out", () => {
+		test("Sitegloss's own shadow root is left out", () => {
 			const root = component("open", `<button>Speichern</button>`);
 			const stored = describeElement(root.querySelector("button") as Element);
 			const search = createSearch(doc, { exclude: root.host });

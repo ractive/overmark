@@ -108,7 +108,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	/** Take a case out of the store behind the panel's back; answers it to put back. */
 	async function takeOut(caseId: string): Promise<object> {
 		return h.control.eval<object>(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark");
+			const open = indexedDB.open("sitegloss");
 			open.onsuccess = () => {
 				const tx = open.result.transaction("cases", "readwrite");
 				const cases = tx.objectStore("cases");
@@ -122,7 +122,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 
 	async function putBack(value: object): Promise<void> {
 		await h.control.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("overmark");
+			const open = indexedDB.open("sitegloss");
 			open.onsuccess = () => {
 				const tx = open.result.transaction("cases", "readwrite");
 				tx.objectStore("cases").put(${JSON.stringify(value)});
@@ -662,7 +662,7 @@ describe.skipIf(browserBinary === undefined)("adding marks to a case", () => {
 	test("New case for this page stays with the tab it was clicked for (review of PR 57)", async () => {
 		const a = await h.open("v1");
 		const b = await h.open("v2");
-		// Overmark runs on the tab already: one question, no injection on the
+		// Sitegloss runs on the tab already: one question, no injection on the
 		// way (each would count against the 5 s the page has to answer).
 		await h.control.eval(
 			`chrome.scripting.executeScript({ target: { tabId: ${a.tabId} }, files: ["content.js"] })`,

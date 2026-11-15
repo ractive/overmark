@@ -1,5 +1,5 @@
 /**
- * Overmark's logo (DEC-029): a light `</>` on a dark tile with a hand-drawn
+ * Sitegloss's logo (DEC-029): a light `</>` on a dark tile with a hand-drawn
  * amber pen loop round it. The geometry is the owner's, ported as it was
  * chosen; the icon files (`bun scripts/icons.ts`) and the bars' ring in the
  * page are all drawn from it, so they never disagree. Units: a 128 × 128 tile.

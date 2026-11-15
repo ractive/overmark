@@ -17,7 +17,7 @@ import { caseMarkdown } from "./markdown.ts";
 import type { CaseStore, StoredImage } from "./store.ts";
 import { readZip, writeZip, type ZipEntry } from "./zip.ts";
 
-export const EXPORT_SUFFIX = ".overmark.zip";
+export const EXPORT_SUFFIX = ".sitegloss.zip";
 
 /** `login-button-contrast`: a case's title as a file or folder name. */
 function slugOf(c: Case): string {
@@ -32,15 +32,15 @@ function slugOf(c: Case): string {
 	return slug || "case";
 }
 
-/** `login-button-contrast.overmark.zip` */
+/** `login-button-contrast.sitegloss.zip` */
 export function exportFileName(c: Case): string {
 	return `${slugOf(c)}${EXPORT_SUFFIX}`;
 }
 
-/** `overmark-cases-2026-11-12.overmark.zip`, by the local date. */
+/** `sitegloss-cases-2026-11-12.sitegloss.zip`, by the local date. */
 export function exportAllFileName(now = new Date()): string {
 	const two = (n: number) => String(n).padStart(2, "0");
-	return `overmark-cases-${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}${EXPORT_SUFFIX}`;
+	return `sitegloss-cases-${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}${EXPORT_SUFFIX}`;
 }
 
 /** The largest export of one case the side panel reads. */
@@ -179,7 +179,7 @@ export async function exportAllCases(
 
 /** case.json is text about marks; a real one is far smaller than this. */
 export const MAX_CASE_JSON_BYTES = 20 * 1024 * 1024;
-/** Limits per imported image: larger ones are no Overmark screenshot. */
+/** Limits per imported image: larger ones are no Sitegloss screenshot. */
 export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 export const MAX_IMAGE_SIDE = 16_384;
 export const MAX_IMAGE_PIXELS = 64 * 1024 * 1024;
@@ -254,7 +254,7 @@ async function readCaseJson(
 	).get(`${folder}case.json`);
 	if (json === undefined)
 		throw new CaseError(
-			"This is not an Overmark export: case.json is missing.",
+			"This is not an Sitegloss export: case.json is missing.",
 		);
 	let parsed: unknown;
 	try {
@@ -363,7 +363,7 @@ export async function readExports(
 	);
 	if (folders.length === 0)
 		throw new CaseError(
-			"This is not an Overmark export: case.json is missing.",
+			"This is not an Sitegloss export: case.json is missing.",
 		);
 	const tooMuch = new CaseError(
 		`The cases in the file unpack to more than ${mb(limits.maxAllBytes)}.`,

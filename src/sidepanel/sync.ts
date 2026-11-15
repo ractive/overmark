@@ -30,7 +30,7 @@ import { askForDownloads, DOWNLOADS } from "./download.ts";
 import type { PanelState } from "./state.ts";
 import type { SyncActions } from "./sync-view.ts";
 
-declare const OVERMARK_TEST_BUILD: boolean | undefined;
+declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
 
 /** A folder handle as a window has it: it may ask for permission. */
 interface WindowFolder extends PickedFolder {
@@ -158,7 +158,7 @@ export function startSync(
 		// Chrome shows its picker only during a click: nothing is awaited before.
 		let picking: Promise<WindowFolder>;
 		try {
-			picking = picker({ id: "overmark-sync", mode: "readwrite" });
+			picking = picker({ id: "sitegloss-sync", mode: "readwrite" });
 		} catch (error) {
 			problem(`Could not open the folder picker: ${message(error)}`);
 			return;
@@ -178,7 +178,7 @@ export function startSync(
 
 	/**
 	 * "Sync to Downloads" and "Use Downloads instead": Chrome's prompt for
-	 * downloads (only during a click; none where Overmark has it), then the
+	 * downloads (only during a click; none where Sitegloss has it), then the
 	 * worker writes to Downloads.
 	 */
 	function syncDownloads(): void {
@@ -195,7 +195,7 @@ export function startSync(
 			update((s) => (s.sync.asking = false));
 			if (!yes) {
 				problem(
-					"Chrome did not allow Overmark to save to your downloads. Click Sync to Downloads to ask again, or choose a folder.",
+					"Chrome did not allow Sitegloss to save to your downloads. Click Sync to Downloads to ask again, or choose a folder.",
 				);
 				return;
 			}
@@ -301,8 +301,8 @@ export function startSync(
 
 	// The end-to-end tests cannot answer Chrome's picker: they hand the panel a
 	// folder of the origin's private file system instead.
-	if (typeof OVERMARK_TEST_BUILD !== "undefined" && OVERMARK_TEST_BUILD)
-		Object.assign(window, { overmarkUseFolder: use });
+	if (typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD)
+		Object.assign(window, { siteglossUseFolder: use });
 
 	void refresh().then(() => run());
 	return {

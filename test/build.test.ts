@@ -17,7 +17,7 @@ import { readZip } from "../src/lib/zip.ts";
 
 const dirs: string[] = [];
 const tempDir = () => {
-	const dir = mkdtempSync(join(tmpdir(), "overmark-build-"));
+	const dir = mkdtempSync(join(tmpdir(), "sitegloss-build-"));
 	dirs.push(dir);
 	return dir;
 };
@@ -114,7 +114,7 @@ describe("build", () => {
 			);
 		// The pages are split, which names every chunk chunk-<hash>.js: a
 		// lazy one (the client's WebMCP mirror since 0.16.1, say, for
-		// `webmcp: true`, which Overmark leaves off) would be one more script.
+		// `webmcp: true`, which Sitegloss leaves off) would be one more script.
 		// Each page's files, exactly: the html, one chunk with its map, and
 		// the side panel's stylesheet.
 		const pages = {
@@ -194,15 +194,15 @@ describe("build", () => {
 	});
 
 	test("a package has no test switch left for a page to answer", async () => {
-		const outdir = mkdtempSync(join(tmpdir(), "overmark-flag-"));
+		const outdir = mkdtempSync(join(tmpdir(), "sitegloss-flag-"));
 		try {
 			await build({ outdir, store: true });
 			const content = await Bun.file(join(outdir, "content.js")).text();
-			expect(content).not.toContain("OVERMARK_TEST_BUILD");
+			expect(content).not.toContain("SITEGLOSS_TEST_BUILD");
 			expect(content).toContain('"closed"');
 			// Nor the worker's way to pause a folder that cannot be (DEC-025).
 			const worker = await Bun.file(join(outdir, "background.js")).text();
-			expect(worker).not.toContain("OVERMARK_TEST_BUILD");
+			expect(worker).not.toContain("SITEGLOSS_TEST_BUILD");
 			expect(worker).not.toContain("test:access");
 			// Nor the side panel's way to take a folder without the picker (DEC-021).
 			const panel = new Bun.Glob("sidepanel/**/*.js");
@@ -210,8 +210,8 @@ describe("build", () => {
 			for await (const file of panel.scan(outdir)) {
 				scripts++;
 				const text = await Bun.file(join(outdir, file)).text();
-				expect(text).not.toContain("overmarkUseFolder");
-				expect(text).not.toContain("OVERMARK_TEST_BUILD");
+				expect(text).not.toContain("siteglossUseFolder");
+				expect(text).not.toContain("SITEGLOSS_TEST_BUILD");
 			}
 			expect(scripts).toBeGreaterThan(0);
 		} finally {

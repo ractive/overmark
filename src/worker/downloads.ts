@@ -50,7 +50,7 @@ function offscreen(): Promise<void> {
 			url: OFFSCREEN_PATH,
 			reasons: [chrome.offscreen.Reason.BLOBS],
 			justification:
-				"Overmark writes each case to Downloads/Overmark: the download needs a blob URL of the case's file.",
+				"Sitegloss writes each case to Downloads/Sitegloss: the download needs a blob URL of the case's file.",
 		});
 	})();
 	opening.catch(() => undefined).finally(() => (opening = undefined));
@@ -73,12 +73,12 @@ async function ask(request: OffscreenRequest): Promise<OffscreenResponse> {
 			| undefined;
 	} catch (error) {
 		throw new TargetFailed(
-			`Overmark could not prepare the files for your downloads: ${message(error)} Overmark tries again at the next change, or click Try again.`,
+			`Sitegloss could not prepare the files for your downloads: ${message(error)} Sitegloss tries again at the next change, or click Try again.`,
 		);
 	}
 	if (answer === undefined)
 		throw new TargetFailed(
-			"Overmark could not prepare the files for your downloads: its offscreen document did not answer. Overmark tries again at the next change, or click Try again.",
+			"Sitegloss could not prepare the files for your downloads: its offscreen document did not answer. Sitegloss tries again at the next change, or click Try again.",
 		);
 	return answer;
 }

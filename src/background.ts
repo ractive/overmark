@@ -62,7 +62,7 @@ import {
 	type WorkerMessage,
 } from "./worker/protocol.ts";
 
-declare const OVERMARK_TEST_BUILD: boolean | undefined;
+declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
 
 const store = new IdbStore();
 const added = new AddLedger(chrome.storage.session);
@@ -98,7 +98,7 @@ const sync = new Sync({
 	// Saves in a row are one download per case, not one each (a burst of
 	// Chrome's download bubble).
 	quietMs: 2000,
-	...(typeof OVERMARK_TEST_BUILD !== "undefined" && OVERMARK_TEST_BUILD
+	...(typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD
 		? { folder: testFolder }
 		: {}),
 	notify: (status) => {
@@ -110,7 +110,7 @@ void sync.request();
 
 /**
  * The end of a download the sync waits for wakes the worker, should it have
- * stopped meanwhile: its run settles it. At the top level where Overmark has
+ * stopped meanwhile: its run settles it. At the top level where Sitegloss has
  * the (optional) permission, and once it is given.
  */
 let hearingDownloads = false;
@@ -140,7 +140,7 @@ chrome.permissions.onAdded.addListener(() => {
 // while saving) would otherwise stay in storage unseen.
 void store
 	.sweepPending(Date.now() - PENDING_MAX_AGE_MS)
-	.catch((error: unknown) => console.warn("Overmark: sweep", error));
+	.catch((error: unknown) => console.warn("Sitegloss: sweep", error));
 
 chrome.action.onClicked.addListener((tab) => {
 	if (tab.id === undefined) return;
@@ -151,9 +151,9 @@ chrome.action.onClicked.addListener((tab) => {
 	// panel of its own.
 	void chrome.sidePanel
 		.open({ tabId: tab.id, windowId: tab.windowId })
-		.catch((error: unknown) => console.warn("Overmark: side panel", error));
+		.catch((error: unknown) => console.warn("Sitegloss: side panel", error));
 	void injectOnClick(tab).catch((error: unknown) =>
-		console.warn("Overmark: cannot run on this tab", error),
+		console.warn("Sitegloss: cannot run on this tab", error),
 	);
 });
 
@@ -349,7 +349,7 @@ const ready = Connection.start({
 	changed: () => void sync.request(),
 });
 ready.catch((error: unknown) =>
-	console.error("Overmark: AI connection", error),
+	console.error("Sitegloss: AI connection", error),
 );
 
 const withConnection = (use: (connection: Connection) => void) =>
@@ -421,6 +421,6 @@ chrome.notifications.onClosed.addListener((id, byUser) => {
 	if (byUser) notificationDismissed(id);
 });
 Object.assign(globalThis, {
-	overmarkNotificationButton: notificationButton,
-	overmarkNotificationDismissed: notificationDismissed,
+	siteglossNotificationButton: notificationButton,
+	siteglossNotificationDismissed: notificationDismissed,
 });

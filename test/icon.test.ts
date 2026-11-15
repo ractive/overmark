@@ -151,7 +151,7 @@ describe("the badge (DEC-025)", () => {
 			text: "!",
 			color: "#ffb000",
 			textColor: "#1b2130",
-			title: "Overmark: sync is paused. Click to allow access.",
+			title: "Sitegloss: sync is paused. Click to allow access.",
 			spark: false,
 		});
 	});
@@ -159,7 +159,9 @@ describe("the badge (DEC-025)", () => {
 	test("paused, the downloads: the same “!”, another title", () => {
 		const b = decideBadge(off, paused("downloads"));
 		expect([b.text, b.color]).toEqual(["!", "#ffb000"]);
-		expect(b.title).toBe("Overmark: sync is paused. Click to allow downloads.");
+		expect(b.title).toBe(
+			"Sitegloss: sync is paused. Click to allow downloads.",
+		);
 	});
 
 	test("failed: red “!” with white text", () => {
@@ -175,7 +177,7 @@ describe("the badge (DEC-025)", () => {
 			{ folderId: "f", state: "synced" },
 		] as const) {
 			const b = decideBadge(off, s);
-			expect([b.text, b.title]).toEqual(["", "Overmark"]);
+			expect([b.text, b.title]).toEqual(["", "Sitegloss"]);
 		}
 	});
 
@@ -192,7 +194,7 @@ describe("the badge (DEC-025)", () => {
 		const b = decideBadge({ questions: 0, ai: "connected" }, paused("access"));
 		expect([b.text, b.spark]).toEqual(["!", true]);
 		expect(b.title).toBe(
-			"Overmark: sync is paused. Click to allow access. AI access is on.",
+			"Sitegloss: sync is paused. Click to allow access. AI access is on.",
 		);
 	});
 

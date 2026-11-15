@@ -514,7 +514,7 @@ export function withinLimits(details: ElementDetails): ElementDetails {
 	return out;
 }
 
-/** Everything Overmark records about an element. */
+/** Everything Sitegloss records about an element. */
 export function describeElement(
 	el: Element,
 	context: DescribeContext = createContext(el.ownerDocument),

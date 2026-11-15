@@ -29,7 +29,7 @@ import { HOST_ID, Overlay } from "./overlay.ts";
 import { LoadReplaced, Reviewer } from "./review.ts";
 
 declare global {
-	var __overmark: boolean | undefined;
+	var __sitegloss: boolean | undefined;
 }
 
 const pageBlur = new PageBlur(document);
@@ -323,12 +323,12 @@ function start(): void {
 			return false;
 		},
 	);
-	// The panel learns that Overmark runs here now: after a click on the
+	// The panel learns that Sitegloss runs here now: after a click on the
 	// icon, a case waiting for this tab loads.
 	overlay.onChange();
 }
 
-if (!globalThis.__overmark) {
-	globalThis.__overmark = true;
+if (!globalThis.__sitegloss) {
+	globalThis.__sitegloss = true;
 	start();
 }

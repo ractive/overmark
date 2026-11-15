@@ -44,7 +44,7 @@ function stepOf(w: Workflow, job: string, name: string): Step {
 
 const dirs: string[] = [];
 function tempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "overmark-workflow-"));
+	const dir = mkdtempSync(join(tmpdir(), "sitegloss-workflow-"));
 	dirs.push(dir);
 	return dir;
 }
@@ -84,7 +84,7 @@ async function run(
 		cwd,
 		env: {
 			PATH: process.env["PATH"] ?? "",
-			GITHUB_REPOSITORY: "ractive/overmark",
+			GITHUB_REPOSITORY: "ractive/sitegloss",
 			...declared,
 			...env,
 		},
@@ -137,7 +137,7 @@ describe("publish.yml", () => {
 		expect(result).toEqual({ code: 0, output: "\n" });
 		const log = await Bun.file(join(gh, "gh.log")).text();
 		expect(log).toContain("release download v1.2.3");
-		expect(log).toContain("overmark-1.2.3-store.zip");
+		expect(log).toContain("sitegloss-1.2.3-store.zip");
 	});
 });
 
@@ -156,7 +156,7 @@ describe("release.yml", () => {
 		);
 		expect(result.code).toBe(0);
 		expect(await Bun.file(join(gh, "gh.log")).text()).toContain(
-			"api repos/ractive/overmark/commits/refs/tags/v1.2.3",
+			"api repos/ractive/sitegloss/commits/refs/tags/v1.2.3",
 		);
 	});
 
@@ -209,9 +209,9 @@ describe("release.yml", () => {
 		// Pinned to a commit, as every action that gets a token is.
 		expect(step.uses).toMatch(/^actions\/attest@[0-9a-f]{40}$/);
 		// Both zips the release then attaches.
-		expect(step.with?.["subject-path"]).toBe("overmark-*.zip");
+		expect(step.with?.["subject-path"]).toBe("sitegloss-*.zip");
 		const create = stepOf(w, "release", "Create the release with both zips");
-		expect(create.run).toContain('gh release create "$TAG" overmark-*.zip');
+		expect(create.run).toContain('gh release create "$TAG" sitegloss-*.zip');
 		// What signing and storing an attestation need, and only where no
 		// third-party code runs: the build job keeps the read-only token.
 		expect(w.jobs["release"]?.permissions).toEqual({

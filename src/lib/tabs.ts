@@ -9,7 +9,7 @@ import {
 	type OverlayState,
 } from "./messages.ts";
 
-/** Overmark may not run on this tab (no click on the icon, no host access). */
+/** Sitegloss may not run on this tab (no click on the icon, no host access). */
 export class NoAccessError extends Error {
 	override name = "NoAccessError";
 }
@@ -37,7 +37,7 @@ export const CLICK_RETRY_MS = 250;
 /**
  * Resolves once the tab's new page is there: it has loaded, or the address
  * the tab was on its way to (`pendingUrl`, as the click saw it) has become
- * its address, which Chrome says only while Overmark may see it: that page
+ * its address, which Chrome says only while Sitegloss may see it: that page
  * committed, and `executeScript` waits for it to be idle by itself. Another
  * address (a redirect, the old page's own `pushState`) waits for the load.
  * `false` if the tab was closed first or neither came within `timeoutMs`.
@@ -86,7 +86,7 @@ function loaded(
 
 /**
  * Inject after a click on the icon, which grants the tab's page to
- * Overmark. Two things in Chrome make one try not enough:
+ * Sitegloss. Two things in Chrome make one try not enough:
  *
  * - Clicked while the tab loads, the page the script would go into is the
  *   one on its way out, and the next one comes without it. The grant holds

@@ -216,7 +216,7 @@ describe("markup", () => {
 		);
 		const { html, hidden } = markupOf($("#d"));
 		expect(html).toBe(
-			'<div id="d"><p>shown</p><!-- overmark: hidden p left out --><!-- overmark: hidden span left out --></div>',
+			'<div id="d"><p>shown</p><!-- sitegloss: hidden p left out --><!-- sitegloss: hidden span left out --></div>',
 		);
 		expect(hidden).toBe(3);
 		const inspected = inspectElement($("#d"));
@@ -235,9 +235,9 @@ describe("markup", () => {
 		);
 	});
 
-	test("leaves out Overmark's own overlay", () => {
-		page(`<main><p>Text</p><div id="overmark-root">toolbar</div></main>`);
-		const { html } = markupOf($("main"), { skip: $("#overmark-root") });
+	test("leaves out Sitegloss's own overlay", () => {
+		page(`<main><p>Text</p><div id="sitegloss-root">toolbar</div></main>`);
+		const { html } = markupOf($("main"), { skip: $("#sitegloss-root") });
 		expect(html).toBe("<main><p>Text</p></main>");
 	});
 

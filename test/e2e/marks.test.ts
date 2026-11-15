@@ -538,7 +538,7 @@ describe.skipIf(browserBinary === undefined)(
 		}, 60_000);
 
 		test("saving works on a plain http: host, where crypto.randomUUID does not exist", async () => {
-			const url = h.base.replace("127.0.0.1", "overmark.test");
+			const url = h.base.replace("127.0.0.1", "sitegloss.test");
 			const page = await h.browser.newPage(`${url}/ui?tab=plain`);
 			expect(await page.eval("window.isSecureContext")).toBe(false);
 			const tabId = await h.control.eval<number>(

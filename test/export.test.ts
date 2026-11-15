@@ -108,8 +108,8 @@ async function stored(): Promise<{ store: MemoryStore; c: Case }> {
 describe("export", () => {
 	test("file name", async () => {
 		const { c } = await stored();
-		expect(exportFileName(c)).toBe("pramien-button-kontrast.overmark.zip");
-		expect(exportFileName({ ...c, title: "!!!" })).toBe("case.overmark.zip");
+		expect(exportFileName(c)).toBe("pramien-button-kontrast.sitegloss.zip");
+		expect(exportFileName({ ...c, title: "!!!" })).toBe("case.sitegloss.zip");
 	});
 
 	test("the zip holds the case, the Markdown and every image", async () => {
@@ -575,7 +575,7 @@ describe("import", () => {
 		expect(await target.getImage(c.id, "crops/a2.webp")).toBeDefined();
 	});
 
-	test("refuses archives that are not complete Overmark exports", async () => {
+	test("refuses archives that are not complete Sitegloss exports", async () => {
 		const target = new MemoryStore();
 		const text = (s: string) => new TextEncoder().encode(s);
 		await expect(
@@ -773,7 +773,7 @@ describe("all cases in one file", () => {
 
 	test("file name and folders", () => {
 		expect(exportAllFileName(new Date(2026, 10, 2))).toBe(
-			"overmark-cases-2026-11-02.overmark.zip",
+			"sitegloss-cases-2026-11-02.sitegloss.zip",
 		);
 		const named = (title: string) => ({ ...sampleCase(), title });
 		expect(
@@ -835,7 +835,7 @@ describe("all cases in one file", () => {
 			readExports(
 				await writeZip([{ name: "a/b/case.json", data: text("{}") }]),
 			),
-		).rejects.toThrow("This is not an Overmark export: case.json is missing.");
+		).rejects.toThrow("This is not an Sitegloss export: case.json is missing.");
 		await expect(readExports(await writeZip([]))).rejects.toThrow(
 			"case.json is missing",
 		);

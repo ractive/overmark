@@ -41,15 +41,15 @@ export function syncBadge(
 			textColor: SYNC_PAUSED_TEXT,
 			title:
 				status.reason === "downloads"
-					? "Overmark: sync is paused. Click to allow downloads."
-					: "Overmark: sync is paused. Click to allow access.",
+					? "Sitegloss: sync is paused. Click to allow downloads."
+					: "Sitegloss: sync is paused. Click to allow access.",
 		};
 	if (status?.state === "failed")
 		return {
 			text: "!",
 			color: SYNC_FAILED_COLOR,
 			textColor: "#ffffff",
-			title: "Overmark: sync failed. Click to see why and try again.",
+			title: "Sitegloss: sync failed. Click to see why and try again.",
 		};
 	return undefined;
 }
@@ -60,7 +60,7 @@ export function decideBadge(ai: AiBadge, sync: SyncStatus | undefined): Badge {
 			text: "?",
 			color: "#b45309",
 			textColor: "#ffffff",
-			title: `Overmark: ${ai.questions === 1 ? "an AI app asks" : `${ai.questions} questions wait`} for your answer. Open the side panel to answer.`,
+			title: `Sitegloss: ${ai.questions === 1 ? "an AI app asks" : `${ai.questions} questions wait`} for your answer. Open the side panel to answer.`,
 			spark: false,
 		};
 	const spark = ai.ai === "connected";
@@ -76,7 +76,7 @@ export function decideBadge(ai: AiBadge, sync: SyncStatus | undefined): Badge {
 			text: "",
 			color: "#15803d",
 			textColor: "#ffffff",
-			title: "Overmark: AI access is on",
+			title: "Sitegloss: AI access is on",
 			spark,
 		};
 	if (ai.ai === "connecting")
@@ -84,14 +84,14 @@ export function decideBadge(ai: AiBadge, sync: SyncStatus | undefined): Badge {
 			text: "…",
 			color: "#6b7280",
 			textColor: "#ffffff",
-			title: "Overmark: connecting to the AI app",
+			title: "Sitegloss: connecting to the AI app",
 			spark,
 		};
 	return {
 		text: "",
 		color: "#6b7280",
 		textColor: "#ffffff",
-		title: "Overmark",
+		title: "Sitegloss",
 		spark,
 	};
 }
@@ -118,7 +118,7 @@ export function badgeOf(deps: BadgeDeps) {
 	};
 }
 
-/** Overmark's toolbar badge, title and spark. */
+/** Sitegloss's toolbar badge, title and spark. */
 export const badge = badgeOf({
 	apply(b) {
 		void showSpark(b.spark);

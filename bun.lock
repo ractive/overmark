@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "overmark",
+      "name": "sitegloss",
       "dependencies": {
         "@ractive-ch/tab-mcp-client": "0.16.2",
       },

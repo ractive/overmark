@@ -77,7 +77,7 @@ export const visible: (text: string) => string = escapeInvisible;
 
 /**
  * Who calls through the browser's WebMCP: not paired, nothing known of it.
- * Overmark leaves WebMCP off and refuses such calls (`decide.ts`).
+ * Sitegloss leaves WebMCP off and refuses such calls (`decide.ts`).
  */
 export const WEBMCP_CALLER = "An agent in the browser (WebMCP)";
 
@@ -109,7 +109,7 @@ export function notificationText(
 	const text = (message: string, buttons: readonly string[]) => ({
 		title: `Allow ${what}?`,
 		message,
-		contextMessage: "Overmark · close it to not allow",
+		contextMessage: "Sitegloss · close it to not allow",
 		buttons,
 	});
 	if (args.length <= MAX_ARGS_NOTIFICATION && head.length < room)
@@ -117,7 +117,7 @@ export function notificationText(
 			`${cut(`${head}${about}`, room)}${shown}`,
 			NOTIFICATION_BUTTONS,
 		);
-	const note = `Its arguments (${characters(args.length)}) do not fit here: open Overmark's side panel to read all of them and answer there.`;
+	const note = `Its arguments (${characters(args.length)}) do not fit here: open Sitegloss's side panel to read all of them and answer there.`;
 	return text(
 		`${cut(`${head}${about}`, MAX_NOTIFICATION_MESSAGE - note.length - 1)} ${note}`,
 		REFUSE_ONLY,
@@ -241,7 +241,7 @@ export class Questions {
 		pending.canAllow = text.buttons === NOTIFICATION_BUTTONS;
 		pending.created = this.#host.notify(id, text).catch((error: unknown) =>
 			// Notifications off for Chrome: the badge and the panel remain.
-			console.warn("Overmark: notification", error),
+			console.warn("Sitegloss: notification", error),
 		);
 	}
 

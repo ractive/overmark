@@ -1,7 +1,7 @@
 /**
  * What a selector from an AI app may say (CR-01). A selector is a question
  * asked of the live page: whether something matches is an answer, even when
- * nothing is read. So it may name only what the markup Overmark sends shows:
+ * nothing is read. So it may name only what the markup Sitegloss sends shows:
  * tags, classes, ids, a few attributes that hold no field value, the
  * structure around an element, and the combinators. It may not test what is
  * typed or chosen (`:checked`, `:placeholder-shown`, `[value^=…]`), the state
