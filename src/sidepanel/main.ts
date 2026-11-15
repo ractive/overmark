@@ -49,27 +49,20 @@ import {
 import { IdbStore } from "../lib/store.ts";
 import { inject, NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { blurFormsNow, startAi } from "./ai.ts";
-import { byId, isWebPage, shortUrl, sitePattern } from "./dom.ts";
+import { byId, isWebPage, sitePattern } from "./dom.ts";
 import {
 	askForDownloads,
 	DOWNLOADS,
 	type SavedFile,
 	saveFile,
 } from "./download.ts";
-import {
-	type Drawn,
-	dashDrawn,
-	followStep,
-	foundText,
-	isFound,
-	newsLetsIn,
-	noneFound,
-} from "./follow.ts";
+import { type Drawn, followStep, isFound, newsLetsIn } from "./follow.ts";
 import { isUntouched, mayHold, newCase, type TabAnswer } from "./fresh.ts";
 import { CaseHints } from "./hints.ts";
 import { markAsked } from "./picked.ts";
 import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
+	type CaseHint,
 	type Exported,
 	type ImportBatch,
 	Latest,
@@ -250,7 +243,7 @@ let pendingLoad: { tabId: number; caseId: string } | undefined;
 async function loadInto(
 	c: Case,
 	tabId: number,
-	hint: (text: string | undefined) => void,
+	hint: (text: CaseHint | undefined) => void,
 	work: { current: () => boolean },
 	again = false,
 	quietWhenBusy = false,
@@ -312,20 +305,12 @@ async function loadInto(
 				caseId: c.id,
 				tabId,
 				matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+				url: result.url,
 				settling,
 			};
 		});
-		// None found: the case view says so, and where the case is from. A case
-		// without marks yet (just created, DEC-026) has nothing to say.
-		hint(
-			(noneFound(result.matches) && !settling) || result.matches.length === 0
-				? undefined
-				: foundText(
-						result.matches,
-						shortUrl(result.url),
-						dashDrawn(c, result.matches, result.url),
-					),
-		);
+		// What it found, worded from `loaded` as it is now (`foundLine`).
+		hint({ kind: "found" });
 		return { found, total: result.matches.length };
 	} catch (error) {
 		if (work.current()) hint(describeError(error));
@@ -372,16 +357,10 @@ async function readLoaded(c: Case, tabId: number): Promise<void> {
 			caseId: c.id,
 			tabId,
 			matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+			url: result.url,
 		};
 	});
-	if (!noneFound(result.matches))
-		hint(
-			foundText(
-				result.matches,
-				shortUrl(result.url),
-				dashDrawn(c, result.matches, result.url),
-			),
-		);
+	hint({ kind: "found" });
 }
 
 /** A page busy with a mark is asked again this often, this many times (20 s). */
@@ -397,7 +376,7 @@ const BUSY_TRIES = 40;
 async function loadOnLoaded(
 	c: Case,
 	tabId: number,
-	hint: (text: string | undefined) => void,
+	hint: (text: CaseHint | undefined) => void,
 ): Promise<void> {
 	const target = { tabId, caseId: c.id };
 	const work = startLoad(target);
@@ -934,7 +913,7 @@ function closeCase(): void {
  * buttons, unless the panel left the case, or an action clicked after it
  * wrote there already (hints.ts).
  */
-function caseHintWriter(): (text: string | undefined) => void {
+function caseHintWriter(): (text: CaseHint | undefined) => void {
 	const may = caseHints.action();
 	return (text) => {
 		if (may()) update((s) => (s.caseHint = text));
@@ -945,7 +924,7 @@ function caseHintWriter(): (text: string | undefined) => void {
  * For the panel's own draws: writes under the case's buttons while no action
  * of the user's has written there since, and stops no action's hint itself.
  */
-function followHint(): (text: string | undefined) => void {
+function followHint(): (text: CaseHint | undefined) => void {
 	const may = caseHints.draw();
 	return (text) => {
 		if (may()) update((s) => (s.caseHint = text));
@@ -2149,6 +2128,7 @@ async function redrawLoaded(c: Case): Promise<void> {
 				s.loaded = {
 					...s.loaded,
 					matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+					url: result.url,
 				};
 		});
 	}

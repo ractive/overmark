@@ -6,6 +6,7 @@ import {
 	dashDrawn,
 	type FollowInput,
 	followStep,
+	foundLine,
 	foundText,
 	isUnsure,
 	newsLetsIn,
@@ -346,6 +347,27 @@ describe("what a draw found, in a line (DEC-024)", () => {
 				"https://x.ch/kk/step-2",
 			),
 		).toBe(true);
+	});
+
+	test("the line is worded from the matches as they are now: none where none was found or there is none yet", () => {
+		const c = caseOf(["element", "element"]);
+		const loaded = (matches: AnnotationMatch[], settling = false) => ({
+			matches: new Map(matches.map((m) => [m.annotationId, m])),
+			url: HERE,
+			settling,
+		});
+		expect(foundLine(c, loaded([match(1, "found")]))).toBe(
+			"1 of 1 marks found on x.ch/kk.",
+		);
+		expect(
+			foundLine(c, loaded([match(1, "found"), match(2, "probable")])),
+		).toBe("2 of 2 marks found on x.ch/kk. Dashed: unsure.");
+		expect(foundLine(c, loaded([]))).toBeUndefined();
+		expect(foundLine(c, loaded([match(1, "lost")]))).toBeUndefined();
+		// Still looking: the count so far.
+		expect(foundLine(c, loaded([match(1, "lost")], true))).toBe(
+			"0 of 1 marks found on x.ch/kk.",
+		);
 	});
 
 	test("it names no colour: a mark's colour is its status", () => {
