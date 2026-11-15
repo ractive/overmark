@@ -1350,6 +1350,17 @@ describe("tools", () => {
 		await call("set_summary", { caseId: "c_1", summary: "v".repeat(5000) });
 		expect(json(await call("list_cases"))[0].summary).toHaveLength(201);
 	});
+
+	test("get_case gives the case's link where it has one; list_cases never (DEC-028)", async () => {
+		const c = await seed();
+		const view = async () =>
+			json(await call("get_case", { caseId: "c_1", images: false }));
+		expect("link" in (await view())).toBe(false);
+		const link = "https://tickets.example.com/browse/ABC-123?focused=1";
+		await putCase(store, { ...c, link });
+		expect((await view()).link).toBe(link);
+		expect("link" in json(await call("list_cases"))[0]).toBe(false);
+	});
 });
 
 describe("findings", () => {

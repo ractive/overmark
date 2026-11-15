@@ -129,11 +129,15 @@ describe("saveCase", () => {
 		);
 	});
 
-	test("adding to a case keeps its title and verdict and numbers shots on", async () => {
+	test("adding to a case keeps its title, verdict and link and numbers shots on", async () => {
 		const store = new MemoryStore();
 		await newCase(store);
 		await store.updateCase("c_1", (c) => ({
-			value: { ...(c as NonNullable<typeof c>), verdict: "Fix it" },
+			value: {
+				...(c as NonNullable<typeof c>),
+				verdict: "Fix it",
+				link: "https://tickets.example.com/browse/ABC-123",
+			},
 		}));
 		await captured(store, "c_1", "p_b");
 		const saved = await saveCase(
@@ -146,6 +150,7 @@ describe("saveCase", () => {
 		);
 		expect(saved.title).toBe("One");
 		expect(saved.verdict).toBe("Fix it");
+		expect(saved.link).toBe("https://tickets.example.com/browse/ABC-123");
 		expect(saved.shots.map((s) => s.id)).toEqual(["s1", "s2"]);
 		expect(saved.annotations.map((a) => [a.number, a.shot])).toEqual([
 			[1, "s1"],

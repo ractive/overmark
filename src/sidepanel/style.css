@@ -1077,6 +1077,43 @@ ul.cases .title {
 }
 
 /*
+ * The case's link and its Edit in one line under the meta line (DEC-028): a
+ * long address is cut with an ellipsis, never wider than the panel.
+ */
+.case-link {
+	display: flex;
+	align-items: baseline;
+	gap: var(--s2);
+	margin-top: -4px;
+}
+
+.case-link > #case-link-open {
+	min-width: 0;
+	overflow: hidden;
+	font: 12px / 17px var(--font-mono);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.case-link > #case-link-edit {
+	flex: none;
+	min-height: 0;
+	font-size: 12px;
+}
+
+/* The link as a field while it is edited, as the title in Rename. */
+.case-link-form {
+	display: grid;
+	flex: 1;
+	gap: var(--s2);
+	min-width: 0;
+}
+
+.case-link-form > .hint {
+	margin: 0;
+}
+
+/*
  * The case's summary (DEC-023): the bar, then a chip per status with marks,
  * which is the bar's legend and the list's filter.
  */

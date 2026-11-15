@@ -240,6 +240,7 @@ export async function saveCase(
 			shots,
 			annotations,
 			verdict: current?.verdict ?? null,
+			link: current?.link,
 			importedAt: current?.importedAt,
 			// The highest number used, the new marks' too: a case's format
 			// refuses a lastNumber below a mark's (it was kept as it was, so

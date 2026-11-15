@@ -283,6 +283,8 @@ function caseView(c: Case, clientId: string | undefined, compact = false) {
 	return {
 		caseId: c.id,
 		title: c.title,
+		// What the user attached: a ticket or the like (DEC-028).
+		...(c.link === undefined ? {} : { link: c.link }),
 		...imported(c),
 		page: {
 			url: plainUrl(c.page.url),
@@ -602,7 +604,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		name: "get_case",
 		title: "Read a case",
 		description:
-			"A case with its summary for the developer and all its marks: comment, status (open, fixed: waiting to be verified, verified, wontfix, cantreproduce), how it was settled, its reopens (why it came back, oldest first), kind, element details, AI apps' findings (own: yours, which you may edit or delete), and (unless images is false) each mark's crop from the screenshot. Crops that do not fit the size limit are listed; fetch them with get_image.",
+			"A case with its link (a ticket or the like), its summary for the developer and all its marks: comment, status (open, fixed: waiting to be verified, verified, wontfix, cantreproduce), how it was settled, its reopens (why it came back, oldest first), kind, element details, AI apps' findings (own: yours, which you may edit or delete), and (unless images is false) each mark's crop from the screenshot. Crops that do not fit the size limit are listed; fetch them with get_image.",
 		inputSchema: {
 			type: "object",
 			properties: {

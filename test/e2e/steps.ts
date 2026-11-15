@@ -67,6 +67,7 @@ export interface Db {
 		id: string;
 		title: string;
 		lastNumber?: number;
+		link?: string;
 		page: {
 			url: string;
 			title: string;

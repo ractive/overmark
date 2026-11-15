@@ -1133,3 +1133,30 @@ when creating a mark?"
   opened again finds the marks on the page without drawing them, and answered nobody.
   The second is the page's own word: a compromised page in front, which had the case
   before, could say so after "Hide marks" too.
+
+## DEC-028: A case can carry a link (owner)
+
+The owner, 2026-11-15: "It would be great to be able to attach an URL to a case, like a
+Jira ticket or so. This URL needs to be editable per case, but normally is just
+clickable."
+
+- **One link per case**, optional: `link` in the case (absent: none), at most 2048
+  characters. Only an `http:` or `https:` address (`cleanLink`, `new URL`): it is shown
+  as a link that opens, so never `javascript:`, `data:`, `file:` or an address relative
+  to the panel. A file's case with any other link is refused on import, as a file
+  Overmark wrote never has one.
+- **In the case view, under the meta line**: the link, short (host and path), opening in
+  a new tab with no opener and no referrer, the whole address in its tooltip, and a
+  quiet "Edit"; without one only "Add a link". A long address is cut with an ellipsis,
+  the panel never widens.
+- **Edited as the title in Rename (DEC-026)**: a field with the stored link, Save and
+  Cancel; Enter saves, Escape cancels, the Enter that ends an IME composition is the
+  composition's. An empty field removes the link; text that is no link keeps the form
+  open with "A link starts with https:// or http://". Stored at once; the focus goes
+  back to Edit or Add a link. Leaving the case drops an open form.
+- **It goes where the case goes**: in `case.json` and the synced file by itself, in
+  `case.md` under the page, written as the page's address (an autolink only for a web
+  address, else a code span), and in `get_case`. An AI app reads it and cannot set it;
+  `list_cases` leaves it out.
+- A case with a link is the user's: "New case for this page" left without a mark does
+  not delete it (DEC-026).

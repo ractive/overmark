@@ -188,6 +188,24 @@ describe.skipIf(browserBinary === undefined)("the look", () => {
 			),
 		).toEqual(["rgb(67, 71, 201)", "rgb(194, 15, 76)", "rgb(194, 15, 76)"]);
 
+		// A long link (DEC-028): cut in its line, never wider than the panel,
+		// its form too.
+		const link = `https://tickets.example.com/browse/ABC-123/${"averyverylongpathsegment".repeat(8)}`;
+		await panel.eval(`${id("case-link-edit")}.click()`);
+		await panel.waitFor(`!${id("case-link-form")}.hidden`);
+		await panel.eval(`(() => {
+			const f = ${id("case-link-field")};
+			f.value = ${JSON.stringify(link)};
+			f.dispatchEvent(new Event("input"));
+		})()`);
+		await holds(["add-marks"]);
+		await panel.eval(`${id("case-link-save")}.click()`);
+		await panel.waitFor(
+			`${id("case-link-form")}.hidden && ${id("case-link-open")}.getAttribute("href") === ${JSON.stringify(link)}`,
+			10_000,
+		);
+		await holds(["add-marks"]);
+
 		// Settings, over the case: the pill turns AI access on, and the card
 		// shows the address and the code, its widest content.
 		const relay = startTestRelay({ pageWaitMs: 0 });

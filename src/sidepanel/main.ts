@@ -7,6 +7,7 @@
 import {
 	type Annotation,
 	type Case,
+	cleanLink,
 	cleanTitle,
 	MAX_COMMENT,
 	markStatus,
@@ -16,6 +17,7 @@ import {
 	validateCase,
 	withChoice,
 	withComment,
+	withLink,
 	withoutAnnotation,
 	withoutFinding,
 	withReopen,
@@ -740,6 +742,7 @@ function openCase(id: string): void {
 		s.deleteArmedAt = undefined;
 		s.markEdit = undefined;
 		s.renaming = undefined;
+		s.linking = undefined;
 		s.markFilter = undefined;
 		s.markDeleteArmed = undefined;
 		s.findingDeleteArmed = undefined;
@@ -905,6 +908,7 @@ function closeCase(): void {
 		s.caseHint = undefined;
 		s.deleteArmedAt = undefined;
 		s.renaming = undefined;
+		s.linking = undefined;
 		s.loaded = undefined;
 		s.leaving = undefined;
 		// Where the case's export went is the case's.
@@ -1141,6 +1145,52 @@ async function renameCase(caseId: string, text: string): Promise<void> {
 					caseId,
 					text: s.renaming.text,
 					error: `Not renamed: ${message(error)}`,
+				};
+		});
+	}
+}
+
+/** Under the link's field for a text that is no link (DEC-028). */
+const NOT_A_LINK = "A link starts with https:// or http://";
+
+/**
+ * The case's link (DEC-028): stored at once, as every change is; an empty
+ * field removes it. Text that is no http or https address keeps the form
+ * open and says so.
+ */
+async function linkCase(caseId: string, text: string): Promise<void> {
+	const link = text.trim() === "" ? undefined : cleanLink(text);
+	if (link === undefined && text.trim() !== "") {
+		update((s) => {
+			if (s.linking?.caseId === caseId)
+				s.linking = { caseId, text: s.linking.text, error: NOT_A_LINK };
+		});
+		return;
+	}
+	if (state.current?.id === caseId && state.current.link === link) {
+		update((s) => (s.linking = undefined));
+		return;
+	}
+	try {
+		const saved = await store.updateCase(caseId, (current) => {
+			if (current === undefined) throw new Error("the case no longer exists");
+			return {
+				value: validateCase(withLink(current, link, new Date().toISOString())),
+			};
+		});
+		update((s) => {
+			if (s.linking?.caseId === caseId) s.linking = undefined;
+			if (s.current?.id === caseId) s.current = saved;
+		});
+		announce(caseId);
+		void refreshCases();
+	} catch (error) {
+		update((s) => {
+			if (s.linking?.caseId === caseId)
+				s.linking = {
+					caseId,
+					text: s.linking.text,
+					error: `Not saved: ${message(error)}`,
 				};
 		});
 	}
@@ -1568,6 +1618,20 @@ const actions: Actions = {
 	saveRename: (c, text) => void renameCase(c.id, text),
 
 	cancelRename: () => update((s) => (s.renaming = undefined)),
+
+	startLink: (c) =>
+		update((s) => (s.linking = { caseId: c.id, text: c.link ?? "" })),
+
+	typeLink(text) {
+		update((s) => {
+			if (s.linking !== undefined)
+				s.linking = { caseId: s.linking.caseId, text };
+		});
+	},
+
+	saveLink: (c, text) => void linkCase(c.id, text),
+
+	cancelLink: () => update((s) => (s.linking = undefined)),
 
 	doneAdding(c) {
 		const hint = caseHintWriter();

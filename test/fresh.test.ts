@@ -78,6 +78,14 @@ describe("an untouched case goes when it is left (DEC-026)", () => {
 		expect(isUntouched(withOneMark(fresh()))).toBe(false);
 	});
 
+	test("a link attached: the user's (DEC-028)", () => {
+		const linked = {
+			...fresh(),
+			link: "https://tickets.example.com/browse/ABC-123",
+		};
+		expect(isUntouched(linked)).toBe(false);
+	});
+
 	test("its only mark taken out by the toolbar's Undo: the user's, it stays (review of PR 57)", () => {
 		// Undo frees the number and records that a mark was stored.
 		const undone = {
