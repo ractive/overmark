@@ -141,8 +141,8 @@ PRs (`.github/dependabot.yml`).
 > app. Overmark works inside the page, so that page's own scripts can see what it shows
 > there and the keys you press there.
 
-**Single purpose:** Annotating web pages and reviewing the annotations on other builds
-of the same pages, alone or with an AI app the user connects.
+**Single purpose:** Annotating web pages and reviewing the annotations on the same pages
+in other environments, alone or with an AI app the user connects.
 
 **Permission justifications:**
 
@@ -185,7 +185,7 @@ data only, and no tool runs code an AI app sends.
   creditworthiness.
 
 **Screenshots for the listing (1280×800):** the toolbar with marks on a page; the side
-panel with a case; a case loaded onto another build with its marks outlined, solid
+panel with a case; a case loaded in another environment with its marks outlined, solid
 and dashed.
 
 # Citations

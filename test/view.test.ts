@@ -1370,7 +1370,7 @@ describe("none of the case's marks found (DEC-022)", () => {
 		expect(opened).toEqual(["c_none"]);
 	});
 
-	test("on the case's own path (another build): says so, no claim of another page", () => {
+	test("on the case's own path (another environment): says so, no claim of another page", () => {
 		render(on("http://localhost:3000/kk", [match(1, "lost")]), noActions);
 		expect(el("none-found").hidden).toBe(false);
 		expect(el("none-found").textContent).not.toContain("another page");

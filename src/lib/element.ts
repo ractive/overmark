@@ -1,6 +1,6 @@
 /**
  * Describing an element: the details a case stores for each annotation, and
- * that matching (match.ts) compares on another build.
+ * that matching (match.ts) compares in another environment.
  *
  * What is recorded is this list and nothing else (DEC-009). All of it comes
  * from the page's markup and its rendered text; nothing a user typed (field

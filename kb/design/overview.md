@@ -4,7 +4,7 @@ title: "Overmark design"
 description: >-
   What Overmark is for, the workflow from a PO's annotation on prod to a dev's fix on
   localhost and the check on dev and prod, the parts of the extension, the case format,
-  how an element is found again on another build, and the tools an AI app gets through
+  how an element is found again in another environment, and the tools an AI app gets through
   tab-mcp.
 tags:
   - design
@@ -16,7 +16,7 @@ timestamp: 2026-11-05T08:00:00+01:00
 
 Overmark is a Chrome (and Edge) extension for annotating any web page: pick an element,
 draw boxes, arrows and freehand marks, and comment on each. The annotations are saved
-as a named **case**. A case can be loaded onto another build of the page (localhost,
+as a named **case**. A case can be loaded onto the same page in another environment (localhost,
 dev, prod), exported as a file, and read or extended by an AI app such as Claude through
 a [tab-mcp](https://github.com/ractive/tab-mcp) relay.
 
@@ -37,7 +37,7 @@ whatever tab is in front (DEC-022). Forwarding cases to a team (tickets, links) 
 
 ## The screenshot is the record
 
-Finding the same element on another build is unreliable: class names from CSS modules
+Finding the same element in another environment is unreliable: class names from CSS modules
 change, generated ids change, content differs between environments, layouts differ by
 window size, and the fix itself changes the element. So the **annotated screenshot**
 is what a case is about, and finding the element again is a best-effort extra:

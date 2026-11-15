@@ -897,7 +897,7 @@ describe.skipIf(browserBinary === undefined)("annotating and saving", () => {
 });
 
 describe.skipIf(browserBinary === undefined)(
-	"loading onto another build",
+	"loading in another environment",
 	() => {
 		let h: Harness;
 

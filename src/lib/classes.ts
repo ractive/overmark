@@ -1,6 +1,6 @@
 /**
  * Telling hand-written class names and ids from generated ones. Only the
- * readable part of a class helps find an element on another build, and it is
+ * readable part of a class helps find an element in another environment, and it is
  * also what a developer can search the code for.
  */
 

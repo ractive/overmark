@@ -574,7 +574,7 @@ describe("a case for a page", () => {
 		return { ...c, page: { ...c.page, url } };
 	};
 
-	test("another build of a page is that page", () => {
+	test("a page in another environment is that page", () => {
 		expect(isPageOf(on("https://a.ch/kk"), "http://localhost:3000/kk")).toBe(
 			true,
 		);

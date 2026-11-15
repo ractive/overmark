@@ -1,14 +1,14 @@
 /**
  * How well does Overmark find elements again on real pages?
  *
- *   bun test/e2e/pilot.ts <url> [<the same page on another build>]
+ *   bun test/e2e/pilot.ts <url> [<the same page in another environment>]
  *
  * Picks up to 25 visible elements spread over <url> (1280×800) and records
  * their details with the extension's own code. Then it looks for each one
- * after a reload, at phone width (390×844), and on the other build if one is
+ * after a reload, at phone width (390×844), and in the other environment if one is
  * given, with the same search the extension uses when a case is loaded. For
- * the same build, "right" means the element at the same place in the DOM;
- * for another build it prints what was found, for a person to judge.
+ * the same environment, "right" means the element at the same place in the DOM;
+ * for another environment it prints what was found, for a person to judge.
  *
  * Needs Chrome for Testing or Chromium (CHROME_PATH, or Playwright's).
  */
@@ -18,7 +18,9 @@ import { Browser, findBrowser, type Page } from "./browser.ts";
 
 const urls = process.argv.slice(2);
 if (urls.length === 0) {
-	console.error("usage: bun test/e2e/pilot.ts <url> [<url on another build>]");
+	console.error(
+		"usage: bun test/e2e/pilot.ts <url> [<url in another environment>]",
+	);
 	process.exit(2);
 }
 const binary = findBrowser();
@@ -191,7 +193,7 @@ try {
 		await open(page, urls[1], DESKTOP);
 		r = await search(page, targets);
 		report(
-			`Other build ${urls[1]}, 1280×800`,
+			`Other environment ${urls[1]}, 1280×800`,
 			targets,
 			r.outcomes,
 			r.ms,
