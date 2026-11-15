@@ -3,9 +3,7 @@
  * while the side panel is closed; a question shows in the side panel of the
  * window in front, or else as a Chrome notification (answered through the
  * worker's own button handler); only the side panel's own page may command
- * the connection; the panel's old address is kept, and so is the one the
- * build before kept in chrome.storage.local (DEC-016); what is written there
- * later is not taken.
+ * the connection (DEC-016).
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -546,17 +544,16 @@ describe.skipIf(browserBinary === undefined)("who may command it", () => {
 });
 
 describe.skipIf(browserBinary === undefined)(
-	"what an unreleased build kept in chrome.storage.local",
+	"a Stop in this browser session",
 	() => {
 		let h: Harness;
-		let address: string;
 		const relay = startTestRelay();
 
 		beforeAll(async () => {
 			h = await startHarness(browserBinary as string);
 			await (await h.open("v1")).page.activate();
 			const panel = await openSidePanel(h);
-			address = await connectAi(panel, relay.url, { keepOn: true });
+			await connectAi(panel, relay.url, { keepOn: true });
 			await closeSidePanel(h, panel);
 		}, 60_000);
 
@@ -564,68 +561,6 @@ describe.skipIf(browserBinary === undefined)(
 			await h?.stop();
 			await relay.stop();
 		});
-
-		// In the control page, an extension page too: a session on the worker
-		// would keep Chrome from stopping it.
-		const localAll = () =>
-			h.control.eval<Record<string, unknown>>("chrome.storage.local.get(null)");
-
-		test("is removed at the next start and never taken over: the relay and the address stay", async () => {
-			const before = await settingsOf(h);
-			expect(before["relay"]).toBe(relay.url);
-			// the layout of an unreleased build (only the owner's build wrote it), here with a
-			// relay and a secret of someone else's, as a content script could.
-			const old = {
-				"tab-mcp:secret:https://evil.example:sitegloss": "E".repeat(43),
-				relay: "https://evil.example",
-				keepAiOn: false,
-				blurForms: true,
-				replaced: { sibling: true },
-			};
-			// From a content script: Chrome refuses it where it closes the area.
-			const { tabId } = await h.open("v1");
-			await h.control.eval(
-				`chrome.scripting.executeScript({
-					target: { tabId: ${tabId} },
-					func: (items) => chrome.storage.local.set(items).then(() => "written", (e) => e.message),
-					args: [${JSON.stringify(old)}],
-				})`,
-			);
-			// And as one could where Chrome lets it: written there all the same.
-			await h.control.eval(`chrome.storage.local.set(${JSON.stringify(old)})`);
-			await restartWorker(h);
-			// The new worker only removes it from there.
-			await until(localAll, (local) => Object.keys(local).length === 0, 10_000);
-			expect(await settingsOf(h)).toEqual(before);
-			// Keep AI access on: the same address answers, on the same relay.
-			await until(
-				async () => {
-					const client = await mcpClient(relay.store, address).catch(
-						() => undefined,
-					);
-					if (client === undefined) return false;
-					try {
-						return !(
-							(await client.callTool({
-								name: "list_cases",
-								arguments: {},
-							})) as CallResult
-						).isError;
-					} catch {
-						return false;
-					} finally {
-						await client.close();
-					}
-				},
-				(ok) => ok,
-				20_000,
-			);
-			await (await h.open("v1")).page.activate();
-			const panel = await openSidePanel(h);
-			expect(await panel.eval(`${byId("relay")}.value`)).toBe(relay.url);
-			expect(await panel.eval(`${byId("blur-forms")}.checked`)).toBe(false);
-			await closeSidePanel(h, panel);
-		}, 60_000);
 
 		test("a Stop in this browser session holds over a stored Keep AI access on, in a new worker too", async () => {
 			// What a Stop whose write of Keep AI access on failed leaves behind.

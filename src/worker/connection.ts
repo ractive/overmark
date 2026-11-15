@@ -27,7 +27,7 @@ import { AlwaysAllowed } from "./always.ts";
 import { badge } from "./badge.ts";
 import { decide } from "./decide.ts";
 import { endedProblem, KeepOn } from "./keep-on.ts";
-import { type Kv, openKv, removeOldSettings } from "./kv.ts";
+import { type Kv, openKv } from "./kv.ts";
 import {
 	type AiState,
 	type CallView,
@@ -329,13 +329,8 @@ export class Connection {
 	 */
 	static async start(deps: ConnectionDeps): Promise<Connection> {
 		await restrictStorage();
-		// The settings live in IndexedDB, out of content scripts' reach. An
-		// unreleased build kept them in chrome.storage.local: removed there at
-		// every start, never taken over (DEC-016).
+		// The settings live in IndexedDB, out of content scripts' reach (DEC-016).
 		const kv = deps.kv ?? (await openKv());
-		await removeOldSettings(chrome.storage.local).catch((error: unknown) =>
-			console.warn("Sitegloss: removing the old settings", error),
-		);
 		// A previous worker's questions died with it.
 		await clearNotifications();
 		const [storage, settings, session, always] = await Promise.all([
