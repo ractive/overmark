@@ -1207,4 +1207,11 @@ that the old name had namesakes among annotation tools.
   name. The extension ID is unchanged.
 - **The icon is unchanged;** the wordmark's swipe now lies over "gloss" (this supersedes
   the wordmark line of DEC-029).
+- **The wordmark's letters are outlines,** not text: "Sitegloss" in Inter Bold (SIL OFL
+  1.1), the nearest free font to the system fonts the site uses, taken once from the
+  font file into `src/lib/logo.ts` with the swipe's geometry. An SVG cannot count on a
+  font, and with outlines the swipe covers "gloss" wherever the file is opened, for about
+  2.5 KB. `bun scripts/icons.ts` draws `assets/brand/wordmark.svg` and `lockup.svg` (for
+  light backgrounds) and their `-light` versions (for dark ones); `assets/store/` gets
+  nothing new until the store graphics are made.
 - **Earlier entries, the log and finished iterations keep the old name.**

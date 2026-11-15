@@ -1,4 +1,9 @@
-# Sitegloss
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/lockup-light.svg">
+    <img src="assets/brand/lockup.svg" alt="Sitegloss" width="300">
+  </picture>
+</h1>
 
 Mark what is wrong on a web page, open the marks in another environment to fix it, and
 talk them through with your AI app.
