@@ -19,7 +19,9 @@ timestamp: 2026-11-05T08:00:00+01:00
    trader declaration). Which account is an open question
    ([open questions](../open-questions.md)).
 2. Publish [PRIVACY.md](https://github.com/ractive/overmark/blob/main/PRIVACY.md) at a
-   stable URL (a page on ractive.ch).
+   stable URL: it is the page `https://ractive.ch/overmark/privacy/`, kept in
+   `ractive/ractive.ch` (`src/pages/overmark/privacy/`); a change of `PRIVACY.md` goes
+   there too.
 3. Build the store package: `bun scripts/build.ts --store --zip --outdir dist-store`
    writes `overmark-<version>-store.zip` (no `key` in the manifest; the store would
    reject it). Without `--outdir` it would replace `dist/`, the unpacked development
@@ -97,15 +99,16 @@ PRs (`.github/dependabot.yml`).
   `createManifest` in `scripts/build.ts` sets: "Mark what is wrong on a web page, open
   the marks in another environment to fix it, and talk them through with your AI app."
   (at most 132 characters). Change it there; the store reads it from the uploaded
-  package, so a new summary needs a new version.
+  package, so a new summary needs a new version. The repository's About text on GitHub
+  is a fourth copy (`gh repo edit ractive/overmark --description "…"`).
 - **Category:** Developer Tools
 - **Language:** English
-- **Official URL:** `ractive.ch` (verified in the Search Console of the store account).
-- **Homepage URL:** `https://ractive.ch/overmark/`, beside tab-mcp's page; until that
-  page exists, `https://github.com/ractive/overmark`.
+- **Official URL:** `ractive.ch`. The dashboard offers only sites verified in Search
+  Console by the Google account of the store's developer account; `ractive.ch` is
+  verified in the owner's.
+- **Homepage URL:** `https://ractive.ch/overmark/`, beside tab-mcp's page.
 - **Support URL:** `https://github.com/ractive/overmark/issues`.
-- **Privacy policy:** `https://ractive.ch/overmark/privacy/` once the page exists
-  (step 2); until then `https://github.com/ractive/overmark/blob/main/PRIVACY.md`.
+- **Privacy policy:** `https://ractive.ch/overmark/privacy/` (step 2).
 
 **Description:**
 
@@ -126,7 +129,7 @@ PRs (`.github/dependabot.yml`).
 > together: it reads your comments, finds the marked elements on the page in front of
 > you, inspects their HTML and CSS, and works out what should change. Overmark connects
 > through a tab-mcp relay, and anything the app wants to change in a case is shown to
-> you first, every time.
+> you first, unless you chose to always allow it.
 >
 > Export a case, or all of them, as a zip with a Markdown summary and the images, or
 > keep every case synced to your Downloads or a folder of your choice, in iCloud Drive
