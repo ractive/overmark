@@ -108,7 +108,7 @@ const PATH_WITH = (dir: string) => `${dir}:${process.env["PATH"]}`;
 describe("publishing to the Chrome Web Store", () => {
 	const REF = "${{ github.ref_name }}";
 	const SHARED =
-		/^ractive\/release-workflows\/\.github\/workflows\/chrome-extension-publish\.yml@\S+$/;
+		/^ractive\/release-workflows\/\.github\/workflows\/chrome-extension-publish\.yml@[0-9a-f]{40}$/;
 
 	// release.yml's job after the release, and publish.yml's by hand: the same
 	// call of release-workflows' job (DEC-032).
