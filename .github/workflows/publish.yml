@@ -1,17 +1,15 @@
 name: Publish to Chrome Web Store
 
-# Uploads the store zip of a GitHub release to the Chrome Web Store item and,
-# when asked, submits it for review. Run it by hand after the release workflow
-# has created the release: Actions → Publish to Chrome Web Store → Run workflow,
-# and pick the release's tag under "Use workflow from". The tag it runs on is
-# the tag it uploads; a run from a branch fails. The first version is submitted
-# by hand in the developer dashboard: the API only updates an existing item.
-# Setup and the secrets it needs: kb/operations/chrome-web-store.md.
+# Publishes the store zip of a GitHub release to the Chrome Web Store by hand:
+# the same job release.yml runs after it creates the release, for a release
+# whose publish failed or was rejected. Actions → Publish to Chrome Web Store →
+# Run workflow, and pick the release's tag under "Use workflow from"; a run
+# from a branch fails.
 #
-# The upload uses mnao305/chrome-extension-upload (Chrome Web Store API v2
-# through fregante's chrome-webstore-upload), pinned to a commit, because it
-# receives the store's credentials. Nothing else runs in this job: no checkout,
-# no bun install.
+# ractive/release-workflows chrome-extension-publish.yml (DEC-032): only a zip
+# whose build provenance verifies (signed by release.yml for this tag), as a
+# CRX signed with the item's verified-upload key, from the environment
+# chrome-web-store. Setup: kb/operations/chrome-web-store.md.
 
 on:
   workflow_dispatch:
@@ -19,48 +17,21 @@ on:
       submit:
         description: "Submit for review after the upload (otherwise it stays a draft in the dashboard)"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: chrome-web-store
-  cancel-in-progress: false
-
 jobs:
   publish:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # Holds the secrets; add required reviewers to it in the repository settings.
-    environment: chrome-web-store
-    steps:
-      - name: Download the release's store zip
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          test "$GITHUB_REF_TYPE" = tag \
-            || { echo "$TAG is no tag: pick the release's tag under \"Use workflow from\""; exit 1; }
-          echo "$TAG" | grep -Eq '^v(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){0,3}$' \
-            || { echo "not a version tag: $TAG"; exit 1; }
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "sitegloss-${TAG#v}-store.zip" --output store.zip
-      - name: The zip is a store build of that version
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          manifest="$(unzip -p store.zip manifest.json)"
-          test "$(jq -r .version <<<"$manifest")" = "${TAG#v}" \
-            || { echo "the manifest's version is not ${TAG#v}"; exit 1; }
-          jq -e 'has("key") or has("host_permissions") | not' <<<"$manifest" >/dev/null \
-            || { echo "not a store build (it has a key or install-time host access)"; exit 1; }
-      - uses: mnao305/chrome-extension-upload@f549d5d654694a7722d6abfa64c97409ad5e64c1 # v7.0.0
-        with:
-          file-path: store.zip
-          extension-id: ${{ vars.CWS_EXTENSION_ID }}
-          publisher-id: ${{ vars.CWS_PUBLISHER_ID }}
-          client-id: ${{ secrets.CWS_CLIENT_ID }}
-          client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
-          refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
-          publish: ${{ inputs.submit }}
+    uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@ea1fdf1ab5602ac55fa78f2d10e65d9dc4d5cd24 # v0.6.0
+    permissions:
+      contents: read
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      asset: sitegloss-{version}-store.zip
+      extension-id: ldmcfigcnobhnbaigehcaodheklibeon
+      attest-signer-workflow: .github/workflows/release.yml
+      signing-key-id: fhagiknobniheomfcadmfdpanogmpmka
+      submit: ${{ inputs.submit }}

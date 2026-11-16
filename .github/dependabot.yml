@@ -1,5 +1,6 @@
-# Keeps the pinned actions (the store upload action holds the store's
-# credentials) and the packages current; every update is a reviewed PR.
+# Keeps the pinned actions and reusable workflows (ractive/release-workflows'
+# chrome-extension-publish.yml holds the store's credentials and the CRX
+# signing key) and the packages current; every update is a reviewed PR.
 version: 2
 updates:
   - package-ecosystem: github-actions

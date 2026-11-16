@@ -46,12 +46,12 @@ timestamp: 2026-11-05T08:00:00+01:00
   `git tag vX.Y.Z <merge commit> && git push origin vX.Y.Z`. The release workflow
   checks the tag, runs `verify`, and creates the GitHub release with both zips. It stops
   if the tag has moved off the commit it built.
-- **Attestations:** once the repository is public, the release workflow attests both
-  zips before it creates the release (build provenance, signed through Sigstore): that
-  this workflow built a file with that digest from that commit. Check a downloaded zip
-  with `gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss`. While the
-  repository is private the step is skipped: GitHub has attestations for private
-  repositories only on Enterprise Cloud.
+- **Attestations:** the release workflow attests both zips before it creates the
+  release (build provenance, signed through Sigstore): that this workflow built a file
+  with that digest from that commit. Check a downloaded zip with
+  `gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss`. The publish job
+  verifies it, so the step always runs; GitHub has attestations for private
+  repositories only on Enterprise Cloud, so a private repository could not release.
 
 Every build, and so every zip, holds `LICENSES.txt`: Sitegloss's licence and those of the
 packages in its bundles. A bundled package whose licence the build does not know stops
@@ -59,18 +59,51 @@ the build (`LICENCES` in `scripts/build.ts`).
 
 ## Updates through the publish workflow
 
-The API only updates an item that exists, so the first version goes in by hand (steps
-above). After that, run "Publish to Chrome Web Store" (`publish.yml`) by hand: Actions →
-Publish to Chrome Web Store → Run workflow, and pick the release's tag under "Use workflow
-from". The default there is `main`, which fails: the tag the workflow runs on is the tag
-it uploads, and it has no other way to name one. It downloads that release's store zip,
-checks that its manifest has the tag's version and no key, and uploads it with
-[mnao305/chrome-extension-upload](https://github.com/mnao305/chrome-extension-upload)
-(Chrome Web Store API v2), pinned to a commit. With "submit" off the upload stays a
-draft in the dashboard; with it on, the version is submitted for review and published
-when approved. The store rejects an upload whose version is not higher than the last.
+The API only updates an item that exists, so the first version went in by hand (steps
+above). Since then a release publishes itself (DEC-032): after the release workflow has
+created the release, its job `publish` runs
+[chrome-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.6.0/.github/workflows/chrome-extension-publish.yml)
+of ractive/release-workflows (pinned to a commit) in the environment `chrome-web-store`,
+which waits for the owner's approval. That job:
 
-One-time setup:
+1. checks that it runs on the release's tag and downloads the release's store zip;
+2. checks that its manifest has the tag's version, no key, no host access and the zip no
+   source maps;
+3. verifies the zip's build provenance (attested by `release.yml` for that tag; an
+   unattested zip stops the run, so the attestation is the record of what the store got);
+4. packs it as a CRX3 signed with `CWS_CRX_PRIVATE_KEY` (Verified CRX uploads, below), whose
+   CRX id must be `fhagiknobniheomfcadmfdpanogmpmka`; the CRX wraps exactly the verified
+   zip's bytes;
+5. uploads the CRX with the Chrome Web Store API v2 and submits it for review; it is
+   published when approved. The store rejects a version that is not higher than the last.
+
+No third-party code runs in that job: the CRX is packed by Python of the standard library
+and `openssl` (byte for byte what `chrome --pack-extension` writes, which release-workflows'
+selftest checks against Chrome), the API is called with `curl`. The client secret and the
+refresh token can publish every item of the developer account; the signing key can sign
+uploads of this item only.
+
+If the publish fails or is rejected, fix the cause and run "Publish to Chrome Web Store"
+(`publish.yml`) by hand: Actions → Publish to Chrome Web Store → Run workflow, and pick
+the release's tag under "Use workflow from" (the default, `main`, fails). "Submit" off
+leaves the upload as a draft in the dashboard.
+
+### Verified CRX uploads
+
+The item accepts only uploads signed with our key (dashboard → Package → "Verified CRX
+uploads"), so whoever gets into the Google account cannot push an update without it. The
+key is an RSA key of its own (not the item's key, which Google holds):
+`~/.config/chrome-web-store/sitegloss-crx-key.pem` on the owner's machine, a copy in the
+owner's password manager, and the environment secret `CWS_CRX_PRIVATE_KEY`. It is never
+stored in the Google account. Losing it means a week with Chrome Web Store support. Its
+public key and CRX id:
+
+```sh
+openssl rsa -in sitegloss-crx-key.pem -pubout                     # pasted into the dashboard
+openssl pkey -in sitegloss-crx-key.pem -pubout -outform DER | shasum -a 256 | head -c 32 | tr 0-9a-f a-p
+```
+
+### One-time setup
 
 1. In a Google Cloud project, enable the **Chrome Web Store API**. Configure the OAuth
    consent screen (External) and set its publishing status to **In production**: while
@@ -81,18 +114,16 @@ One-time setup:
 3. In the [OAuth 2.0 Playground](https://developers.google.com/oauthplayground), under
    the settings, use your own client ID and secret; authorize the scope
    `https://www.googleapis.com/auth/chromewebstore` with the store's developer account
-   and exchange the code for a refresh token.
-4. The publisher ID is under Publisher → Settings in the developer dashboard; the
-   extension ID is the item's ID.
-5. In the repository: Settings → Environments → new environment `chrome-web-store`.
-   Secrets `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`; variables
-   `CWS_PUBLISHER_ID`, `CWS_EXTENSION_ID`. Add yourself as required reviewer, and limit
-   deployments to tags `v*` (the reason a run starts from the tag, not from `main`).
-
-The upload action receives the client secret and the refresh token, which can publish
-every item of the developer account. That is why it is pinned to a commit and runs in a
-job that checks out nothing and installs nothing; Dependabot proposes its updates as
-PRs (`.github/dependabot.yml`).
+   and exchange the code for a refresh token. One client and token serve every item of
+   the account (tab-mcp for Chrome uses the same).
+4. In the repository: Settings → Environments → new environment `chrome-web-store`.
+   Secrets `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`,
+   `CWS_CRX_PRIVATE_KEY` (the PEM of the signing key); variable `CWS_PUBLISHER_ID`
+   (Publisher → Settings in the developer dashboard). Add yourself as required reviewer,
+   and limit deployments to tags `v*` (the reason a run starts from the tag, not from
+   `main`).
+5. Opt in to Verified CRX uploads (Package tab) with the key's public key, after the
+   secret is set: from then on the store refuses a zip.
 
 ## Listing
 
