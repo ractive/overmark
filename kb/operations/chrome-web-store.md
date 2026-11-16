@@ -46,12 +46,12 @@ timestamp: 2026-11-05T08:00:00+01:00
   `git tag vX.Y.Z <merge commit> && git push origin vX.Y.Z`. The release workflow
   checks the tag, runs `verify`, and creates the GitHub release with both zips. It stops
   if the tag has moved off the commit it built.
-- **Attestations:** once the repository is public, the release workflow attests both
-  zips before it creates the release (build provenance, signed through Sigstore): that
-  this workflow built a file with that digest from that commit. Check a downloaded zip
-  with `gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss`. While the
-  repository is private the step is skipped: GitHub has attestations for private
-  repositories only on Enterprise Cloud.
+- **Attestations:** the release workflow attests both zips before it creates the
+  release (build provenance, signed through Sigstore): that this workflow built a file
+  with that digest from that commit. Check a downloaded zip with
+  `gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss`. The publish job
+  verifies it, so the step always runs; GitHub has attestations for private
+  repositories only on Enterprise Cloud, so a private repository could not release.
 
 Every build, and so every zip, holds `LICENSES.txt`: Sitegloss's licence and those of the
 packages in its bundles. A bundled package whose licence the build does not know stops
@@ -62,7 +62,7 @@ the build (`LICENCES` in `scripts/build.ts`).
 The API only updates an item that exists, so the first version went in by hand (steps
 above). Since then a release publishes itself (DEC-032): after the release workflow has
 created the release, its job `publish` runs
-[chrome-extension-publish.yml](https://github.com/ractive/release-workflows/blob/main/.github/workflows/chrome-extension-publish.yml)
+[chrome-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.6.0/.github/workflows/chrome-extension-publish.yml)
 of ractive/release-workflows (pinned to a commit) in the environment `chrome-web-store`,
 which waits for the owner's approval. That job:
 

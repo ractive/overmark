@@ -206,11 +206,11 @@ describe("release.yml", () => {
 		expect(result.code).not.toBe(0);
 	});
 
-	test("the zips are attested before the release, by the job that runs no third-party code, and only in a public repository", async () => {
+	test("the zips are attested before the release, by the job that runs no third-party code, always", async () => {
 		const w = await workflow("release.yml");
 		const steps = w.jobs["release"]?.steps ?? [];
 		const names = steps.map((s) => s.name);
-		const attest = "Attest both zips (a public repository only)";
+		const attest = "Attest both zips";
 		// After the tag was checked, before anything is published: a failed
 		// attestation leaves no release.
 		expect(names.indexOf(still)).toBeLessThan(names.indexOf(attest));
@@ -218,9 +218,8 @@ describe("release.yml", () => {
 			names.indexOf("Create the release with both zips"),
 		);
 		const step = stepOf(w, "release", attest);
-		// GitHub has no attestations for a private repository on this plan:
-		// there the step is skipped and the release is made without them.
-		expect(step.if).toBe("${{ !github.event.repository.private }}");
+		// The job publish verifies the attestation, so the step is never skipped.
+		expect(step.if).toBeUndefined();
 		// Pinned to a commit, as every action that gets a token is.
 		expect(step.uses).toMatch(/^actions\/attest@[0-9a-f]{40}$/);
 		// Both zips the release then attaches.
