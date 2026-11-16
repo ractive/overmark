@@ -20,6 +20,13 @@ name: Release
 # GitHub offers attestations in private repositories only on Enterprise Cloud,
 # so while this repository is private the step is skipped and the release is
 # made without them.
+#
+# Then the job publish uploads the store zip to the Chrome Web Store as a CRX
+# signed with the item's verified-upload key and submits it for review
+# (ractive/release-workflows chrome-extension-publish.yml, DEC-032): only a
+# zip whose attestation verifies for this tag, in the environment
+# chrome-web-store (required reviewer, tags v* only). publish.yml runs the
+# same job by hand, for a release whose publish failed.
 
 on:
   push:
@@ -122,3 +129,19 @@ jobs:
           ls sitegloss-*.zip
           gh release create "$TAG" sitegloss-*.zip --repo "$GITHUB_REPOSITORY" \
             --verify-tag --title "Sitegloss ${TAG#v}" --generate-notes
+
+  publish:
+    needs: release
+    uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@v0.6.0
+    permissions:
+      contents: read
+      # gh attestation verify reads the zip's attestation.
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      asset: sitegloss-{version}-store.zip
+      extension-id: ldmcfigcnobhnbaigehcaodheklibeon
+      attest-signer-workflow: .github/workflows/release.yml
+      # The CRX id of CWS_CRX_PRIVATE_KEY, whose public key the item has under
+      # "Verified CRX uploads" (kb/operations/chrome-web-store.md).
+      signing-key-id: fhagiknobniheomfcadmfdpanogmpmka

@@ -24,8 +24,12 @@ interface Workflow {
 	jobs: Record<
 		string,
 		{
+			needs?: string | string[];
 			permissions?: Record<string, string>;
 			outputs?: Record<string, string>;
+			uses?: string;
+			with?: Record<string, string | boolean>;
+			secrets?: unknown;
 			steps: Step[];
 		}
 	>;
@@ -101,43 +105,54 @@ async function run(
 
 const PATH_WITH = (dir: string) => `${dir}:${process.env["PATH"]}`;
 
-describe("publish.yml", () => {
+describe("publishing to the Chrome Web Store", () => {
 	const REF = "${{ github.ref_name }}";
-	const download = "Download the release's store zip";
+	const SHARED =
+		/^ractive\/release-workflows\/\.github\/workflows\/chrome-extension-publish\.yml@\S+$/;
 
-	test("uploads the tag it runs on: there is no other tag to name", async () => {
-		const w = await workflow("publish.yml");
-		expect(w.on.workflow_dispatch?.inputs["tag"]).toBeUndefined();
-		for (const step of w.jobs["publish"]?.steps ?? []) {
-			if (step.env?.["TAG"] !== undefined) expect(step.env["TAG"]).toBe(REF);
+	// release.yml's job after the release, and publish.yml's by hand: the same
+	// call of release-workflows' job (DEC-032).
+	const callers = async () => [
+		(await workflow("release.yml")).jobs["publish"],
+		(await workflow("publish.yml")).jobs["publish"],
+	];
+
+	test("both run release-workflows' job on the run's own tag", async () => {
+		for (const job of await callers()) {
+			expect(job?.uses).toMatch(SHARED);
+			expect(job?.with?.["tag"]).toBe(REF);
+			expect(job?.with?.["tag-prefix"]).toBeUndefined();
+			expect(job?.with?.["asset"]).toBe("sitegloss-{version}-store.zip");
+			expect(job?.with?.["extension-id"]).toBe(
+				"ldmcfigcnobhnbaigehcaodheklibeon",
+			);
 		}
 	});
 
-	test("a run from a branch fails and says to pick the tag", async () => {
-		const gh = fakeGh("");
-		const step = stepOf(await workflow("publish.yml"), "publish", download);
-		const result = await run(
-			step,
-			{ [REF]: "main" },
-			{ GITHUB_REF_TYPE: "branch", PATH: PATH_WITH(gh) },
-		);
-		expect(result.code).not.toBe(0);
-		expect(result.output).toContain('"Use workflow from"');
-		expect(await Bun.file(join(gh, "gh.log")).exists()).toBe(false);
+	test("both upload only a zip release.yml attested, as a CRX signed with our key", async () => {
+		for (const job of await callers()) {
+			expect(job?.with?.["attest-signer-workflow"]).toBe(
+				".github/workflows/release.yml",
+			);
+			expect(job?.with?.["sign-crx"]).toBeUndefined();
+			expect(job?.with?.["signing-key-id"]).toBe(
+				"fhagiknobniheomfcadmfdpanogmpmka",
+			);
+			expect(job?.permissions).toEqual({
+				contents: "read",
+				attestations: "read",
+			});
+			// The secrets are the environment's, read by the job itself.
+			expect(job?.secrets).toBeUndefined();
+		}
 	});
 
-	test("a run from a version tag downloads that tag's zip", async () => {
-		const gh = fakeGh("");
-		const step = stepOf(await workflow("publish.yml"), "publish", download);
-		const result = await run(
-			step,
-			{ [REF]: "v1.2.3" },
-			{ GITHUB_REF_TYPE: "tag", PATH: PATH_WITH(gh) },
-		);
-		expect(result).toEqual({ code: 0, output: "\n" });
-		const log = await Bun.file(join(gh, "gh.log")).text();
-		expect(log).toContain("release download v1.2.3");
-		expect(log).toContain("sitegloss-1.2.3-store.zip");
+	test("release.yml publishes after the release, publish.yml takes no tag", async () => {
+		const [release, byHand] = await callers();
+		expect(release?.needs).toBe("release");
+		const w = await workflow("publish.yml");
+		expect(w.on.workflow_dispatch?.inputs["tag"]).toBeUndefined();
+		expect(byHand?.with?.["submit"]).toBe("${{ inputs.submit }}");
 	});
 });
 
