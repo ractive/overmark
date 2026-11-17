@@ -135,13 +135,44 @@ describe.skipIf(browserBinary === undefined)(
 			// arguments have the focus, and it says how long it waits.
 			const dialog = `document.getElementById("questions")`;
 			expect(await panel.eval(`${dialog}.matches("dialog:modal")`)).toBe(true);
-			await panel.eval(
-				`${dialog}.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+			// The key and the close request are both stopped (false: prevented)...
+			expect(
+				await panel.eval(
+					`${dialog}.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+				),
+			).toBe(false);
+			expect(
+				await panel.eval(
+					`${dialog}.dispatchEvent(new Event("cancel", { cancelable: true }))`,
+				),
+			).toBe(false);
+			// ...a real Escape, twice (the second is the one a close watcher may
+			// not let be stopped), leaves it open...
+			for (let i = 0; i < 2; i++)
+				for (const type of ["keyDown", "keyUp"])
+					await panel.send("Input.dispatchKeyEvent", {
+						type,
+						key: "Escape",
+						code: "Escape",
+						windowsVirtualKeyCode: 27,
+					});
+			await panel.waitFor(`${dialog}.matches("dialog:modal")`);
+			// ...and one closed while its question waits opens again.
+			await panel.eval(`${dialog}.close()`);
+			await panel.waitFor(`${dialog}.matches("dialog:modal")`);
+			// Who asks for what describes it; the arguments are a named group.
+			expect(
+				await panel.eval<string>(
+					`document.getElementById(${dialog}.getAttribute("aria-describedby")).textContent`,
+				),
+			).toBe(
+				"Test client (client.example) wants to run Record the summary for the developer.",
 			);
-			await panel.eval(
-				`${dialog}.dispatchEvent(new Event("cancel", { cancelable: true }))`,
-			);
-			expect(await panel.eval(`${dialog}.open`)).toBe(true);
+			expect(
+				await panel.eval<string>(
+					`${QUESTION}.querySelector("pre").getAttribute("role")`,
+				),
+			).toBe("group");
 			expect(
 				await panel.eval<string[]>(
 					`[...${QUESTION}.querySelectorAll("button[data-answer]")].map((b) => b.className)`,
@@ -217,9 +248,25 @@ describe.skipIf(browserBinary === undefined)(
 			const allowAll = `${GRANT}.querySelector('[data-focus="allow-all"]')`;
 			expect(await panel.eval(`${allowAll}.checked`)).toBe(false);
 			// Right after the questions' dialog closed the switch turns nothing
-			// on (DEC-037): a double click on its last answer lands there.
-			await panel.eval(`${allowAll}.click()`);
-			expect(await panel.eval(`${allowAll}.checked`)).toBe(false);
+			// on (DEC-037): a double click on its last answer lands there. The
+			// click is made in the page the moment the dialog has gone, so no
+			// round trip of the test lies between the two.
+			const result = call("set_summary", { caseId: "c_1", summary: "Four b" });
+			await panel.waitFor(QUESTION, 10_000);
+			await answerInPanel(panel, "deny");
+			expect(
+				await panel.eval<string>(`new Promise((resolve) => {
+					const timer = setInterval(() => {
+						if (document.getElementById("questions").open) return;
+						clearInterval(timer);
+						if (!document.body.hasAttribute("data-quiet")) return resolve("late");
+						const s = ${allowAll};
+						s.click();
+						resolve(s.checked + " " + s.getAttribute("aria-checked"));
+					}, 5);
+				})`),
+			).toBe("false false");
+			expect((await result).isError).toBe(true);
 			expect(await kept()).toBeUndefined();
 			await panel.waitFor(QUIET_OVER);
 			await panel.eval(`${allowAll}.click()`);
@@ -379,6 +426,34 @@ describe.skipIf(browserBinary === undefined)(
 				(await asks("set_summary", { caseId: "c_3", summary: "Ten" }, "deny"))
 					.isError,
 			).toBe(true);
+		}, 60_000);
+
+		test("Stop AI access in the dialog refuses what waits: the top bar's Stop is under it", async () => {
+			const result = call("set_summary", { caseId: "c_3", summary: "Eleven" });
+			await panel.waitFor(QUESTION, 10_000);
+			// The rest of the panel is inert while a question waits.
+			expect(
+				await panel.eval(
+					`(() => { const b = ${byId("stop-ai")}; b.focus(); return document.activeElement === b; })()`,
+				),
+			).toBe(false);
+			await panel.eval(
+				`document.querySelector("#questions [data-stop]").click()`,
+			);
+			await panel.waitFor(
+				`document.documentElement.dataset.aiState === "disconnected"`,
+				10_000,
+			);
+			await panel.waitFor(`!document.getElementById("questions").open`);
+			// The call did not run.
+			expect(
+				await result.then(
+					(r) => r.isError,
+					() => true,
+				),
+			).toBe(true);
+			const db = await h.control.eval<{ cases: Case[] }>(READ_DB);
+			expect(db.cases.find((c) => c.id === "c_3")?.verdict).not.toBe("Eleven");
 		}, 60_000);
 	},
 );

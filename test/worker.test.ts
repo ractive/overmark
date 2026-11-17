@@ -241,7 +241,6 @@ describe("questions", () => {
 	test("without a panel in front, a notification asks and names the case; Allow after the guard counts", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
-		const asked = Date.now();
 		const answer = questions.ask(request(), CASE, 7);
 		await settle();
 		expect(questions.list).toEqual([
@@ -255,10 +254,8 @@ describe("questions", () => {
 				expiresAt: expect.any(Number),
 			},
 		]);
-		// When it ends unanswered: the panel counts down to it.
-		const expiresAt = questions.list[0]?.expiresAt ?? 0;
-		expect(expiresAt).toBeGreaterThanOrEqual(asked + QUESTION_TIMEOUT_MS);
-		expect(expiresAt).toBeLessThanOrEqual(Date.now() + QUESTION_TIMEOUT_MS);
+		// When it ends unanswered, by the host's clock: the panel counts down to it.
+		expect(questions.list[0]?.expiresAt).toBe(host.now() + QUESTION_TIMEOUT_MS);
 		expect(host.changes).toBeGreaterThan(0);
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
 		expect(text).toEqual({
@@ -755,6 +752,10 @@ describe("the panel's status line", () => {
 		);
 		expect(countdownText(end, end + 5_000)).toBe(
 			"0 s left to answer; no answer is Don't allow.",
+		);
+		// A clock set back says no more than the whole time, as the bar.
+		expect(countdownText(end, end - 2 * QUESTION_TIMEOUT_MS)).toBe(
+			"60 s left to answer; no answer is Don't allow.",
 		);
 		expect(timeLeftShare(end, end - QUESTION_TIMEOUT_MS)).toBe(1);
 		expect(timeLeftShare(end, end - QUESTION_TIMEOUT_MS / 4)).toBe(0.25);

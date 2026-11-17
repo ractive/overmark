@@ -68,10 +68,10 @@ export interface GrantView {
 	problem?: string;
 }
 
-/** A question waiting for the user (a tool that changes something). */
 /** A question nobody answers in this time ends as `"timeout"`: unanswered, the call does not run. */
 export const QUESTION_TIMEOUT_MS = 60_000;
 
+/** A question waiting for the user (a tool that changes something). */
 export interface QuestionView {
 	id: string;
 	/** The AI app: its declared name beside its verified host. */

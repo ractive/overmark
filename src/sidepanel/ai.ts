@@ -80,7 +80,11 @@ export function blurFormsNow(): Promise<boolean> {
 
 /** What a question's card says of the time left to answer it. */
 export function countdownText(expiresAt: number, now: number): string {
-	const left = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+	// Never more than the whole time, as the bar: a clock set back says no more.
+	const left = Math.min(
+		QUESTION_TIMEOUT_MS / 1000,
+		Math.max(0, Math.ceil((expiresAt - now) / 1000)),
+	);
 	return `${left} s left to answer; no answer is Don't allow.`;
 }
 
@@ -196,6 +200,8 @@ export async function startAi(
 	 * on its last Allow lands on the panel under it.
 	 */
 	let quietUntil = 0;
+	/** The relay field's text is half typed: a question took the focus from it. */
+	let relayHeld = false;
 
 	function send(command: PanelCommand): void {
 		try {
@@ -217,6 +223,7 @@ export async function startAi(
 			// The extension was updated or reloaded: this panel belongs to the
 			// version before and can reach nothing any more.
 			port = undefined;
+			showQuestions([]);
 			update(
 				(s) =>
 					(s.ai = {
@@ -238,6 +245,9 @@ export async function startAi(
 		});
 		opened.onDisconnect.addListener(() => {
 			if (port === opened) port = undefined;
+			// The worker stopped, and its questions with it: the next one's
+			// first state lists what waits then.
+			showQuestions([]);
 			setTimeout(connectPort, 250);
 		});
 		if (windowId !== undefined) send({ type: "hello", windowId });
@@ -248,6 +258,9 @@ export async function startAi(
 	/** The worker's connection could not start: nothing here can work. */
 	function failed(problem: string): void {
 		document.documentElement.dataset["aiState"] = "failed";
+		// Its questions went with the worker: no dialog over a panel that
+		// can answer nothing.
+		showQuestions([]);
 		blurValue = undefined;
 		blurSettled();
 		for (const b of buttons) b.disabled = true;
@@ -291,7 +304,7 @@ export async function startAi(
 		blurForms.checked = a.blurForms;
 		blurValue = a.blurForms;
 		blurSettled();
-		if (document.activeElement !== relayInput) {
+		if (document.activeElement !== relayInput && !relayHeld) {
 			relayInput.value = a.relay;
 			relayInput.setCustomValidity("");
 		}
@@ -402,6 +415,12 @@ export async function startAi(
 	);
 
 	relayInput.addEventListener("change", () => {
+		// The questions' dialog took the focus from a relay half typed: that
+		// is no commit. The text stays for when the dialog has gone.
+		if (list.open) {
+			relayHeld = true;
+			return;
+		}
 		const value = relayInput.value.trim();
 		const problem = relayProblem(value);
 		if (problem !== undefined) {
@@ -521,7 +540,12 @@ export async function startAi(
 		grant: AiState["grants"][number],
 		named: boolean,
 	): HTMLElement[] {
-		const app = grant.name || grant.host;
+		// Under the top bar the name the app gave itself stands with its
+		// verified host, as in the card's head: two apps may give the same name.
+		const app =
+			named && grant.name
+				? `${grant.name} (${grant.host})`
+				: grant.name || grant.host;
 		const parts: HTMLElement[] = [
 			h(
 				"label",
@@ -541,8 +565,10 @@ export async function startAi(
 						// Allow lands on the panel under it: it turns nothing on.
 						if (input.checked && Date.now() < quietUntil) {
 							input.checked = false;
+							input.setAttribute("aria-checked", "false");
 							return;
 						}
+						input.setAttribute("aria-checked", String(input.checked));
 						send({
 							type: "allow-all",
 							grantId: grant.grantId,
@@ -554,7 +580,14 @@ export async function startAi(
 					"span",
 					{},
 					"Allow all changes",
-					named ? h("span", { class: "meta" }, ` · ${app}`) : null,
+					named
+						? h(
+								"span",
+								{ class: "meta" },
+								` · ${grant.name || grant.host}`,
+								grant.name ? ` ${grant.host}` : null,
+							)
+						: null,
 				),
 			),
 		];
@@ -745,7 +778,10 @@ export async function startAi(
 
 	/** Since when the panel has been visible and focused, if it is. */
 	let focusedSince: number | undefined;
-	const cards = new Map<string, { card: HTMLElement; shownAt: number }>();
+	const cards = new Map<
+		string,
+		{ card: HTMLElement; shownAt: number; expiresAt: number }
+	>();
 	const list = byId<HTMLDialogElement>("questions");
 	const questionStatus = byId("question-status");
 
@@ -757,14 +793,56 @@ export async function startAi(
 	 * with the last; the arguments take the focus, Allow waits as before.
 	 */
 	function showDialog(open: boolean): void {
-		if (open && !list.open) list.showModal();
-		else if (!open && list.open) {
+		if (open && !list.open) {
+			returnTo = focusedControl();
+			list.showModal();
+		} else if (!open && list.open) {
 			// With the close, not at its event a task later.
 			quietUntil = Date.now() + ALLOW_DELAY_MS;
 			list.close();
+			// The dialog gives the focus back to the element that had it, but
+			// the card and the row under the bar were drawn again meanwhile:
+			// to the same control of the same app, as drawn now.
+			returnTo?.()?.focus();
+			returnTo = undefined;
+			relayHeld = false;
 			arm();
 		}
 	}
+
+	/**
+	 * Where the focus is, if it is on a control of an AI app in the card or
+	 * under the top bar: how to find that control again once it is redrawn.
+	 */
+	let returnTo: (() => HTMLElement | null) | undefined;
+	function focusedControl(): (() => HTMLElement | null) | undefined {
+		const active = document.activeElement as HTMLElement | null;
+		const control = active?.dataset["focus"];
+		const item = active?.closest<HTMLElement>("[data-grant]");
+		const box = item?.closest<HTMLElement>("#pair-grants, #ai-allow");
+		const grant = item?.dataset["grant"];
+		if (control === undefined || grant === undefined || !box) return undefined;
+		return () =>
+			document.querySelector<HTMLElement>(
+				`#${box.id} [data-grant="${CSS.escape(grant)}"] [data-focus="${CSS.escape(control)}"]`,
+			);
+	}
+
+	// The way out that allows nothing (the rest of the panel is inert, the
+	// top bar's Stop with it): every waiting call is refused.
+	const stopInDialog = h(
+		"button",
+		{
+			type: "button",
+			"data-stop": "",
+			title:
+				"Pause AI access now: the waiting calls do not run, AI apps can no longer reach Sitegloss, and they stay paired",
+			onclick: () => send({ type: "stop" }),
+		},
+		"Stop AI access",
+	);
+	const dialogFoot = h("div", { class: "questions-foot" }, stopInDialog);
+	list.append(dialogFoot);
 	// Escape does not close it: a question ends with an answer or its time.
 	// `cancel` is not always cancelable (a close watcher without a user
 	// activation), so the key is stopped too, and a dialog closed while
@@ -778,6 +856,7 @@ export async function startAi(
 		else {
 			// A close showDialog did not make: the quiet time from now.
 			quietUntil = Math.max(quietUntil, Date.now() + ALLOW_DELAY_MS);
+			relayHeld = false;
 			arm();
 		}
 	});
@@ -835,7 +914,7 @@ export async function startAi(
 			),
 			h(
 				"p",
-				{},
+				{ id: `asks-${q.id}` },
 				h("strong", {}, `${q.app} wants to run ${q.title ?? q.tool}.`),
 			),
 			...q.lines.map((line) => h("p", {}, line)),
@@ -849,7 +928,12 @@ export async function startAi(
 			// All of them, scrolling: what is allowed is what was shown (CR-03).
 			// Reachable by keyboard to scroll them, and where the dialog's focus
 			// goes: no key pressed as the question came answers it.
-			h("pre", { tabindex: "0", "aria-label": "Arguments" }, q.args),
+			// A group: an element without a role takes no name.
+			h(
+				"pre",
+				{ tabindex: "0", role: "group", "aria-label": "Arguments" },
+				q.args,
+			),
 			h(
 				"div",
 				{ class: "row" },
@@ -882,13 +966,19 @@ export async function startAi(
 		);
 	}
 
-	function showQuestions(questions: QuestionView[]): void {
+	function showQuestions(all: QuestionView[]): void {
+		// A card dropped here stays dropped while the worker still lists it.
+		for (const id of lostIds)
+			if (!all.some((q) => q.id === id)) lostIds.delete(id);
+		const questions = all.filter((q) => !lostIds.has(q.id));
 		const ids = new Set(questions.map((q) => q.id));
 		let removed = false;
+		let hadFocus = false;
 		for (const [id, { card }] of cards)
 			if (!ids.has(id)) {
 				const pre = card.querySelector("pre");
 				if (pre !== null) overflow.unobserve(pre);
+				hadFocus ||= card.contains(document.activeElement);
 				card.remove();
 				cards.delete(id);
 				removed = true;
@@ -898,18 +988,30 @@ export async function startAi(
 		for (const q of questions)
 			if (!cards.has(q.id)) {
 				const card = question(q);
-				list.append(card);
+				dialogFoot.before(card);
 				const pre = card.querySelector("pre");
 				if (pre !== null) {
 					scrollNote(pre);
 					overflow.observe(pre);
 				}
-				cards.set(q.id, { card, shownAt: Date.now() });
+				cards.set(q.id, { card, shownAt: Date.now(), expiresAt: q.expiresAt });
 				announce(`${q.app} wants to run ${q.title ?? q.tool}.`);
 			}
+		// The dialog is described by its first question: who asks for what.
+		const [first] = cards.keys();
+		if (first === undefined) list.removeAttribute("aria-describedby");
+		else list.setAttribute("aria-describedby", `asks-${first}`);
 		showDialog(cards.size > 0);
+		// The answered card had the focus and went: to the next one's arguments.
+		if (hadFocus)
+			cards.values().next().value?.card.querySelector("pre")?.focus();
 		arm();
 	}
+
+	/** How long after its end a card stays when no state took it away. */
+	const LOST_CARD_MS = 5000;
+	/** The questions whose cards were dropped so, while the worker lists them. */
+	const lostIds = new Set<string>();
 
 	/**
 	 * Allow and Always allow count once the panel has been visible and focused for
@@ -940,10 +1042,22 @@ export async function startAi(
 		// The quiet after the dialog, for the end-to-end tests: no look, as
 		// nothing moved (switches going grey after every answer would flicker).
 		document.body.toggleAttribute("data-quiet", now < quietUntil);
+		// A card well past its end that no state took away (the worker's
+		// timer and this clock disagree, or its news was lost): the panel is
+		// not held under a dialog that waits for nothing.
+		const lost = [...cards].filter(
+			([, entry]) => now > entry.expiresAt + LOST_CARD_MS,
+		);
+		if (lost.length > 0) {
+			for (const [id] of lost) lostIds.add(id);
+			showQuestions((current?.questions ?? []).filter((q) => cards.has(q.id)));
+		}
 	}
 
 	setInterval(() => {
-		if (cards.size > 0 || Date.now() < quietUntil + 200) arm();
+		// While the mark of the quiet time is there too: a tick that comes late
+		// (timers of a hidden panel) still takes it off.
+		if (cards.size > 0 || document.body.hasAttribute("data-quiet")) arm();
 	}, 100);
 	for (const type of ["focus", "blur", "visibilitychange"])
 		window.addEventListener(type, arm);

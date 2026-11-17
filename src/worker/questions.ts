@@ -206,7 +206,7 @@ export class Questions {
 			lines: lines.map(visible),
 			// All of it: the user allows what they were shown (CR-03).
 			args: json,
-			expiresAt: Date.now() + this.#timeoutMs,
+			expiresAt: this.#host.now() + this.#timeoutMs,
 		};
 		const args = visible(JSON.stringify(request.arguments) ?? "{}");
 		return new Promise((resolve) => {

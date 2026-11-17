@@ -763,8 +763,15 @@ body:has(#settings:not([hidden])) .ai-allow {
 	display: none;
 }
 
+/* Chrome and Edge before 122: a backdrop sees no custom properties. */
 .questions::backdrop {
-	background: var(--scrim);
+	background: var(--scrim, rgb(27 33 48 / 0.4));
+}
+
+/* The way out that allows nothing, under the questions. */
+.questions-foot {
+	display: flex;
+	justify-content: flex-end;
 }
 
 /* Each waits for an answer: a sheet with an edge. */
@@ -2207,6 +2214,11 @@ button.copy {
 }
 
 @media (prefers-reduced-motion: reduce) {
+	/* The line under the buttons says the time left. */
+	.countdown-bar {
+		display: none;
+	}
+
 	button,
 	.switch input,
 	.switch input::after,
@@ -2232,12 +2244,14 @@ button.copy {
 		background: ButtonText;
 	}
 
-	.switch input:checked {
+	.switch input:checked,
+	.switch.small input:checked {
 		background: Highlight;
 	}
 
 	.number,
 	.progress > span,
+	.countdown-bar span,
 	.ai-pill .dot,
 	.ai-state .dot {
 		forced-color-adjust: none;

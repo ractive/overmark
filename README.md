@@ -267,7 +267,7 @@ such as Claude in Chrome's, can cover it), otherwise in a system notification wi
 Allow and Always allow, where closing it is Don't allow (the icon shows "?" while a
 question waits). In the side panel the question is a dialog over the panel, wherever it
 is scrolled to, with Don't allow, Allow and Always allow, and it counts down its 60
-seconds. With no answer in that time the call does not run, and the AI
+seconds; "Stop AI access" under it refuses everything that waits. With no answer in that time the call does not run, and the AI
 app is told you did not answer. "Always allow" lets that
 tool run without asking for that AI app from then on; "Allow all changes", a switch
 for each connected app under the side panel's top bar (and under the app in the AI app

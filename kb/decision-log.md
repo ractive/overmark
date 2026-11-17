@@ -1315,8 +1315,7 @@ Chrome's (DEC-032) and Edge's (DEC-033).
 - `release.yml` builds the Firefox store zip and `sitegloss-<version>-source.zip`
   (`git archive` of the built commit) beside the other zips, attests all of them, and runs
   the job `publish-firefox` after it creates the release: `firefox-extension-publish.yml`
-  of ractive/release-workflows (ractive/release-workflows PR 17, pinned to its head commit
-  until v0.8.0 is released), in the environment `firefox-add-ons` (required reviewer, tags
+  of ractive/release-workflows (v0.8.1, pinned by its commit), in the environment `firefox-add-ons` (required reviewer, tags
   `v*` only), with `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. `publish.yml` runs it by hand
   (store `firefox`, or `all` for the three stores; `both` is gone).
 - Beside the other store jobs, not after them: one store's failure or rejection does not
@@ -1340,13 +1339,16 @@ the view the user is on while the app asks says that it exists. It belongs where
 user is: below the top bar.
 
 - Under the top bar, on Home and in an open case, one row for each connected AI app: the
-  switch "Allow all changes · <app>", and while it is on the line DEC-018 asks for
+  switch "Allow all changes · <app>" with the app's verified host beside the name it
+  gave itself (two apps may give the same name), and while it is on the line DEC-018 asks for
   ("Every change <app> asks for runs without asking you, deleting a case too, until you
   disconnect it."). Above the last AI call.
 - Only while AI access is connected and an app is paired: otherwise no app can ask.
   Only apps the card lists, as DEC-018 limits it; the same command to the worker.
 - The card keeps its switch, with the tools always allowed and "Ask again". Settings
   shows the card and hides the row, so the switch is never there twice.
+- It is set between questions: while one waits, the dialog (DEC-037) is over the panel,
+  and its card has Always allow for that tool.
 
 ## DEC-037: Questions in a modal dialog, as the tab-mcp extension's (owner)
 
@@ -1367,6 +1369,14 @@ Taken over:
   60 s. The arguments take the focus (they are focusable, to scroll them by keyboard), so
   no key pressed as the question came answers it. Allow waits as before (DEC-018). A
   short line is said for screen readers, not the card with its arguments.
+- **"Stop AI access" is in the dialog too**, under the questions: the top bar's Stop is
+  inert under it, and an app that keeps asking must not keep the user from stopping it.
+  It refuses what waits. A card whose question ended without the worker saying so (the
+  worker stopped, or its timer and the clock disagree) goes by itself, so the panel is
+  never held under a dialog that waits for nothing.
+- **Focus.** A card answered with others waiting hands the focus to the next one's
+  arguments; when the dialog closes, the focus goes back to the control of the AI app
+  it was on. A relay address half typed when a question takes the focus is not saved.
 - **After the dialog closes, "Allow all changes" turns nothing on for 750 ms**: the second
   click of a double click on the dialog's last Allow lands on the panel under it, where
   DEC-036 put that switch. Not shown (nothing moved); `data-quiet` on the body is for the
