@@ -1,21 +1,28 @@
-name: Publish to Chrome Web Store
+name: Publish to the stores
 
-# Publishes the store zip of a GitHub release to the Chrome Web Store by hand:
-# the same job release.yml runs after it creates the release, for a release
-# whose publish failed or was rejected. Actions → Publish to Chrome Web Store →
-# Run workflow, and pick the release's tag under "Use workflow from"; a run
-# from a branch fails.
+# Publishes the store zip of a GitHub release to the Chrome Web Store or
+# Microsoft Edge Add-ons by hand: the jobs release.yml runs after it creates the
+# release, for a release whose publish failed or was rejected. Actions →
+# Publish to the stores → Run workflow, pick the release's tag under "Use
+# workflow from" (a run from a branch fails) and the store.
 #
-# ractive/release-workflows chrome-extension-publish.yml (DEC-032): only a zip
-# whose build provenance verifies (signed by release.yml for this tag), as a
-# CRX signed with the item's verified-upload key, from the environment
-# chrome-web-store. Setup: kb/operations/chrome-web-store.md.
+# ractive/release-workflows chrome-extension-publish.yml (DEC-032) and
+# edge-extension-publish.yml (DEC-033): only a zip whose build provenance
+# verifies (signed by release.yml for this tag); for Chrome as a CRX signed
+# with the item's verified-upload key, from the environment chrome-web-store;
+# for Edge the zip, from the environment edge-add-ons.
+# Setup: kb/operations/chrome-web-store.md.
 
 on:
   workflow_dispatch:
     inputs:
+      store:
+        description: "The store to publish to"
+        type: choice
+        options: [chrome, edge, both]
+        default: chrome
       submit:
-        description: "Submit for review after the upload (otherwise it stays a draft in the dashboard)"
+        description: "Submit for review after the upload (otherwise it stays a draft in the store's dashboard)"
         type: boolean
         default: true
 
@@ -24,6 +31,7 @@ permissions:
 
 jobs:
   publish:
+    if: inputs.store != 'edge'
     uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@ea1fdf1ab5602ac55fa78f2d10e65d9dc4d5cd24 # v0.6.0
     # The job runs in the environment chrome-web-store, whose secrets a
     # reusable workflow sees only when the caller passes them on: inherit
@@ -39,3 +47,27 @@ jobs:
       attest-signer-workflow: .github/workflows/release.yml
       signing-key-id: fhagiknobniheomfcadmfdpanogmpmka
       submit: ${{ inputs.submit }}
+
+  publish-edge:
+    if: inputs.store != 'chrome'
+    uses: ractive/release-workflows/.github/workflows/edge-extension-publish.yml@f1fde0fc2dfb016201659084f5d9d4f2ad2cea5a # v0.7.0
+    secrets: inherit
+    permissions:
+      contents: read
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      asset: sitegloss-{version}-store.zip
+      product-id: 5c87cd72-07f3-427a-a433-edcd7c08eff4
+      attest-signer-workflow: .github/workflows/release.yml
+      submit: ${{ inputs.submit }}
+      # The same notes for certification as release.yml's.
+      notes: >-
+        Open any web page and click the Sitegloss toolbar icon: the side panel opens. "New case
+        for this page" shows a toolbar on the page (Element, Box, Arrow, Pen, Note); each mark
+        takes a comment and is saved to the case with a screenshot. Clicking the case on the
+        same page later draws the marks on it again. Connecting an AI app is optional: the
+        side panel's AI section uses the hosted tab-mcp relay and shows an address and a
+        pairing code for an MCP client. Source: https://github.com/ractive/sitegloss; the
+        package is the release zip of tag ${{ github.ref_name }}, with GitHub build
+        provenance (gh attestation verify <zip> -R ractive/sitegloss).

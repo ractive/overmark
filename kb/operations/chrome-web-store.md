@@ -87,10 +87,10 @@ in that environment, and a caller outside the environment cannot name them one b
 repository has no secrets of its own, so only the environment's reach the job (tab-mcp's
 first publish failed for the lack of it, before the upload; a dry run reads no secrets).
 
-If the publish fails or is rejected, fix the cause and run "Publish to Chrome Web Store"
-(`publish.yml`) by hand: Actions → Publish to Chrome Web Store → Run workflow, and pick
-the release's tag under "Use workflow from" (the default, `main`, fails). "Submit" off
-leaves the upload as a draft in the dashboard.
+If the publish fails or is rejected, fix the cause and run "Publish to the stores"
+(`publish.yml`) by hand: Actions → Publish to the stores → Run workflow, pick the
+release's tag under "Use workflow from" (the default, `main`, fails) and store `chrome`.
+"Submit" off leaves the upload as a draft in the dashboard.
 
 ### Verified CRX uploads
 
@@ -128,6 +128,35 @@ openssl pkey -in sitegloss-crx-key.pem -pubout -outform DER | shasum -a 256 | he
    `main`).
 5. Opt in to Verified CRX uploads (Package tab) with the key's public key, after the
    secret is set: from then on the store refuses a zip.
+
+## Microsoft Edge Add-ons
+
+The same release goes to its Edge Add-ons item (DEC-033): `release.yml`'s job
+`publish-edge` runs beside `publish`, after the release, and calls
+[edge-extension-publish.yml](https://github.com/ractive/release-workflows/blob/v0.7.0/.github/workflows/edge-extension-publish.yml)
+of ractive/release-workflows (pinned to a commit) in the environment `edge-add-ons`
+(required reviewer, tags `v*` only). It runs the same checks of the tag, the manifest and
+the zip's build provenance, then uploads the zip itself (Edge takes no CRX and has no
+signed uploads) through the Edge Add-ons API v1.1 and submits it for certification with
+the notes in the workflow. On failure the log shows Microsoft's error code and message.
+
+- **Item:** Product ID `5c87cd72-07f3-427a-a433-edcd7c08eff4` (the workflows'
+  `product-id`), CRX id `odheabckckkaclenpbbdkpkjjfmbnalo`. Edge's store signs with its own
+  key, so the id differs from the Chrome Web Store's, and the hosted relay allows
+  `chrome-extension://odheabckckkaclenpbbdkpkjjfmbnalo` separately. 0.2.0 went in by hand
+  (the API updates items, it cannot create one).
+- **Credentials:** Partner Center → Microsoft Edge → Publish API: the Client ID and an API
+  key, as the environment secrets `EDGE_CLIENT_ID` and `EDGE_API_KEY` of `edge-add-ons`; both
+  workflows pass `secrets: inherit`. The key works for every item of the account (tab-mcp's
+  workflows use the same). **API keys expire** (the date is on that page): before then
+  "Create API credentials" makes a new key, and the secret takes it. An expired key fails
+  the upload at once with HTTP 401.
+- **One submission at a time:** while a version is in certification, a new submission is
+  refused with `InProgressSubmission`; the upload to the draft has gone through. Run it
+  again by hand once certification is over.
+- **By hand:** Actions → "Publish to the stores" → Run workflow, the release's tag under
+  "Use workflow from", store `edge` (or `both`). "Submit" off leaves the package in the
+  item's draft in Partner Center.
 
 ## Listing
 

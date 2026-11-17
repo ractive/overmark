@@ -25,6 +25,7 @@ interface Workflow {
 		string,
 		{
 			needs?: string | string[];
+			if?: string;
 			permissions?: Record<string, string>;
 			outputs?: Record<string, string>;
 			uses?: string;
@@ -154,6 +155,57 @@ describe("publishing to the Chrome Web Store", () => {
 		const w = await workflow("publish.yml");
 		expect(w.on.workflow_dispatch?.inputs["tag"]).toBeUndefined();
 		expect(byHand?.with?.["submit"]).toBe("${{ inputs.submit }}");
+		expect(byHand?.if).toBe("inputs.store != 'edge'");
+	});
+});
+
+describe("publishing to Microsoft Edge Add-ons", () => {
+	const REF = "${{ github.ref_name }}";
+	const SHARED =
+		/^ractive\/release-workflows\/\.github\/workflows\/edge-extension-publish\.yml@[0-9a-f]{40}$/;
+
+	// release.yml's job beside the Chrome Web Store's, and publish.yml's by
+	// hand: the same call of release-workflows' job (DEC-033).
+	const callers = async () => [
+		(await workflow("release.yml")).jobs["publish-edge"],
+		(await workflow("publish.yml")).jobs["publish-edge"],
+	];
+
+	test("both publish the attested store zip to the Edge item, with the environment's secrets", async () => {
+		for (const job of await callers()) {
+			expect(job?.uses).toMatch(SHARED);
+			expect(job?.with?.["tag"]).toBe(REF);
+			expect(job?.with?.["tag-prefix"]).toBeUndefined();
+			expect(job?.with?.["asset"]).toBe("sitegloss-{version}-store.zip");
+			expect(job?.with?.["product-id"]).toBe(
+				"5c87cd72-07f3-427a-a433-edcd7c08eff4",
+			);
+			expect(job?.with?.["attest-signer-workflow"]).toBe(
+				".github/workflows/release.yml",
+			);
+			expect(job?.with?.["allow-host-permissions"]).toBeUndefined();
+			expect(String(job?.with?.["notes"]).length).toBeLessThanOrEqual(2000);
+			expect(job?.permissions).toEqual({
+				contents: "read",
+				attestations: "read",
+			});
+			expect(job?.secrets).toBe("inherit");
+		}
+	});
+
+	test("release.yml runs it beside the Chrome job, publish.yml when Edge is picked", async () => {
+		const [release, byHand] = await callers();
+		// Not after the Chrome job: one store's failure must not hold back the other.
+		expect(release?.needs).toBe("release");
+		const w = await workflow("publish.yml");
+		expect(w.on.workflow_dispatch?.inputs["store"]).toMatchObject({
+			type: "choice",
+			options: ["chrome", "edge", "both"],
+		});
+		expect(byHand?.if).toBe("inputs.store != 'chrome'");
+		expect(byHand?.with?.["submit"]).toBe("${{ inputs.submit }}");
+		// The same notes for certification either way.
+		expect(byHand?.with?.["notes"]).toBe(release?.with?.["notes"]);
 	});
 });
 
