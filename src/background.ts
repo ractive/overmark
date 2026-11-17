@@ -67,26 +67,45 @@ declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
 declare const SITEGLOSS_FIREFOX: boolean | undefined;
 
 /**
- * A test build keeps the worker's errors on its global object, for the
- * end-to-end tests: Firefox's event page has a console no automation
- * reaches. (The define itself: other builds drop it.)
+ * A test build keeps what the worker reports as wrong, for the end-to-end
+ * tests: Firefox's event page has a console no automation reaches, and it is
+ * discarded after 30 s idle, so the record is in `storage.session`
+ * (`siteglossTestLog`), which outlasts it, one line each, `error: …` (errors,
+ * unhandled rejections, console.error) or `warn: …` (console.warn). (The
+ * define itself: other builds drop it.)
  */
 if (typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD) {
-	const errors: string[] = [];
+	const key = "siteglossTestLog";
 	const text = (value: unknown) =>
 		value instanceof Error ? value.message : String(value);
+	let writing: Promise<unknown> = Promise.resolve();
+	const log = (kind: "error" | "warn", parts: unknown[]) => {
+		const line = `${kind}: ${parts.map(text).join(" ")}`;
+		writing = writing
+			.then(() => chrome.storage.session.get(key))
+			.then((stored) =>
+				chrome.storage.session.set({
+					[key]: [...((stored[key] as string[] | undefined) ?? []), line],
+				}),
+			)
+			.catch(() => undefined);
+	};
 	globalThis.addEventListener("error", (e) =>
-		errors.push(text((e as ErrorEvent).error ?? (e as ErrorEvent).message)),
+		log("error", [(e as ErrorEvent).error ?? (e as ErrorEvent).message]),
 	);
 	globalThis.addEventListener("unhandledrejection", (e) =>
-		errors.push(text((e as PromiseRejectionEvent).reason)),
+		log("error", [(e as PromiseRejectionEvent).reason]),
 	);
 	const error = console.error.bind(console);
 	console.error = (...args: unknown[]) => {
-		errors.push(args.map(text).join(" "));
+		log("error", args);
 		error(...args);
 	};
-	Object.assign(globalThis, { siteglossErrors: errors });
+	const warn = console.warn.bind(console);
+	console.warn = (...args: unknown[]) => {
+		log("warn", args);
+		warn(...args);
+	};
 }
 
 const store = new IdbStore();

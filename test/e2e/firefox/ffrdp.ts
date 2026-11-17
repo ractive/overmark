@@ -159,7 +159,7 @@ export class FfRdp {
  * comes first (a lock directory with the holder's pid; one whose holder is
  * gone is taken over). Resolves with the function that gives it back.
  */
-export async function takeLock(waitMs = 15 * 60_000): Promise<() => void> {
+export async function takeLock(waitMs: number): Promise<() => void> {
 	const dir = join(tmpdir(), "sitegloss-firefox-e2e.lock");
 	const pidFile = join(dir, "pid");
 	const end = Date.now() + waitMs;

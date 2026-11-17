@@ -24,11 +24,12 @@ import { MAX_SIDE } from "../../../src/lib/images.ts";
 import { cropRectFor } from "../../../src/lib/save.ts";
 import { readZip } from "../../../src/lib/zip.ts";
 import {
-	backgroundErrors,
+	backgroundLog,
 	clickButton,
 	draw,
 	type FirefoxHarness,
 	firefoxReady,
+	LOCK_WAIT_MS,
 	marksInPanel,
 	newCase,
 	PANEL_TEXT,
@@ -109,22 +110,42 @@ async function until(
 	}
 }
 
+/**
+ * The time a start may take: the wait for another run's lock, then the
+ * build and Firefox's start (two minutes). A start the hook gave up on goes
+ * on, and is stopped once it is there (`stopStarted`).
+ */
+const START_TIMEOUT_MS = LOCK_WAIT_MS + 120_000;
+/** Enough for a start the hook gave up on to finish, and to stop it. */
+const STOP_TIMEOUT_MS = 180_000;
+
+/** Stop the Firefox a start made, also one still under way when the hook timed out. */
+async function stopStarted(
+	starting: Promise<FirefoxHarness> | undefined,
+): Promise<void> {
+	// A failed start cleaned up after itself.
+	const started = await starting?.catch(() => undefined);
+	await started?.stop();
+}
+
 describe.skipIf(!firefoxReady)("Firefox: the test build", () => {
 	let h: FirefoxHarness;
+	let starting: Promise<FirefoxHarness> | undefined;
 	let relay: TestRelay | undefined;
 
 	beforeAll(async () => {
-		h = await startFirefox("test");
-	}, 120_000);
+		starting = startFirefox("test");
+		h = await starting;
+	}, START_TIMEOUT_MS);
 
 	afterAll(async () => {
 		await relay?.stop();
-		await h?.stop();
-	}, 60_000);
+		await stopStarted(starting);
+	}, STOP_TIMEOUT_MS);
 
 	test("installs with no manifest warning, and the event page starts without an error", async () => {
 		expect(h.warnings).toEqual([]);
-		expect(await backgroundErrors(h)).toEqual([]);
+		expect(await backgroundLog(h)).toEqual([]);
 		// Firefox's words: the panel is a sidebar there.
 		expect(
 			await h.rdp.eval<string>(
@@ -311,11 +332,12 @@ describe.skipIf(!firefoxReady)("Firefox: the test build", () => {
 		// Overwritten in place: no "(1)" copy beside it.
 		expect(synced().sort()).toEqual([...before, file].sort());
 		// Firefox's download list keeps only the newest of the sync's entries.
-		const entries = await h.rdp.eval<string[]>(
+		// The worker erases the entry before it once the new one is done.
+		await h.rdp.waitFor(
 			h.panel,
-			"chrome.downloads.search({}).then((all) => all.filter((d) => /[\\\\/]Sitegloss[\\\\/]/.test(d.filename)).map((d) => d.filename))",
+			"chrome.downloads.search({}).then((all) => all.filter((d) => /[\\\\/]Sitegloss[\\\\/]/.test(d.filename)).length === 1)",
+			"one entry of the sync's in the download list",
 		);
-		expect(entries).toHaveLength(1);
 	}, 120_000);
 
 	test("AI access: a read tool, a question answered in the panel, still connected after 30 s idle", async () => {
@@ -425,20 +447,22 @@ describe.skipIf(!firefoxReady)("Firefox: the test build", () => {
 	}, 120_000);
 
 	test("the event page logged no error all along", async () => {
-		expect(await backgroundErrors(h)).toEqual([]);
+		expect(await backgroundLog(h)).toEqual([]);
 	});
 });
 
 describe.skipIf(!firefoxReady)("Firefox: the store package", () => {
 	let h: FirefoxHarness;
+	let starting: Promise<FirefoxHarness> | undefined;
 
 	beforeAll(async () => {
-		h = await startFirefox("store");
-	}, 120_000);
+		starting = startFirefox("store");
+		h = await starting;
+	}, START_TIMEOUT_MS);
 
 	afterAll(async () => {
-		await h?.stop();
-	}, 60_000);
+		await stopStarted(starting);
+	}, STOP_TIMEOUT_MS);
 
 	test("installs with no manifest warning; its panel's page in a tab is no panel", async () => {
 		expect(h.warnings).toEqual([]);

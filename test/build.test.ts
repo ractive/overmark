@@ -293,8 +293,8 @@ describe("build", () => {
 			const worker = await Bun.file(join(outdir, "background.js")).text();
 			expect(worker).not.toContain("SITEGLOSS_TEST_BUILD");
 			expect(worker).not.toContain("test:access");
-			// Nor the worker's record of its errors for the tests.
-			expect(worker).not.toContain("siteglossErrors");
+			// Nor the worker's record of what went wrong, for the tests.
+			expect(worker).not.toContain("siteglossTestLog");
 			// Nor the side panel's way to take a folder without the picker (DEC-021).
 			const panel = new Bun.Glob("sidepanel/**/*.js");
 			let scripts = 0;

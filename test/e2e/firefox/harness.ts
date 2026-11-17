@@ -29,6 +29,12 @@ if (!firefoxReady && process.env["CI"])
 		`ff-rdp and Firefox are needed for the Firefox end-to-end tests in CI (ff-rdp: ${ffRdpBinary ?? "not found, set FF_RDP_PATH"}; Firefox: ${firefoxBinary ?? "not found, set FIREFOX_PATH"})`,
 	);
 
+/**
+ * How long a start waits for another run's lock (a whole run takes about a
+ * minute); the tests' hooks wait longer than this for a start.
+ */
+export const LOCK_WAIT_MS = 5 * 60_000;
+
 export interface FirefoxHarness {
 	rdp: FfRdp;
 	/** `http://127.0.0.1:<port>` serving `test/e2e/pages/`. */
@@ -93,7 +99,7 @@ export async function startFirefox(
 	kind: "test" | "store",
 ): Promise<FirefoxHarness> {
 	if (ffRdpBinary === undefined) throw new Error("no ff-rdp");
-	const unlock = await takeLock();
+	const unlock = await takeLock(LOCK_WAIT_MS);
 	const root = mkdtempSync(join(tmpdir(), "sitegloss-firefox-"));
 	const outdir = join(root, "dist");
 	const profile = join(root, "profile");
@@ -247,11 +253,15 @@ export function readCase(
 	);
 }
 
-/** The event page's recorded errors (the test build's `siteglossErrors`). */
-export function backgroundErrors(h: FirefoxHarness): Promise<string[]> {
+/**
+ * What the event page reported as wrong so far, each `error: …` or
+ * `warn: …`: the test build's record in `storage.session`, which outlasts
+ * the event pages Firefox stops when idle.
+ */
+export function backgroundLog(h: FirefoxHarness): Promise<string[]> {
 	return h.rdp.eval<string[]>(
 		h.panel,
-		"browser.runtime.getBackgroundPage().then((bg) => [...(bg.siteglossErrors ?? ['no siteglossErrors: not a test build?'])])",
+		'chrome.storage.session.get("siteglossTestLog").then((s) => s.siteglossTestLog ?? [])',
 	);
 }
 
