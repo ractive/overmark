@@ -238,8 +238,7 @@ jobs:
     # Beside the other two, not after them: one store's failure does not hold
     # back the others. Waits for the owner's approval in its own environment.
     needs: release
-    # PR 17's head: pin v0.8.0's commit once it is released
-    uses: ractive/release-workflows/.github/workflows/firefox-extension-publish.yml@c2ec18473709dcffae7299dd6d846ffe697adfb2
+    uses: ractive/release-workflows/.github/workflows/firefox-extension-publish.yml@d69f242378f228560fdf2fb7ce851c2d8fb6a11e # v0.8.1
     # The environment firefox-add-ons (required reviewer, tags v* only) holds
     # AMO_JWT_ISSUER and AMO_JWT_SECRET; inherit passes them on, as above.
     secrets: inherit
