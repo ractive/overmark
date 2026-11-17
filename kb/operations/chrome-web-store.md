@@ -155,7 +155,7 @@ the notes in the workflow. On failure the log shows Microsoft's error code and m
   refused with `InProgressSubmission`; the upload to the draft has gone through. Run it
   again by hand once certification is over.
 - **By hand:** Actions → "Publish to the stores" → Run workflow, the release's tag under
-  "Use workflow from", store `edge` (or `both`). "Submit" off leaves the package in the
+  "Use workflow from", store `edge` (or `all`). "Submit" off leaves the package in the
   item's draft in Partner Center.
 
 ## Listing
