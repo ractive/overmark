@@ -530,6 +530,10 @@ async function overlayState(tabId: number): Promise<OverlayState | undefined> {
 	}
 }
 
+/** Firefox's "Access local files on your computer" for Sitegloss. */
+const firefoxFileAccess = () =>
+	chrome.extension.isAllowedFileSchemeAccess().catch(() => false);
+
 async function refreshTab(): Promise<void> {
 	const work = tabWork.start();
 	refreshing++;
@@ -538,15 +542,21 @@ async function refreshTab(): Promise<void> {
 		const overlay =
 			tab?.id === undefined ? undefined : await overlayState(tab.id);
 		const size = tab === undefined ? undefined : await tabSize(tab);
+		const files = FIREFOX ? await firefoxFileAccess() : undefined;
+		// Firefox tells a file's address, which Chrome hides, also where
+		// Sitegloss may not run on it: hidden here, as in Chrome.
+		const hidden =
+			files === false && (tab?.url ?? "").toLowerCase().startsWith("file:");
 		if (!work.current()) return;
 		update((s) => {
+			if (files !== undefined) s.fileAccess = files;
 			const next =
 				tab?.id === undefined
 					? undefined
 					: {
 							id: tab.id,
-							url: tab.url ?? "",
-							title: tab.title ?? "",
+							url: hidden ? "" : (tab.url ?? ""),
+							title: hidden ? "" : (tab.title ?? ""),
 							size,
 							loading: tab.status === "loading",
 						};
@@ -2410,7 +2420,8 @@ void refreshTab();
 void refreshAllSites();
 void refreshDownloads();
 // Turning "Allow access to file URLs" on or off reloads Sitegloss: once is
-// enough. Firefox has no such toggle (its answer is always no before 153).
+// enough. Firefox's "Access local files on your computer" reloads nothing:
+// it is read again with each look at the tab (`refreshTab`).
 if (!FIREFOX)
 	void chrome.extension.isAllowedFileSchemeAccess().then(
 		(allowed) => update((s) => (s.fileAccess = allowed)),

@@ -84,14 +84,14 @@ describe("manifest", () => {
 });
 
 describe("Firefox manifest", () => {
-	test("an event page, a sidebar, no offscreen document or side panel, the add-on id and Firefox 140", () => {
+	test("an event page, a sidebar, no offscreen document or side panel, the add-on id and Firefox 153", () => {
 		const m = createFirefoxManifest("1.2.3", {});
 		expect(m["manifest_version"]).toBe(3);
 		expect(m["version"]).toBe("1.2.3");
 		expect(m["browser_specific_settings"]).toEqual({
 			gecko: {
 				id: FIREFOX_ID,
-				strict_min_version: "140.0",
+				strict_min_version: "153.0",
 				// Nothing goes anywhere until the user turns AI access on, and
 				// asks for it then.
 				data_collection_permissions: {

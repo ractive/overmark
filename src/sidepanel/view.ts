@@ -5,7 +5,13 @@
  * render; the other parts are redrawn when what they show changed.
  */
 
-import { BROWSER, CANNOT_RUN_TEXT, PANEL } from "../lib/browser.ts";
+import {
+	BROWSER,
+	CANNOT_RUN_FILES_TEXT,
+	CANNOT_RUN_TEXT,
+	FIREFOX,
+	PANEL,
+} from "../lib/browser.ts";
 import {
 	type Annotation,
 	appLabel,
@@ -167,8 +173,7 @@ export const NO_ACCESS =
 export const CANNOT_RUN = CANNOT_RUN_TEXT;
 
 /** The same, where Sitegloss may not read files either: that is the toggle for them. */
-export const CANNOT_RUN_FILES =
-	"Sitegloss cannot run on this tab. A page of Chrome's own or the Chrome Web Store is off limits to extensions. A file on your computer needs “Allow access to file URLs” in Sitegloss's details.";
+export const CANNOT_RUN_FILES = CANNOT_RUN_FILES_TEXT;
 
 /** The title of a button that needs the page, while Sitegloss may not run there. */
 export const NEEDS_ACCESS =
@@ -284,7 +289,8 @@ function renderAccess(n: Notice, state: PanelState): void {
 	const files = now === "never" && state.fileAccess === false;
 	n.text.textContent =
 		now !== "never" ? NO_ACCESS : files ? CANNOT_RUN_FILES : CANNOT_RUN;
-	n.button.hidden = now === "never" && !files;
+	// Firefox lets no extension open its add-ons page: the text says the way.
+	n.button.hidden = now === "never" && (!files || FIREFOX);
 	n.button.dataset["action"] = files ? "file-access" : "allow-all-sites";
 	n.button.textContent = files
 		? "Open Sitegloss's details"

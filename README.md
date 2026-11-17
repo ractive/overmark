@@ -33,7 +33,7 @@ panel there.
 `bun run zip` packs `sitegloss-<version>.zip` for sharing; unzip it and load the folder
 the same way.
 
-For Firefox (140 or later, desktop), `bun scripts/build.ts --firefox` builds
+For Firefox (153 or later, desktop), `bun scripts/build.ts --firefox` builds
 `dist-firefox/`; in Firefox open `about:debugging`, This Firefox, "Load Temporary Add-on…"
 and choose its `manifest.json` (gone when Firefox quits). `bun scripts/firefox-dev.ts`
 builds it and starts Firefox with it through [ff-rdp](https://github.com/ractive/ff-rdp),

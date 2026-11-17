@@ -60,7 +60,7 @@ export function requestPermissions(
 	return chrome.permissions.request(permissions);
 }
 
-/** Firefox's `permissions` with the data collection consent (Firefox 140+). */
+/** Firefox's `permissions` with the data collection consent. */
 interface FirefoxPermissions {
 	request(p: { data_collection: readonly string[] }): Promise<boolean>;
 	contains(p: { data_collection: readonly string[] }): Promise<boolean>;
@@ -93,6 +93,15 @@ export function askDataConsent(): Promise<boolean> {
 			.then((yes) => yes || firefoxPermissions().request(wanted));
 	return firefoxPermissions().request(wanted);
 }
+
+/**
+ * The same, where Sitegloss may not read files either: where the user lets
+ * it (Firefox lets no extension open its add-ons page, so the text says the
+ * way there).
+ */
+export const CANNOT_RUN_FILES_TEXT: string = FIREFOX
+	? "Sitegloss cannot run on this tab. A page of Firefox's own (about:) or addons.mozilla.org is off limits to extensions. For a file on your computer, turn on “Access local files on your computer” in Firefox's Add-ons and themes: Sitegloss, Permissions and data."
+	: "Sitegloss cannot run on this tab. A page of Chrome's own or the Chrome Web Store is off limits to extensions. A file on your computer needs “Allow access to file URLs” in Sitegloss's details.";
 
 /** Firefox's `browser.sidebarAction`, the part used here. */
 export interface SidebarAction {

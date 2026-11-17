@@ -157,10 +157,14 @@ export const FIREFOX_ID = "sitegloss@ractive.ch";
  * background is an event page (`background.scripts`: Firefox has no
  * extension service workers), the side panel a sidebar (`sidebar_action`),
  * and there is no offscreen document (the event page has a DOM and makes the
- * sync's blob URLs itself). Firefox 140, the ESR, is the first with the data
- * collection consent: Sitegloss sends nothing anywhere until the user turns
- * AI access on, and then the pages' content and addresses go to the AI app,
- * so that is optional and asked for at that click (a test build has it at
+ * sync's blob URLs itself). Firefox 153, the ESR since 2026-07 (ESR 140's
+ * last release was 2026-09-29), is the first to tell a message's
+ * `documentId`, which Undo of a mark just added needs, and the first where
+ * "Access local files on your computer" is what
+ * `extension.isAllowedFileSchemeAccess` answers. The data collection consent
+ * (from 140): Sitegloss sends nothing anywhere until the user turns AI
+ * access on, and then the pages' content and addresses go to the AI app, so
+ * that is optional and asked for at that click (a test build has it at
  * install, as it has host access and `downloads`).
  */
 export function createFirefoxManifest(
@@ -179,7 +183,7 @@ export function createFirefoxManifest(
 		browser_specific_settings: {
 			gecko: {
 				id: FIREFOX_ID,
-				strict_min_version: "140.0",
+				strict_min_version: "153.0",
 				data_collection_permissions: options.test
 					? { required: [...DATA_COLLECTION] }
 					: { required: ["none"], optional: [...DATA_COLLECTION] },
