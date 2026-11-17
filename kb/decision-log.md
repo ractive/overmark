@@ -34,7 +34,7 @@ input of a similarity score (after Similo). The case format is Overmark's own
 (`overmark/1`); the CSS selector is named after the W3C `CssSelector`, and a full W3C
 Web Annotation export waits for a consumer that needs it.
 
-## DEC-003: Chrome and Edge, Manifest V3, `activeTab` first
+## DEC-003: Chrome and Edge, Manifest V3, `activeTab` first (Firefox amended by DEC-034)
 
 Firefox and Safari give every install a random extension ID, which a relay's allow
 list cannot name. `activeTab` covers drawing, reading the page and `captureVisibleTab`
@@ -1268,3 +1268,64 @@ asked for the Edge upload to be automated as well (tab-mcp's DEC-194 is the same
   holds the API key could upload another zip; the key lives only in the environment and in
   the owner's password manager, and it expires.
 - No third-party code in the job: the API is called with `curl`, as for Chrome (DEC-032).
+
+## DEC-034: A Firefox build (owner)
+
+2026-11-17. The owner asked for Sitegloss in Firefox too, after the hosted tab-mcp relay
+began to admit Firefox extensions (tab-mcp's DEC-189, since 2026-11-16). That was DEC-003's
+reason against Firefox: an installation's origin is `moz-extension://<a UUID per
+installation>`, so no list can name one extension; a relay now admits all of them
+(`moz-extension://*`, relay 0.11.0 or later) or none. This amends DEC-003: Chrome, Edge and
+desktop Firefox (153 or later, the ESR since 2026-07 and the first to tell a message's
+`documentId`, which Undo of a mark just added needs; ESR 140's last release was
+2026-09-29; not Firefox for Android).
+
+- One codebase. The difference is decided at build time (`SITEGLOSS_FIREFOX`, `--firefox`
+  in `scripts/build.ts`, everything in `src/lib/browser.ts`), never by the user agent. The
+  add-on id is `sitegloss@ractive.ch`.
+- Firefox has no extension service workers, so the background is an event page, and no
+  side panel API, so Sitegloss is a sidebar opened by the toolbar icon. Texts say Firefox
+  and "sidebar". Firefox stops an idle event page after 30 s, and its WebSocket with it:
+  while AI access is on, or a question waits, the background calls an extension API every
+  20 s.
+- Sync writes to a subfolder of Downloads only (no `showDirectoryPicker`: "Choose a folder"
+  is not offered); overwriting replaces the file without a dialog. A notification has no
+  buttons and closes by itself: a question's notification says to answer in the sidebar,
+  its closing is no answer (in Chrome it is Don't allow). The tab's size in the panel is
+  read every 3 s while the sidebar shows (no `windows.onBoundsChanged`). For `file:`
+  pages there is no button: the user turns on "Access local files on your computer" in
+  Firefox's add-on settings, the notice says where, and the panel reads the setting on
+  each look at the tab (Firefox does not reload the extension when it changes).
+- Firefox's built-in data collection consent (`data_collection_permissions`): nothing is
+  required at install (`required: ["none"]`); `websiteContent` and `browsingActivity` are
+  optional and asked for at the click that turns AI access on. AI access does not start
+  without it and ends when the user takes it back in Firefox's add-on settings. Without AI
+  access nothing leaves the computer, as in Chrome.
+- The package for addons.mozilla.org (`--firefox --store --zip`) is not minified and has no
+  source maps, so that its reviewers can read it; they get the source archive and rebuild
+  it. The zip's entries have a fixed time, so the rebuild has the same SHA-256.
+
+## DEC-035: A release publishes itself to addons.mozilla.org too (owner)
+
+2026-11-17, with DEC-034. The owner asked for the Firefox upload to be automated like
+Chrome's (DEC-032) and Edge's (DEC-033).
+
+- `release.yml` builds the Firefox store zip and `sitegloss-<version>-source.zip`
+  (`git archive` of the built commit) beside the other zips, attests all of them, and runs
+  the job `publish-firefox` after it creates the release: `firefox-extension-publish.yml`
+  of ractive/release-workflows (ractive/release-workflows PR 17, pinned to its head commit
+  until v0.8.0 is released), in the environment `firefox-add-ons` (required reviewer, tags
+  `v*` only), with `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`. `publish.yml` runs it by hand
+  (store `firefox`, or `all` for the three stores; `both` is gone).
+- Beside the other store jobs, not after them: one store's failure or rejection does not
+  hold back the others.
+- The same verified zip: its build provenance, and the source archive's, is checked before
+  the upload. The job uploads the zip as a new listed version of the existing add-on (the
+  first version and the listing are made by hand, as for Chrome and Edge) and attaches the
+  source in the same request. addons.mozilla.org has no draft, so a version is always
+  submitted for review; the job ends successfully when AMO already has that version
+  number.
+- The reviewers' notes (what the extension does, how to try it, how to build it) are the
+  job's `notes`. Not yet checked: that addons.mozilla.org keeps them with the version
+  (see `operations/firefox-add-ons.md`).
+- No third-party code in the job: the API is called with `curl`, as for Chrome and Edge.

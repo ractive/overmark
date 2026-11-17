@@ -249,6 +249,19 @@ describe("build", () => {
 		expect([...files.keys()].some((n) => n.endsWith(".map"))).toBe(false);
 	});
 
+	test("a zip does not depend on when it is made", async () => {
+		const dir = tempDir();
+		await Bun.write(join(dir, "manifest.json"), "{}\n");
+		const target = join(tempDir(), "x.zip");
+		await zipBuild(dir, target);
+		const bytes = new DataView(
+			(await Bun.file(target).arrayBuffer()) as ArrayBuffer,
+		);
+		// The first entry's DOS time and date: midnight, 1 January 1980.
+		expect(bytes.getUint16(10, true)).toBe(0);
+		expect(bytes.getUint16(12, true)).toBe(33);
+	});
+
 	test("every build and its zip carry the licences of what they bundle", async () => {
 		for (const options of [{}, { store: true }, { test: true }]) {
 			const outdir = tempDir();

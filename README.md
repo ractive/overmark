@@ -33,19 +33,55 @@ panel there.
 `bun run zip` packs `sitegloss-<version>.zip` for sharing; unzip it and load the folder
 the same way.
 
-For Firefox (153 or later, desktop), `bun scripts/build.ts --firefox` builds
+For Firefox (see [In Firefox](#in-firefox)), `bun scripts/build.ts --firefox` builds
 `dist-firefox/`; in Firefox open `about:debugging`, This Firefox, "Load Temporary Add-on…"
 and choose its `manifest.json` (gone when Firefox quits). `bun scripts/firefox-dev.ts`
 builds it and starts Firefox with it through [ff-rdp](https://github.com/ractive/ff-rdp),
-in a profile that is kept. `bun scripts/build.ts --firefox --store --zip` packs
-`sitegloss-firefox-<version>-store.zip` for addons.mozilla.org. In Firefox the side panel
-is a sidebar, the sync writes to Downloads only, and Firefox asks once, when you turn AI
-access on, whether Sitegloss may send the pages' content to your AI app.
+in a profile that is kept. The package for addons.mozilla.org is built as described in
+[Building the Firefox package from source](#building-the-firefox-package-from-source).
 
 Without building: every CI run has the zip as the artifact `sitegloss-unpacked` on its
 page (Actions → the run → Artifacts), and every release has it under Releases. Each also
 has `sitegloss-store`, the package for the Chrome Web Store; publishing it is described
 in [kb/operations/chrome-web-store.md](kb/operations/chrome-web-store.md).
+
+## In Firefox
+
+Sitegloss also runs in desktop Firefox (153 or later; not Firefox for Android). The Firefox
+version is on its way to addons.mozilla.org; there is no listing yet. Until there is, a
+release has `sitegloss-firefox-<version>-store.zip` under Releases: in Firefox open
+`about:debugging`, This Firefox, "Load Temporary Add-on…" and choose that zip. It stays
+until Firefox quits, since release Firefox installs only signed add-ons for good.
+
+It is one codebase; the difference is decided when the package is built, never by the
+user agent. What differs from Chrome and Edge:
+
+- Firefox has no extension service workers, so the background is an event page, and no
+  side panel API: Sitegloss is a sidebar there, which the toolbar icon opens. Firefox
+  stops an idle event page after 30 seconds, and its connection to the AI app with it; while
+  AI access is on, or a question waits, the background calls an extension API every 20
+  seconds to keep it running.
+- The AI app connection allows Firefox's origin, `moz-extension://<a UUID per
+  installation>`, so no list can name one extension. The hosted relay admits Firefox
+  extensions since 2026-11-16; a relay of your own must allow `moz-extension://*` (relay
+  0.11.0 or later).
+- Firefox asks once, at the click that turns AI access on, whether Sitegloss may collect
+  website content and browsing activity (its built-in data collection consent). Nothing is
+  required at install. Without that consent AI access does not start, and it ends when you
+  take the consent back in Firefox's add-on settings. Without AI access nothing leaves
+  your computer, as in Chrome.
+- The sync writes to a subfolder of Downloads only: Firefox has no folder picker, so
+  "Choose a folder" is not offered. Overwriting a file replaces it without a dialog.
+- A notification has no buttons in Firefox and closes by itself. A question from the AI
+  app says to answer in the sidebar, a click on it opens the sidebar, and its closing is
+  no answer (in Chrome a close is Don't allow). The question in the sidebar asks you to
+  click into it first, as Firefox leaves the focus in the page.
+- For files on your computer (`file:` pages) there is no button: turn on "Access local
+  files on your computer" in Firefox's Add-ons and themes, under Sitegloss, Permissions and
+  data. The "cannot run here" text says so, and names `about:` pages and
+  addons.mozilla.org, which are off limits to extensions.
+- Firefox has no event for a window's size changing, so the tab's size shown in the
+  sidebar is read again every 3 seconds while the sidebar shows.
 
 ## Use
 
@@ -261,6 +297,30 @@ bun run fix        # format and apply safe lint fixes
 The end-to-end tests load the extension into Chrome for Testing or Chromium
 (`CHROME_PATH`, or Playwright's download in its usual cache). Branded Chrome ignores
 `--load-extension`, so without one of them the tests are skipped locally; CI runs them.
+
+### Building the Firefox package from source
+
+For addons.mozilla.org's reviewers, and anyone who wants to check the package: the
+source archive `sitegloss-<version>-source.zip` of a release (or the repository at its
+tag) builds the package that was uploaded, `sitegloss-firefox-<version>-store.zip`. The
+code is bundled with Bun and not minified in this package, and has no source maps.
+
+- Operating system: macOS or Linux (the release is built on Ubuntu).
+- Tool: [Bun](https://bun.sh) 1.4.4, the version `.github/workflows/release.yml` pins.
+  Nothing else: no Node.js, no global packages.
+- Version: the `version` in `package.json`; the build does not need git.
+
+```sh
+unzip sitegloss-<version>-source.zip && cd sitegloss-<version>
+bun install --frozen-lockfile
+bun scripts/build.ts --firefox --store --zip
+```
+
+This makes `dist-firefox-store/` (the unpacked package) and
+`sitegloss-firefox-<version>-store.zip` beside it. The zip is reproducible: the same source
+and Bun give the same file, with the same SHA-256, wherever and whenever it is built.
+Sitegloss's own code is in `src/`, the build is `scripts/build.ts`, and the bundled
+packages are listed with their licences in the package's `LICENSES.txt`.
 
 ## Licence
 
