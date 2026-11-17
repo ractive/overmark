@@ -265,11 +265,14 @@ A tool that changes something (marked "asks first" above) asks first: in the sid
 panel when it is open and on screen in the window in front (another extension's panel,
 such as Claude in Chrome's, can cover it), otherwise in a system notification with
 Allow and Always allow, where closing it is Don't allow (the icon shows "?" while a
-question waits). With no answer within 60 seconds the call does not run, and the AI
+question waits). In the side panel the question is a dialog over the panel, wherever it
+is scrolled to, with Don't allow, Allow and Always allow, and it counts down its 60
+seconds; "Stop AI access" under it refuses everything that waits. With no answer in that time the call does not run, and the AI
 app is told you did not answer. "Always allow" lets that
-tool run without asking for that AI app from then on; "Allow all changes", under the
-app in the side panel's AI app card (in Settings, which the AI pill at the top
-opens), does so for every tool that changes something, deleting a case too. The card lists the tools always allowed for each app, each with
+tool run without asking for that AI app from then on; "Allow all changes", a switch
+for each connected app under the side panel's top bar (and under the app in the AI app
+card, in Settings, which the AI pill at the top opens), does so for every tool that
+changes something, deleting a case too. The card lists the tools always allowed for each app, each with
 "Ask again". Both last until you disconnect the app (or make a new address), also
 across browser restarts. An AI app can be steered by text on a page it reads, so allow
 always only what you would not need to check.

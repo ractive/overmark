@@ -17,10 +17,13 @@
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
 import { FIREFOX, PANEL } from "../lib/browser.ts";
-import type { Answer, QuestionView } from "./protocol.ts";
+import {
+	type Answer,
+	QUESTION_TIMEOUT_MS,
+	type QuestionView,
+} from "./protocol.ts";
 
-/** A question nobody answers in this time ends as `"timeout"`: unanswered, the call does not run. */
-export const QUESTION_TIMEOUT_MS = 60_000;
+export { QUESTION_TIMEOUT_MS };
 /** An Allow or Always allow this soon after a notification showed does not count. */
 export const NOTIFICATION_GUARD_MS = 500;
 /**
@@ -203,6 +206,7 @@ export class Questions {
 			lines: lines.map(visible),
 			// All of it: the user allows what they were shown (CR-03).
 			args: json,
+			expiresAt: this.#host.now() + this.#timeoutMs,
 		};
 		const args = visible(JSON.stringify(request.arguments) ?? "{}");
 		return new Promise((resolve) => {

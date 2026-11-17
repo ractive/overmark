@@ -34,7 +34,7 @@ amends DEC-003) and DEC-035 (the release).
 - [ ] The first version and the listing by hand on addons.mozilla.org, the environment
       `firefox-add-ons` with the API key
 - [ ] The first real run of `publish-firefox` (the reviewers' notes arrive with the version?)
-- [ ] Pin ractive/release-workflows v0.8.0's commit instead of PR 17's head
+- [x] Pin ractive/release-workflows's released commit instead of PR 17's head (v0.8.1)
 
 ## Results
 

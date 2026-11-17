@@ -70,8 +70,8 @@ apply to Firefox.
 
 ## Before the first real run
 
-The job has not run against AMO yet (ractive/release-workflows PR 17, pinned to its head
-commit in both workflow files until v0.8.0 is released: then pin that release's commit).
+The job has not run against AMO yet (`firefox-extension-publish.yml` of
+ractive/release-workflows v0.8.1, pinned by its commit in both workflow files).
 On the first real run, check in AMO's Developer Hub:
 
 - the new version is there with the source archive;

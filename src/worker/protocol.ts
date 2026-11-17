@@ -68,6 +68,9 @@ export interface GrantView {
 	problem?: string;
 }
 
+/** A question nobody answers in this time ends as `"timeout"`: unanswered, the call does not run. */
+export const QUESTION_TIMEOUT_MS = 60_000;
+
 /** A question waiting for the user (a tool that changes something). */
 export interface QuestionView {
 	id: string;
@@ -80,6 +83,8 @@ export interface QuestionView {
 	lines: string[];
 	/** The arguments as JSON, invisible characters written as `\uXXXX`. */
 	args: string;
+	/** `Date.now()` when it ends unanswered: the call does not run then. */
+	expiresAt: number;
 }
 
 /** An AI app's last tool call. */

@@ -20,9 +20,12 @@
 		</header>
 		<!-- What is wrong with the AI connection, in words, on every view (DEC-024). -->
 		<div id="ai-problem" class="ai-problem" role="status" hidden><p id="ai-problem-text"></p></div>
+		<!-- Each connected AI app's "Allow all changes", on Home and in a case (DEC-036; ai.ts). -->
+		<div id="ai-allow" class="ai-allow" hidden></div>
 		<p id="ai-call" class="meta" hidden></p>
-		<!-- The AI connection lives in the service worker; the questions and the AI app card show it (ai.ts). -->
-		<div id="questions" class="ai-box" aria-live="polite"></div>
+		<!-- The AI connection lives in the service worker; the questions and the AI app card show it (ai.ts).
+		     The questions: a modal dialog over the panel, wherever it is scrolled to (DEC-037). -->
+		<dialog id="questions" class="questions" aria-label="Questions from AI apps"><p id="question-status" class="visually-hidden" role="status"></p></dialog>
 		<!-- The sync paused or failed, above every view (DEC-025): drawn by sync-view.ts. -->
 		<div id="sync-banner" class="sync-banner" role="status" hidden></div>
 		<main id="home">

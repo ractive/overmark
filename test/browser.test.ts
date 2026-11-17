@@ -101,6 +101,7 @@ describe("Firefox's notifications of a question", () => {
 		title: "Record the summary",
 		lines: ["Case: “Checkout” (example.com/cart, 2 marks)."],
 		args: "{}",
+		expiresAt: 0,
 	};
 
 	test("no buttons: they say where to answer, and the whole of it fits", () => {
