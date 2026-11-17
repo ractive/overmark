@@ -16,6 +16,7 @@
 
 import type { ConfirmRequest } from "@ractive-ch/tab-mcp-client";
 import { escapeInvisible } from "@ractive-ch/tab-mcp-client/visible";
+import { FIREFOX, PANEL } from "../lib/browser.ts";
 import type { Answer, QuestionView } from "./protocol.ts";
 
 /** A question nobody answers in this time ends as `"timeout"`: unanswered, the call does not run. */
@@ -40,6 +41,15 @@ export const MAX_NOTIFICATION_TITLE = 60;
 export const NOTIFICATION_BUTTONS = ["Allow", "Always allow"] as const;
 /** The one button of a notification that cannot show all the arguments. */
 export const REFUSE_ONLY = ["Don't allow"] as const;
+/**
+ * Firefox's notifications have no buttons and close by themselves: one only
+ * tells, a click on it opens the sidebar, and the question is answered
+ * there. Firefox leaves the focus in the page, and Allow counts only in a
+ * focused panel: so the click into the sidebar.
+ */
+export const NO_BUTTONS: readonly string[] = [];
+export const FIREFOX_ANSWER =
+	"Answer in Sitegloss's sidebar: click this, or the Sitegloss icon, then click into the sidebar.";
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -100,10 +110,18 @@ const characters = (n: number) =>
 export function notificationText(
 	view: QuestionView,
 	args: string,
+	firefox = FIREFOX,
 ): NotificationText {
 	const what = cut(view.title ?? view.tool, MAX_NOTIFICATION_TITLE);
 	const head = `${view.app} wants to run ${view.tool}: `;
 	const about = view.lines.join(" ");
+	if (firefox)
+		return {
+			title: `Allow ${what}?`,
+			message: `${cut(`${head}${about}`, MAX_NOTIFICATION_MESSAGE - FIREFOX_ANSWER.length - 1)} ${FIREFOX_ANSWER}`,
+			contextMessage: "Sitegloss · answer in its sidebar",
+			buttons: NO_BUTTONS,
+		};
 	const shown = about === "" ? args : ` Arguments: ${args}`;
 	const room = MAX_NOTIFICATION_MESSAGE - shown.length;
 	const text = (message: string, buttons: readonly string[]) => ({
@@ -117,7 +135,7 @@ export function notificationText(
 			`${cut(`${head}${about}`, room)}${shown}`,
 			NOTIFICATION_BUTTONS,
 		);
-	const note = `Its arguments (${characters(args.length)}) do not fit here: open Sitegloss's side panel to read all of them and answer there.`;
+	const note = `Its arguments (${characters(args.length)}) do not fit here: open Sitegloss's ${PANEL} to read all of them and answer there.`;
 	return text(
 		`${cut(`${head}${about}`, MAX_NOTIFICATION_MESSAGE - note.length - 1)} ${note}`,
 		REFUSE_ONLY,

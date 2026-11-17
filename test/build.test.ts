@@ -5,13 +5,16 @@ import { dirname, join } from "node:path";
 import {
 	build,
 	checkOutdir,
+	createFirefoxManifest,
 	createManifest,
 	extensionId,
+	FIREFOX_ID,
 	mitText,
 	NOTICES_FILE,
 	notices,
 	readKey,
 	zipBuild,
+	zipName,
 } from "../scripts/build.ts";
 import { readZip } from "../src/lib/zip.ts";
 
@@ -77,6 +80,79 @@ describe("manifest", () => {
 		expect(m["host_permissions"]).toEqual(["<all_urls>"]);
 		expect(m["permissions"]).toContain("downloads");
 		expect(m["optional_permissions"]).toBeUndefined();
+	});
+});
+
+describe("Firefox manifest", () => {
+	test("an event page, a sidebar, no offscreen document or side panel, the add-on id and Firefox 140", () => {
+		const m = createFirefoxManifest("1.2.3", {});
+		expect(m["manifest_version"]).toBe(3);
+		expect(m["version"]).toBe("1.2.3");
+		expect(m["browser_specific_settings"]).toEqual({
+			gecko: {
+				id: FIREFOX_ID,
+				strict_min_version: "140.0",
+				// Nothing goes anywhere until the user turns AI access on, and
+				// asks for it then.
+				data_collection_permissions: {
+					required: ["none"],
+					optional: ["websiteContent", "browsingActivity"],
+				},
+			},
+		});
+		expect(FIREFOX_ID).toBe("sitegloss@ractive.ch");
+		expect(m["background"]).toEqual({
+			scripts: ["background.js"],
+			type: "module",
+		});
+		expect(m["sidebar_action"]).toMatchObject({
+			default_panel: "sidepanel/index.html",
+			open_at_install: false,
+		});
+		expect(m["permissions"]).toEqual([
+			"activeTab",
+			"alarms",
+			"notifications",
+			"scripting",
+			"storage",
+			"unlimitedStorage",
+		]);
+		expect(m["optional_permissions"]).toEqual(["downloads"]);
+		expect(m["optional_host_permissions"]).toEqual(["<all_urls>"]);
+		expect(m["host_permissions"]).toBeUndefined();
+		// Chrome's CSP: Firefox's own would turn ws://127.0.0.1 into wss:.
+		expect(m["content_security_policy"]).toEqual({
+			extension_pages: "script-src 'self'; object-src 'self'",
+		});
+		for (const key of [
+			"key",
+			"minimum_chrome_version",
+			"side_panel",
+			"offscreen",
+		])
+			expect(m[key]).toBeUndefined();
+		expect(JSON.stringify(m)).not.toContain("gecko_android");
+		// The same commands as Chrome's: the icon's click, Alt+Shift+O.
+		expect(m["commands"]).toEqual(createManifest("1.2.3", {})["commands"]);
+	});
+
+	test("the test build has host access, downloads and the data collection at install", () => {
+		const m = createFirefoxManifest("1.0.0", { test: true });
+		expect(m["host_permissions"]).toEqual(["<all_urls>"]);
+		expect(m["permissions"]).toContain("downloads");
+		expect(m["optional_permissions"]).toBeUndefined();
+		expect(
+			(m["browser_specific_settings"] as { gecko: Record<string, unknown> })
+				.gecko["data_collection_permissions"],
+		).toEqual({ required: ["websiteContent", "browsingActivity"] });
+	});
+
+	test("the zips' names: the release takes sitegloss-*.zip, the Chrome store sitegloss-<version>-store.zip", () => {
+		expect(zipName("1.2.3")).toBe("sitegloss-1.2.3.zip");
+		expect(zipName("1.2.3", { store: true })).toBe("sitegloss-1.2.3-store.zip");
+		expect(zipName("1.2.3", { store: true, firefox: true })).toBe(
+			"sitegloss-firefox-1.2.3-store.zip",
+		);
 	});
 });
 
@@ -217,6 +293,70 @@ describe("build", () => {
 		} finally {
 			rmSync(outdir, { recursive: true, force: true });
 		}
+	});
+
+	test("Firefox: the bundles and the sidebar, no offscreen document, no key", async () => {
+		const outdir = tempDir();
+		const result = await build({ outdir, firefox: true });
+		expect(result.id).toBeUndefined();
+		expect(result.manifest["browser_specific_settings"]).toBeDefined();
+		const manifest = await Bun.file(join(outdir, "manifest.json")).json();
+		expect(manifest.key).toBeUndefined();
+		for (const file of [
+			"background.js",
+			"content.js",
+			"sidepanel/index.html",
+			"icons/icon-128.png",
+			NOTICES_FILE,
+		])
+			expect(await Bun.file(join(outdir, file)).exists()).toBe(true);
+		expect(await Bun.file(join(outdir, "offscreen/index.html")).exists()).toBe(
+			false,
+		);
+		// The build decides: the define is gone, its value in.
+		const worker = await Bun.file(join(outdir, "background.js")).text();
+		expect(worker).toContain("sidebarAction");
+		expect(worker).not.toContain("SITEGLOSS_FIREFOX");
+		const content = await Bun.file(join(outdir, "content.js")).text();
+		expect(isWrappedScript(content)).toBe(true);
+		expect(content).toContain("sidebar");
+	});
+
+	test("Firefox's store package: not minified, no source maps, no test hooks", async () => {
+		const outdir = tempDir();
+		await build({ outdir, firefox: true, store: true });
+		const names = [...new Bun.Glob("**/*").scanSync({ cwd: outdir })].sort();
+		expect(names.some((n) => n.endsWith(".map"))).toBe(false);
+		const worker = await Bun.file(join(outdir, "background.js")).text();
+		// Readable: one statement a line, names kept.
+		expect(worker.split("\n").length).toBeGreaterThan(1000);
+		expect(worker).toContain("function isPanelSender(");
+		expect(worker).not.toContain("test:access");
+		expect(worker).not.toContain("SITEGLOSS_");
+		for (const file of names.filter((n) => n.endsWith(".js"))) {
+			const text = await Bun.file(join(outdir, file)).text();
+			expect(text).not.toContain("siteglossUseFolder");
+			// The panel's page in a tab is no panel there (`window.ts`).
+			if (file.startsWith("sidepanel/"))
+				expect(text).not.toContain("location.search");
+		}
+		const target = join(tempDir(), "x.zip");
+		await zipBuild(outdir, target);
+		const files = await readZip(
+			new Uint8Array(await Bun.file(target).arrayBuffer()),
+		);
+		expect(files.has("manifest.json")).toBe(true);
+		expect(files.has("offscreen/index.html")).toBe(false);
+	});
+
+	test("Firefox's test build lets the panel's page in a tab be the panel", async () => {
+		const outdir = tempDir();
+		await build({ outdir, firefox: true, test: true });
+		const panel = [...new Bun.Glob("sidepanel/*.js").scanSync({ cwd: outdir })];
+		const texts = await Promise.all(
+			panel.map((f) => Bun.file(join(outdir, f)).text()),
+		);
+		expect(texts.some((t) => t.includes("location.search"))).toBe(true);
 	});
 
 	test("a licence that is not the expected MIT text stops the build", () => {

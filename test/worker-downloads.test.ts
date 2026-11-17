@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { CaseStore } from "../src/lib/store.ts";
 import { TargetFailed } from "../src/lib/sync.ts";
 import { memoryKv } from "../src/worker/kv.ts";
 import { sampleCase } from "./fixtures.ts";
 
 type Listener = (delta: chrome.downloads.DownloadDelta) => void;
+
+/** Chrome's offscreen document reads the cases, not the worker. */
+const noStore = {} as CaseStore;
 
 /** The parts of `chrome` the worker's downloads use, in memory. */
 const fake = {
@@ -78,7 +82,7 @@ const changed = (delta: chrome.downloads.DownloadDelta) => {
 
 describe("the offscreen document (DEC-025)", () => {
 	test("one a stopped worker left open goes before this worker opens its own, once", async () => {
-		const api = downloads.chromeDownloads(memoryKv());
+		const api = downloads.chromeDownloads(memoryKv(), noStore);
 		await Bun.sleep(1);
 		// Not at once: a download it serves may still be settled first.
 		expect(fake.log).toEqual([]);
@@ -94,16 +98,16 @@ describe("the offscreen document (DEC-025)", () => {
 
 	test("the download under way is kept in the sync's database, for a new worker", async () => {
 		const kv = memoryKv();
-		const api = downloads.chromeDownloads(kv);
+		const api = downloads.chromeDownloads(kv, noStore);
 		const p = { id: 3, caseId: "c_1", version: "v", file: "a.sitegloss.zip" };
 		await api.setPending(p);
-		expect(await downloads.chromeDownloads(kv).pending()).toEqual(p);
+		expect(await downloads.chromeDownloads(kv, noStore).pending()).toEqual(p);
 		await api.setPending(undefined);
 		expect(await api.pending()).toBeUndefined();
 	});
 
 	test("not answering, or not opening, fails the target, not the case", async () => {
-		const api = downloads.chromeDownloads(memoryKv());
+		const api = downloads.chromeDownloads(memoryKv(), noStore);
 		fake.answer = () => {
 			throw new Error("Could not establish connection.");
 		};
@@ -170,7 +174,7 @@ describe("waiting for a download (DEC-025)", () => {
 
 describe("Sitegloss's own entries in Chrome's list (DEC-025)", () => {
 	test("erased only when Sitegloss wrote it into Sitegloss/: an id reused later is someone else's", async () => {
-		const api = downloads.chromeDownloads(memoryKv());
+		const api = downloads.chromeDownloads(memoryKv(), noStore);
 		fake.items.set(20, {
 			id: 20,
 			byExtensionId: "sitegloss",

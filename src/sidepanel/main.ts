@@ -4,6 +4,7 @@
  * view.ts draws it (DEC-011).
  */
 
+import { BROWSER, FIREFOX, requestPermissions } from "../lib/browser.ts";
 import {
 	type Annotation,
 	type Case,
@@ -71,6 +72,7 @@ import {
 } from "./state.ts";
 import { startSync, syncActions } from "./sync.ts";
 import { type Actions, lostMarksText, NO_ACCESS, render } from "./view.ts";
+import { panelWindow } from "./window.ts";
 
 const store = new IdbStore();
 
@@ -95,7 +97,7 @@ function askForSite(url: string): Promise<boolean> {
 	const pattern = sitePattern(url);
 	if (pattern === undefined || declinedSites.has(pattern))
 		return Promise.resolve(false);
-	return chrome.permissions.request({ origins: [pattern] }).then(
+	return requestPermissions({ origins: [pattern] }).then(
 		(granted) => {
 			if (!granted) declinedSites.add(pattern);
 			return granted;
@@ -140,8 +142,9 @@ const downloadsWork = new Latest();
 let refreshing = 0;
 
 async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
-	const win = await chrome.windows.getCurrent();
-	const [tab] = await chrome.tabs.query({ active: true, windowId: win.id });
+	const windowId = await panelWindow();
+	if (windowId === undefined) return undefined;
+	const [tab] = await chrome.tabs.query({ active: true, windowId });
 	return tab;
 }
 
@@ -649,9 +652,17 @@ async function adoptLoaded(
 }
 
 /** Only the size of the tab in front: a window or the panel was resized, or zoomed. */
-async function refreshSize(): Promise<void> {
+async function refreshSize(onlyChanged = false): Promise<void> {
 	const tab = await activeTab();
 	const size = tab && (await tabSize(tab));
+	const now = state.tab?.size;
+	if (
+		onlyChanged &&
+		(size === undefined
+			? now === undefined
+			: now !== undefined && sameSize(size, now))
+	)
+		return;
 	update((s) => {
 		if (s.tab !== undefined && s.tab.id === tab?.id) s.tab = { ...s.tab, size };
 	});
@@ -1469,7 +1480,7 @@ const actions: Actions = {
 
 	allowAllSites() {
 		// Chrome asks only during a click: nothing may be awaited before this.
-		void chrome.permissions.request(ALL_SITES).then(
+		void requestPermissions(ALL_SITES).then(
 			// A yes: permissions.onAdded draws the open case's marks.
 			() => refreshAllSites(),
 			(error: unknown) =>
@@ -1579,7 +1590,7 @@ const actions: Actions = {
 						? "Could not change the window's size."
 						: screenShort
 							? `The screen leaves room for ${sizeText(size)}; the marks were made at ${sizeText(want)}.`
-							: `Chrome would not make this tab ${sizeText(want)}; it is ${sizeText(size)}. The device toolbar in DevTools shows a page at any size.`,
+							: `${BROWSER} would not make this tab ${sizeText(want)}; it is ${sizeText(size)}. The device toolbar in DevTools shows a page at any size.`,
 				);
 			} catch (error) {
 				hint(`Could not change the window's size: ${message(error)}`);
@@ -1965,7 +1976,7 @@ async function refreshAllSites(): Promise<void> {
 allSites.addEventListener("change", () => {
 	// Chrome asks only during a click: nothing may be awaited before this.
 	const change = allSites.checked
-		? chrome.permissions.request(ALL_SITES)
+		? requestPermissions(ALL_SITES)
 		: chrome.permissions.remove(ALL_SITES);
 	void change
 		.catch((error: unknown) =>
@@ -2344,12 +2355,12 @@ function hear(news: Broadcast, sender: chrome.runtime.MessageSender): false {
 }
 
 /** The window this panel is in. */
-let panelWindow: number | undefined;
-void chrome.windows.getCurrent().then((w) => (panelWindow = w.id));
+let panelWindowId: number | undefined;
+void panelWindow().then((id) => (panelWindowId = id));
 chrome.tabs.onActivated.addListener(({ windowId }) => {
 	void refreshTab();
 	// The open case's marks follow it to the tab in front of this window.
-	if (panelWindow === undefined || windowId === panelWindow) void follow();
+	if (panelWindowId === undefined || windowId === panelWindowId) void follow();
 });
 // The tab's size: the window's, the panel's own width, or the zoom changed.
 let resized: ReturnType<typeof setTimeout> | undefined;
@@ -2357,9 +2368,17 @@ const sizeChanged = () => {
 	clearTimeout(resized);
 	resized = setTimeout(() => void refreshSize(), 150);
 };
-chrome.windows.onBoundsChanged.addListener((w) => {
-	if (w.id === panelWindow) sizeChanged();
-});
+// Firefox has no `windows.onBoundsChanged`: the sidebar's own resize, below,
+// tells of a change in the window's height, and a look every few seconds
+// while the panel shows catches one in its width.
+if (FIREFOX)
+	setInterval(() => {
+		if (document.visibilityState === "visible") void refreshSize(true);
+	}, 3000);
+else
+	chrome.windows.onBoundsChanged.addListener((w) => {
+		if (w.id === panelWindowId) sizeChanged();
+	});
 chrome.tabs.onZoomChange.addListener(({ tabId }) => {
 	if (tabId === state.tab?.id) sizeChanged();
 });
@@ -2390,8 +2409,10 @@ chrome.tabs.onRemoved.addListener((id) => {
 void refreshTab();
 void refreshAllSites();
 void refreshDownloads();
-// Turning "Allow access to file URLs" on or off reloads Sitegloss: once is enough.
-void chrome.extension.isAllowedFileSchemeAccess().then(
-	(allowed) => update((s) => (s.fileAccess = allowed)),
-	() => undefined,
-);
+// Turning "Allow access to file URLs" on or off reloads Sitegloss: once is
+// enough. Firefox has no such toggle (its answer is always no before 153).
+if (!FIREFOX)
+	void chrome.extension.isAllowedFileSchemeAccess().then(
+		(allowed) => update((s) => (s.fileAccess = allowed)),
+		() => undefined,
+	);

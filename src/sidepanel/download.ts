@@ -4,6 +4,8 @@
  * it (a no to Chrome's prompt, or no such API) as a link's download, as before.
  */
 
+import { BROWSER, requestPermissions } from "../lib/browser.ts";
+
 export const DOWNLOADS: chrome.permissions.Permissions = {
 	permissions: ["downloads"],
 };
@@ -16,7 +18,7 @@ export const DOWNLOADS: chrome.permissions.Permissions = {
  */
 export function askForDownloads(): Promise<boolean> {
 	try {
-		return chrome.permissions.request(DOWNLOADS).then(
+		return requestPermissions(DOWNLOADS).then(
 			(granted) => granted === true,
 			(error: unknown) => {
 				// Not the user's no: outside a click, say. The file is saved anyway.
@@ -52,7 +54,7 @@ function finished(
 			if (done) return;
 			if (item === undefined) {
 				end();
-				reject(new Error("Chrome lost the download."));
+				reject(new Error(`${BROWSER} lost the download.`));
 			} else if (item.state === "complete") {
 				end();
 				resolve(item);
@@ -61,7 +63,9 @@ function finished(
 				if (item.error === "USER_CANCELED") resolve(undefined);
 				else
 					reject(
-						new Error(`Chrome stopped saving the file (${item.error ?? "?"}).`),
+						new Error(
+							`${BROWSER} stopped saving the file (${item.error ?? "?"}).`,
+						),
 					);
 			}
 		};

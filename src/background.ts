@@ -19,6 +19,7 @@
  * user.
  */
 
+import { BROWSER, FIREFOX, openPanel, PANEL } from "./lib/browser.ts";
 import { isSafeId, pendingImage } from "./lib/case.ts";
 import {
 	cropImages,
@@ -63,6 +64,7 @@ import {
 } from "./worker/protocol.ts";
 
 declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
+declare const SITEGLOSS_FIREFOX: boolean | undefined;
 
 const store = new IdbStore();
 const added = new AddLedger(chrome.storage.session);
@@ -94,10 +96,11 @@ function testFolder(chosen: ChosenFolder): SyncTarget {
 const sync = new Sync({
 	cases: store,
 	store: kvSyncStore(syncKv),
-	downloads: downloadsTarget(chromeDownloads(syncKv)),
+	downloads: downloadsTarget(chromeDownloads(syncKv, store)),
 	// Saves in a row are one download per case, not one each (a burst of
 	// Chrome's download bubble).
 	quietMs: 2000,
+	// The define itself, so other builds drop the test's folder.
 	...(typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD
 		? { folder: testFolder }
 		: {}),
@@ -129,8 +132,12 @@ function hearDownloads(): void {
 	});
 }
 hearDownloads();
-// The downloads permission taken back, or given.
-chrome.permissions.onRemoved.addListener(() => void sync.request());
+// The downloads permission taken back, or given; in Firefox, the data
+// collection consent taken back ends AI access (`consentChanged`).
+chrome.permissions.onRemoved.addListener(() => {
+	void sync.request();
+	if (FIREFOX) withConnection((c) => void c.consentChanged());
+});
 chrome.permissions.onAdded.addListener(() => {
 	hearDownloads();
 	void sync.request();
@@ -144,14 +151,14 @@ void store
 
 chrome.action.onClicked.addListener((tab) => {
 	if (tab.id === undefined) return;
-	// `sidePanel.open` needs the click's user gesture: call it before any await.
-	// With the tab, not only the window: over another extension's panel for
-	// this tab (Claude in Chrome's, say), `open({ windowId })` resolves and
-	// shows nothing. The panel stays the global one, for every tab without a
-	// panel of its own.
-	void chrome.sidePanel
-		.open({ tabId: tab.id, windowId: tab.windowId })
-		.catch((error: unknown) => console.warn("Sitegloss: side panel", error));
+	// `sidePanel.open` (Firefox: `sidebarAction.open`) needs the click's user
+	// gesture: call it before any await. With the tab, not only the window:
+	// over another extension's panel for this tab (Claude in Chrome's, say),
+	// `open({ windowId })` resolves and shows nothing. The panel stays the
+	// global one, for every tab without a panel of its own.
+	void openPanel({ tabId: tab.id, windowId: tab.windowId }).catch(
+		(error: unknown) => console.warn("Sitegloss: side panel", error),
+	);
 	void injectOnClick(tab).catch((error: unknown) =>
 		console.warn("Sitegloss: cannot run on this tab", error),
 	);
@@ -186,7 +193,8 @@ function capture(tabId: number, windowId: number): Promise<string> {
 				chrome.tabs.captureVisibleTab(windowId, { format: "png" }),
 				new Promise<never>((_, reject) => {
 					timer = setTimeout(
-						() => reject(new Error("Chrome did not deliver the screenshot.")),
+						() =>
+							reject(new Error(`${BROWSER} did not deliver the screenshot.`)),
 						CAPTURE_TIMEOUT_MS,
 					);
 				}),
@@ -289,7 +297,7 @@ async function handle(
 			);
 			if (mark === undefined)
 				throw new Error(
-					"this page did not add that mark; delete it in the side panel if it should go.",
+					`this page did not add that mark; delete it in the ${PANEL} if it should go.`,
 				);
 			const result = await undoAdd(
 				store,
@@ -360,7 +368,17 @@ const withConnection = (use: (connection: Connection) => void) =>
 chrome.runtime.onConnect.addListener((port) => {
 	if (
 		port.name !== PANEL_PORT ||
-		!isPanelSender(port.sender ?? {}, chrome.runtime.id)
+		!isPanelSender(port.sender ?? {}, chrome.runtime.id, {
+			origin: chrome.runtime.getURL(""),
+			// Firefox's test build: automation cannot reach the sidebar, so
+			// the panel's page runs in a tab there.
+			// (The defines themselves: other builds drop it.)
+			inTab:
+				typeof SITEGLOSS_TEST_BUILD !== "undefined" &&
+				SITEGLOSS_TEST_BUILD &&
+				typeof SITEGLOSS_FIREFOX !== "undefined" &&
+				SITEGLOSS_FIREFOX,
+		})
 	) {
 		port.disconnect();
 		return;
@@ -408,6 +426,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
  * global object too, for the DevTools Protocol, which cannot click a
  * notification: the end-to-end tests answer through the same functions a
  * click calls.
+ *
+ * Firefox's notifications have no buttons and close by themselves, which
+ * fires `onClosed` too, without `byUser`: there a notification only tells,
+ * a click on it opens the sidebar of the window in front, where the
+ * question is answered, and a close is no answer.
  */
 function notificationButton(id: string, index: number): void {
 	withConnection((c) => c.notificationButton(id, index));
@@ -415,12 +438,37 @@ function notificationButton(id: string, index: number): void {
 function notificationDismissed(id: string): void {
 	withConnection((c) => c.notificationDismissed(id));
 }
-chrome.notifications.onButtonClicked.addListener(notificationButton);
-chrome.notifications.onClicked.addListener(notificationDismissed);
-chrome.notifications.onClosed.addListener((id, byUser) => {
-	if (byUser) notificationDismissed(id);
-});
+if (FIREFOX)
+	chrome.notifications.onClicked.addListener(() => {
+		// At once, in the click's gesture, which an await would end.
+		void openPanel({}).catch((error: unknown) =>
+			console.warn("Sitegloss: sidebar", error),
+		);
+	});
+else {
+	chrome.notifications.onButtonClicked.addListener(notificationButton);
+	chrome.notifications.onClicked.addListener(notificationDismissed);
+	chrome.notifications.onClosed.addListener((id, byUser) => {
+		if (byUser) notificationDismissed(id);
+	});
+}
 Object.assign(globalThis, {
 	siteglossNotificationButton: notificationButton,
 	siteglossNotificationDismissed: notificationDismissed,
 });
+
+/**
+ * Firefox stops an idle event page after 30 s, its WebSocket to the relay
+ * with it; Chrome keeps a worker whose WebSocket carries messages. A call
+ * to an extension API resets Firefox's idle timer, so while AI access is on
+ * the event page makes one this often (as tab-mcp does).
+ */
+const FIREFOX_KEEPALIVE_MS = 20_000;
+if (FIREFOX)
+	setInterval(
+		() =>
+			withConnection((c) => {
+				if (c.active) void chrome.runtime.getPlatformInfo().catch(() => {});
+			}),
+		FIREFOX_KEEPALIVE_MS,
+	);

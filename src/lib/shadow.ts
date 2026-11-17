@@ -3,13 +3,19 @@
  * `querySelectorAll`, `closest` and `elementsFromPoint` do not enter.
  */
 
-/** An element's shadow root, open or (from an extension) closed. */
+/**
+ * An element's shadow root, open or (from an extension) closed: Chrome's
+ * `chrome.dom.openOrClosedShadowRoot`, Firefox's
+ * `element.openOrClosedShadowRoot` (content scripts only).
+ */
 export function shadowOf(el: Element): ShadowRoot | null {
 	try {
 		const closed =
-			typeof chrome === "undefined"
+			(el as { openOrClosedShadowRoot?: ShadowRoot | null })
+				.openOrClosedShadowRoot ??
+			(typeof chrome === "undefined"
 				? undefined
-				: chrome.dom?.openOrClosedShadowRoot?.(el as HTMLElement);
+				: chrome.dom?.openOrClosedShadowRoot?.(el as HTMLElement));
 		return closed ?? el.shadowRoot;
 	} catch {
 		// Not an element that can have one.

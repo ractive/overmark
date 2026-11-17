@@ -86,6 +86,50 @@ describe("who may send what", () => {
 		expect(isPanelSender({ id: ID, url: "not a url" }, ID)).toBe(false);
 	});
 
+	test("Firefox: the panel's origin is the installation's UUID, not the add-on id", () => {
+		const FIREFOX_ID = "sitegloss@ractive.ch";
+		const UUID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+		const origin = `moz-extension://${UUID}/`;
+		const panel = `${origin}sidepanel/index.html`;
+		const options = { origin };
+		expect(
+			isPanelSender({ id: FIREFOX_ID, url: panel }, FIREFOX_ID, options),
+		).toBe(true);
+		// Not by the default origin, which is Chrome's.
+		expect(isPanelSender({ id: FIREFOX_ID, url: panel }, FIREFOX_ID)).toBe(
+			false,
+		);
+		// Another installation, another scheme, another page, a content script.
+		for (const url of [
+			panel.replace(UUID, "1".repeat(8)),
+			panel.replace("moz-extension:", "chrome-extension:"),
+			`${origin}sidepanel/other.html`,
+			"moz-extension:///sidepanel/index.html",
+		])
+			expect(isPanelSender({ id: FIREFOX_ID, url }, FIREFOX_ID, options)).toBe(
+				false,
+			);
+		expect(
+			isPanelSender(
+				{ id: "other@example.com", url: panel },
+				FIREFOX_ID,
+				options,
+			),
+		).toBe(false);
+		// The panel's page in a tab: only where the test build lets it.
+		const inTab = { id: FIREFOX_ID, url: panel, tab: { id: 3 } };
+		expect(isPanelSender(inTab, FIREFOX_ID, options)).toBe(false);
+		expect(isPanelSender(inTab, FIREFOX_ID, { ...options, inTab: true })).toBe(
+			true,
+		);
+		expect(
+			isPanelSender({ ...contentScript, id: FIREFOX_ID }, FIREFOX_ID, {
+				...options,
+				inTab: true,
+			}),
+		).toBe(false);
+	});
+
 	test("no command is a one-off message the worker answers: content scripts cannot command", () => {
 		for (const command of COMMANDS)
 			expect(isWorkerRequest(command)).toBe(false);

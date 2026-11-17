@@ -6,6 +6,7 @@
  * re-render replaced afterwards is looked for again.
  */
 
+import { PANEL } from "../lib/browser.ts";
 import {
 	type Candidate,
 	createSearch,
@@ -63,8 +64,7 @@ interface Entry {
 export type AskPanel = (request: MarkRequest) => Promise<MarkAnswer>;
 
 /** No panel shows the case: nothing changes it from the page. */
-export const NO_PANEL =
-	"Open this case in Sitegloss's side panel to change its marks.";
+export const NO_PANEL = `Open this case in Sitegloss's ${PANEL} to change its marks.`;
 
 const askPanel: AskPanel = async (request) => {
 	try {

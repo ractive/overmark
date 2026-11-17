@@ -3,9 +3,15 @@
  * the `downloads` permission and API, and the offscreen document that makes
  * the blob URLs (a service worker has no `URL.createObjectURL`). The document
  * is opened at the first file of a run and closed when the run is over.
+ * Firefox has no offscreen documents, and needs none: its event page has a
+ * DOM, and makes the case's file and its blob URL itself.
  */
 
+import { FIREFOX } from "../lib/browser.ts";
+import { isSafeId } from "../lib/case.ts";
+import { exportCase } from "../lib/export.ts";
 import type { Kv } from "../lib/kv.ts";
+import type { CaseStore } from "../lib/store.ts";
 import {
 	type DownloadEnd,
 	type DownloadsApi,
@@ -135,11 +141,38 @@ export function finished(
 	});
 }
 
-/** Chrome's downloads, for the sync's database `kv`. */
-export function chromeDownloads(kv: Kv): DownloadsApi {
+/**
+ * A blob URL of case `caseId`'s export, made here: Firefox's event page has
+ * `URL.createObjectURL`. Its failing is the case's, as the offscreen
+ * document's answer is in Chrome.
+ */
+async function ownUrl(store: CaseStore, caseId: string): Promise<string> {
+	if (!isSafeId(caseId)) throw new Error("invalid id");
+	const c = await store.getCase(caseId);
+	if (c === undefined) throw new Error("the case is gone");
+	const zip = await exportCase(store, c);
+	const blob = new Blob([zip as Uint8Array<ArrayBuffer>], {
+		type: "application/zip",
+	});
+	return URL.createObjectURL(blob);
+}
+
+/**
+ * The browser's downloads, for the sync's database `kv`; `store` is where
+ * Firefox's event page reads the cases from.
+ */
+export function chromeDownloads(kv: Kv, store: CaseStore): DownloadsApi {
+	if (FIREFOX)
+		return {
+			...common(kv),
+			url: (c) => ownUrl(store, c.id),
+			async revoke(url) {
+				URL.revokeObjectURL(url);
+			},
+			async end() {},
+		};
 	return {
-		granted: () => chrome.permissions.contains(DOWNLOADS),
-		apiMissing: () => typeof chrome.downloads?.download !== "function",
+		...common(kv),
 		async url(c) {
 			const answer = await ask({ type: "offscreen:export", caseId: c.id });
 			if (!answer.ok) throw new Error(answer.error);
@@ -152,6 +185,19 @@ export function chromeDownloads(kv: Kv): DownloadsApi {
 			const request: OffscreenRequest = { type: "offscreen:revoke", url };
 			await chrome.runtime.sendMessage(request);
 		},
+		async end() {
+			await opening?.catch(() => undefined);
+			if (await chrome.offscreen.hasDocument())
+				await chrome.offscreen.closeDocument();
+		},
+	};
+}
+
+/** What Chrome and Firefox do alike. */
+function common(kv: Kv): Omit<DownloadsApi, "url" | "revoke" | "end"> {
+	return {
+		granted: () => chrome.permissions.contains(DOWNLOADS),
+		apiMissing: () => typeof chrome.downloads?.download !== "function",
 		download: (options) => chrome.downloads.download(options),
 		finished,
 		cancel: (id) => chrome.downloads.cancel(id),
@@ -168,10 +214,5 @@ export function chromeDownloads(kv: Kv): DownloadsApi {
 		pending: async () =>
 			(await kv.get(PENDING_DOWNLOAD_KEY)) as PendingDownload | undefined,
 		setPending: (p) => kv.set({ [PENDING_DOWNLOAD_KEY]: p }),
-		async end() {
-			await opening?.catch(() => undefined);
-			if (await chrome.offscreen.hasDocument())
-				await chrome.offscreen.closeDocument();
-		},
 	};
 }

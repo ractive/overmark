@@ -5,11 +5,24 @@
  *   bun scripts/build.ts --store    no `key`, for the Chrome Web Store
  *   bun scripts/build.ts --test     grants `<all_urls>` and `downloads` at install, for the end-to-end tests
  *   bun scripts/build.ts --zip      also packs sitegloss-<version>.zip
+ *   bun scripts/build.ts --firefox  the Firefox build into `dist-firefox/`
+ *   bun scripts/build.ts --firefox --test
+ *                                   the Firefox build with host access,
+ *                                   `downloads` and the data collection
+ *                                   granted at install, and the panel's page
+ *                                   usable in a tab (automation cannot reach
+ *                                   Firefox's sidebar)
+ *   bun scripts/build.ts --firefox --store [--zip]
+ *                                   the package for addons.mozilla.org into
+ *                                   `dist-firefox-store/`, not minified, no
+ *                                   source maps; `--zip` packs
+ *                                   sitegloss-firefox-<version>-store.zip
  */
 
 import { readdir, rm } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
+import { DATA_COLLECTION } from "../src/lib/browser.ts";
 import { CONTENT_SCRIPT } from "../src/lib/messages.ts";
 import { writeZip } from "../src/lib/zip.ts";
 import { ICON_SIZES } from "./icons.ts";
@@ -25,6 +38,13 @@ export interface BuildOptions {
 	 * the icon and no answer to Chrome's prompt (DEC-020).
 	 */
 	test?: boolean;
+	/**
+	 * The Firefox build: an event page for the service worker, a sidebar for
+	 * the side panel, no offscreen document; into `dist-firefox/` (with
+	 * `store`, `dist-firefox-store/`). No key: Firefox's id is in
+	 * `browser_specific_settings`.
+	 */
+	firefox?: boolean;
 	minify?: boolean;
 }
 
@@ -129,13 +149,92 @@ export function createManifest(
 	};
 }
 
+/** The Firefox build's add-on id (`browser_specific_settings.gecko.id`). */
+export const FIREFOX_ID = "sitegloss@ractive.ch";
+
+/**
+ * The Firefox build's manifest: Manifest V3 as Firefox has it. The
+ * background is an event page (`background.scripts`: Firefox has no
+ * extension service workers), the side panel a sidebar (`sidebar_action`),
+ * and there is no offscreen document (the event page has a DOM and makes the
+ * sync's blob URLs itself). Firefox 140, the ESR, is the first with the data
+ * collection consent: Sitegloss sends nothing anywhere until the user turns
+ * AI access on, and then the pages' content and addresses go to the AI app,
+ * so that is optional and asked for at that click (a test build has it at
+ * install, as it has host access and `downloads`).
+ */
+export function createFirefoxManifest(
+	version: string,
+	options: { test?: boolean },
+): Record<string, unknown> {
+	const icons = Object.fromEntries(
+		ICON_SIZES.map((s) => [String(s), `icons/icon-${s}.png`]),
+	);
+	return {
+		manifest_version: 3,
+		name: "Sitegloss",
+		version,
+		description:
+			"Mark what is wrong on a web page, open the marks in another environment to fix it, and talk them through with your AI app.",
+		browser_specific_settings: {
+			gecko: {
+				id: FIREFOX_ID,
+				strict_min_version: "140.0",
+				data_collection_permissions: options.test
+					? { required: [...DATA_COLLECTION] }
+					: { required: ["none"], optional: [...DATA_COLLECTION] },
+			},
+		},
+		icons,
+		action: { default_title: "Sitegloss", default_icon: icons },
+		background: { scripts: ["background.js"], type: "module" },
+		sidebar_action: {
+			default_title: "Sitegloss",
+			default_panel: "sidepanel/index.html",
+			default_icon: icons,
+			open_at_install: false,
+		},
+		permissions: [
+			"activeTab",
+			"alarms",
+			"notifications",
+			"scripting",
+			"storage",
+			"unlimitedStorage",
+			...(options.test ? ["downloads"] : []),
+		],
+		...(options.test ? {} : { optional_permissions: ["downloads"] }),
+		optional_host_permissions: ["<all_urls>"],
+		...(options.test ? { host_permissions: ["<all_urls>"] } : {}),
+		commands: {
+			_execute_action: {
+				suggested_key: { default: "Alt+Shift+O" },
+				description: "Open Sitegloss on this tab",
+			},
+		},
+		// Chrome's default for Manifest V3. Firefox's adds
+		// `upgrade-insecure-requests`, which turns a relay on the loopback
+		// (ws://127.0.0.1, which the library allows) into wss: and fails.
+		content_security_policy: {
+			extension_pages: "script-src 'self'; object-src 'self'",
+		},
+	};
+}
+
+/** How every entry point is bundled. */
+interface BundleOptions {
+	minify: boolean;
+	sourcemap: "none" | "linked";
+	test: boolean;
+	firefox: boolean;
+}
+
 async function bundle(
 	entrypoint: string,
 	outdir: string,
 	format: "esm" | "iife",
-	minify: boolean,
+	options: BundleOptions,
 	naming?: string,
-	test = false,
 ): Promise<string[]> {
 	const result = await Bun.build({
 		entrypoints: [join(ROOT, entrypoint)],
@@ -145,10 +244,13 @@ async function bundle(
 		...(naming ? { naming } : {}),
 		// Always defined: left to run time, an element with that id on the page
 		// would answer for it and open the overlay's shadow root.
-		define: { SITEGLOSS_TEST_BUILD: test ? "true" : "false" },
-		minify,
+		define: {
+			SITEGLOSS_TEST_BUILD: String(options.test),
+			SITEGLOSS_FIREFOX: String(options.firefox),
+		},
+		minify: options.minify,
 		splitting: format === "esm" && entrypoint.endsWith(".html"),
-		sourcemap: "linked",
+		sourcemap: options.sourcemap,
 		metafile: true,
 	});
 	if (!result.success) {
@@ -185,45 +287,56 @@ export async function checkOutdir(outdir: string): Promise<void> {
 }
 
 export async function build(options: BuildOptions = {}): Promise<BuildResult> {
-	const outdir = resolve(options.outdir ?? join(ROOT, "dist"));
+	const firefox = options.firefox === true;
+	const outdir = resolve(
+		options.outdir ??
+			join(
+				ROOT,
+				firefox
+					? options.store
+						? "dist-firefox-store"
+						: "dist-firefox"
+					: "dist",
+			),
+	);
 	await checkOutdir(outdir);
-	const minify = options.minify ?? true;
+	const how: BundleOptions = {
+		// Not the Firefox store package: addons.mozilla.org reviews the code
+		// itself, which it can read unminified.
+		minify: options.minify ?? !(firefox && options.store),
+		sourcemap: firefox && options.store ? "none" : "linked",
+		test: options.test === true,
+		firefox,
+	};
 	const pkg = (await Bun.file(join(ROOT, "package.json")).json()) as {
 		version: string;
 	};
 	await rm(outdir, { recursive: true, force: true });
 	const packages = new Set([
-		...(await bundle(
-			"src/background.ts",
-			outdir,
-			"esm",
-			minify,
-			undefined,
-			options.test,
-		)),
+		...(await bundle("src/background.ts", outdir, "esm", how)),
 		...(await bundle(
 			"src/content/index.ts",
 			outdir,
 			"iife",
-			minify,
+			how,
 			CONTENT_SCRIPT,
-			options.test,
 		)),
 		...(await bundle(
 			"src/sidepanel/index.html",
 			join(outdir, "sidepanel"),
 			"esm",
-			minify,
-			undefined,
-			options.test,
+			how,
 		)),
-		// The sync to Downloads' blob URLs (DEC-025).
-		...(await bundle(
-			"src/offscreen/index.html",
-			join(outdir, "offscreen"),
-			"esm",
-			minify,
-		)),
+		// The sync to Downloads' blob URLs (DEC-025); Firefox's event page
+		// makes them itself.
+		...(firefox
+			? []
+			: await bundle(
+					"src/offscreen/index.html",
+					join(outdir, "offscreen"),
+					"esm",
+					{ ...how, test: false },
+				)),
 	]);
 	await Bun.write(join(outdir, NOTICES_FILE), await notices(packages));
 	for (const size of ICON_SIZES) {
@@ -233,16 +346,31 @@ export async function build(options: BuildOptions = {}): Promise<BuildResult> {
 			Bun.file(join(ROOT, "assets/icons", name)),
 		);
 	}
-	const key = options.store ? undefined : await readKey();
-	const manifest = createManifest(pkg.version, {
-		...(key ? { key } : {}),
-		...(options.test ? { test: true } : {}),
-	});
+	const key = options.store || firefox ? undefined : await readKey();
+	const manifest = firefox
+		? createFirefoxManifest(pkg.version, {
+				...(options.test ? { test: true } : {}),
+			})
+		: createManifest(pkg.version, {
+				...(key ? { key } : {}),
+				...(options.test ? { test: true } : {}),
+			});
 	await Bun.write(
 		join(outdir, "manifest.json"),
 		`${JSON.stringify(manifest, null, "\t")}\n`,
 	);
 	return { outdir, manifest, id: key ? extensionId(key) : undefined };
+}
+
+/**
+ * The zip's file name: `sitegloss-<version>.zip`, the store package
+ * `sitegloss-<version>-store.zip`, Firefox's `sitegloss-firefox-<version>-store.zip`.
+ */
+export function zipName(
+	version: string,
+	options: { store?: boolean; firefox?: boolean } = {},
+): string {
+	return `sitegloss-${options.firefox ? "firefox-" : ""}${version}${options.store ? "-store" : ""}.zip`;
 }
 
 async function filesOf(dir: string): Promise<string[]> {
@@ -271,22 +399,37 @@ if (import.meta.main) {
 		options: {
 			store: { type: "boolean" },
 			test: { type: "boolean" },
+			firefox: { type: "boolean" },
 			zip: { type: "boolean" },
 			outdir: { type: "string" },
 		},
 	});
+	// Firefox installs no unsigned zip for good: only the store's is of use.
+	if (values.firefox && values.zip && !values.store) {
+		console.error("--firefox --zip packs only the store package: add --store");
+		process.exit(2);
+	}
 	const result = await build({
 		...(values.outdir ? { outdir: values.outdir } : {}),
 		...(values.store ? { store: true } : {}),
 		...(values.test ? { test: true } : {}),
+		...(values.firefox ? { firefox: true } : {}),
 	});
+	const where = relative(process.cwd(), result.outdir) || ".";
 	console.log(
-		`Built ${relative(process.cwd(), result.outdir) || "."}${result.id ? ` (extension ID ${result.id})` : " (no key: store build)"}`,
+		result.id
+			? `Built ${where} (extension ID ${result.id})`
+			: values.firefox
+				? `Built ${where} for Firefox (add-on id ${FIREFOX_ID})`
+				: `Built ${where} (no key: store build)`,
 	);
 	if (values.zip) {
 		const target = join(
 			ROOT,
-			`sitegloss-${result.manifest["version"]}${values.store ? "-store" : ""}.zip`,
+			zipName(String(result.manifest["version"]), {
+				...(values.store ? { store: true } : {}),
+				...(values.firefox ? { firefox: true } : {}),
+			}),
 		);
 		await zipBuild(result.outdir, target);
 		console.log(`Packed ${relative(process.cwd(), target)}`);

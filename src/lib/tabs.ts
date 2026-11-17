@@ -3,6 +3,7 @@
  * service worker, injecting it first when it is not there yet.
  */
 
+import { FIREFOX } from "./browser.ts";
 import {
 	CONTENT_SCRIPT,
 	type ContentRequest,
@@ -14,13 +15,26 @@ export class NoAccessError extends Error {
 	override name = "NoAccessError";
 }
 
+/**
+ * The content script's file as `executeScript` takes it: Chrome reads it
+ * from the extension's root, Firefox from the calling page's folder unless
+ * the path starts with "/" (the side panel's would be `sidepanel/content.js`).
+ */
+const SCRIPT_FILE = FIREFOX ? `/${CONTENT_SCRIPT}` : CONTENT_SCRIPT;
+
 /** Inject the content script; it ignores a second injection. */
 export async function inject(tabId: number): Promise<void> {
 	try {
-		await chrome.scripting.executeScript({
+		const results = await chrome.scripting.executeScript({
 			target: { tabId },
-			files: [CONTENT_SCRIPT],
+			files: [SCRIPT_FILE],
 		});
+		// Firefox reports a script that did not run in the result, not by
+		// rejecting as Chrome does.
+		const failed = FIREFOX
+			? (results as { error?: unknown }[]).find((r) => r.error !== undefined)
+			: undefined;
+		if (failed !== undefined) throw failed.error;
 	} catch (error) {
 		throw new NoAccessError(
 			error instanceof Error ? error.message : String(error),
