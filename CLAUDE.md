@@ -137,6 +137,10 @@ with `kb/design/overview.md` and `kb/iterations/`.
 - End-to-end tests (`test/e2e/`) need Chromium or Chrome for Testing (`CHROME_PATH`, or
   Playwright's Chromium); branded Chrome ignores `--load-extension`. They are skipped
   without one locally and required in CI.
+- Firefox end-to-end tests (`test/e2e/firefox/`, about a minute): a small suite through
+  the `ff-rdp` CLI (`FF_RDP_PATH`) and Firefox (`FIREFOX_PATH`), headless on a free port;
+  skipped without them locally, required in CI, which pins both. `bun run test` runs them
+  with the rest; a lock lets one run at a time.
 - Only runtime dependency: `@ractive-ch/tab-mcp-client`. Prefer a few lines of own code
   over a package. No JavaScript from an AI app or server ever runs (fixed tools only).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency, pinned
