@@ -1,0 +1,468 @@
+/**
+ * End to end in Firefox: the Firefox build in a headless Firefox, through
+ * the ff-rdp CLI (`harness.ts`). Deliberately small, beside the Chromium
+ * suite (`test/e2e/*.test.ts`), which stays the thorough one: what is
+ * Firefox's own or most likely to break there, one test each.
+ *
+ * Skipped without ff-rdp and Firefox (`FF_RDP_PATH`, `FIREFOX_PATH`, or
+ * where they are installed); required in CI.
+ */
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import {
+	Client,
+	StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import {
+	startTestRelay,
+	type TestRelay,
+	tokenFor,
+} from "@ractive-ch/tab-mcp/testing";
+import { MAX_SIDE } from "../../../src/lib/images.ts";
+import { cropRectFor } from "../../../src/lib/save.ts";
+import { readZip } from "../../../src/lib/zip.ts";
+import {
+	backgroundErrors,
+	clickButton,
+	draw,
+	type FirefoxHarness,
+	firefoxReady,
+	marksInPanel,
+	newCase,
+	PANEL_TEXT,
+	readCase,
+	type StoredCase,
+	startFirefox,
+	toHome,
+} from "./harness.ts";
+
+/** The page the tests mark: the fixture's first version, on the local server. */
+const TITLE = "Krankenkasse vergleichen (v1)";
+
+/** Within `slack` of `want`: rounding at a fractional device pixel ratio. */
+const near = (got: number, want: number, slack = 2) =>
+	Math.abs(got - want) <= slack;
+
+/**
+ * Every shot of `c` is its viewport in device pixels, and every mark's crop
+ * is its rectangle grown as the overlay grows it (`cropRectFor`), in device
+ * pixels, at most MAX_SIDE long. Returns what does not hold.
+ */
+function sizeProblems(c: StoredCase): string[] {
+	const problems: string[] = [];
+	for (const shot of c.shots) {
+		const size = c.sizes[shot.image];
+		const { width, height, dpr } = shot.viewport;
+		if (
+			size === undefined ||
+			!near(size.width, width * dpr) ||
+			!near(size.height, height * dpr)
+		)
+			problems.push(
+				`shot ${shot.id}: ${JSON.stringify(size)} for ${width}×${height} at ${dpr}`,
+			);
+	}
+	for (const a of c.annotations) {
+		const shot = c.shots.find((s) => s.id === a.shot);
+		const size = c.sizes[a.crop];
+		if (
+			shot === undefined ||
+			a.shape.rect === undefined ||
+			size === undefined
+		) {
+			problems.push(`mark ${a.number}: no shot, rectangle or crop`);
+			continue;
+		}
+		const { dpr } = shot.viewport;
+		const crop = cropRectFor(a.shape.rect, shot.viewport);
+		const scale = Math.min(
+			1,
+			MAX_SIDE / Math.max(crop.width * dpr, crop.height * dpr),
+		);
+		if (
+			!near(size.width, crop.width * dpr * scale, 3) ||
+			!near(size.height, crop.height * dpr * scale, 3)
+		)
+			problems.push(
+				`mark ${a.number}: crop ${size.width}×${size.height}, expected ${Math.round(crop.width * dpr * scale)}×${Math.round(crop.height * dpr * scale)}`,
+			);
+	}
+	return problems;
+}
+
+/** The files in `dir` (none if it does not exist), but `.keep`. */
+const filesIn = (dir: string) =>
+	existsSync(dir) ? readdirSync(dir).filter((f) => f !== ".keep") : [];
+
+/** Until `test()` holds, or `ms` have passed (then it throws, naming `what`). */
+async function until(
+	test: () => boolean,
+	what: string,
+	ms = 15_000,
+): Promise<void> {
+	const end = Date.now() + ms;
+	while (!test()) {
+		if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+		await Bun.sleep(100);
+	}
+}
+
+describe.skipIf(!firefoxReady)("Firefox: the test build", () => {
+	let h: FirefoxHarness;
+	let relay: TestRelay | undefined;
+
+	beforeAll(async () => {
+		h = await startFirefox("test");
+	}, 120_000);
+
+	afterAll(async () => {
+		await relay?.stop();
+		await h?.stop();
+	}, 60_000);
+
+	test("installs with no manifest warning, and the event page starts without an error", async () => {
+		expect(h.warnings).toEqual([]);
+		expect(await backgroundErrors(h)).toEqual([]);
+		// Firefox's words: the panel is a sidebar there.
+		expect(
+			await h.rdp.eval<string>(
+				h.panel,
+				"document.getElementById('ai-button').title",
+			),
+		).not.toContain("Chrome");
+	});
+
+	test("a case with an element mark and a box: its screenshots and crops have the right sizes", async () => {
+		await newCase(h);
+		await draw(h, { tool: "element", selector: "h1", comment: "The title" });
+		await marksInPanel(h, 1);
+		await draw(h, {
+			tool: "box",
+			selector: "main section p",
+			comment: "This text",
+		});
+		await marksInPanel(h, 2);
+		const c = await readCase(h, TITLE);
+		expect(c.annotations.map((a) => [a.shape.kind, a.comment])).toEqual([
+			["element", "The title"],
+			["box", "This text"],
+		]);
+		expect(sizeProblems(c)).toEqual([]);
+	}, 60_000);
+
+	test("at 150 % zoom too", async () => {
+		const tabId = await h.rdp.eval<number>(
+			h.panel,
+			`chrome.tabs.query({ active: true, windowId: ${h.windowId} }).then(([t]) => t.id)`,
+		);
+		await h.rdp.eval(h.panel, `chrome.tabs.setZoom(${tabId}, 1.5)`);
+		try {
+			await h.rdp.waitFor(h.page, "devicePixelRatio > 1.4", "the zoom");
+			await newCase(h);
+			await draw(h, {
+				tool: "element",
+				selector: "button[type=submit]",
+				comment: "Zoomed button",
+			});
+			await draw(h, {
+				tool: "box",
+				selector: "main section h2",
+				comment: "Zoomed box",
+			});
+			await marksInPanel(h, 2);
+			const c = await readCase(h, TITLE);
+			expect(c.annotations.map((a) => a.comment)).toEqual([
+				"Zoomed button",
+				"Zoomed box",
+			]);
+			expect(c.shots[0]?.viewport.dpr).toBeGreaterThan(1.4);
+			expect(sizeProblems(c)).toEqual([]);
+		} finally {
+			await h.rdp.eval(h.panel, `chrome.tabs.setZoom(${tabId}, 1)`);
+			await h.rdp.waitFor(h.page, "devicePixelRatio < 1.1", "zoom 100 %");
+		}
+	}, 60_000);
+
+	test("after a reload the open case's marks are found again", async () => {
+		// The zoomed case is open in the panel, its marks drawn on the page.
+		await h.rdp.waitFor(
+			h.panel,
+			`/2 of 2 marks found/.test(${PANEL_TEXT})`,
+			"the marks found before the reload",
+		);
+		await h.rdp.run(["--tab", h.page, "reload"]);
+		await h.rdp.waitFor(
+			h.page,
+			"document.readyState === 'complete' && document.getElementById('sitegloss-root') !== null",
+			"the page again, with the overlay",
+		);
+		await h.rdp.waitFor(
+			h.panel,
+			`/2 of 2 marks found/.test(${PANEL_TEXT})`,
+			"the marks found after the reload",
+			20_000,
+		);
+		const drawn = await h.rdp.eval<number>(
+			h.page,
+			"document.getElementById('sitegloss-root').shadowRoot.querySelectorAll('.marks > *').length",
+		);
+		expect(drawn).toBeGreaterThan(0);
+	}, 60_000);
+
+	test("export, and import as a copy", async () => {
+		await clickButton(h, "Export");
+		let file = "";
+		await until(() => {
+			file =
+				filesIn(h.downloads).find((f) => f.endsWith(".sitegloss.zip")) ?? "";
+			return file !== "" && statSync(join(h.downloads, file)).size > 0;
+		}, "the exported file");
+		const bytes = await Bun.file(join(h.downloads, file)).bytes();
+		// Import is on Home, and asks there.
+		await toHome(h);
+		await h.rdp.eval(
+			h.panel,
+			`(() => {
+				const bytes = Uint8Array.from(atob(${JSON.stringify(Buffer.from(bytes).toString("base64"))}), (c) => c.charCodeAt(0));
+				const input = document.getElementById("import-file");
+				const files = new DataTransfer();
+				files.items.add(new File([bytes], "case.sitegloss.zip", { type: "application/zip" }));
+				input.files = files.files;
+				input.dispatchEvent(new Event("change", { bubbles: true }));
+				return true;
+			})()`,
+		);
+		// The case is here already: Keep both.
+		await h.rdp.waitFor(
+			h.panel,
+			`[...document.querySelectorAll("button")].some((b) => b.textContent.trim() === "Keep both")`,
+			"the import's question",
+		);
+		await clickButton(h, "Keep both");
+		await h.rdp.waitFor(
+			h.panel,
+			`/\\(copy\\)/.test(${PANEL_TEXT})`,
+			"the copy in the panel",
+		);
+		const copy = await readCase(h, `${TITLE} (copy)`);
+		expect(copy.annotations.map((a) => a.comment)).toEqual([
+			"Zoomed button",
+			"Zoomed box",
+		]);
+		expect(sizeProblems(copy)).toEqual([]);
+	}, 60_000);
+
+	test("sync to Downloads writes each case, and overwrites its file after a change", async () => {
+		const folder = join(h.downloads, "Sitegloss");
+		const synced = () =>
+			filesIn(folder).filter((f) => f.endsWith(".sitegloss.zip"));
+		/** The marks in a synced file's case.json; -1 while it cannot be read. */
+		const marksIn = async (file: string) => {
+			try {
+				const files = await readZip(await Bun.file(join(folder, file)).bytes());
+				const json = files.get("case.json");
+				if (json === undefined) return -1;
+				return (
+					JSON.parse(new TextDecoder().decode(json)) as {
+						annotations: unknown[];
+					}
+				).annotations.length;
+			} catch {
+				return -1;
+			}
+		};
+		// On Home: every case so far gets a file of its own.
+		await toHome(h);
+		await clickButton(h, "Sync to Downloads");
+		await until(() => synced().length === 3, "three synced files", 30_000);
+		const before = new Set(synced());
+
+		// A new case: one more file; a second mark: the same file again.
+		await newCase(h);
+		await draw(h, { tool: "element", selector: "h1", comment: "Synced" });
+		await marksInPanel(h, 1);
+		let file = "";
+		await until(
+			() => {
+				file = synced().find((f) => !before.has(f)) ?? "";
+				return file !== "";
+			},
+			"the new case's file",
+			30_000,
+		);
+		const end = Date.now() + 30_000;
+		while ((await marksIn(file)) !== 1) {
+			if (Date.now() > end) throw new Error("the file never had the mark");
+			await Bun.sleep(200);
+		}
+		await draw(h, {
+			tool: "box",
+			selector: "main section p",
+			comment: "Synced box",
+		});
+		await marksInPanel(h, 2);
+		while ((await marksIn(file)) !== 2) {
+			if (Date.now() > end + 30_000)
+				throw new Error("the file was not written again");
+			await Bun.sleep(200);
+		}
+		// Overwritten in place: no "(1)" copy beside it.
+		expect(synced().sort()).toEqual([...before, file].sort());
+		// Firefox's download list keeps only the newest of the sync's entries.
+		const entries = await h.rdp.eval<string[]>(
+			h.panel,
+			"chrome.downloads.search({}).then((all) => all.filter((d) => /[\\\\/]Sitegloss[\\\\/]/.test(d.filename)).map((d) => d.filename))",
+		);
+		expect(entries).toHaveLength(1);
+	}, 120_000);
+
+	test("AI access: a read tool, a question answered in the panel, still connected after 30 s idle", async () => {
+		relay = startTestRelay();
+		const url = relay.url;
+		await h.rdp.run(["--tab", h.panel, "navigate", h.panelUrl]);
+		await h.rdp.waitFor(
+			h.panel,
+			"document.documentElement.dataset.aiState === 'disconnected'",
+			"the panel",
+		);
+		await h.rdp.eval(
+			h.panel,
+			`(() => {
+				const relay = document.getElementById("relay");
+				relay.value = ${JSON.stringify(url)};
+				relay.dispatchEvent(new Event("change"));
+				document.getElementById("ai-button").click();
+				return true;
+			})()`,
+		);
+		const address = await h.rdp.waitFor<string>(
+			h.panel,
+			"document.documentElement.dataset.aiState === 'connected' && document.getElementById('pair-address').textContent",
+			"AI access connected",
+			20_000,
+		);
+		expect(address).toContain(url);
+		const token = await tokenFor(relay.store, address, {});
+		const client = new Client(
+			{ name: "firefox-e2e", version: "1.0.0" },
+			{ versionNegotiation: { mode: { pin: "2026-07-28" } } },
+		);
+		await client.connect(
+			new StreamableHTTPClientTransport(new URL(address), {
+				requestInit: { headers: { Authorization: `Bearer ${token}` } },
+			}),
+		);
+		try {
+			const listed = await client.callTool({
+				name: "list_cases",
+				arguments: {},
+			});
+			const cases = JSON.parse(
+				(listed.content as { text: string }[])[0]?.text ?? "[]",
+			) as { caseId: string; title: string }[];
+			const target = cases.find((c) => c.title === `${TITLE} (copy)`);
+			expect(target).toBeDefined();
+
+			// A change asks; Allow counts only in a panel with the focus, so its
+			// window comes to the front for the answer (and the page's after:
+			// the tools act on the tab in front of the last focused window).
+			const verdict = client.callTool({
+				name: "set_summary",
+				arguments: { caseId: target?.caseId, summary: "From Firefox" },
+			});
+			await h.rdp.waitFor(
+				h.panel,
+				"document.querySelector('[data-question]') !== null",
+				"the question in the panel",
+			);
+			await h.rdp.eval(
+				h.panel,
+				"chrome.tabs.getCurrent().then((t) => chrome.windows.update(t.windowId, { focused: true })).then(() => true)",
+			);
+			const allow = `document.querySelector('[data-question] button[data-answer="allow"]')`;
+			await h.rdp.waitFor(h.panel, `!${allow}.disabled`, "Allow to count");
+			await h.rdp.eval(h.panel, `${allow}.click()`);
+			const result = (await verdict) as { isError?: boolean };
+			expect(result.isError).toBeFalsy();
+			await h.rdp.eval(
+				h.panel,
+				`chrome.windows.update(${h.windowId}, { focused: true }).then(() => true)`,
+			);
+			// The summary for the developer is the case's `verdict` (DEC-019).
+			expect((await readCase(h, `${TITLE} (copy)`)) as unknown).toMatchObject({
+				verdict: "From Firefox",
+			});
+
+			// Firefox stops an event page after 30 s without extension events,
+			// its WebSocket with it, unless something keeps it.
+			const started = await h.rdp.eval<number>(
+				h.panel,
+				"browser.runtime.getBackgroundPage().then((bg) => bg.performance.timeOrigin)",
+			);
+			await Bun.sleep(35_000);
+			expect(
+				await h.rdp.eval<number>(
+					h.panel,
+					"browser.runtime.getBackgroundPage().then((bg) => bg.performance.timeOrigin)",
+				),
+			).toBe(started);
+			expect(
+				await h.rdp.eval<string>(
+					h.panel,
+					"document.documentElement.dataset.aiState",
+				),
+			).toBe("connected");
+			const again = await client.callTool({
+				name: "list_cases",
+				arguments: {},
+			});
+			expect(again.isError).toBeFalsy();
+		} finally {
+			await client.close();
+		}
+	}, 120_000);
+
+	test("the event page logged no error all along", async () => {
+		expect(await backgroundErrors(h)).toEqual([]);
+	});
+});
+
+describe.skipIf(!firefoxReady)("Firefox: the store package", () => {
+	let h: FirefoxHarness;
+
+	beforeAll(async () => {
+		h = await startFirefox("store");
+	}, 120_000);
+
+	afterAll(async () => {
+		await h?.stop();
+	}, 60_000);
+
+	test("installs with no manifest warning; its panel's page in a tab is no panel", async () => {
+		expect(h.warnings).toEqual([]);
+		expect(await h.rdp.eval<string>(h.panel, PANEL_TEXT)).toContain(
+			"Open the sidebar from the Sitegloss icon for AI access",
+		);
+		expect(
+			await h.rdp.eval<boolean>(
+				h.panel,
+				"document.getElementById('connect').disabled",
+			),
+		).toBe(true);
+		// The event page closes a port from it at once, and tells it nothing.
+		expect(
+			await h.rdp.eval<string>(
+				h.panel,
+				`new Promise((resolve) => {
+					const port = chrome.runtime.connect({ name: "ai" });
+					let told = false;
+					port.onMessage.addListener(() => { told = true; });
+					port.onDisconnect.addListener(() => resolve(told ? "told" : "closed"));
+					setTimeout(() => resolve("still open"), 5000);
+				})`,
+			),
+		).toBe("closed");
+	}, 60_000);
+});

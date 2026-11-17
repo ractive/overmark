@@ -66,6 +66,29 @@ import {
 declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
 declare const SITEGLOSS_FIREFOX: boolean | undefined;
 
+/**
+ * A test build keeps the worker's errors on its global object, for the
+ * end-to-end tests: Firefox's event page has a console no automation
+ * reaches. (The define itself: other builds drop it.)
+ */
+if (typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD) {
+	const errors: string[] = [];
+	const text = (value: unknown) =>
+		value instanceof Error ? value.message : String(value);
+	globalThis.addEventListener("error", (e) =>
+		errors.push(text((e as ErrorEvent).error ?? (e as ErrorEvent).message)),
+	);
+	globalThis.addEventListener("unhandledrejection", (e) =>
+		errors.push(text((e as PromiseRejectionEvent).reason)),
+	);
+	const error = console.error.bind(console);
+	console.error = (...args: unknown[]) => {
+		errors.push(args.map(text).join(" "));
+		error(...args);
+	};
+	Object.assign(globalThis, { siteglossErrors: errors });
+}
+
 const store = new IdbStore();
 const added = new AddLedger(chrome.storage.session);
 
