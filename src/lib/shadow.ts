@@ -3,23 +3,45 @@
  * `querySelectorAll`, `closest` and `elementsFromPoint` do not enter.
  */
 
-/**
- * An element's shadow root, open or (from an extension) closed: Chrome's
- * `chrome.dom.openOrClosedShadowRoot`, Firefox's
- * `element.openOrClosedShadowRoot` (content scripts only).
- */
+import { FIREFOX } from "./browser.ts";
+
+/** An element's shadow root, open or (from an extension) closed. */
 export function shadowOf(el: Element): ShadowRoot | null {
+	if (FIREFOX) return firefoxShadowOf(el);
 	try {
 		const closed =
-			(el as { openOrClosedShadowRoot?: ShadowRoot | null })
-				.openOrClosedShadowRoot ??
-			(typeof chrome === "undefined"
+			typeof chrome === "undefined"
 				? undefined
-				: chrome.dom?.openOrClosedShadowRoot?.(el as HTMLElement));
+				: chrome.dom?.openOrClosedShadowRoot?.(el as HTMLElement);
 		return closed ?? el.shadowRoot;
 	} catch {
 		// Not an element that can have one.
 		return el.shadowRoot;
+	}
+}
+
+/** `value` if it is a shadow root (a document fragment with a host). */
+const asShadowRoot = (value: unknown): ShadowRoot | null =>
+	(value as Node | null | undefined)?.nodeType === 11 &&
+	(value as ShadowRoot).host !== undefined
+		? (value as ShadowRoot)
+		: null;
+
+/**
+ * Firefox's way: `element.openOrClosedShadowRoot`, which content scripts
+ * have. A page can shadow the property: a form's control named
+ * `openOrClosedShadowRoot` is what `form.openOrClosedShadowRoot` gives, in
+ * the content script's world too. So only a shadow root counts.
+ */
+export function firefoxShadowOf(el: Element): ShadowRoot | null {
+	try {
+		return (
+			asShadowRoot(
+				(el as { openOrClosedShadowRoot?: unknown }).openOrClosedShadowRoot,
+			) ?? asShadowRoot(el.shadowRoot)
+		);
+	} catch {
+		return null;
 	}
 }
 
