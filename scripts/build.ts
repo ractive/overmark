@@ -382,6 +382,13 @@ async function filesOf(dir: string): Promise<string[]> {
 		.sort();
 }
 
+/**
+ * Every entry's time: a zip of the same files is the same bytes whenever it
+ * is made, so a reviewer who rebuilds the package from the source gets the
+ * same SHA-256.
+ */
+const ZIP_DATE = new Date(1980, 0, 1);
+
 /** Pack a build into a zip for "Load unpacked" or the store. */
 export async function zipBuild(outdir: string, target: string): Promise<void> {
 	const entries = [];
@@ -391,7 +398,7 @@ export async function zipBuild(outdir: string, target: string): Promise<void> {
 			data: new Uint8Array(await Bun.file(join(outdir, name)).arrayBuffer()),
 		});
 	}
-	await Bun.write(target, await writeZip(entries));
+	await Bun.write(target, await writeZip(entries, { date: ZIP_DATE }));
 }
 
 if (import.meta.main) {
