@@ -1250,3 +1250,21 @@ decision).
 - No third-party code where the keys are: the CRX is packed by inline Python (standard
   library, `openssl`), byte for byte Chrome's `--pack-extension`; the API is called with
   `curl`.
+
+## DEC-033: A release publishes itself to Microsoft Edge Add-ons too (owner)
+
+2026-11-17, after Sitegloss 0.2.0 went live in Edge Add-ons, uploaded by hand. The owner
+asked for the Edge upload to be automated as well (tab-mcp's DEC-194 is the same decision).
+
+- `release.yml` runs the job `publish-edge` after it creates the release:
+  `edge-extension-publish.yml` of ractive/release-workflows (v0.7.0, pinned to a commit),
+  in the environment `edge-add-ons` (required reviewer, tags `v*` only), with the Publish
+  API's `EDGE_CLIENT_ID` and `EDGE_API_KEY`. `publish.yml` runs it by hand (store `edge` or
+  `both`).
+- Beside the Chrome Web Store job, not after it: one store's failure or rejection does not
+  hold back the other, and each waits for its own approval.
+- The same verified zip: its build provenance is checked before the upload, so the
+  attestation is the record of what Edge got too. Edge has no signed uploads, so whoever
+  holds the API key could upload another zip; the key lives only in the environment and in
+  the owner's password manager, and it expires.
+- No third-party code in the job: the API is called with `curl`, as for Chrome (DEC-032).
