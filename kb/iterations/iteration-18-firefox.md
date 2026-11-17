@@ -48,8 +48,16 @@ amends DEC-003) and DEC-035 (the release).
   tab. Skipped locally without ff-rdp or Firefox, required in CI, which installs Firefox
   160.0 by its checksum and ff-rdp 0.5.0 by its attestation.
 - The Firefox store zip built from the unpacked source archive is byte for byte the same
-  in another directory and at another time (macOS). Before the fix the zips of two builds
-  differed in the entries' time only.
+  in another directory and at another time, and on another system: the zip CI built on
+  Ubuntu (x86_64) and one built on macOS (arm64) from the same commit have the same
+  SHA-256. Before the fix the zips of two builds differed in the entries' time only.
+- The review (Claude 8, GLM 1): the release's build job ran the tests without Firefox and
+  ff-rdp, so a tag would have made no release (it installs them now, and a test keeps its
+  pins equal to CI's); a notification's click cannot open the sidebar (no user gesture),
+  so the text names the icon; `shadowOf` read Firefox's property in Chrome too, where a
+  form's control of that name answered for it; a Firefox start that outlived its hook was
+  never stopped; the tests' error record died with the idle event page (it is in
+  `storage.session` now, warnings included).
 - Not available in Firefox for Android. `file:` pages work once the user turns on "Access
   local files on your computer" in Firefox's add-on settings (tried in Firefox 160 with
   the grant written into the profile; the toggle itself is out of automation's reach).

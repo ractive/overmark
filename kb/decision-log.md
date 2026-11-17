@@ -1290,8 +1290,10 @@ desktop Firefox (153 or later, the ESR since 2026-07 and the first to tell a mes
   20 s.
 - Sync writes to a subfolder of Downloads only (no `showDirectoryPicker`: "Choose a folder"
   is not offered); overwriting replaces the file without a dialog. A notification has no
-  buttons and closes by itself: a question's notification says to answer in the sidebar,
-  its closing is no answer (in Chrome it is Don't allow). The tab's size in the panel is
+  buttons and closes by itself: a question's notification says to click the Sitegloss icon
+  (which shows "?") and answer in the sidebar; its click only brings the question's window
+  to the front, as `sidebarAction.open()` needs a user gesture and a notification's click
+  is none in Firefox; its closing is no answer (in Chrome it is Don't allow). The tab's size in the panel is
   read every 3 s while the sidebar shows (no `windows.onBoundsChanged`). For `file:`
   pages there is no button: the user turns on "Access local files on your computer" in
   Firefox's add-on settings, the notice says where, and the panel reads the setting on
