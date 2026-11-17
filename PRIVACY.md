@@ -1,7 +1,7 @@
 # Sitegloss privacy policy
 
-Sitegloss is a browser extension for annotating web pages. It has no account and no
-analytics. What it keeps stays in your browser, unless you export it, sync it or connect
+Sitegloss is a browser extension for annotating web pages, for Chrome, Edge and
+Firefox. It has no account and no analytics. What it keeps stays in your browser, unless you export it, sync it or connect
 an AI app. Its author receives nothing from it, except what passes through the hosted
 relay when you connect an AI app through it.
 
@@ -28,7 +28,8 @@ Only in three cases, all started by you:
 1. **Export.** Export writes a case, or every case, to a zip file. Where it goes from
    there is up to you.
 2. **Sync.** If you turn on the sync, Sitegloss writes each case as the same zip file to
-   Chrome's downloads folder, or to a folder you choose. If a cloud service syncs that
+   the browser's downloads folder, or in Chrome and Edge to a folder you choose (in
+   Firefox, a subfolder of Downloads). If a cloud service syncs that
    folder, it uploads the files under its own privacy policy.
 3. **An AI app.** If you connect an AI app (for example Claude), it can read your cases
    and their screenshots, and the address (cut as above), title, element details and
@@ -42,6 +43,11 @@ Only in three cases, all started by you:
    The AI app's provider handles it under its own privacy policy.
 
    Changes the AI app wants to make are asked first, unless you chose "Always allow".
+
+   In Firefox, the browser first asks, at the click that turns AI access on, for its own
+   data collection consent for website content and browsing activity. Without it AI
+   access does not start, and it ends when you take the consent back in Firefox's add-on
+   settings. Nothing is required at install.
 
 Sitegloss itself sends nothing else. It does not sell data, use it for advertising or
 for anything but annotating pages and reviewing the annotations, or use it to determine
@@ -63,14 +69,15 @@ creditworthiness.
 - **activeTab:** to run on the tab where you click the Sitegloss icon, until that tab
   navigates elsewhere.
 - **scripting:** to add its toolbar and outlines to that tab.
-- **sidePanel:** for its side panel.
+- **sidePanel:** for its side panel (Chrome and Edge; Firefox has a sidebar instead).
 - **storage:** session storage, forgotten when the browser closes: what Undo can take
   back, and whether AI access is on.
 - **alarms:** so the AI app's connection comes back after the computer slept.
 - **notifications:** to ask whether the AI app may make a change when the side panel
   is not in front.
 - **unlimitedStorage:** so the browser does not delete your cases to free disk space.
-- **offscreen:** to make the files for the sync to Downloads.
+- **offscreen:** to make the files for the sync to Downloads (Chrome and Edge; Firefox's
+  background page makes them itself).
 - **Downloads (optional):** to save exports and synced files. It does not read, change
   or open your other downloads.
 - **Single sites (optional):** asked when you open a case's page, so Sitegloss may run
@@ -89,4 +96,4 @@ stay until you delete them.
 Jean-Pierre Bergamin, <https://ractive.ch>, james@ractive.ch.
 Source code: <https://github.com/ractive/sitegloss>.
 
-Last changed: 15 November 2026.
+Last changed: 17 November 2026.
