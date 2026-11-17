@@ -17,8 +17,8 @@ name: Release
 #
 #   gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss
 #
-# The job publish verifies it before anything goes to the store, so it is not
-# optional: GitHub offers attestations in private repositories only on
+# The jobs publish and publish-edge verify it before anything goes to a store,
+# so it is not optional: GitHub offers attestations in private repositories only on
 # Enterprise Cloud, and in a private repository this step fails before any
 # release is made.
 #
