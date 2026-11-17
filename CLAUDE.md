@@ -146,6 +146,6 @@ with `kb/design/overview.md` and `kb/iterations/`.
 - Always the latest versions of Bun, TypeScript, Biome and every dependency, pinned
   exactly.
 - Biome ignores `.claude/` and `kb/`.
-- No entry in `kb/log.md` for a change: it is no longer written. A change is described
-  in its commit and its pull request, a decision in `kb/decision-log.md`.
+- No `kb/log.md` (removed by the owner, 2026-11-17): a change is described in its commit
+  and its pull request, a decision in `kb/decision-log.md`.
 - Commits: author email james@ractive.ch. MIT licence with `AI_NOTICE`.
