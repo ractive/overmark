@@ -73,8 +73,10 @@ user agent. What differs from Chrome and Edge:
 - The sync writes to a subfolder of Downloads only: Firefox has no folder picker, so
   "Choose a folder" is not offered. Overwriting a file replaces it without a dialog.
 - A notification has no buttons in Firefox and closes by itself. A question from the AI
-  app says to answer in the sidebar, a click on it opens the sidebar, and its closing is
-  no answer (in Chrome a close is Don't allow). The question in the sidebar asks you to
+  app says to answer in the sidebar, which the Sitegloss icon opens (it shows "?" while a
+  question waits; Firefox does not let a notification's click open a sidebar, so that
+  click only brings the question's window to the front), and its closing is no answer
+  (in Chrome a close is Don't allow). The question in the sidebar asks you to
   click into it first, as Firefox leaves the focus in the page.
 - For files on your computer (`file:` pages) there is no button: turn on "Access local
   files on your computer" in Firefox's Add-ons and themes, under Sitegloss, Permissions and

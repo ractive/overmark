@@ -691,6 +691,11 @@ export class Connection {
 		this.#questions.notificationDismissed(id);
 	}
 
+	/** The window whose tab the question of notification `id` is about, if known. */
+	notificationWindow(id: string): number | undefined {
+		return this.#questions.windowOfNotification(id);
+	}
+
 	// --- The side panels ---
 
 	/**

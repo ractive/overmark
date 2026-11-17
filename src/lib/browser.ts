@@ -129,13 +129,13 @@ export function openSidebar(
 
 /**
  * Open the panel for `tabId` in `windowId`: Chrome's side panel, or
- * Firefox's sidebar. Both need the user's gesture: no `await` before this.
- * Without a window, Firefox's sidebar in the window in front (Chrome needs
- * one).
+ * Firefox's sidebar. Both need the user's gesture (Firefox only takes one
+ * from a user input handler, such as the icon's click): no `await` before
+ * this.
  */
 export function openPanel(options: {
 	tabId?: number;
-	windowId?: number;
+	windowId: number;
 }): Promise<void> {
 	if (FIREFOX)
 		return openSidebar(
@@ -143,8 +143,6 @@ export function openPanel(options: {
 				?.sidebarAction,
 			options.windowId,
 		);
-	if (options.windowId === undefined)
-		return Promise.reject(new Error("no window for the side panel"));
 	return chrome.sidePanel.open(
 		options.tabId === undefined
 			? { windowId: options.windowId }

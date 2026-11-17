@@ -43,13 +43,16 @@ export const NOTIFICATION_BUTTONS = ["Allow", "Always allow"] as const;
 export const REFUSE_ONLY = ["Don't allow"] as const;
 /**
  * Firefox's notifications have no buttons and close by themselves: one only
- * tells, a click on it opens the sidebar, and the question is answered
- * there. Firefox leaves the focus in the page, and Allow counts only in a
- * focused panel: so the click into the sidebar.
+ * tells, and the question is answered in the sidebar, which only the
+ * Sitegloss icon's click opens (Firefox lets `sidebarAction.open` run only in
+ * a user input handler, and a notification's click is none); the icon shows
+ * "?" meanwhile. A click on the notification brings the question's window
+ * to the front. Firefox leaves the focus in the page, and Allow counts only
+ * in a focused panel: so the click into the sidebar.
  */
 export const NO_BUTTONS: readonly string[] = [];
 export const FIREFOX_ANSWER =
-	"Answer in Sitegloss's sidebar: click this, or the Sitegloss icon, then click into the sidebar.";
+	"Answer in Sitegloss's sidebar: click the Sitegloss icon (it shows “?”), then click into the sidebar.";
 
 /** What a question needs from Chrome and from the panels. */
 export interface QuestionsHost {
@@ -312,6 +315,14 @@ export class Questions {
 			return;
 		}
 		pending.settle(answer);
+	}
+
+	/**
+	 * The window of the question notification `id` asks, if it is still
+	 * open and its window known (Firefox brings it to the front at a click).
+	 */
+	windowOfNotification(id: string): number | undefined {
+		return this.#byNotification(id)?.windowId;
 	}
 
 	/** A click on the notification's body, or its closing: Don't allow. */

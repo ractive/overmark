@@ -262,6 +262,20 @@ describe("questions", () => {
 		expect(host.shown.size).toBe(0);
 	});
 
+	test("a notification knows the window of its question's tab, until the question is settled", async () => {
+		const host = fakeHost();
+		const questions = new Questions(host);
+		const answer = questions.ask(request(), CASE, 7);
+		await settle();
+		const [id] = [...host.shown.keys()] as [string];
+		// Tab 7 is in window 3 (Firefox brings it to the front at a click).
+		expect(questions.windowOfNotification(id)).toBe(3);
+		expect(questions.windowOfNotification("other")).toBeUndefined();
+		questions.answer(questions.list[0]?.id ?? "", "deny");
+		expect(await answer).toBe("deny");
+		expect(questions.windowOfNotification(id)).toBeUndefined();
+	});
+
 	test("questions an Always allow given meanwhile covers are allowed; others still wait", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);

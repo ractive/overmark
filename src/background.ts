@@ -452,8 +452,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
  *
  * Firefox's notifications have no buttons and close by themselves, which
  * fires `onClosed` too, without `byUser`: there a notification only tells,
- * a click on it opens the sidebar of the window in front, where the
- * question is answered, and a close is no answer.
+ * and a close is no answer. The question is answered in the sidebar, which
+ * only the icon's click opens: Firefox lets `sidebarAction.open` run only in
+ * a user input handler, and a notification's click is none. So a click on
+ * one brings the question's window to the front, where the icon shows "?".
  */
 function notificationButton(id: string, index: number): void {
 	withConnection((c) => c.notificationButton(id, index));
@@ -462,12 +464,15 @@ function notificationDismissed(id: string): void {
 	withConnection((c) => c.notificationDismissed(id));
 }
 if (FIREFOX)
-	chrome.notifications.onClicked.addListener(() => {
-		// At once, in the click's gesture, which an await would end.
-		void openPanel({}).catch((error: unknown) =>
-			console.warn("Sitegloss: sidebar", error),
-		);
-	});
+	chrome.notifications.onClicked.addListener((id) =>
+		withConnection((c) => {
+			const windowId = c.notificationWindow(id);
+			if (windowId !== undefined)
+				void chrome.windows
+					.update(windowId, { focused: true })
+					.catch(() => undefined);
+		}),
+	);
 else {
 	chrome.notifications.onButtonClicked.addListener(notificationButton);
 	chrome.notifications.onClicked.addListener(notificationDismissed);

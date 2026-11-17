@@ -110,6 +110,9 @@ describe("Firefox's notifications of a question", () => {
 		expect(text.message).toContain("Case: “Checkout”");
 		expect(text.message.length).toBeLessThanOrEqual(MAX_NOTIFICATION_MESSAGE);
 		expect(text.contextMessage).toBe("Sitegloss · answer in its sidebar");
+		// Only the icon opens Firefox's sidebar: a notification's click cannot.
+		expect(FIREFOX_ANSWER).toContain("click the Sitegloss icon");
+		expect(text.message).not.toContain("click this");
 		const long = notificationText(
 			{ ...view, lines: ["x".repeat(1000)] },
 			"{}",
