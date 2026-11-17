@@ -1,36 +1,43 @@
 name: Release
 
-# Pushing a tag vX.Y.Z (on a commit of main) builds two zips, the unpacked
-# extension with the fixed key (for "Load unpacked") and the store package
-# without it, and only then creates the GitHub release with both attached. So a
-# failed build leaves no empty release, and published releases are never
-# changed afterwards (immutable releases work).
+# Pushing a tag vX.Y.Z (on a commit of main) builds four zips: the unpacked
+# extension with the fixed key (for "Load unpacked"), the store package without
+# it (Chrome Web Store, Microsoft Edge Add-ons), the Firefox store package
+# (addons.mozilla.org, not minified) and the source archive of the built commit
+# that addons.mozilla.org's reviewers rebuild that one from. Only then it
+# creates the GitHub release with all four attached. So a failed build leaves
+# no empty release, and published releases are never changed afterwards
+# (immutable releases work).
 #
 #   git tag v0.1.0 <merge commit on main> && git push origin v0.1.0
 #
 # The build job runs third-party code (bun install, the tests, Chrome) with a
 # read-only token; only the release job, which runs none, may write.
 #
-# The release job also attests both zips: a signed statement (SLSA build
+# The release job also attests all four zips: a signed statement (SLSA build
 # provenance, through Sigstore) that this workflow built a file with that
 # digest from that commit. Whoever has a zip checks it with
 #
 #   gh attestation verify sitegloss-X.Y.Z.zip --repo ractive/sitegloss
 #
-# The jobs publish and publish-edge verify it before anything goes to a store,
-# so it is not optional: GitHub offers attestations in private repositories only on
+# The jobs publish, publish-edge and publish-firefox verify it before anything
+# goes to a store, so it is not optional: GitHub offers attestations in private repositories only on
 # Enterprise Cloud, and in a private repository this step fails before any
 # release is made.
 #
-# Then two jobs publish the store zip, each in its own environment (required
-# reviewer, tags v* only), only a zip whose attestation verifies for this tag:
+# Then three jobs publish, each in its own environment (required reviewer,
+# tags v* only), only a zip whose attestation verifies for this tag:
 # publish uploads it to the Chrome Web Store as a CRX signed with the item's
 # verified-upload key and submits it for review (ractive/release-workflows
 # chrome-extension-publish.yml, DEC-032, environment chrome-web-store);
 # publish-edge uploads it to Microsoft Edge Add-ons and submits it for
 # certification (edge-extension-publish.yml, DEC-033, environment
-# edge-add-ons). publish.yml runs either by hand, for a release whose publish
-# failed.
+# edge-add-ons); publish-firefox uploads the Firefox store zip to
+# addons.mozilla.org as a new version for review, with the source archive
+# attached (firefox-extension-publish.yml, DEC-035, environment
+# firefox-add-ons). The tag rule serves Firefox too: a Chrome version is a valid
+# Firefox version. publish.yml runs any of them by hand, for a release whose
+# publish failed.
 
 on:
   push:
@@ -88,6 +95,15 @@ jobs:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
       - run: bun scripts/build.ts --zip
       - run: bun scripts/build.ts --store --zip --outdir dist-store
+      - run: bun scripts/build.ts --firefox --store --zip
+      - name: The source archive of the built commit (for addons.mozilla.org's reviewers)
+        env:
+          TAG: ${{ github.ref_name }}
+          BUILT: ${{ steps.tag.outputs.commit }}
+        run: |
+          version="${TAG#v}"
+          git archive --format=zip --prefix="sitegloss-$version/" \
+            -o "sitegloss-$version-source.zip" "$BUILT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-zips
@@ -120,11 +136,11 @@ jobs:
           tagged="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
           test "$tagged" = "$BUILT" \
             || { echo "tag $TAG is at $tagged, this run built $BUILT"; exit 1; }
-      - name: Attest both zips
+      - name: Attest the zips
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: sitegloss-*.zip
-      - name: Create the release with both zips
+      - name: Create the release with the zips
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -181,3 +197,38 @@ jobs:
         pairing code for an MCP client. Source: https://github.com/ractive/sitegloss; the
         package is the release zip of tag ${{ github.ref_name }}, with GitHub build
         provenance (gh attestation verify <zip> -R ractive/sitegloss).
+
+  publish-firefox:
+    # Beside the other two, not after them: one store's failure does not hold
+    # back the others. Waits for the owner's approval in its own environment.
+    needs: release
+    # PR 17's head: pin v0.8.0's commit once it is released
+    uses: ractive/release-workflows/.github/workflows/firefox-extension-publish.yml@c2ec18473709dcffae7299dd6d846ffe697adfb2
+    # The environment firefox-add-ons (required reviewer, tags v* only) holds
+    # AMO_JWT_ISSUER and AMO_JWT_SECRET; inherit passes them on, as above.
+    secrets: inherit
+    permissions:
+      contents: read
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      asset: sitegloss-firefox-{version}-store.zip
+      source-asset: sitegloss-{version}-source.zip
+      addon-id: sitegloss@ractive.ch
+      attest-signer-workflow: .github/workflows/release.yml
+      notes: >-
+        Open any web page and click the Sitegloss toolbar icon: the sidebar opens. "New case
+        for this page" shows a toolbar on the page (Element, Box, Arrow, Pen, Note); each mark
+        takes a comment and is saved to the case with a screenshot. Clicking the case on the
+        same page later draws the marks on it again. Connecting an AI app is optional: it is
+        off until the user turns it on in the sidebar's AI section and consents to the data
+        collection Firefox asks about; it then uses the hosted tab-mcp relay and shows an
+        address and a pairing code for an MCP client. The code is bundled with Bun and not
+        minified. To build the uploaded zip from the attached source: Bun 1.4.4
+        (https://bun.sh), then in the unpacked archive `bun install --frozen-lockfile` and
+        `bun scripts/build.ts --firefox --store --zip`, which makes
+        sitegloss-firefox-<version>-store.zip (the version is package.json's; the build is
+        reproducible, the zip has the same SHA-256). Source and the README's build section:
+        https://github.com/ractive/sitegloss; the package is the release zip of tag
+        ${{ github.ref_name }}, with GitHub build provenance
+        (gh attestation verify <zip> -R ractive/sitegloss).
