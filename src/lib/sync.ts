@@ -15,6 +15,7 @@
  * writes each case whose version differs from what was written.
  */
 
+import { BROWSER, FIREFOX } from "./browser.ts";
 import type { Case } from "./case.ts";
 import { EXPORT_SUFFIX, exportCase, exportFileName } from "./export.ts";
 import type { Kv } from "./kv.ts";
@@ -442,13 +443,17 @@ const savedAs = (path: string, name: string) =>
 function downloadProblem(error: string, file: string): string {
 	switch (error) {
 		case "USER_CANCELED":
-			return `Chrome asked where to save “${file}”, and it was not saved. Chrome asks for every download while “Ask where to save each file before downloading” is on in its settings (Downloads): turn it off, or choose a folder instead, then click Try again.`;
+			// Firefox never asks where for an extension's download that says
+			// `saveAs: false`.
+			return FIREFOX
+				? `Firefox did not save “${file}” (it was cancelled). Sitegloss tries again at the next change, or click Try again.`
+				: `Chrome asked where to save “${file}”, and it was not saved. Chrome asks for every download while “Ask where to save each file before downloading” is on in its settings (Downloads): turn it off, or choose a folder instead, then click Try again.`;
 		case "FILE_NO_SPACE":
 			return `There is no space left in your downloads for “${file}”. Free some space, then click Try again.`;
 		case "FILE_ACCESS_DENIED":
-			return `Chrome may not write “${file}” to your downloads (${error}). Check that the downloads folder can be written to, then click Try again.`;
+			return `${BROWSER} may not write “${file}” to your downloads (${error}). Check that the downloads folder can be written to, then click Try again.`;
 		default:
-			return `Chrome stopped saving “${file}” to your downloads (${error}). Sitegloss tries again at the next change, or click Try again.`;
+			return `${BROWSER} stopped saving “${file}” to your downloads (${error}). Sitegloss tries again at the next change, or click Try again.`;
 	}
 }
 
@@ -483,7 +488,7 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 				// Taken back meanwhile: paused, as at the run's start.
 				if (!(await api.granted().catch(() => false))) throw new SyncPaused();
 				throw new TargetFailed(
-					"Chrome allowed Sitegloss to save to your downloads, but Sitegloss's background part does not see it yet. It starts writing once Chrome restarts that part, by itself after a while without use; now, turn Sitegloss off and on in chrome://extensions.",
+					`${BROWSER} allowed Sitegloss to save to your downloads, but Sitegloss's background part does not see it yet. It starts writing once ${BROWSER} restarts that part, by itself after a while without use; now, turn Sitegloss off and on in ${FIREFOX ? "Add-ons and themes (in Firefox's menu)" : "chrome://extensions"}.`,
 				);
 			}
 			// Its export failing is the case's own problem.
@@ -502,7 +507,7 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 					if (!(await api.granted().catch(() => false))) throw new SyncPaused();
 					// Refused for this case (its name, say): the others go on.
 					throw new Error(
-						`Chrome would not save it to your downloads: ${message(error)}`,
+						`${BROWSER} would not save it to your downloads: ${message(error)}`,
 					);
 				}
 				// Should the worker stop before its entry is kept, the next run
@@ -519,7 +524,7 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 					await api.cancel(id).catch(() => undefined);
 					await api.erase(id).catch(() => undefined);
 					throw new TargetFailed(
-						`Chrome did not finish saving “${name}” to your downloads within a minute. Sitegloss tries again at the next change, or click Try again.`,
+						`${BROWSER} did not finish saving “${name}” to your downloads within a minute. Sitegloss tries again at the next change, or click Try again.`,
 					);
 				}
 				if (end.state === "interrupted") {
@@ -535,7 +540,9 @@ export function downloadsTarget(api: DownloadsApi): SyncTarget {
 				if (!savedAs(end.filename, name)) {
 					await api.erase(id).catch(() => undefined);
 					throw new TargetFailed(
-						`Chrome saved “${name}” as “${end.filename}”, not in Downloads/${DOWNLOADS_FOLDER}: the place was chosen in its Save dialog (“Ask where to save each file before downloading” in its settings), or another extension moved it. Turn that off, or choose a folder instead, then click Try again.`,
+						FIREFOX
+							? `Firefox saved “${name}” as “${end.filename}”, not in Downloads/${DOWNLOADS_FOLDER}: another extension may have moved it. Click Try again.`
+							: `Chrome saved “${name}” as “${end.filename}”, not in Downloads/${DOWNLOADS_FOLDER}: the place was chosen in its Save dialog (“Ask where to save each file before downloading” in its settings), or another extension moved it. Turn that off, or choose a folder instead, then click Try again.`,
 						true,
 					);
 				}

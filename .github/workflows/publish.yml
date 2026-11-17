@@ -1,17 +1,19 @@
 name: Publish to the stores
 
 # Publishes the store zip of a GitHub release to the Chrome Web Store or
-# Microsoft Edge Add-ons by hand: the jobs release.yml runs after it creates the
+# Microsoft Edge Add-ons or addons.mozilla.org by hand: the jobs release.yml runs after it creates the
 # release, for a release whose publish failed or was rejected. Actions →
 # Publish to the stores → Run workflow, pick the release's tag under "Use
 # workflow from" (a run from a branch fails) and the store.
 #
-# ractive/release-workflows chrome-extension-publish.yml (DEC-032) and
-# edge-extension-publish.yml (DEC-033): only a zip whose build provenance
+# ractive/release-workflows chrome-extension-publish.yml (DEC-032),
+# edge-extension-publish.yml (DEC-033) and firefox-extension-publish.yml
+# (DEC-035): only a zip whose build provenance
 # verifies (signed by release.yml for this tag); for Chrome as a CRX signed
 # with the item's verified-upload key, from the environment chrome-web-store;
-# for Edge the zip, from the environment edge-add-ons.
-# Setup: kb/operations/chrome-web-store.md.
+# for Edge the zip, from the environment edge-add-ons; for Firefox the Firefox
+# store zip with the source archive, from the environment firefox-add-ons.
+# Setup: kb/operations/chrome-web-store.md, kb/operations/firefox-add-ons.md.
 
 on:
   workflow_dispatch:
@@ -19,10 +21,10 @@ on:
       store:
         description: "The store to publish to"
         type: choice
-        options: [chrome, edge, both]
+        options: [chrome, edge, firefox, all]
         default: chrome
       submit:
-        description: "Submit for review after the upload (otherwise it stays a draft in the store's dashboard)"
+        description: "Submit for review after the upload (otherwise it stays a draft in the store's dashboard). Chrome and Edge only: addons.mozilla.org has no draft, a Firefox version is always submitted"
         type: boolean
         default: true
 
@@ -31,7 +33,7 @@ permissions:
 
 jobs:
   publish:
-    if: inputs.store != 'edge'
+    if: inputs.store == 'chrome' || inputs.store == 'all'
     uses: ractive/release-workflows/.github/workflows/chrome-extension-publish.yml@ea1fdf1ab5602ac55fa78f2d10e65d9dc4d5cd24 # v0.6.0
     # The job runs in the environment chrome-web-store, whose secrets a
     # reusable workflow sees only when the caller passes them on: inherit
@@ -49,7 +51,7 @@ jobs:
       submit: ${{ inputs.submit }}
 
   publish-edge:
-    if: inputs.store != 'chrome'
+    if: inputs.store == 'edge' || inputs.store == 'all'
     uses: ractive/release-workflows/.github/workflows/edge-extension-publish.yml@f1fde0fc2dfb016201659084f5d9d4f2ad2cea5a # v0.7.0
     secrets: inherit
     permissions:
@@ -71,3 +73,35 @@ jobs:
         pairing code for an MCP client. Source: https://github.com/ractive/sitegloss; the
         package is the release zip of tag ${{ github.ref_name }}, with GitHub build
         provenance (gh attestation verify <zip> -R ractive/sitegloss).
+
+  publish-firefox:
+    if: inputs.store == 'firefox' || inputs.store == 'all'
+    # PR 17's head: pin v0.8.0's commit once it is released
+    uses: ractive/release-workflows/.github/workflows/firefox-extension-publish.yml@c2ec18473709dcffae7299dd6d846ffe697adfb2
+    secrets: inherit
+    permissions:
+      contents: read
+      attestations: read
+    with:
+      tag: ${{ github.ref_name }}
+      asset: sitegloss-firefox-{version}-store.zip
+      source-asset: sitegloss-{version}-source.zip
+      addon-id: sitegloss@ractive.ch
+      attest-signer-workflow: .github/workflows/release.yml
+      # The same notes for the reviewers as release.yml's.
+      notes: >-
+        Open any web page and click the Sitegloss toolbar icon: the sidebar opens. "New case
+        for this page" shows a toolbar on the page (Element, Box, Arrow, Pen, Note); each mark
+        takes a comment and is saved to the case with a screenshot. Clicking the case on the
+        same page later draws the marks on it again. Connecting an AI app is optional: it is
+        off until the user turns it on in the sidebar's AI section and consents to the data
+        collection Firefox asks about; it then uses the hosted tab-mcp relay and shows an
+        address and a pairing code for an MCP client. The code is bundled with Bun and not
+        minified. To build the uploaded zip from the attached source: Bun 1.4.4
+        (https://bun.sh), then in the unpacked archive `bun install --frozen-lockfile` and
+        `bun scripts/build.ts --firefox --store --zip`, which makes
+        sitegloss-firefox-<version>-store.zip (the version is package.json's; the build is
+        reproducible, the zip has the same SHA-256). Source and the README's build section:
+        https://github.com/ractive/sitegloss; the package is the release zip of tag
+        ${{ github.ref_name }}, with GitHub build provenance
+        (gh attestation verify <zip> -R ractive/sitegloss).

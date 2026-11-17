@@ -5,6 +5,7 @@
  * changed, so a click survives every other render.
  */
 
+import { BROWSER, FIREFOX } from "../lib/browser.ts";
 import { DOWNLOADS_FOLDER } from "../lib/sync.ts";
 import { byId, formatDate, h } from "./dom.ts";
 import type { PanelState } from "./state.ts";
@@ -42,7 +43,7 @@ const act = (pick: (a: SyncActions) => void) => () => {
 export const DOWNLOADS_PLACE = `Downloads/${DOWNLOADS_FOLDER}`;
 
 /** The tooltips of the sync's buttons. */
-export const SYNC_DOWNLOADS_TITLE = `Write each case to the folder “${DOWNLOADS_FOLDER}” in your downloads, as its own .zip file as Export does, and again whenever it changes. Chrome asks once whether Sitegloss may manage your downloads. A deleted case keeps its file. Nothing is read back.`;
+export const SYNC_DOWNLOADS_TITLE = `Write each case to the folder “${DOWNLOADS_FOLDER}” in your downloads, as its own .zip file as Export does, and again whenever it changes. ${BROWSER} asks once whether Sitegloss may manage your downloads. A deleted case keeps its file. Nothing is read back.`;
 export const SYNC_CHOOSE_TITLE =
 	"Choose a folder, in iCloud Drive or Dropbox say: Sitegloss writes each case there as its own .zip file, as Export does, and again whenever it changes. A deleted case keeps its file. Nothing is read from the folder.";
 const SYNC_CHANGE_TITLE =
@@ -51,18 +52,17 @@ const SYNC_CANCEL_TITLE = "Keep syncing where it syncs now";
 const SYNC_STOP_TITLE = "Stop writing the cases; the files written so far stay";
 const SYNC_SHOW_TITLE =
 	"Open the folder with the synced files in your system's file manager";
-const SYNC_ALLOW_TITLE =
-	"Chrome asks whether Sitegloss may edit files in the folder again; then the cases changed meanwhile are written";
-const SYNC_ALLOW_DOWNLOADS_TITLE =
-	"Chrome asks whether Sitegloss may manage your downloads again; then the cases changed meanwhile are written";
+const SYNC_ALLOW_TITLE = `${BROWSER} asks whether Sitegloss may edit files in the folder again; then the cases changed meanwhile are written`;
+const SYNC_ALLOW_DOWNLOADS_TITLE = `${BROWSER} asks whether Sitegloss may manage your downloads again; then the cases changed meanwhile are written`;
 const SYNC_USE_DOWNLOADS_TITLE = `Write the cases to ${DOWNLOADS_PLACE} from now on, which needs no OK after a restart; the files in the folder stay`;
 const SYNC_RETRY_TITLE = "Write the cases that are not written yet";
 
 const SYNC_OFF_TEXT =
 	"Keep a copy of every case as a file, written again whenever the case changes. One way: nothing is read back.";
-export const SYNC_OFF_NOTE =
-	"Downloads: a folder “Sitegloss” in your downloads, asked once, works with this panel closed. A folder of your choice (iCloud Drive, Dropbox): Chrome asks for access again after each restart.";
-export const SYNC_ASKING_TEXT = `Chrome asks whether Sitegloss may manage your downloads. With a yes, the cases are written to ${DOWNLOADS_PLACE}.`;
+export const SYNC_OFF_NOTE = FIREFOX
+	? "Downloads: a folder “Sitegloss” in your downloads, asked once, works with this panel closed. Firefox does not let extensions write to a folder of your choice."
+	: "Downloads: a folder “Sitegloss” in your downloads, asked once, works with this panel closed. A folder of your choice (iCloud Drive, Dropbox): Chrome asks for access again after each restart.";
+export const SYNC_ASKING_TEXT = `${BROWSER} asks whether Sitegloss may manage your downloads. With a yes, the cases are written to ${DOWNLOADS_PLACE}.`;
 
 /** The banner's text, after its bold "Sync is paused." or "Sync failed.". */
 export function bannerText(sync: Sync): string | undefined {
@@ -71,7 +71,7 @@ export function bannerText(sync: Sync): string | undefined {
 	if (status.state === "paused")
 		return status.reason === "downloads"
 			? "Sitegloss may no longer save to your downloads."
-			: `Chrome needs your OK to write to “${sync.folder ?? ""}” again.`;
+			: `${BROWSER} needs your OK to write to “${sync.folder ?? ""}” again.`;
 	if (status.state === "failed") return status.problem ?? "";
 	return undefined;
 }
@@ -79,8 +79,8 @@ export function bannerText(sync: Sync): string | undefined {
 /** Under the banner's text, after a no to Chrome's prompt. */
 export const refusedText = (sync: Sync) =>
 	sync.status?.reason === "downloads"
-		? "Chrome did not allow it. Click Allow downloads to ask again, or choose a folder."
-		: "Chrome did not allow it. Click Allow access to ask again, or use Downloads instead.";
+		? `${BROWSER} did not allow it. Click Allow downloads to ask again${FIREFOX ? "" : ", or choose a folder"}.`
+		: `${BROWSER} did not allow it. Click Allow access to ask again, or use Downloads instead.`;
 
 function button(
 	action: string,
@@ -180,12 +180,17 @@ function choices(sync: Sync): HTMLElement[] {
 				act((a) => a.syncDownloads()),
 				true,
 			),
-			button(
-				"sync-choose",
-				"Choose a folder…",
-				SYNC_CHOOSE_TITLE,
-				act((a) => a.syncChoose()),
-			),
+			// Firefox has no folder picker for extensions: Downloads only.
+			...(FIREFOX
+				? []
+				: [
+						button(
+							"sync-choose",
+							"Choose a folder…",
+							SYNC_CHOOSE_TITLE,
+							act((a) => a.syncChoose()),
+						),
+					]),
 			...(sync.changing
 				? [
 						button(
@@ -226,7 +231,7 @@ function sectionParts(sync: Sync): HTMLElement[] {
 				{ class: "sync-state" },
 				status?.reason === "downloads"
 					? "Paused: Sitegloss may no longer save to your downloads."
-					: `Paused: Chrome wants your OK for “${sync.folder ?? ""}” again.`,
+					: `Paused: ${BROWSER} wants your OK for “${sync.folder ?? ""}” again.`,
 			),
 		);
 	else parts.push(place(sync));

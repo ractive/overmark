@@ -136,15 +136,29 @@ export interface Sender {
  * A port from the side panel: this extension's page at the panel's path, not
  * in a tab. A content script's port has `tab`, and its `url` is the page's;
  * the panel's page opened in a tab by its address is not the side panel
- * either, and gets nothing.
+ * either, and gets nothing. `origin` is the extension's own,
+ * `runtime.getURL("")`: `chrome-extension://<id>/` in Chrome, and in Firefox
+ * `moz-extension://<UUID>/`, a UUID of each installation, not the id.
+ * `inTab` lets the panel's page in a tab through: only Firefox's test
+ * build, as automation cannot reach Firefox's sidebar.
  */
-export function isPanelSender(sender: Sender, extensionId: string): boolean {
-	if (sender.id !== extensionId || sender.tab !== undefined) return false;
+export function isPanelSender(
+	sender: Sender,
+	extensionId: string,
+	options: { origin?: string; inTab?: boolean } = {},
+): boolean {
+	if (sender.id !== extensionId) return false;
+	if (sender.tab !== undefined && options.inTab !== true) return false;
 	try {
 		const url = new URL(sender.url ?? "");
+		const origin = new URL(
+			options.origin ?? `chrome-extension://${extensionId}/`,
+		);
+		// Not `url.origin`: it is "null" for these schemes in some engines.
 		return (
-			url.protocol === "chrome-extension:" &&
-			url.host === extensionId &&
+			url.protocol === origin.protocol &&
+			url.host === origin.host &&
+			url.host !== "" &&
 			url.pathname === PANEL_PATH
 		);
 	} catch {

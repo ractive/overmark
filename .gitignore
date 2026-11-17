@@ -8,3 +8,6 @@ sitegloss-*.zip
 !.env.example
 .hyalo-index
 dist-store/
+dist-firefox/
+dist-firefox-store/
+dist-firefox-dev/

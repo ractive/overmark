@@ -130,14 +130,22 @@ with `kb/design/overview.md` and `kb/iterations/`.
   the icons; `bun test/e2e/pilot.ts <url>` measures matching on a real page.
 - Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
   `bun run fix` to format; `bun run build`, `bun run zip`.
+- Firefox: `bun scripts/build.ts --firefox` (`--test`, `--store --zip`) builds it from the
+  same code; `src/lib/browser.ts` holds every difference (the build's define
+  `SITEGLOSS_FIREFOX`, never the user agent). `bun scripts/firefox-dev.ts [URL] [--test]`
+  runs it in Firefox through ff-rdp; use a debug port of your own (`--port`).
 - End-to-end tests (`test/e2e/`) need Chromium or Chrome for Testing (`CHROME_PATH`, or
   Playwright's Chromium); branded Chrome ignores `--load-extension`. They are skipped
   without one locally and required in CI.
+- Firefox end-to-end tests (`test/e2e/firefox/`, about a minute): a small suite through
+  the `ff-rdp` CLI (`FF_RDP_PATH`) and Firefox (`FIREFOX_PATH`), headless on a free port;
+  skipped without them locally, required in CI, which pins both. `bun run test` runs them
+  with the rest; a lock lets one run at a time.
 - Only runtime dependency: `@ractive-ch/tab-mcp-client`. Prefer a few lines of own code
   over a package. No JavaScript from an AI app or server ever runs (fixed tools only).
 - Always the latest versions of Bun, TypeScript, Biome and every dependency, pinned
   exactly.
 - Biome ignores `.claude/` and `kb/`.
-- No entry in `kb/log.md` for a change: it is no longer written. A change is described
-  in its commit and its pull request, a decision in `kb/decision-log.md`.
+- No `kb/log.md` (removed by the owner, 2026-11-17): a change is described in its commit
+  and its pull request, a decision in `kb/decision-log.md`.
 - Commits: author email james@ractive.ch. MIT licence with `AI_NOTICE`.

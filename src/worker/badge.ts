@@ -7,6 +7,7 @@
  * before except while a question waits.
  */
 
+import { PANEL } from "../lib/browser.ts";
 import type { SyncStatus } from "../lib/sync.ts";
 import { showSpark } from "./icon.ts";
 
@@ -60,7 +61,7 @@ export function decideBadge(ai: AiBadge, sync: SyncStatus | undefined): Badge {
 			text: "?",
 			color: "#b45309",
 			textColor: "#ffffff",
-			title: `Sitegloss: ${ai.questions === 1 ? "an AI app asks" : `${ai.questions} questions wait`} for your answer. Open the side panel to answer.`,
+			title: `Sitegloss: ${ai.questions === 1 ? "an AI app asks" : `${ai.questions} questions wait`} for your answer. Open the ${PANEL} to answer.`,
 			spark: false,
 		};
 	const spark = ai.ai === "connected";

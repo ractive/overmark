@@ -7,6 +7,7 @@
  * from the sync's database and asks it to run.
  */
 
+import { BROWSER, FIREFOX, PANEL } from "../lib/browser.ts";
 import { newId } from "../lib/case.ts";
 import { type Kv, kvWhenOpen, openKv } from "../lib/kv.ts";
 import type { Broadcast } from "../lib/messages.ts";
@@ -105,7 +106,7 @@ export function startSync(
 		try {
 			all = await kv.all();
 		} catch (error) {
-			unreadable = `Could not read the sync's state: ${message(error)} Close and open the side panel to try again.`;
+			unreadable = `Could not read the sync's state: ${message(error)} Close and open the ${PANEL} to try again.`;
 			problem(unreadable);
 			return;
 		}
@@ -195,7 +196,7 @@ export function startSync(
 			update((s) => (s.sync.asking = false));
 			if (!yes) {
 				problem(
-					"Chrome did not allow Sitegloss to save to your downloads. Click Sync to Downloads to ask again, or choose a folder.",
+					`${BROWSER} did not allow Sitegloss to save to your downloads. Click Sync to Downloads to ask again${FIREFOX ? "" : ", or choose a folder"}.`,
 				);
 				return;
 			}

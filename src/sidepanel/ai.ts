@@ -12,6 +12,7 @@
  * Always allow and "Allow all changes" for each AI app (DEC-018).
  */
 
+import { askDataConsent, FIREFOX, PANEL } from "../lib/browser.ts";
 import {
 	type AiState,
 	type Answer,
@@ -32,6 +33,14 @@ import {
 import { byId, h } from "./dom.ts";
 import { copyText, startSetup } from "./setup.ts";
 import type { PanelState } from "./state.ts";
+import { panelWindow } from "./window.ts";
+
+/** Firefox: the user said no to its question about the data AI access sends. */
+export const NO_CONSENT_ANSWER =
+	"AI access sends the pages' marks, comments, screenshots, element details and addresses to your AI app, and Firefox was not allowed to let it. Turn it on again to be asked again.";
+
+declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
+declare const SITEGLOSS_FIREFOX: boolean | undefined;
 
 /** How long the panel must be visible and focused before Allow and Always allow count. */
 const ALLOW_DELAY_MS = 750;
@@ -122,13 +131,23 @@ export async function startAi(
 	];
 
 	// The panel's page opened in a tab by its address is no side panel: the
-	// worker does not talk to it (DEC-015).
-	if ((await chrome.tabs.getCurrent()) !== undefined) {
+	// worker does not talk to it (DEC-015). But in Firefox's test build, as
+	// automation cannot reach the sidebar (the defines themselves, not
+	// `browser.ts`'s constants, so other builds drop the code).
+	if (
+		!(
+			typeof SITEGLOSS_TEST_BUILD !== "undefined" &&
+			SITEGLOSS_TEST_BUILD &&
+			typeof SITEGLOSS_FIREFOX !== "undefined" &&
+			SITEGLOSS_FIREFOX
+		) &&
+		(await chrome.tabs.getCurrent()) !== undefined
+	) {
 		update(
 			(s) =>
 				(s.ai = {
 					...s.ai,
-					status: "Open the side panel from the Sitegloss icon for AI access",
+					status: `Open the ${PANEL} from the Sitegloss icon for AI access`,
 					problem: "tab",
 				}),
 		);
@@ -142,7 +161,7 @@ export async function startAi(
 	}
 
 	const setup = startSetup();
-	const windowId = (await chrome.windows.getCurrent()).id;
+	const windowId = await panelWindow();
 	let port: chrome.runtime.Port | undefined;
 	let current: AiState | undefined;
 	/** What the worker was told: pairing on (codes come only then). */
@@ -264,17 +283,55 @@ export async function startAi(
 
 	// --- Commands ---
 
+	/**
+	 * Send `command`, which turns AI access on: in Firefox once the user has
+	 * allowed that the AI app gets the pages' content and addresses (its
+	 * data collection consent). Firefox asks only in the click: call this in
+	 * it, before any await. A no leaves AI access off, and says why.
+	 */
+	function turnOn(command: PanelCommand, refused: () => void = () => {}): void {
+		if (!FIREFOX) {
+			send(command);
+			return;
+		}
+		askDataConsent().then(
+			(yes) => {
+				if (yes) send(command);
+				else {
+					refused();
+					update(
+						(s) =>
+							(s.ai = {
+								...s.ai,
+								status: `Not connected: ${NO_CONSENT_ANSWER}`,
+							}),
+					);
+				}
+			},
+			(error: unknown) => {
+				refused();
+				update(
+					(s) =>
+						(s.ai = {
+							...s.ai,
+							status: `Not connected: Firefox could not ask for the consent (${error instanceof Error ? error.message : String(error)}).`,
+						}),
+				);
+			},
+		);
+	}
+
 	/** The top bar's pill: to the card in Settings, turning AI access on if it is off. */
 	byId<HTMLButtonElement>("ai-button").addEventListener("click", () => {
 		if (current !== undefined && cardView(current, false).turnOn)
-			send({ type: "connect" });
+			turnOn({ type: "connect" });
 		showSettings();
 		// After the render that shows the Settings view.
 		setTimeout(() => byId("ai-card").scrollIntoView({ block: "nearest" }));
 	});
 
 	byId<HTMLButtonElement>("connect").addEventListener("click", () =>
-		send({ type: "connect" }),
+		turnOn({ type: "connect" }),
 	);
 
 	byId<HTMLButtonElement>("stop-ai").addEventListener("click", () =>
@@ -285,7 +342,13 @@ export async function startAi(
 		const intent = { on: aiSwitch.checked, until: Date.now() + SWITCH_WAIT_MS };
 		switchIntent = intent;
 		addingApp = false;
-		send({ type: aiSwitch.checked ? "connect" : "stop" });
+		if (aiSwitch.checked)
+			turnOn({ type: "connect" }, () => {
+				switchIntent = undefined;
+				if (current) showCard(current);
+				else aiSwitch.checked = false;
+			});
+		else send({ type: "stop" });
 		// No state that matches the flip: the switch shows the state again.
 		setTimeout(() => {
 			if (switchIntent === intent && current) showCard(current);
@@ -306,9 +369,13 @@ export async function startAi(
 		addApp(false),
 	);
 
-	keepOn.addEventListener("change", () =>
-		send({ type: "keep-on", on: keepOn.checked }),
-	);
+	keepOn.addEventListener("change", () => {
+		if (keepOn.checked)
+			turnOn({ type: "keep-on", on: true }, () => {
+				keepOn.checked = current?.keepOn ?? false;
+			});
+		else send({ type: "keep-on", on: false });
+	});
 
 	// The worker keeps it and tells the overlays already open.
 	blurForms.addEventListener("change", () =>
@@ -348,7 +415,7 @@ export async function startAi(
 	);
 
 	byId<HTMLButtonElement>("pair-take-back").addEventListener("click", () =>
-		send({ type: "connect" }),
+		turnOn({ type: "connect" }),
 	);
 
 	// Under the code, and in the takeover notice: there AI access is off and
@@ -657,6 +724,17 @@ export async function startAi(
 				answer("Allow", "allow", true),
 				answer("Always allow", "always"),
 			),
+			// Firefox leaves the focus in the page when its sidebar opens, and
+			// Allow counts only in a panel that has it.
+			...(FIREFOX
+				? [
+						h(
+							"p",
+							{ class: "meta", "data-focus-hint": "", hidden: true },
+							`Click into the ${PANEL} to answer: Allow counts once it has the focus.`,
+						),
+					]
+				: []),
 			h(
 				"p",
 				{ class: "meta" },
@@ -709,6 +787,8 @@ export async function startAi(
 				'button[data-answer="allow"], button[data-answer="always"]',
 			))
 				b.disabled = !ready;
+			const hint = card.querySelector<HTMLElement>("[data-focus-hint]");
+			if (hint !== null) hint.hidden = focusedSince !== undefined;
 		}
 	}
 

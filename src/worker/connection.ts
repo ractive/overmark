@@ -20,6 +20,12 @@ import {
 	type StateChangeDetail,
 	TabMcp,
 } from "@ractive-ch/tab-mcp-client";
+import {
+	BROWSER,
+	dataConsent,
+	FIREFOX,
+	notificationOptions,
+} from "../lib/browser.ts";
 import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
@@ -98,6 +104,8 @@ async function clearNotifications(): Promise<void> {
  * only logged.
  */
 async function restrictStorage(): Promise<void> {
+	// Firefox has no access levels: its content scripts may always use it.
+	if (FIREFOX) return;
 	try {
 		await chrome.storage.local.setAccessLevel({
 			accessLevel: "TRUSTED_CONTEXTS",
@@ -128,6 +136,13 @@ async function broadcast(news: Broadcast): Promise<void> {
 		// No side panel open.
 	}
 }
+
+/**
+ * Firefox: why AI access does not come on, when the user has not allowed
+ * that the AI app gets the pages' content and addresses (or took it back).
+ */
+export const NO_CONSENT =
+	"Firefox has not been allowed to let Sitegloss send the pages' content and addresses to the AI app. Turn on AI access to be asked again.";
 
 /** The writes of "Stop AI access": the session's stop, Keep AI access on, the session's on. */
 type StopWrite = "stopped" | "keepOn" | "session";
@@ -160,9 +175,9 @@ export function stopProblem(
 	const said = `AI access is off now, but a setting could not be saved (${message(errors[0])}).`;
 	// The session's stop holds over the rest until the browser closes.
 	if ("stopped" in failed && ("keepOn" in failed || "session" in failed))
-		return `${said} It may come on again the next time Chrome starts Sitegloss in the background.`;
+		return `${said} It may come on again the next time ${BROWSER} starts Sitegloss in the background.`;
 	if ("keepOn" in failed)
-		return `${said} Keep AI access on is still saved as on: AI access comes on again when Chrome restarts.`;
+		return `${said} Keep AI access on is still saved as on: AI access comes on again when ${BROWSER} restarts.`;
 	return said;
 }
 
@@ -507,6 +522,43 @@ export class Connection {
 		this.#keep.watch(mcp);
 	}
 
+	/**
+	 * Whether AI access may come on: always in Chrome; in Firefox only with
+	 * the user's data collection consent, which the panel asks for at the
+	 * click that turns it on. Without it, the card says why.
+	 */
+	async #consented(): Promise<boolean> {
+		if (!FIREFOX) return true;
+		const yes = await dataConsent().catch(() => false);
+		if (!yes) {
+			this.#problem = NO_CONSENT;
+			this.#changed();
+		}
+		return yes;
+	}
+
+	/**
+	 * The consent taken back (Firefox, in its add-on's permissions): AI
+	 * access ends now, as the user's Stop would, but nothing is saved: once
+	 * allowed again, the settings hold as they were.
+	 */
+	async consentChanged(): Promise<void> {
+		if (!FIREFOX || (await dataConsent().catch(() => false))) return;
+		this.#keep.stop();
+		this.#mcp.disconnect();
+		this.#problem = NO_CONSENT;
+		this.#changed();
+	}
+
+	/** AI access is on, or on its way: Firefox's event page must stay meanwhile. */
+	get active(): boolean {
+		return (
+			this.#mcp.state !== "disconnected" ||
+			this.#keep.retrying ||
+			this.#questions.list.length > 0
+		);
+	}
+
 	/** Connect now: the panel's button, a start or the alarm. */
 	#connect(): void {
 		const mcp = this.#mcp;
@@ -598,7 +650,10 @@ export class Connection {
 		this.#mcp = next;
 		this.#watch(next);
 		before.disconnect();
-		this.#keep.connect();
+		// (It connects only with Keep AI access on, which Firefox lets it only
+		// with the consent.)
+		if (!FIREFOX || !this.#settings.keepOn || (await this.#consented()))
+			this.#keep.connect();
 		this.#changed();
 	}
 
@@ -611,6 +666,17 @@ export class Connection {
 	keepUp(): void {
 		void this.#syncAlarm();
 		if (this.#settings.replaced !== undefined) return;
+		if (!this.#settings.keepOn && !this.#sessionOn) return;
+		// Firefox: only with the data collection consent, which the user may
+		// have taken back since.
+		if (FIREFOX)
+			void this.#consented().then((yes) => {
+				if (yes && this.#settings.replaced === undefined) this.#keepUp();
+			});
+		else this.#keepUp();
+	}
+
+	#keepUp(): void {
 		if (this.#settings.keepOn) this.#keep.connect();
 		// Not while the library reconnects by itself: `#connect` waits for
 		// `disconnected`.
@@ -623,6 +689,11 @@ export class Connection {
 
 	notificationDismissed(id: string): void {
 		this.#questions.notificationDismissed(id);
+	}
+
+	/** The window whose tab the question of notification `id` is about, if known. */
+	notificationWindow(id: string): number | undefined {
+		return this.#questions.windowOfNotification(id);
 	}
 
 	// --- The side panels ---
@@ -671,6 +742,7 @@ export class Connection {
 					this.#questions.panelClosed(panel.windowId);
 				return;
 			case "connect":
+				if (FIREFOX && !(await this.#consented())) return;
 				// The user's click takes the address back after a takeover. AI
 				// access is on for the session once connected ("connected").
 				await this.#setReplaced(undefined);
@@ -705,6 +777,7 @@ export class Connection {
 				return;
 			}
 			case "keep-on":
+				if (FIREFOX && command.on && !(await this.#consented())) return;
 				await this.#setKeepOn(command.on);
 				if (command.on) await this.#setStopped(false);
 				if (command.on) this.#keep.connect();
@@ -775,7 +848,8 @@ export class Connection {
 			// The address is new: no longer the one taken over, also should
 			// the connect after it fail.
 			await this.#setReplaced(undefined);
-			if (replaced) await this.#mcp.connect({ resume: true });
+			if (replaced && (!FIREFOX || (await this.#consented())))
+				await this.#mcp.connect({ resume: true });
 		} catch (error) {
 			this.#problem = message(error);
 			// The address changed, and only connecting with it failed (the
@@ -846,14 +920,19 @@ export class Connection {
 				return (await chrome.windows.get(windowId)).focused;
 			},
 			notify: async (id, text) => {
-				await chrome.notifications.create(id, {
-					type: "basic",
-					iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-					...text,
-					buttons: text.buttons.map((title) => ({ title })),
-					requireInteraction: true,
-					priority: 2,
-				});
+				// Firefox: no buttons, no `requireInteraction` (the text says to
+				// answer in the sidebar, `notificationText`).
+				await chrome.notifications.create(
+					id,
+					notificationOptions({
+						type: "basic",
+						iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+						...text,
+						buttons: text.buttons.map((title) => ({ title })),
+						requireInteraction: true,
+						priority: 2,
+					}),
+				);
 			},
 			clear: (id) => void chrome.notifications.clear(id).catch(() => {}),
 			changed: () => this.#changed(),

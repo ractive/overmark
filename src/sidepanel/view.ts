@@ -6,6 +6,13 @@
  */
 
 import {
+	BROWSER,
+	CANNOT_RUN_FILES_TEXT,
+	CANNOT_RUN_TEXT,
+	FIREFOX,
+	PANEL,
+} from "../lib/browser.ts";
+import {
 	type Annotation,
 	appLabel,
 	type Case,
@@ -163,12 +170,10 @@ export const NO_ACCESS =
 	"Sitegloss may not run on this tab yet. Click the Sitegloss icon in the toolbar (or press Alt+Shift+O) while this tab is in front.";
 
 /** A tab Sitegloss is not let onto even with "Allow on all sites". */
-export const CANNOT_RUN =
-	"Sitegloss cannot run on this tab: Chrome keeps its own pages and the Chrome Web Store off limits to extensions.";
+export const CANNOT_RUN = CANNOT_RUN_TEXT;
 
 /** The same, where Sitegloss may not read files either: that is the toggle for them. */
-export const CANNOT_RUN_FILES =
-	"Sitegloss cannot run on this tab. A page of Chrome's own or the Chrome Web Store is off limits to extensions. A file on your computer needs “Allow access to file URLs” in Sitegloss's details.";
+export const CANNOT_RUN_FILES = CANNOT_RUN_FILES_TEXT;
 
 /** The title of a button that needs the page, while Sitegloss may not run there. */
 export const NEEDS_ACCESS =
@@ -266,8 +271,7 @@ function accessNotice(id: string, actions: () => Actions): Notice {
 	);
 }
 
-const ALLOW_ALL_SITES_TITLE =
-	"Let Sitegloss run on every site, without a click on its icon on each tab. Chrome asks first; you can take it back in the options, in Settings (the AI pill at the top).";
+const ALLOW_ALL_SITES_TITLE = `Let Sitegloss run on every site, without a click on its icon on each tab. ${BROWSER} asks first; you can take it back in the options, in Settings (the AI pill at the top).`;
 const DETAILS_TITLE =
 	"Open Sitegloss's page in chrome://extensions, where “Allow access to file URLs” is";
 
@@ -285,7 +289,8 @@ function renderAccess(n: Notice, state: PanelState): void {
 	const files = now === "never" && state.fileAccess === false;
 	n.text.textContent =
 		now !== "never" ? NO_ACCESS : files ? CANNOT_RUN_FILES : CANNOT_RUN;
-	n.button.hidden = now === "never" && !files;
+	// Firefox lets no extension open its add-ons page: the text says the way.
+	n.button.hidden = now === "never" && (!files || FIREFOX);
 	n.button.dataset["action"] = files ? "file-access" : "allow-all-sites";
 	n.button.textContent = files
 		? "Open Sitegloss's details"
@@ -308,8 +313,7 @@ function setHint(el: HTMLElement, text: string | undefined): void {
 }
 
 /** Under Export while Chrome's prompt is open: what the answer does. */
-export const ASKING_DOWNLOADS =
-	"Chrome asks whether Sitegloss may manage your downloads. With a yes, Sitegloss shows here where the file went; with a no, it saves the file as before.";
+export const ASKING_DOWNLOADS = `${BROWSER} asks whether Sitegloss may manage your downloads. With a yes, Sitegloss shows here where the file went; with a no, it saves the file as before.`;
 
 /**
  * Under an Export button: where the file went, with Copy and Show in folder
@@ -2254,7 +2258,7 @@ const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
 /** A problem in the pill's two or three words; the sentence is under the bar. */
 const PROBLEM_LABEL: Record<AiProblem, string> = {
-	tab: "AI: side panel only",
+	tab: `AI: ${PANEL} only`,
 	updated: "AI: reopen panel",
 	unavailable: "AI unavailable",
 	connection: "AI problem",

@@ -10,6 +10,7 @@
  * written together. A verdict saved or marks added meanwhile are kept.
  */
 
+import { PANEL } from "./browser.ts";
 import {
 	type Annotation,
 	CASE_FORMAT,
@@ -85,7 +86,7 @@ export const MAX_NUMBER_GAP = 100;
 export function fromPage(request: SaveRequest): SaveRequest {
 	if (request.isNew)
 		throw new SaveError(
-			"a page adds marks to an existing case; the side panel creates cases.",
+			`a page adds marks to an existing case; the ${PANEL} creates cases.`,
 		);
 	return {
 		...request,
@@ -317,7 +318,7 @@ export async function undoAdd(
 		if (gone === undefined) return { value: current };
 		const refuse = (why: string) =>
 			new SaveError(
-				`mark ${gone.number} ${why}; delete it in the side panel if it should go.`,
+				`mark ${gone.number} ${why}; delete it in the ${PANEL} if it should go.`,
 			);
 		if (gone.resolution !== undefined || gone.reopens !== undefined)
 			throw refuse("was resolved since");

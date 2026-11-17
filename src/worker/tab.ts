@@ -4,6 +4,7 @@
  * applies, DEC-015).
  */
 
+import { PANEL } from "../lib/browser.ts";
 import { NoAccessError, sendToTab } from "../lib/tabs.ts";
 import type { TabBridge } from "./tools.ts";
 
@@ -11,7 +12,7 @@ import type { TabBridge } from "./tools.ts";
 function accessError(message: string): Error {
 	return /permission|cannot access|activeTab|all_urls/i.test(message)
 		? new Error(
-				`Sitegloss may not take a screenshot of this tab (${message}). The user can click the Sitegloss icon on the tab, or turn on "Allow on all sites" in the side panel.`,
+				`Sitegloss may not take a screenshot of this tab (${message}). The user can click the Sitegloss icon on the tab, or turn on "Allow on all sites" in the ${PANEL}.`,
 			)
 		: new Error(message);
 }
