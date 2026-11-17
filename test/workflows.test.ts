@@ -20,6 +20,7 @@ interface Step {
 
 interface Workflow {
 	on: { workflow_dispatch?: { inputs: Record<string, unknown> } };
+	env?: Record<string, string>;
 	permissions?: Record<string, string>;
 	jobs: Record<
 		string,
@@ -350,7 +351,11 @@ describe("release.yml", () => {
 			"artifact-metadata": "write",
 		});
 		expect(w.permissions).toEqual({ contents: "read" });
-		expect(w.jobs["build"]?.permissions).toBeUndefined();
+		// Read-only: the contents, and ff-rdp's attestation to check it.
+		expect(w.jobs["build"]?.permissions).toEqual({
+			contents: "read",
+			attestations: "read",
+		});
 		expect(
 			w.jobs["build"]?.steps.some((s) => s.uses?.startsWith("actions/attest")),
 		).toBe(false);
@@ -387,6 +392,73 @@ describe("release.yml", () => {
 		);
 		expect(result.code).toBe(0);
 		expect(await Bun.file(outputs).text()).toBe(`commit=${commit}\n`);
+	});
+});
+
+describe("Firefox and ff-rdp for the Firefox end-to-end tests", () => {
+	const FILES = ["ci.yml", "release.yml"];
+	const PINS = ["FIREFOX_VERSION", "FIREFOX_SHA256", "FF_RDP_VERSION"];
+	/** A GitHub expression, as the workflows write it. */
+	const expression = (inner: string) => `$${"{{"} ${inner} }}`;
+	const FIREFOX = `Install Firefox ${expression("env.FIREFOX_VERSION")}`;
+	const FF_RDP = `Install ff-rdp ${expression("env.FF_RDP_VERSION")}`;
+
+	/** Every job of every workflow that runs `bun run verify`, by "file job". */
+	async function verifying(): Promise<Map<string, Workflow["jobs"][string]>> {
+		const jobs = new Map<string, Workflow["jobs"][string]>();
+		for (const name of await Array.fromAsync(
+			new Bun.Glob("*.yml").scan(join(import.meta.dir, "../.github/workflows")),
+		)) {
+			const w = await workflow(name);
+			for (const [id, job] of Object.entries(w.jobs))
+				if ((job.steps ?? []).some((s) => s.run?.trim() === "bun run verify"))
+					jobs.set(`${name} ${id}`, job);
+		}
+		return jobs;
+	}
+
+	test("both workflows pin the same Firefox, checksum and ff-rdp", async () => {
+		const [ci, release] = await Promise.all(FILES.map(workflow));
+		for (const pin of PINS) {
+			expect(ci?.env?.[pin]).toBeTruthy();
+			expect(release?.env?.[pin]).toBe(ci?.env?.[pin] as string);
+		}
+		expect(ci?.env?.["FIREFOX_SHA256"]).toMatch(/^[0-9a-f]{64}$/);
+	});
+
+	test("every job that runs bun run verify installs them alike, checked, and points the tests at them", async () => {
+		const jobs = await verifying();
+		expect([...jobs.keys()].sort()).toEqual([
+			"ci.yml verify",
+			"release.yml build",
+		]);
+		const scripts = new Set<string>();
+		for (const [where, job] of jobs) {
+			const names = job.steps.map((s) => s.name ?? s.run ?? s.uses);
+			const verify = names.indexOf("bun run verify");
+			for (const install of [FIREFOX, FF_RDP]) {
+				const at = names.indexOf(install);
+				expect(at, `${where}: ${install}`).toBeGreaterThanOrEqual(0);
+				expect(at, `${where}: ${install} before verify`).toBeLessThan(verify);
+				scripts.add(`${install}\n${job.steps[at]?.run}`);
+			}
+			const env = job.steps[verify]?.env ?? {};
+			const temp = expression("runner.temp");
+			expect(env["FIREFOX_PATH"]).toBe(`${temp}/firefox/firefox`);
+			expect(env["FF_RDP_PATH"]).toBe(`${temp}/ff-rdp/ff-rdp`);
+			// The attestation check reads; nothing more is given.
+			expect(job.permissions).toEqual({
+				contents: "read",
+				attestations: "read",
+			});
+		}
+		// The same two scripts everywhere: one per install step.
+		expect(scripts.size).toBe(2);
+		const all = [...scripts].join("\n");
+		expect(all).toContain("sha256sum --check --strict");
+		expect(all).toContain("gh attestation verify");
+		expect(all).toContain("--signer-repo ractive/release-workflows");
+		expect(all).toContain(`--source-ref "refs/tags/v$${"{"}FF_RDP_VERSION}"`);
 	});
 });
 
