@@ -142,8 +142,9 @@ describe("publishing to the Chrome Web Store", () => {
 				contents: "read",
 				attestations: "read",
 			});
-			// The secrets are the environment's, read by the job itself.
-			expect(job?.secrets).toBeUndefined();
+			// The environment's secrets reach a reusable workflow only when
+			// the caller passes them on; the repository has none of its own.
+			expect(job?.secrets).toBe("inherit");
 		}
 	});
 
