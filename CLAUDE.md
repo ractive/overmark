@@ -130,6 +130,10 @@ with `kb/design/overview.md` and `kb/iterations/`.
   the icons; `bun test/e2e/pilot.ts <url>` measures matching on a real page.
 - Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
   `bun run fix` to format; `bun run build`, `bun run zip`.
+- Firefox: `bun scripts/build.ts --firefox` (`--test`, `--store --zip`) builds it from the
+  same code; `src/lib/browser.ts` holds every difference (the build's define
+  `SITEGLOSS_FIREFOX`, never the user agent). `bun scripts/firefox-dev.ts [URL] [--test]`
+  runs it in Firefox through ff-rdp; use a debug port of your own (`--port`).
 - End-to-end tests (`test/e2e/`) need Chromium or Chrome for Testing (`CHROME_PATH`, or
   Playwright's Chromium); branded Chrome ignores `--load-extension`. They are skipped
   without one locally and required in CI.

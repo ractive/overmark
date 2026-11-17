@@ -33,6 +33,15 @@ panel there.
 `bun run zip` packs `sitegloss-<version>.zip` for sharing; unzip it and load the folder
 the same way.
 
+For Firefox (140 or later, desktop), `bun scripts/build.ts --firefox` builds
+`dist-firefox/`; in Firefox open `about:debugging`, This Firefox, "Load Temporary Add-on…"
+and choose its `manifest.json` (gone when Firefox quits). `bun scripts/firefox-dev.ts`
+builds it and starts Firefox with it through [ff-rdp](https://github.com/ractive/ff-rdp),
+in a profile that is kept. `bun scripts/build.ts --firefox --store --zip` packs
+`sitegloss-firefox-<version>-store.zip` for addons.mozilla.org. In Firefox the side panel
+is a sidebar, the sync writes to Downloads only, and Firefox asks once, when you turn AI
+access on, whether Sitegloss may send the pages' content to your AI app.
+
 Without building: every CI run has the zip as the artifact `sitegloss-unpacked` on its
 page (Actions → the run → Artifacts), and every release has it under Releases. Each also
 has `sitegloss-store`, the package for the Chrome Web Store; publishing it is described
