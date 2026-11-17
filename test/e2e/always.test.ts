@@ -51,6 +51,8 @@ class FlakyStore extends MemoryTokenStore {
 }
 
 const QUESTION = `document.querySelector("[data-question]")`;
+/** The time after the questions' dialog in which "Allow all changes" turns nothing on is over. */
+const QUIET_OVER = `!document.body.hasAttribute("data-quiet")`;
 const GRANT = `document.querySelector("#pair-grants li[data-grant]")`;
 
 describe.skipIf(browserBinary === undefined)(
@@ -128,6 +130,33 @@ describe.skipIf(browserBinary === undefined)(
 		test("the question explains Always allow, which arms with Allow", async () => {
 			const result = call("set_summary", { caseId: "c_1", summary: "One" });
 			await panel.waitFor(QUESTION, 10_000);
+			// In a modal dialog (DEC-037): over the panel wherever it is scrolled
+			// to, and Escape does not close it. Its buttons look alike, the
+			// arguments have the focus, and it says how long it waits.
+			const dialog = `document.getElementById("questions")`;
+			expect(await panel.eval(`${dialog}.matches("dialog:modal")`)).toBe(true);
+			await panel.eval(
+				`${dialog}.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`,
+			);
+			await panel.eval(
+				`${dialog}.dispatchEvent(new Event("cancel", { cancelable: true }))`,
+			);
+			expect(await panel.eval(`${dialog}.open`)).toBe(true);
+			expect(
+				await panel.eval<string[]>(
+					`[...${QUESTION}.querySelectorAll("button[data-answer]")].map((b) => b.className)`,
+				),
+			).toEqual(["", "", ""]);
+			expect(
+				await panel.eval(
+					`document.activeElement === ${QUESTION}.querySelector("pre")`,
+				),
+			).toBe(true);
+			expect(
+				await panel.eval<string>(
+					`${QUESTION}.querySelector(".countdown").textContent`,
+				),
+			).toMatch(/^(5\d|60) s left to answer; no answer is Don't allow\.$/);
 			expect(await panel.eval<string>(`${QUESTION}.textContent`)).toContain(
 				"Always allow: Record the summary for the developer runs without asking for Test client (client.example), until you disconnect it.",
 			);
@@ -138,6 +167,8 @@ describe.skipIf(browserBinary === undefined)(
 			).toBe(true);
 			await answerInPanel(panel, "allow");
 			expect((await result).isError).toBeFalsy();
+			// It closes with its last question.
+			await panel.waitFor(`!${dialog}.open`);
 		});
 
 		test("Always allow skips the next question of that tool for that app, not of another tool", async () => {
@@ -185,6 +216,12 @@ describe.skipIf(browserBinary === undefined)(
 		test("Allow all changes skips every tool's question until it is off", async () => {
 			const allowAll = `${GRANT}.querySelector('[data-focus="allow-all"]')`;
 			expect(await panel.eval(`${allowAll}.checked`)).toBe(false);
+			// Right after the questions' dialog closed the switch turns nothing
+			// on (DEC-037): a double click on its last answer lands there.
+			await panel.eval(`${allowAll}.click()`);
+			expect(await panel.eval(`${allowAll}.checked`)).toBe(false);
+			expect(await kept()).toBeUndefined();
+			await panel.waitFor(QUIET_OVER);
 			await panel.eval(`${allowAll}.click()`);
 			await until(
 				kept,
@@ -201,6 +238,45 @@ describe.skipIf(browserBinary === undefined)(
 				(await asks("set_summary", { caseId: "c_1", summary: "Six" }, "deny"))
 					.isError,
 			).toBe(true);
+		});
+
+		test("the same switch is under the top bar on Home, and Settings shows only the card's", async () => {
+			const bar = `document.querySelector('#ai-allow [data-focus="allow-all"]')`;
+			const card = `${GRANT}.querySelector('[data-focus="allow-all"]')`;
+			const shown = `getComputedStyle(document.getElementById("ai-allow")).display !== "none"`;
+			// In Settings the card has it: the bar's is not shown twice.
+			expect(await panel.eval(shown)).toBe(false);
+			await panel.eval(`document.getElementById("back").click()`);
+			await panel.waitFor(`document.getElementById("settings").hidden`);
+			expect(await panel.eval(shown)).toBe(true);
+			// It names the app, which the card's has above it.
+			expect(
+				await panel.eval<string>(`${bar}.closest("label").textContent`),
+			).toContain("Allow all changes ·");
+			expect(await panel.eval(`${bar}.checked`)).toBe(false);
+			await panel.waitFor(QUIET_OVER);
+			await panel.eval(`(() => { const b = ${bar}; b.focus(); b.click(); })()`);
+			await until(
+				kept,
+				(k) => Object.values(k ?? {}).some((e) => e.all),
+				10_000,
+			);
+			// Redrawn with the new state: on, with the keyboard's focus kept, the
+			// line that says what it means, and the card's switch on too.
+			await panel.waitFor(`${bar}.checked && ${card}.checked`);
+			expect(await panel.eval(`document.activeElement === ${bar}`)).toBe(true);
+			expect(
+				await panel.eval<string>(
+					`document.getElementById("ai-allow").textContent`,
+				),
+			).toContain("deleting a case too");
+			await runs("set_summary", { caseId: "c_1", summary: "Six and a half" });
+			await panel.eval(`${bar}.click()`);
+			await until(kept, (k) => k === undefined, 10_000);
+			await panel.waitFor(`!${bar}.checked && !${card}.checked`);
+			// Back where the next tests expect the panel.
+			await panel.eval(`document.getElementById("ai-button").click()`);
+			await panel.waitFor(`!document.getElementById("settings").hidden`);
 		});
 
 		test("the notification's Always allow counts, and survives a worker restart", async () => {

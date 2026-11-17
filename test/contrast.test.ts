@@ -79,6 +79,8 @@ const PANEL: Row[] = [
 	],
 	["--accent-edge", ["--paper", "--sheet"], [4.12, 4.53], [10.06, 9.1], EDGE],
 	["--on-strong", ["--strong"], [16.07], [15.89], TEXT],
+	// The knob of an "Allow all changes" switch that is on (DEC-037).
+	["--on-strong", ["--st-verified"], [6.44], [9.85], EDGE],
 	["--link", ["--paper", "--sheet"], [6.12, 6.73], [9.19, 8.32], TEXT],
 	["--focus", ["--paper", "--sheet"], [6.12, 6.73], [9.19, 8.32], TEXT],
 	[

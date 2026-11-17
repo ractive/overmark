@@ -408,7 +408,7 @@ pairing view gives way to it.
   allow do not apply: every change asks each time (DEC-008). (Replaced by DEC-018: Allow
   and Always allow, closing it is Don't allow.)
 
-## DEC-018: Always allow, per tool or for all, until the AI app is disconnected (owner)
+## DEC-018: Always allow, per tool or for all, until the AI app is disconnected (owner; the switch's place amended by DEC-036)
 
 The owner, 2026-11-10: bring "Always allow" back, per tool and also as "allow
 everything" for an AI app, lasting until that app is disconnected. This replaces
@@ -1331,3 +1331,59 @@ Chrome's (DEC-032) and Edge's (DEC-033).
   job's `notes`. Not yet checked: that addons.mozilla.org keeps them with the version
   (see `operations/firefox-add-ons.md`).
 - No third-party code in the job: the API is called with `curl`, as for Chrome and Edge.
+
+## DEC-036: "Allow all changes" is also under the top bar (owner)
+
+The owner, 2026-11-17, testing the Firefox build with an AI app: the switch "Allow all
+changes" was only in the AI app card, behind the pill "AI on · 1 app", and nothing on
+the view the user is on while the app asks says that it exists. It belongs where the
+user is: below the top bar.
+
+- Under the top bar, on Home and in an open case, one row for each connected AI app: the
+  switch "Allow all changes · <app>", and while it is on the line DEC-018 asks for
+  ("Every change <app> asks for runs without asking you, deleting a case too, until you
+  disconnect it."). Above the last AI call.
+- Only while AI access is connected and an app is paired: otherwise no app can ask.
+  Only apps the card lists, as DEC-018 limits it; the same command to the worker.
+- The card keeps its switch, with the tools always allowed and "Ask again". Settings
+  shows the card and hides the row, so the switch is never there twice.
+
+## DEC-037: Questions in a modal dialog, as the tab-mcp extension's (owner)
+
+The owner, 2026-11-17, testing the Firefox build: with a case scrolled down, an AI app's
+question appeared at the panel's top, out of sight; one has to scroll up to see it. The
+tab-mcp extension had the same and solved it with a dialog over the panel (its DEC-185),
+"which turned out to be much better". The owner also asked to take over what else
+tab-mcp's panel decided since it took Sitegloss's look (its DEC-160), such as the switch
+that is green when on.
+
+Taken over:
+
+- **A modal dialog.** The questions are in a native `<dialog>` opened with `showModal()`:
+  in the top layer, at the panel's top wherever it is scrolled to, the rest inert, the
+  backdrop the token `--scrim`. It opens with the first question and closes with the
+  last. Escape does not close it (the key and the `cancel` event are prevented, and a
+  dialog closed while questions wait opens again): a question ends with an answer or its
+  60 s. The arguments take the focus (they are focusable, to scroll them by keyboard), so
+  no key pressed as the question came answers it. Allow waits as before (DEC-018). A
+  short line is said for screen readers, not the card with its arguments.
+- **After the dialog closes, "Allow all changes" turns nothing on for 750 ms**: the second
+  click of a double click on the dialog's last Allow lands on the panel under it, where
+  DEC-036 put that switch. Not shown (nothing moved); `data-quiet` on the body is for the
+  tests.
+- **Three answer buttons that look alike** (tab-mcp's DEC-180): Allow is no longer the
+  strong button; the card does not nudge towards allowing.
+- **The time left** (tab-mcp's EQ 13): the card says "N s left to answer; no answer is
+  Don't allow." and a bar at its top drains. The worker sends when the question ends
+  (`expiresAt`). Firefox's line "Click into the sidebar to answer" is right under the
+  buttons, above the time left: it says why two of them wait (owner).
+- **"Allow all changes" is green when on** (tab-mcp's DEC-184), as the connected dot: on,
+  it grants. Off is not red: off is the safe side. The AI access switch keeps ink.
+
+Not taken over, for the owner to decide:
+
+- tab-mcp's label "Allow once" for Allow (DEC-018's words are "Allow" and "Always allow",
+  in the panel and the notification).
+- "Not answered in time: <tool> did not run." for 15 s after a question ran out unseen.
+- One notification button only ("Allow once"; tab-mcp's DEC-139: a standing permission
+  needs the whole question). Sitegloss's notification has Allow and Always allow.

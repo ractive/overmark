@@ -42,6 +42,8 @@
 	--warn: #7d4500;
 	--warn-bg: #fff0cc;
 	--warn-edge: #a86400;
+	/* Behind the questions' dialog: dims the panel */
+	--scrim: #1b213066;
 	/* Type */
 	--font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 	--font-num: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
@@ -93,6 +95,7 @@
 		--warn: #ffc861;
 		--warn-bg: #33270d;
 		--warn-edge: #c98a1a;
+		--scrim: #000000a3;
 	}
 }
 
@@ -440,6 +443,12 @@ textarea + .row {
 	transform: translateX(12px);
 }
 
+/* On, it grants: green, as the connected dot (DEC-037, as the tab-mcp
+   extension's "Always allow"). The AI access switch keeps ink. */
+.switch.small input:checked {
+	background: var(--st-verified);
+}
+
 /* --- notes, notices, chips --------------------------------------------------- */
 
 /* What the last action came to, or what a control is for: a note on a wash. */
@@ -701,6 +710,28 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	line-height: 16px;
 }
 
+/* Each connected AI app's "Allow all changes", under the top bar (DEC-036).
+   Settings shows the card, which has the same switch. */
+.ai-allow {
+	display: grid;
+	gap: var(--s1);
+	padding: var(--s2) var(--s4);
+	border-bottom: 1px solid var(--rule);
+}
+
+.ai-allow[hidden],
+body:has(#settings:not([hidden])) .ai-allow {
+	display: none;
+}
+
+.ai-allow .switch.small {
+	margin-top: 0;
+}
+
+.ai-allow p {
+	margin: 0;
+}
+
 /* The last AI call: one line under the top bar. */
 #ai-call {
 	margin: 0;
@@ -711,17 +742,29 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	white-space: nowrap;
 }
 
-/* --- an AI app's questions, above every view (ai.ts) ------------------------- */
+/* --- an AI app's questions: a modal dialog over the panel (ai.ts, DEC-037) ---- */
 
-.ai-box {
+/* In the top layer, at the panel's top wherever it is scrolled to. */
+.questions {
+	width: auto;
+	max-width: none;
+	max-height: calc(100% - 2 * var(--s3));
+	margin: var(--s3);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	overflow: auto;
 	display: grid;
 	gap: var(--s3);
-	padding: var(--s3) var(--s4);
-	border-bottom: 1px solid var(--rule);
 }
 
-#questions:empty {
+.questions:not([open]) {
 	display: none;
+}
+
+.questions::backdrop {
+	background: var(--scrim);
 }
 
 /* Each waits for an answer: a sheet with an edge. */
@@ -749,6 +792,27 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 
 .question .row {
 	margin-bottom: var(--s2);
+}
+
+/* The seconds left: figures of one width, so the line does not move. */
+.question .countdown {
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+/* The time left as a bar that drains, at the card's top. */
+.countdown-bar {
+	height: 4px;
+	margin-bottom: var(--s2);
+	border-radius: 2px;
+	background: var(--wash);
+	overflow: hidden;
+}
+
+.countdown-bar span {
+	display: block;
+	height: 100%;
+	background: var(--ink-2);
 }
 
 .question > :last-child {

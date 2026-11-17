@@ -12,7 +12,12 @@ import { join } from "node:path";
 import type { ConfirmRequest, RelayClient } from "@ractive-ch/tab-mcp-client";
 import { build } from "../scripts/build.ts";
 import { isWorkerRequest } from "../src/lib/messages.ts";
-import { problemOf, statusText } from "../src/sidepanel/ai.ts";
+import {
+	countdownText,
+	problemOf,
+	statusText,
+	timeLeftShare,
+} from "../src/sidepanel/ai.ts";
 import { stopFirst, stopProblem } from "../src/worker/connection.ts";
 import { DATABASE, memoryKv } from "../src/worker/kv.ts";
 import {
@@ -27,6 +32,7 @@ import {
 	NOTIFICATION_GUARD_MS,
 	type NotificationText,
 	notificationText,
+	QUESTION_TIMEOUT_MS,
 	Questions,
 	type QuestionsHost,
 	visible,
@@ -235,6 +241,7 @@ describe("questions", () => {
 	test("without a panel in front, a notification asks and names the case; Allow after the guard counts", async () => {
 		const host = fakeHost();
 		const questions = new Questions(host);
+		const asked = Date.now();
 		const answer = questions.ask(request(), CASE, 7);
 		await settle();
 		expect(questions.list).toEqual([
@@ -245,8 +252,13 @@ describe("questions", () => {
 				title: "Delete case",
 				lines: CASE,
 				args: '{\n  "caseId": "c_1"\n}',
+				expiresAt: expect.any(Number),
 			},
 		]);
+		// When it ends unanswered: the panel counts down to it.
+		const expiresAt = questions.list[0]?.expiresAt ?? 0;
+		expect(expiresAt).toBeGreaterThanOrEqual(asked + QUESTION_TIMEOUT_MS);
+		expect(expiresAt).toBeLessThanOrEqual(Date.now() + QUESTION_TIMEOUT_MS);
 		expect(host.changes).toBeGreaterThan(0);
 		const [[id, text]] = [...host.shown] as [[string, NotificationText]];
 		expect(text).toEqual({
@@ -403,6 +415,7 @@ describe("questions", () => {
 			tool: "set_mark_status",
 			lines: [`Case: “${"T".repeat(250)}” (shop.example/kk, 3 marks).`],
 			args: "",
+			expiresAt: 0,
 		};
 		const args = '{"caseId":"c_1","mark":2,"status":"fixed"}';
 		const fits = notificationText(view, args);
@@ -726,6 +739,28 @@ describe("the panel's status line", () => {
 		],
 	] as [Partial<AiState>, string][])("%o", (change, text) => {
 		expect(statusText({ ...base, ...change })).toBe(text);
+	});
+
+	test("a question's card counts down to its end, and its bar drains", () => {
+		const end = 1_000_000;
+		expect(countdownText(end, end - 60_000)).toBe(
+			"60 s left to answer; no answer is Don't allow.",
+		);
+		// Whole seconds, rounded up: "0 s" only once it is over.
+		expect(countdownText(end, end - 59_001)).toBe(
+			"60 s left to answer; no answer is Don't allow.",
+		);
+		expect(countdownText(end, end - 1)).toBe(
+			"1 s left to answer; no answer is Don't allow.",
+		);
+		expect(countdownText(end, end + 5_000)).toBe(
+			"0 s left to answer; no answer is Don't allow.",
+		);
+		expect(timeLeftShare(end, end - QUESTION_TIMEOUT_MS)).toBe(1);
+		expect(timeLeftShare(end, end - QUESTION_TIMEOUT_MS / 4)).toBe(0.25);
+		expect(timeLeftShare(end, end + 1)).toBe(0);
+		// A clock that differs from the worker's never draws more than all.
+		expect(timeLeftShare(end, end - 2 * QUESTION_TIMEOUT_MS)).toBe(1);
 	});
 
 	test("which of these tell of something wrong: the panel shows that sentence under its top bar", () => {
