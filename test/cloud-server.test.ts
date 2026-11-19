@@ -14,7 +14,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { type Case, withChoice, withComment } from "../src/lib/case.ts";
+import {
+	type Case,
+	withChoice,
+	withComment,
+	withoutAnnotation,
+} from "../src/lib/case.ts";
 import { eventsUrl } from "../src/lib/cloud/api.ts";
 import { TOKENS_KEY, type Tokens } from "../src/lib/cloud/auth.ts";
 import type { Account } from "../src/lib/cloud/book.ts";
@@ -98,7 +103,13 @@ serverTest("against a real server", () => {
 			await images(tess.device, id),
 		);
 		expect(there.annotations[0]?.createdBy?.name).toBe("Tess Tester");
-
+		// The pages are the server's, made from the screenshots: each with
+		// the title its first screenshot named, though no list was ever sent.
+		expect(there.pages).toEqual([
+			{ url: "https://shop.example/cart", title: "Your cart", lang: "en" },
+			{ url: PAY, title: "Payment", lang: "en" },
+		]);
+		expect(there.page.url).toBe("https://shop.example/cart");
 		// Dana settles a mark: Tess hears of it on the stream, and has it with who did it.
 		const before = heard.length;
 		await change(dana.device, id, (c, now) =>
@@ -156,6 +167,37 @@ serverTest("against a real server", () => {
 		expect(second).not.toBe(first);
 		await tess.session.access(base, true);
 		expect((await tess.device.api.me()).user.email).toBe("tess@example.com");
+
+		// The same page on localhost is no second page at the server either,
+		// and a page leaves the server's list with its last mark.
+		const local = await addMark(dana.device, id, "Here too", {
+			url: "http://localhost:3000/checkout/pay/",
+			title: "Payment (dev)",
+		});
+		const done = await addMark(dana.device, id, "Thanks page", {
+			url: "https://shop.example/done",
+			title: "Thank you",
+		});
+		await sync(dana.device, tess.device);
+		expect(
+			(await tess.device.store.getCase(id))?.pages?.map((p) => [
+				p.url,
+				p.title,
+			]),
+		).toEqual([
+			["https://shop.example/cart", "Your cart"],
+			[PAY, "Payment"],
+			["https://shop.example/done", "Thank you"],
+		]);
+		for (const gone of [done.id, local.id])
+			await change(dana.device, id, (c, now) =>
+				withoutAnnotation(c, gone, now),
+			);
+		await sync(dana.device, tess.device);
+		expect(
+			(await tess.device.store.getCase(id))?.pages?.map((p) => p.url),
+		).toEqual(["https://shop.example/cart", PAY]);
+		expect(status(tess.device)?.problems).toEqual([]);
 
 		// Deleted on one device: deleted for the team, and gone on the other.
 		await tess.device.store.deleteCase(id);

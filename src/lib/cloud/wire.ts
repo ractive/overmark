@@ -29,10 +29,13 @@ import {
 	MAX_TITLE,
 	MAX_URL,
 	MAX_VERDICT,
+	pageAt,
+	pageKey,
 	type Reopen,
 	type Resolution,
 	type Shape,
 	type Shot,
+	samePage,
 	shotImage,
 	shotUrl,
 	type UserRef,
@@ -104,12 +107,6 @@ export function opKey(op: Op): string {
 
 // --- what of a case syncs --------------------------------------------------------
 
-const pageOut = (page: CasePage): WirePage => ({
-	url: page.url,
-	title: page.title,
-	...(page.lang ? { lang: page.lang } : {}),
-});
-
 /** A case's highest mark number used, a deleted mark's too. */
 export const highestNumber = (c: Case): number =>
 	Math.max(c.lastNumber ?? 0, ...c.annotations.map((a) => a.number));
@@ -119,7 +116,6 @@ export function caseContent(c: Case): CaseContent {
 		title: c.title,
 		link: c.link ?? null,
 		summary: c.verdict,
-		pages: casePages(c).map(pageOut),
 		lastNumber: highestNumber(c),
 	};
 }
@@ -191,6 +187,19 @@ export function newShotOf(
 		viewport: shot.viewport,
 		capturedAt: stamp(shot.capturedAt) ?? new Date(0).toISOString(),
 	};
+}
+
+/** A screenshot's page as `shot.create` names it: its title and language, where known. */
+export function pageOfShot(
+	c: Case,
+	shot: Shot,
+): { page?: { title?: string; lang?: string } } {
+	const page = pageAt(c, shotUrl(c, shot));
+	const named = {
+		...(page?.title ? { title: page.title } : {}),
+		...(page?.lang ? { lang: page.lang } : {}),
+	};
+	return Object.keys(named).length > 0 ? { page: named } : {};
 }
 
 export function newMarkOf(
@@ -265,7 +274,8 @@ export function casePatch(
 	if (local.title !== before.title) patch.title = local.title;
 	if (local.link !== before.link) patch.link = local.link;
 	if (local.summary !== before.summary) patch.summary = local.summary;
-	if (!same(local.pages, before.pages)) patch.pages = local.pages;
+	// Never the pages: the server keeps that list from the screenshots, and a
+	// patch of it would replace the whole list with this device's view of it.
 	// The server only ever raises it.
 	if (local.lastNumber > before.lastNumber) patch.lastNumber = local.lastNumber;
 	return Object.keys(patch).length > 0 ? patch : undefined;
@@ -378,6 +388,9 @@ export function deriveOps(
 		ops.push({
 			opId: newId("o"),
 			type: "shot.create",
+			// What the page is called, for the server's list of pages: it adds
+			// the page with the first screenshot of it (DEC-039).
+			...pageOfShot(c, shot),
 			caseId: c.id,
 			shot: newShotOf(c, shot, id, ref),
 		});
@@ -423,7 +436,6 @@ const contentOfNew = (n: OpOf<"case.create">["case"]): CaseContent => ({
 	title: n.title,
 	link: n.link ?? null,
 	summary: n.summary ?? null,
-	pages: n.pages ?? [],
 	lastNumber: n.lastNumber ?? 0,
 });
 
@@ -444,7 +456,6 @@ export function applyOp(book: CaseBook, op: Op, number?: number): void {
 				title: op.title ?? shadow.case.title,
 				link: op.link === undefined ? shadow.case.link : op.link,
 				summary: op.summary === undefined ? shadow.case.summary : op.summary,
-				pages: op.pages ?? shadow.case.pages,
 				lastNumber: Math.max(shadow.case.lastNumber, op.lastNumber ?? 0),
 			};
 			return;
@@ -653,6 +664,43 @@ const pagesIn = (pages: readonly WirePage[]): CasePage[] =>
 		lang: lang(p.lang),
 	}));
 
+/**
+ * The case with the list of pages the server sent (DEC-039): the server
+ * keeps that list, from the screenshots, and it is taken as it is. `page` is
+ * its first page, with the window of that page's first screenshot. An empty
+ * list: the first screenshot's page; without screenshots, what the case had.
+ * A page only this device knows yet (its screenshot has not been sent, or
+ * was not taken) stays after the server's, with its title.
+ */
+export function withPagesOf(c: Case, server: readonly CasePage[]): Case {
+	// A screenshot from before screenshots named their page is of `page`,
+	// and says so before `page` becomes another one.
+	const shots = c.shots.some((s) => s.url === undefined)
+		? c.shots.map((s) => (s.url === undefined ? { ...s, url: c.page.url } : s))
+		: c.shots;
+	const pinned = shots === c.shots ? c : { ...c, shots };
+	const listed = new Set(server.map((p) => pageKey(p.url)));
+	const taken = new Set(shots.map((s) => pageKey(s.url ?? c.page.url)));
+	const own = casePages(pinned).filter(
+		(p) => !listed.has(pageKey(p.url)) && taken.has(pageKey(p.url)),
+	);
+	const pages = casePages({ ...pinned, shots: [], pages: [...server, ...own] });
+	const first = server.length > 0 || shots.length > 0 ? pages[0] : undefined;
+	if (first === undefined || pages.length === 0) return pinned;
+	const made = shots.find((s) => samePage(s.url ?? "", first.url));
+	return {
+		...pinned,
+		pages,
+		page: {
+			...c.page,
+			url: first.url,
+			title: first.title,
+			lang: first.lang || c.page.lang,
+			...(made === undefined ? {} : { viewport: made.viewport }),
+		},
+	};
+}
+
 /** What of a case the server has that a patch can say, within what a case here holds. */
 export function caseContentIn(w: WireCase): CaseContent {
 	return {
@@ -663,7 +711,6 @@ export function caseContentIn(w: WireCase): CaseContent {
 			typeof w.summary === "string" && w.summary !== ""
 				? text(w.summary, MAX_VERDICT)
 				: null,
-		pages: pagesIn(w.pages ?? []).map(pageOut),
 		lastNumber: Number.isInteger(w.lastNumber) ? w.lastNumber : 0,
 	};
 }
@@ -710,6 +757,8 @@ export class NeedsImage extends Error {
 function caseOf(w: WireCase, shots: readonly WireShot[]): Case {
 	const pages = pagesIn(w.pages ?? []);
 	const first = pages[0] ?? { url: shots[0]?.url ?? "", title: "", lang: "" };
+	// The window of the first page: that of its first screenshot.
+	const made = shots.find((s) => samePage(s.url, first.url)) ?? shots[0];
 	return {
 		format: CASE_FORMAT,
 		id: w.id,
@@ -720,8 +769,8 @@ function caseOf(w: WireCase, shots: readonly WireShot[]): Case {
 			url: first.url,
 			title: first.title,
 			lang: first.lang || lang(w.client?.lang),
-			viewport: w.client?.viewport ??
-				shots[0]?.viewport ?? { width: 0, height: 0, dpr: 1 },
+			viewport: made?.viewport ??
+				w.client?.viewport ?? { width: 0, height: 0, dpr: 1 },
 			userAgent: text(w.client?.userAgent, 2000),
 		},
 		pages: pages.length > 0 ? pages : [first],
@@ -1122,28 +1171,16 @@ export function mergeCase(
 		const title = pick("title") || c.title;
 		const link = pick("link");
 		const summary = pick("summary");
-		const pages = pagesIn(pick("pages"));
 		const lastNumber = Math.max(theirs.lastNumber, highestNumber(c));
-		const { link: _l, lastNumber: _n, pages: _p, ...rest } = c;
-		const first = pages[0];
+		const { link: _l, lastNumber: _n, ...rest } = c;
 		c = {
 			...rest,
 			title,
 			verdict: summary,
 			...(link === null ? {} : { link }),
-			...(pages.length > 0 ? { pages } : c.pages ? { pages: c.pages } : {}),
-			...(first === undefined
-				? {}
-				: {
-						page: {
-							...c.page,
-							url: first.url,
-							title: first.title,
-							lang: first.lang || c.page.lang,
-						},
-					}),
 			...(lastNumber > 0 || c.lastNumber !== undefined ? { lastNumber } : {}),
 		};
+		c = withPagesOf(c, pagesIn(incoming.case.pages ?? []));
 		shadow.case = theirs;
 	}
 	for (const path of out.images.keys()) out.deleteImages.delete(path);

@@ -8,6 +8,7 @@
  * gets the whole state (`reset`).
  */
 
+import { MAX_PAGES, pageKey, samePage } from "../src/lib/case.ts";
 import {
 	type Api,
 	ApiFailure,
@@ -270,6 +271,52 @@ export class FakeServer {
 		return row;
 	}
 
+	/**
+	 * A screenshot of a page the case does not have adds that page, called
+	 * what the operation says; which page an address is, is `pageKey`. A full
+	 * list takes no more. (The server's `withPageOf`.)
+	 */
+	#withPageOf(
+		owner: Row<WireCase>,
+		op: Extract<Op, { type: "shot.create" }>,
+	): void {
+		const pages = owner.value.pages;
+		if (
+			pages.some((p) => samePage(p.url, op.shot.url)) ||
+			pages.length >= MAX_PAGES
+		)
+			return;
+		owner.value = {
+			...owner.value,
+			pages: [
+				...pages,
+				{
+					url: op.shot.url,
+					title: op.page?.title ?? "",
+					...(op.page?.lang ? { lang: op.page.lang } : {}),
+				},
+			],
+		};
+	}
+
+	/**
+	 * A page leaves the case with its last screenshot; the last page of all
+	 * stays. (The server's `withoutEmptyPages`.)
+	 */
+	#withoutEmptyPages(owner: Row<WireCase>): void {
+		const pages = owner.value.pages;
+		if (pages.length < 2) return;
+		const keys = new Set(
+			this.shotsOf(owner.value.id).map((s) => pageKey(s.url)),
+		);
+		const kept = pages.filter((p) => keys.has(pageKey(p.url)));
+		if (kept.length === pages.length) return;
+		owner.value = {
+			...owner.value,
+			pages: kept.length > 0 ? kept : pages.slice(0, 1),
+		};
+	}
+
 	#touch(row: Row<WireCase>, rev: number, at: string): void {
 		row.rev = rev;
 		row.value = { ...row.value, updatedAt: at, rev };
@@ -360,10 +407,12 @@ export class FakeServer {
 				if (existing && !existing.deleted) return { status: "duplicate" };
 				this.#need(op.shot.image, "screenshot");
 				if (existing) {
-					// It went with its last mark; a mark still on it brings it back.
+					// It went with its last mark; a mark still on it brings it back,
+					// and its page with it.
 					existing.deleted = false;
 					existing.rev = rev;
 					existing.value = { ...existing.value, rev };
+					this.#withPageOf(owner, op);
 					this.#touch(owner, rev, at);
 					return { status: "applied" };
 				}
@@ -372,11 +421,7 @@ export class FakeServer {
 					rev,
 					value: { ...op.shot, caseId: op.caseId, rev },
 				});
-				if (!owner.value.pages.some((p) => p.url === op.shot.url))
-					owner.value = {
-						...owner.value,
-						pages: [...owner.value.pages, { url: op.shot.url, title: "" }],
-					};
+				this.#withPageOf(owner, op);
 				this.#touch(owner, rev, at);
 				return { status: "applied" };
 			}
@@ -389,7 +434,9 @@ export class FakeServer {
 					throw new Refusal("conflict", "A mark is still on this screenshot.");
 				row.deleted = true;
 				row.rev = rev;
-				this.#touch(this.#live(row.value.caseId), rev, at);
+				const owner = this.#live(row.value.caseId);
+				this.#withoutEmptyPages(owner);
+				this.#touch(owner, rev, at);
 				return { status: "applied" };
 			}
 			case "mark.create": {
@@ -528,7 +575,9 @@ export class FakeServer {
 						shot.rev = rev;
 					}
 				}
-				this.#touch(this.#live(row.value.caseId), rev, at);
+				const owner = this.#live(row.value.caseId);
+				this.#withoutEmptyPages(owner);
+				this.#touch(owner, rev, at);
 				return { status: "applied" };
 			}
 		}

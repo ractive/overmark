@@ -1668,6 +1668,41 @@ handled elsewhere") and DEC-007's spirit holds: no new runtime dependency.
 
 **Known limits** are in the open questions (item 10).
 
+**The pages of a synced case** (added 2026-11-19, after the server's review):
+
+- **The list of pages is the server's.** It keeps the list from the screenshots: a
+  `shot.create` of a page the case does not have adds the page, a page leaves with its
+  last screenshot (the last page of all stays), and which page an address is, is
+  `pageKey` on both sides (DEC-038). So the extension sends no list: a new case names
+  no pages, a `shot.create` says its address (`shotUrl`) and, in `page`, what the page
+  is called (title, language), and no `case.patch` ever carries `pages`. A patch of
+  the list replaces the whole list with one device's view of it, and two people
+  adding different pages dropped each other's entry.
+- **What comes in is taken as sent.** The server's `pages` become the case's `pages`.
+  `page` is the first of them, with the window of that page's first screenshot; an
+  empty list: the first screenshot's page; without screenshots, what the case had. A
+  page only this device has yet (its screenshot is not sent, or was not taken) stays
+  after the server's, with its title. A screenshot from before screenshots named their
+  page is given `page`'s address first, so it does not move when `page` becomes
+  another one.
+- **Lengths.** The server counts UTF-16 units where this format counts code points, so
+  a text of many emoji within the limit here can be over it there. It is refused as
+  any other refused change: said in the Account section with its reason, left out,
+  not sent again, and nothing behind it waits (below).
+- **What is refused, and what is tried again.** An operation the server rejects
+  (`invalid`, `limit`, `forbidden`, `not_found`, `conflict`) leaves the queue, is said
+  by case in plain words, and is not sent again while the change is the same; the
+  operations after it go. A whole request refused for what it holds (400, 409, 413,
+  422) is found out one operation at a time. An image the server does not take (507
+  `quota`: the team's storage is full; too large) is said as "An image was not taken,
+  so its mark is not shared: …" and not uploaded again at every run. Only what may
+  pass is tried again by itself: no network, a 5xx, a 429, and a 401 once with new
+  tokens. "Sync now" tries everything once more.
+- **What the team sees of a page.** Every page's address (site, path, hash route; no
+  query) goes to the team with the case, also a payment provider's or a reset link's
+  path. The sign-in text, the question about the cases that were here before, and
+  `PRIVACY.md` say so.
+
 ## DEC-040: The API's types are generated, with TypeScript 5 for the generator alone
 
 2026-11-19, with DEC-039. `src/lib/cloud/api.gen.ts` is generated from a copy of the

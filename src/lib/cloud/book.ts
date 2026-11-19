@@ -18,7 +18,6 @@ import type {
 	Op,
 	Team,
 	WireFinding,
-	WirePage,
 	WireReopen,
 	WireResolution,
 } from "./api.ts";
@@ -70,11 +69,14 @@ export interface Account {
 export type SyncMode = "synced" | "local" | "undecided";
 
 /** What of a case a `case.patch` can say. */
+/**
+ * What of a case a `case.patch` says. Not its pages: the server keeps that
+ * list itself, from the screenshots (DEC-039, the pages).
+ */
 export interface CaseContent {
 	title: string;
 	link: string | null;
 	summary: string | null;
-	pages: WirePage[];
 	lastNumber: number;
 }
 

@@ -133,12 +133,15 @@ describe("the operations a case becomes", () => {
 		expect(created.case).toMatchObject({
 			id: "c_1",
 			title: "Button contrast",
-			pages: [{ url: "https://www.example.com/kk", title: "KK", lang: "de" }],
 			client: { viewport: { width: 1280, height: 800, dpr: 2 } },
 			lastNumber: 2,
 		});
+		// The list of pages is the server's, made from the screenshots: a new
+		// case names none, and each screenshot says what its page is called.
+		expect("pages" in created.case).toBe(false);
 		const shot = ops[1] as Extract<Op, { type: "shot.create" }>;
 		expect(shot.shot.url).toBe("https://www.example.com/kk");
+		expect(shot.page).toEqual({ title: "KK", lang: "de" });
 		expect(shot.shot.id).toBe(book.shots["s1"] as string);
 		const first = ops[2] as Extract<Op, { type: "mark.create" }>;
 		expect(first.mark.number).toBe(1);
@@ -505,7 +508,7 @@ describe("a case that is here and at the server, with no record of what the serv
 			title: "Button contrast",
 			link: null,
 			summary: null,
-			pages: [{ url: "https://www.example.com/kk", title: "KK", lang: "de" }],
+			// Not its pages: the server keeps that list, from the screenshots.
 			lastNumber: 2,
 		});
 	});

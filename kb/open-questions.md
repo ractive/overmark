@@ -93,8 +93,9 @@ timestamp: 2026-11-04T17:00:00+01:00
     would have to sign in again; nothing would be lost. The local server of 2026-11-19
     took a used refresh token a second time, so this did not happen there: whichever
     is meant, a short grace period for the previous token is what the extension needs.
-    (e) A page whose last mark is deleted in the web app stays in the case's list of
-    pages with 0 marks until a mark is deleted in an extension (which tidies the list).
+    (e) The list of pages is the server's, in the order the pages' first screenshots
+    reached it. Marks made offline on two devices can so list the pages in another
+    order than either device had, and `page` (the first page) follows the server's.
     (f) The toolbar icon's badge says nothing about the team sync (a sign-in that ran
     out, changes the server refused); the panel's banner and Account section do.
     (g) Mark-level actions are not switched off by permission in the panel (only

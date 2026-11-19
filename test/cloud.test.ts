@@ -499,6 +499,107 @@ describe("mark numbers", () => {
 	});
 });
 
+describe("the pages of a synced case are the server's (DEC-039)", () => {
+	const LOCAL_PAY = "http://localhost:3000/checkout/pay/";
+
+	test("a page is added by its first screenshot, with its title; no patch ever names the pages", async () => {
+		const sent: Op[] = [];
+		for (const d of [tess, dana]) {
+			const ops = d.api.ops.bind(d.api);
+			d.api.ops = async (team, list) => {
+				sent.push(...list);
+				return ops(team, list);
+			};
+		}
+		await shared();
+		expect(server.caseOf("c_flow")?.pages).toEqual([
+			{ url: CART, title: "Your cart", lang: "en" },
+			{ url: PAY, title: "Payment", lang: "en" },
+		]);
+		const there = (await dana.store.getCase("c_flow")) as Case;
+		expect(there.pages).toEqual([
+			{ url: CART, title: "Your cart", lang: "en" },
+			{ url: PAY, title: "Payment", lang: "en" },
+		]);
+		// The same page on localhost is no second page, here or there.
+		await addMark(dana, "c_flow", "On my machine too", {
+			url: LOCAL_PAY,
+			title: "Payment (dev)",
+		});
+		// A third page, then its mark goes again: the page comes and leaves.
+		const done = await addMark(dana, "c_flow", "Thanks page", {
+			url: "https://shop.example/done",
+			title: "Thank you",
+		});
+		await sync(dana, tess);
+		expect(server.caseOf("c_flow")?.pages.map((p) => p.url)).toEqual([
+			CART,
+			PAY,
+			"https://shop.example/done",
+		]);
+		expect(look(await tess.store.getCase("c_flow"))?.pages).toEqual([
+			CART,
+			PAY,
+			"https://shop.example/done",
+		]);
+		expect(
+			(await tess.store.getCase("c_flow"))?.pages?.find(
+				(p) => p.url === "https://shop.example/done",
+			)?.title,
+		).toBe("Thank you");
+		await change(dana, "c_flow", (c, now) =>
+			withoutAnnotation(c, done.id, now),
+		);
+		await sync(dana, tess);
+		expect(server.caseOf("c_flow")?.pages.map((p) => p.url)).toEqual([
+			CART,
+			PAY,
+		]);
+		expect(look(await tess.store.getCase("c_flow"))?.pages).toEqual([
+			CART,
+			PAY,
+		]);
+		// All of that without one patch of the list, and no list in a new case.
+		expect(sent.length).toBeGreaterThan(5);
+		for (const op of sent) {
+			if (op.type === "case.patch") expect(op.pages).toBeUndefined();
+			if (op.type === "case.create") expect(op.case.pages).toBeUndefined();
+		}
+		expect(look(await dana.store.getCase("c_flow"))).toEqual(
+			look(await tess.store.getCase("c_flow")),
+		);
+	});
+
+	test("page is the first page of the server's list, with the window of that page's first screenshot", async () => {
+		await shared();
+		const mine = (await tess.store.getCase("c_flow")) as Case;
+		const pay = mine.shots.find((s) => s.url === PAY);
+		expect(mine.page.url).toBe(CART);
+		// Someone changes the list at the server (the web app): the payment
+		// page is first now.
+		const pages = [...(server.caseOf("c_flow")?.pages ?? [])].reverse();
+		server
+			.api(DANA)
+			.ops(TEAM, [
+				{ opId: "o_pages", type: "case.patch", caseId: "c_flow", pages },
+			]);
+		await sync(tess, dana);
+		for (const d of [tess, dana]) {
+			const c = (await d.store.getCase("c_flow")) as Case;
+			expect(c.pages?.map((p) => p.url)).toEqual([PAY, CART]);
+			expect(c.page.url).toBe(PAY);
+			expect(c.page.title).toBe("Payment");
+			expect(c.page.viewport).toEqual(pay?.viewport as never);
+			// Every mark is still on its own page.
+			expect(look(c)?.marks.map((m) => m.page)).toEqual([CART, PAY]);
+		}
+		// Taking the list did not make anything to send.
+		tess.api.calls.length = 0;
+		await sync(tess, dana);
+		expect(posts(tess)).toEqual([]);
+	});
+});
+
 describe("deleting", () => {
 	test("a mark deleted on one device goes on the other, its screenshot with its last mark", async () => {
 		await shared();

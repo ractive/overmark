@@ -63,6 +63,14 @@ Only in four cases, all started by you:
    they are deleted, with who made or changed what, and under
    [its own privacy policy](https://sitegloss.dev/privacy/).
 
+   The address of every page you marked in a case is part of that: the site, the path
+   and a hash route (`#/cart`), without the query (`?…`), which Sitegloss never keeps.
+   Your team sees these addresses. A case can cross to other sites, so this includes
+   the path of a payment provider's page or of a link someone was sent (a password
+   reset, an invitation), and some sites put a token or a session's name in the path.
+   Look at a case's list of pages before you share it; a mark you delete takes its
+   page off the list when it was the page's last.
+
    Cases that were in your browser before you signed in are sent only when you say so
    ("Sync them"); "Keep them on this device" leaves them where they are. Cases you make
    while signed in go to the team once they have a mark. Deleting a case that the team
