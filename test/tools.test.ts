@@ -635,6 +635,70 @@ describe("tools", () => {
 		expect(tab.captured).toEqual([]);
 	});
 
+	test("a change the user allowed for one mark is not made to another that has its number by then (the team's sync renumbers)", async () => {
+		const c = await seed();
+		const [one, two] = c.annotations as [Annotation, Annotation];
+		const ask = async (name: string, input: Record<string, unknown>) => {
+			const signal = new AbortController().signal;
+			const lines = await confirmLines(store, tab, {
+				tool: { name, description: "" },
+				arguments: input,
+				client: CLAUDE,
+				signal,
+			});
+			return { signal, lines };
+		};
+		// The user is asked about mark 2 as it is, and reads its comment.
+		const calls = [
+			["set_mark_status", { caseId: "c_1", mark: 2, status: "fixed" }],
+			["add_finding", { caseId: "c_1", mark: 2, text: "Found why" }],
+		] as const;
+		const asked = [];
+		for (const [name, input] of calls) asked.push(await ask(name, input));
+		expect(asked[0]?.lines.join("\n")).toContain("Mark 2:");
+		// Before they answer, the team's sync gives marks other numbers: a
+		// teammate's mark is 2 now, and the mark they read about is 3.
+		const theirs: Annotation = {
+			...two,
+			comment: "A teammate's mark",
+			shape: { kind: "box", rect: { x: 400, y: 400, width: 9, height: 9 } },
+			element: null,
+		};
+		await putCase(store, {
+			...c,
+			annotations: [one, theirs, { ...two, id: "a3", number: 3 }],
+		});
+		for (const [i, [name, input]] of calls.entries())
+			await expect(call(name, input, asked[i]?.signal)).rejects.toThrow(
+				"Mark 2 is not the mark the user was asked about: the case changed meanwhile",
+			);
+		const after = (await store.getCase("c_1")) as Case;
+		expect(after.annotations.map((a) => [a.resolution, a.findings])).toEqual([
+			[undefined, undefined],
+			[undefined, undefined],
+			[undefined, undefined],
+		]);
+		// Asked again about what mark 3 is now, it goes through.
+		const again = await ask("set_mark_status", {
+			caseId: "c_1",
+			mark: 3,
+			status: "fixed",
+		});
+		await call(
+			"set_mark_status",
+			{ caseId: "c_1", mark: 3, status: "fixed" },
+			again.signal,
+		);
+		expect(
+			(await store.getCase("c_1"))?.annotations.map((a) => a.resolution?.kind),
+		).toEqual([undefined, undefined, "fixed"]);
+		// A call nobody was asked about (allowed always) goes by its number.
+		await call("add_finding", { caseId: "c_1", mark: 2, text: "By number" });
+		expect(
+			(await store.getCase("c_1"))?.annotations[1]?.findings?.[0]?.text,
+		).toBe("By number");
+	});
+
 	test("add_annotation is refused when the page in front changed after the user allowed it", async () => {
 		await seed();
 		const signal = new AbortController().signal;

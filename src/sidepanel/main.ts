@@ -12,9 +12,10 @@ import {
 	cleanLink,
 	cleanTitle,
 	linkProblem,
+	MARK_CHANGED,
 	MAX_COMMENT,
 	MAX_LINK,
-	markByKey,
+	markFor,
 	markKey,
 	markStatus,
 	newId,
@@ -2268,11 +2269,13 @@ async function changeMark(
 		// The images go in the same transaction: a save may take a freed path.
 		const saved = await store.updateCase(caseId, (current) => {
 			if (current === undefined) throw new Error("The case no longer exists.");
-			const now = markByKey(current, key);
+			const now = markFor(current, a.id, key);
 			if (now === undefined)
 				throw new Error(
 					"This mark is no longer in the case as it was: it was changed or removed meanwhile. Nothing was saved.",
 				);
+			// Not to be told from another mark: not applied to the first found.
+			if (now === "ambiguous") throw new Error(MARK_CHANGED);
 			annotationId = now.id;
 			const next = change(current, now.id);
 			return {
@@ -2326,6 +2329,10 @@ function answerMark(
 	if (c === undefined || a === undefined) return false;
 	if (a === "gone") {
 		answer({ ok: false, error: "That mark is no longer in the case." });
+		return false;
+	}
+	if (a === "changed") {
+		answer({ ok: false, error: MARK_CHANGED });
 		return false;
 	}
 	const done = (why: string | undefined) =>

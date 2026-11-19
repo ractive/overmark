@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Annotation, Case } from "../src/lib/case.ts";
+import { type Annotation, type Case, markKey } from "../src/lib/case.ts";
 import { markAsked } from "../src/sidepanel/picked.ts";
 import { sampleCase } from "./fixtures.ts";
 
@@ -87,5 +87,37 @@ describe("which panel answers a page about a mark (DEC-027)", () => {
 		expect(markAsked(showing, { ...request, annotationId: "a_gone" }, 7)).toBe(
 			"gone",
 		);
+	});
+
+	test("the page says which mark its popover is on: the id alone is another mark's after a renumbering", () => {
+		const other: Annotation = {
+			...mark,
+			comment: "A teammate's",
+			shape: { kind: "note", at: { x: 50, y: 50 } },
+		};
+		const moved: Annotation = { ...mark, id: "a2", number: 2 };
+		const now = { ...showing, open: { ...c, annotations: [other, moved] } };
+		const key = markKey(c, mark);
+		// Asked for "a1", which is the teammate's mark now: its own, under its new id.
+		expect(markAsked(now, { ...request, mark: key }, 7)).toBe(moved);
+		// Gone from the case.
+		expect(
+			markAsked(
+				{ ...showing, open: { ...c, annotations: [other] } },
+				{ ...request, mark: key },
+				7,
+			),
+		).toBe("gone");
+		// Two that nothing tells apart, and the id is neither: not the first found.
+		const twin = { ...moved, id: "a3", number: 3 };
+		expect(
+			markAsked(
+				{ ...showing, open: { ...c, annotations: [other, moved, twin] } },
+				{ ...request, mark: key },
+				7,
+			),
+		).toBe("changed");
+		// A page of an older build says no mark: by the id, as before.
+		expect(markAsked(now, request, 7)).toBe(other);
 	});
 });

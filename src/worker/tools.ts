@@ -32,6 +32,7 @@ import {
 	MAX_REOPEN_NOTE,
 	MAX_VERDICT,
 	type MarkStatus,
+	markKey,
 	markStatus,
 	marksByPage,
 	markUrl,
@@ -1246,7 +1247,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 			additionalProperties: false,
 		},
 		annotations: { consequentialHint: true, idempotentHint: true },
-		execute: async ({ caseId, mark, status, note }, { client }) => {
+		execute: async ({ caseId, mark, status, note }, { client, signal }) => {
 			// Recorded as findings record their app (DEC-023): a status with no
 			// app is the user's, set in the panel, so no other caller sets one.
 			if (client.kind !== "relay")
@@ -1256,7 +1257,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 			const app = findingApp(client);
 			let result = "";
 			await store.updateCase(caseId, (current) => {
-				const { c, a } = caseAndMark(current, caseId, mark);
+				const { c, a } = caseAndMark(current, caseId, mark, signal);
 				const now = new Date().toISOString();
 				const was = markStatus(a);
 				const set = (value: Case, said: string) => {
@@ -1327,6 +1328,8 @@ export function createTools(deps: ToolDeps): Tool[] {
 		current: Case | undefined,
 		caseId: string,
 		number: number,
+		/** The call's signal: what its confirmation named, if it had one. */
+		signal?: AbortSignal,
 	): { c: Case; a: Annotation } {
 		if (current === undefined)
 			throw new CaseError(`No case with id ${caseId}; see list_cases.`);
@@ -1334,6 +1337,15 @@ export function createTools(deps: ToolDeps): Tool[] {
 		if (a === undefined)
 			throw new CaseError(
 				`Case ${caseId} has no mark ${number}; see get_case.`,
+			);
+		// The mark the user was asked about, when they were asked: a number
+		// can be another mark's by the time they answer (the team's sync
+		// gives marks other numbers, DEC-039), and what they allowed for one
+		// mark is not done to another.
+		const asked = signal === undefined ? undefined : confirmedMarks.get(signal);
+		if (asked !== undefined && markKey(current, a) !== asked)
+			throw new CaseError(
+				`Mark ${number} is not the mark the user was asked about: the case changed meanwhile (marks can take other numbers when a team syncs). Nothing was changed. Read the case again with get_case and ask again.`,
 			);
 		return { c: current, a };
 	}
@@ -1394,12 +1406,12 @@ export function createTools(deps: ToolDeps): Tool[] {
 			additionalProperties: false,
 		},
 		annotations: { consequentialHint: true },
-		execute: async ({ caseId, mark, text: body }, { client }) => {
+		execute: async ({ caseId, mark, text: body }, { client, signal }) => {
 			const app = findingApp(findingWriter(client));
 			const findingId = newId("f");
 			const now = new Date().toISOString();
 			await store.updateCase(caseId, (current) => {
-				const { c, a } = caseAndMark(current, caseId, mark);
+				const { c, a } = caseAndMark(current, caseId, mark, signal);
 				return {
 					value: withFinding(
 						c,
@@ -1438,12 +1450,15 @@ export function createTools(deps: ToolDeps): Tool[] {
 			additionalProperties: false,
 		},
 		annotations: { consequentialHint: true, idempotentHint: true },
-		execute: async ({ caseId, mark, finding, text: body }, { client }) => {
+		execute: async (
+			{ caseId, mark, finding, text: body },
+			{ client, signal },
+		) => {
 			const writer = findingWriter(client);
 			const now = new Date().toISOString();
 			const me = await deps.me?.();
 			await store.updateCase(caseId, (current) => {
-				const { c, a } = caseAndMark(current, caseId, mark);
+				const { c, a } = caseAndMark(current, caseId, mark, signal);
 				ownFinding(a, finding, writer, me);
 				return { value: withFindingText(c, a.id, finding, body, now) };
 			});
@@ -1467,12 +1482,12 @@ export function createTools(deps: ToolDeps): Tool[] {
 				additionalProperties: false,
 			},
 			annotations: { consequentialHint: true, destructiveHint: true },
-			execute: async ({ caseId, mark, finding }, { client }) => {
+			execute: async ({ caseId, mark, finding }, { client, signal }) => {
 				const writer = findingWriter(client);
 				const now = new Date().toISOString();
 				const me = await deps.me?.();
 				await store.updateCase(caseId, (current) => {
-					const { c, a } = caseAndMark(current, caseId, mark);
+					const { c, a } = caseAndMark(current, caseId, mark, signal);
 					ownFinding(a, finding, writer, me);
 					return { value: withoutFinding(c, a.id, finding, now) };
 				});
@@ -1525,6 +1540,9 @@ export function createTools(deps: ToolDeps): Tool[] {
 		deleteCase,
 	] as Tool[];
 }
+
+/** The mark a confirmation named (`markKey`), by the call's signal. */
+const confirmedMarks = new WeakMap<AbortSignal, string>();
 
 /** The page a confirmation for add_annotation named, by the call's signal. */
 const confirmedPages = new WeakMap<AbortSignal, { id: number; url: string }>();
@@ -1646,6 +1664,10 @@ export async function confirmLines(
 	if (MARK_TOOLS.has(request.tool.name) && typeof caseId === "string") {
 		const c = await store.getCase(caseId).catch(() => undefined);
 		const a = c?.annotations.find((x) => x.number === mark);
+		// What the user is asked about is this mark, whatever number it has
+		// when they answer.
+		if (c !== undefined && a !== undefined)
+			confirmedMarks.set(request.signal, markKey(c, a));
 		if (a !== undefined)
 			lines.push(
 				`Mark ${a.number}: ${a.comment ? `“${cut(a.comment, 200)}”` : "no comment"}${a.resolution ? `, now ${STATUS_LABEL[markStatus(a)]}` : ", now open"}.`,

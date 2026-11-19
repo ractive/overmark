@@ -20,6 +20,8 @@ import {
 	MAX_COMMENT,
 	MAX_REOPEN_NOTE,
 	type MarkStatus,
+	markFor,
+	markKey,
 	markStatus,
 	markUrl,
 	pageAt,
@@ -101,7 +103,15 @@ const CHOICE_LABEL: Record<ResolveChoice, string> = {
  * the mark's commands, or the form of one of them.
  */
 interface OpenMark {
+	/** The mark's id as it is now: it follows the mark when the id changes. */
 	annotationId: string;
+	/**
+	 * Which mark the popover was opened on (`markKey`). The team's sync can
+	 * give the mark another number while the popover is open, and the id it
+	 * had is then a teammate's mark: the popover follows its mark, and what
+	 * it asks names the mark, not only the id.
+	 */
+	mark: string;
 	mode: "main" | "resolve" | "reopen";
 	/** The comment as the case has it, and as typed here. */
 	base: string;
@@ -332,7 +342,7 @@ export class Reviewer {
 		this.#entries = kept;
 		if (this.#focused !== undefined && !byId.has(this.#focused))
 			this.#focused = undefined;
-		this.#follow(byId);
+		this.#follow(c);
 		this.#renderBar();
 		this.#render();
 		return {
@@ -588,6 +598,7 @@ export class Reviewer {
 			return;
 		const open: OpenMark = {
 			annotationId: annotation.id,
+			mark: markKey(c, annotation),
 			mode: "main",
 			base: annotation.comment,
 			draft: annotation.comment,
@@ -867,7 +878,13 @@ export class Reviewer {
 		const was = open.controls.map((b) => b.disabled);
 		for (const b of open.controls) b.disabled = true;
 		open.problem.hidden = true;
-		const answer = await this.#ask(request);
+		// About the mark the popover is on now, and said which one that is:
+		// the panel refuses when the case has another mark under that id.
+		const answer = await this.#ask({
+			...request,
+			annotationId: open.annotationId,
+			mark: open.mark,
+		});
 		if (this.#open !== open) return false;
 		open.busy = false;
 		open.controls.forEach((b, i) => {
@@ -956,14 +973,18 @@ export class Reviewer {
 	 * here, in the panel, by an AI app); a comment changed elsewhere shows
 	 * unless one is being typed; another status draws its commands anew.
 	 */
-	#follow(byId: Map<string, Annotation>): void {
+	#follow(c: Case): void {
 		const open = this.#open;
 		if (open === undefined) return;
-		const annotation = byId.get(open.annotationId);
-		if (annotation === undefined) {
+		// Its mark, under whatever id it has now. Gone, or no longer to be
+		// told from another mark: the popover goes, with what was typed.
+		const annotation = markFor(c, open.annotationId, open.mark);
+		if (annotation === undefined || annotation === "ambiguous") {
 			this.#closeMark();
 			return;
 		}
+		const moved = annotation.id !== open.annotationId;
+		open.annotationId = annotation.id;
 		const untouched = typed(open).trim() === open.base;
 		open.base = annotation.comment;
 		if (untouched) {
@@ -971,6 +992,13 @@ export class Reviewer {
 			if (open.field !== undefined) open.field.value = annotation.comment;
 		}
 		const status = markStatus(annotation);
+		// Another number: the popover says the one the mark has now, and what
+		// is being typed stays (`#fill` keeps it).
+		if (moved && !open.busy) {
+			open.status = status;
+			this.#fill(open);
+			return;
+		}
 		if (status === open.status) return;
 		open.status = status;
 		// A request under way ends the popover or says why not; a form open

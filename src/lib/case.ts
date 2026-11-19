@@ -648,10 +648,28 @@ export function markKey(c: Case, a: Annotation): string {
 	]);
 }
 
-/** The mark of `c` that `key` is of (`markKey`); none: it is not in the case. */
-export function markByKey(c: Case, key: string): Annotation | undefined {
-	return c.annotations.find((a) => markKey(c, a) === key);
+/**
+ * The mark of `c` that something opened on the mark `id` with the key `key`
+ * is about now (`markKey`): the mark under that id while it is still that
+ * mark; else the one mark with that key (it has another number now). None:
+ * it is not in the case any more. `"ambiguous"`: the id is another mark's
+ * and more than one mark has the key (the same element marked twice on one
+ * screenshot), so nothing says which is meant, and nothing may be changed.
+ */
+export function markFor(
+	c: Case,
+	id: string,
+	key: string,
+): Annotation | "ambiguous" | undefined {
+	const under = c.annotations.find((a) => a.id === id);
+	if (under !== undefined && markKey(c, under) === key) return under;
+	const same = c.annotations.filter((a) => markKey(c, a) === key);
+	return same.length > 1 ? "ambiguous" : same[0];
 }
+
+/** What is said when a change cannot be held to its mark. */
+export const MARK_CHANGED =
+	"The case changed meanwhile, and this is not the mark it was: open the mark again. Nothing was saved.";
 
 /** The address of the page a screenshot was taken on. */
 export const shotUrl = (c: Case, shot: Shot | undefined): string =>

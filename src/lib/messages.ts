@@ -385,7 +385,7 @@ export function isCloudRequest(message: unknown): message is CloudRequest {
  * open and drew on that tab, and does it as its own buttons would; nobody
  * answers when no panel shows the case.
  */
-export type MarkRequest =
+export type MarkRequest = (
 	| { type: "mark:picked"; caseId: string; annotationId: string }
 	| { type: "mark:comment"; caseId: string; annotationId: string; text: string }
 	| { type: "mark:delete"; caseId: string; annotationId: string }
@@ -399,7 +399,15 @@ export type MarkRequest =
 	  }
 	| { type: "mark:verify"; caseId: string; annotationId: string }
 	/** Reopen…: with what is still wrong, which the panel requires. */
-	| { type: "mark:reopen"; caseId: string; annotationId: string; note: string };
+	| { type: "mark:reopen"; caseId: string; annotationId: string; note: string }
+) & {
+	/**
+	 * Which mark the popover was opened on (`markKey`): its id is another
+	 * mark's after the team's sync gave marks other numbers, and what was
+	 * typed for one mark must not be saved onto another.
+	 */
+	mark?: string;
+};
 
 export type MarkAnswer = { ok: true } | { ok: false; error: string };
 

@@ -615,7 +615,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		expect(button("mark-done").disabled).toBe(true);
 		button("mark-done").click();
 		await settled();
-		expect(asked.at(-1)).toEqual({
+		expect(asked.at(-1)).toMatchObject({
 			type: "mark:comment",
 			caseId: c.id,
 			annotationId: "a1",
@@ -662,7 +662,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		} finally {
 			Date.now = realNow;
 		}
-		expect(asked.at(-1)).toEqual({
+		expect(asked.at(-1)).toMatchObject({
 			type: "mark:delete",
 			caseId: c.id,
 			annotationId: "a1",
@@ -688,7 +688,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		// a new mark's comment.
 		expect(overlay.dismissPopover()).toBe(true);
 		expect(overlay.popover.hidden).toBe(true);
-		expect(asked.at(-1)).toEqual({
+		expect(asked.at(-1)).toMatchObject({
 			type: "mark:comment",
 			caseId: c.id,
 			annotationId: "a1",
@@ -780,7 +780,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		note.value = "By design";
 		button("mark-resolve-done").click();
 		await settled();
-		expect(asked.at(-1)).toEqual({
+		expect(asked.at(-1)).toMatchObject({
 			type: "mark:resolve",
 			caseId: c.id,
 			annotationId: "a1",
@@ -796,7 +796,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		field().value = "Much too pale";
 		button("mark-resolve").click();
 		await settled();
-		expect(asked.at(-1)).toEqual({
+		expect(asked.at(-1)).toMatchObject({
 			type: "mark:comment",
 			caseId: c.id,
 			annotationId: "a1",
@@ -834,7 +834,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		overlay.onPick?.(1);
 		button("mark-verify").click();
 		await settled();
-		expect(asked.at(-1)).toEqual({
+		expect(asked.at(-1)).toMatchObject({
 			type: "mark:verify",
 			caseId: c.id,
 			annotationId: "a1",
@@ -875,7 +875,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		answer = { ok: true };
 		button("mark-reopen-done").click();
 		await settled();
-		expect(asked.at(-1)).toEqual({
+		expect(asked.at(-1)).toMatchObject({
 			type: "mark:reopen",
 			caseId: c.id,
 			annotationId: "a1",
@@ -920,7 +920,7 @@ describe("a loaded mark's pin clicked on the page (DEC-027)", () => {
 		const before = asked.length;
 		button("mark-done").click();
 		await settled();
-		expect(asked.slice(before)).toEqual([
+		expect(asked.slice(before)).toMatchObject([
 			{
 				type: "mark:comment",
 				caseId: c.id,
@@ -1062,5 +1062,91 @@ describe("a case of several pages on the page in front (review of DEC-038)", () 
 		const back = await reviewer.matches(c.id);
 		expect(back?.matches[0]?.otherPage).toBeUndefined();
 		expect(overlay.items.map((i) => [i.number, i.found])).toEqual([[1, true]]);
+	});
+});
+
+describe("the popover and a mark that takes another number (review B, sync 8)", () => {
+	const PAGE = `<main><h1>Prämien</h1><button>Berechnen</button><p>Tipp</p></main>`;
+	const field = () =>
+		overlay.popover.querySelector("textarea") as HTMLTextAreaElement;
+	const button = (action: string) =>
+		overlay.popover.querySelector(
+			`[data-action="${action}"]`,
+		) as HTMLButtonElement;
+	const settled = () => new Promise<void>((r) => setTimeout(r, 0));
+
+	/** A case with Tess's mark 3 on the button; and the same after the team's sync: Dana's mark is 3, Tess's is 4. */
+	function cases(): { before: Case; after: Case } {
+		doc.body.innerHTML = PAGE;
+		const base = caseOf($("button"));
+		const mine = {
+			...(base.annotations[0] as Annotation),
+			id: "a3",
+			number: 3,
+			comment: "Tess's third",
+		};
+		const hers = describeElement($("p"));
+		const theirs = {
+			id: "a3",
+			number: 3,
+			shot: "s2",
+			comment: "Dana's third",
+			shape: { kind: "element", rect: hers.rect },
+			element: hers,
+		} as Annotation;
+		const before: Case = { ...base, annotations: [mine] };
+		const after: Case = {
+			...base,
+			updatedAt: "2026-11-19T12:00:00.000Z",
+			shots: [...base.shots, shot("s2", 0)].map((s, i) => ({
+				...s,
+				capturedAt: `2026-11-04T10:0${i}:00Z`,
+			})),
+			annotations: [theirs, { ...mine, id: "a4", number: 4 }],
+		};
+		return {
+			before: {
+				...before,
+				shots: before.shots.map((s) => ({
+					...s,
+					capturedAt: "2026-11-04T10:00:00Z",
+				})),
+			},
+			after,
+		};
+	}
+
+	test("typed into mark 3, which becomes mark 4 while a teammate's mark arrives as 3: the text is saved onto its own mark", async () => {
+		const { before, after } = cases();
+		await reviewer.load(before);
+		overlay.onPick?.(3);
+		field().value = "Typed while the sync ran";
+		// The team's sync renumbers: the panel sends the case as it is now.
+		await reviewer.update(after);
+		expect(overlay.popover.hidden).toBe(false);
+		// The popover is still on Tess's mark, which is 4 now, with her text.
+		expect(overlay.popover.querySelector(".pin")?.textContent).toBe("4");
+		expect(field().value).toBe("Typed while the sync ran");
+		button("mark-done").click();
+		await settled();
+		const sent = asked.filter((r) => r.type === "mark:comment").at(-1);
+		expect(sent).toMatchObject({
+			type: "mark:comment",
+			annotationId: "a4",
+			text: "Typed while the sync ran",
+		});
+	});
+
+	test("its mark gone from the case: the popover goes, and nothing is asked", async () => {
+		const { before, after } = cases();
+		await reviewer.load(before);
+		overlay.onPick?.(3);
+		field().value = "Typed";
+		await reviewer.update({
+			...after,
+			annotations: after.annotations.filter((a) => a.id === "a3"),
+		});
+		expect(overlay.popover.hidden).toBe(true);
+		expect(asked.some((r) => r.type === "mark:comment")).toBe(false);
 	});
 });

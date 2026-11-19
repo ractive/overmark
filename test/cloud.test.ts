@@ -11,7 +11,7 @@ import {
 	type Annotation,
 	type Case,
 	isOwnFinding,
-	markByKey,
+	markFor,
 	markKey,
 	validateCase,
 	withChoice,
@@ -577,14 +577,30 @@ describe("a form open on a mark that takes another number (review B, sync 8)", (
 		]);
 		expect(editAfter(edit, after)).toEqual({ ...edit, annotationId: "a4" });
 		// A change is held to the mark it was opened on, not to the id.
-		expect(markByKey(after, edit.mark)?.comment).toBe("Tess's third");
+		expect(markFor(after, "a3", edit.mark)).toMatchObject({
+			id: "a4",
+			comment: "Tess's third",
+		});
 		expect(markKey(after, after.annotations[2] as Annotation)).not.toBe(
 			edit.mark,
 		);
 		// The mark deleted meanwhile: the form closes, and nothing is its mark.
 		const gone = withoutAnnotation(after, "a4", after.updatedAt).value;
 		expect(editAfter(edit, gone)).toBeUndefined();
-		expect(markByKey(gone, edit.mark)).toBeUndefined();
+		expect(markFor(gone, "a3", edit.mark)).toBeUndefined();
+		// Two marks that nothing tells apart (the same element marked twice
+		// on one screenshot): the one under the form's id while it is that
+		// mark; once the id is another mark's, neither, and nothing is changed.
+		const twin = {
+			...(after.annotations[3] as Annotation),
+			id: "a5",
+			number: 5,
+		};
+		const twins = { ...after, annotations: [...after.annotations, twin] };
+		expect(markFor(twins, "a4", edit.mark)).toMatchObject({ id: "a4" });
+		expect(markFor(twins, "a5", edit.mark)).toMatchObject({ id: "a5" });
+		expect(markFor(twins, "a3", edit.mark)).toBe("ambiguous");
+		expect(editAfter(edit, twins)).toBeUndefined();
 		// Unchanged: the same form.
 		expect(editAfter(edit, before)).toBe(edit);
 	});

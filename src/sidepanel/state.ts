@@ -7,7 +7,7 @@
 
 import {
 	type Case,
-	markByKey,
+	markFor,
 	type ResolveChoice,
 	type StatusGroup,
 } from "../lib/case.ts";
@@ -372,8 +372,9 @@ export function editAfter(
 	c: Case | undefined,
 ): MarkEdit | undefined {
 	if (edit === undefined || c === undefined) return edit;
-	const now = markByKey(c, edit.mark);
-	if (now === undefined) return undefined;
+	const now = markFor(c, edit.annotationId, edit.mark);
+	// Gone, or not to be told from another mark: nothing to hold a form to.
+	if (now === undefined || now === "ambiguous") return undefined;
 	return now.id === edit.annotationId
 		? edit
 		: { ...edit, annotationId: now.id };
