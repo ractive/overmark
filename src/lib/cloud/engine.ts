@@ -23,7 +23,7 @@
 
 import { type Case, newId as randomId, validateCase } from "../case.ts";
 import type { Kv } from "../kv.ts";
-import type { CaseStore, StoredImage } from "../store.ts";
+import { type CaseStore, DELETED_KEPT_MS, type StoredImage } from "../store.ts";
 import {
 	type Api,
 	ApiFailure,
@@ -172,9 +172,6 @@ function local(book: CaseBook): CaseBook {
 
 /** A case that has to be read from the server before anything of it is sent. */
 const blocks = (mark: Reread): boolean => mark.why !== "failed";
-
-/** How long a delete stays on record when nobody has taken it up. */
-const DELETED_KEPT_MS = 30 * 24 * 3600_000;
 
 /** The most rejected changes kept per case. */
 const MAX_REJECTED = 50;

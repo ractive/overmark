@@ -96,6 +96,42 @@ export const storeContract: Record<
 			);
 		},
 
+	"a delete written takes the records older than thirty days away: they do not pile up for someone who never signs in":
+		async (store) => {
+			const real = Date.now;
+			const day = 24 * 3600_000;
+			try {
+				Date.now = () => real() - 31 * day;
+				await store.deleteCase("c_old");
+				Date.now = () => real() - 29 * day;
+				await store.deleteCase("c_recent");
+			} finally {
+				Date.now = real;
+			}
+			same((await store.deletedCases()).map((r) => r.id).sort(), [
+				"c_old",
+				"c_recent",
+			]);
+			// The next delete written, by either way of deleting.
+			await putCase(store, sampleCase("c_1"));
+			same(await store.deleteCaseIf("c_1", () => true), true);
+			same((await store.deletedCases()).map((r) => r.id).sort(), [
+				"c_1",
+				"c_recent",
+			]);
+			// A delete for a reason elsewhere writes nothing, and takes nothing.
+			Date.now = () => real() + 2 * day;
+			try {
+				await store.deleteCase("c_gone", true);
+			} finally {
+				Date.now = real;
+			}
+			same((await store.deletedCases()).map((r) => r.id).sort(), [
+				"c_1",
+				"c_recent",
+			]);
+		},
+
 	"lists newest first and returns copies": async (store) => {
 		await putCase(store, sampleCase("c_1", "2026-11-04T10:00:00Z"));
 		await putCase(store, sampleCase("c_2", "2026-11-04T11:00:00Z"));

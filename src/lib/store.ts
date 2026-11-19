@@ -31,6 +31,26 @@ const isPendingKey = (key: string) => key.includes("/pending/");
  */
 const DELETED = "!deleted/";
 const deletedKey = (caseId: string) => `${DELETED}${caseId}`;
+const deletedRange = () => IDBKeyRange.bound(DELETED, `${DELETED}￿`);
+
+/**
+ * How long a delete stays on record: whoever syncs takes it up long before
+ * (and forgets it after this too). Each record written takes the older ones
+ * away, so they do not pile up for someone who never signs in.
+ */
+export const DELETED_KEPT_MS = 30 * 24 * 3600_000;
+
+/** Take records older than `DELETED_KEPT_MS` away, in the caller's transaction. */
+function pruneDeleted(images: IDBObjectStore, now: number): void {
+	const walk = images.openCursor(deletedRange());
+	walk.onsuccess = () => {
+		const at = walk.result;
+		if (at === null) return;
+		const when = Number((at.value as { deletedAt?: unknown })?.deletedAt) || 0;
+		if (now - when > DELETED_KEPT_MS) at.delete();
+		at.continue();
+	};
+}
 
 /** A case deleted here by the user (or an AI app for them), and when (ms). */
 export interface DeletedCase {
@@ -125,7 +145,15 @@ export class MemoryStore implements CaseStore {
 		for (const key of [...this.images.keys()])
 			if (key.startsWith(`${id}/`)) this.images.delete(key);
 		// Also of a case that was not there: whoever asked meant it gone.
-		if (!quiet) this.deleted.set(id, Date.now());
+		if (!quiet) this.#record(id);
+	}
+
+	/** A delete on record, and the records too old to keep gone. */
+	#record(id: string): void {
+		const now = Date.now();
+		for (const [other, at] of [...this.deleted])
+			if (now - at > DELETED_KEPT_MS) this.deleted.delete(other);
+		this.deleted.set(id, now);
 	}
 
 	async deletedCases(): Promise<DeletedCase[]> {
@@ -261,14 +289,18 @@ export class IdbStore implements CaseStore {
 		const images = tx.objectStore("images");
 		images.delete(prefixRange(id));
 		// In this transaction: the delete and its record, or neither.
-		if (!quiet) images.put({ deletedAt: Date.now() }, deletedKey(id));
+		if (!quiet) {
+			const now = Date.now();
+			images.put({ deletedAt: now }, deletedKey(id));
+			pruneDeleted(images, now);
+		}
 		await done(tx);
 	}
 
 	async deletedCases(): Promise<DeletedCase[]> {
 		const db = await this.#open();
 		const store = db.transaction("images").objectStore("images");
-		const range = IDBKeyRange.bound(DELETED, `${DELETED}\uffff`);
+		const range = deletedRange();
 		const [keys, values] = await Promise.all([
 			request(store.getAllKeys(range)),
 			request(store.getAll(range)),
@@ -301,7 +333,9 @@ export class IdbStore implements CaseStore {
 				cases.delete(id);
 				const images = tx.objectStore("images");
 				images.delete(prefixRange(id));
-				images.put({ deletedAt: Date.now() }, deletedKey(id));
+				const now = Date.now();
+				images.put({ deletedAt: now }, deletedKey(id));
+				pruneDeleted(images, now);
 				deleted = true;
 			} catch (error) {
 				failure = error;

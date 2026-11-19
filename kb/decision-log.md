@@ -1857,7 +1857,9 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   sync has no book any more and comes back, DEC-041; what records there are leave
   when the book is taken up, so no times are compared). A record leaves when it was taken
   up, when no book here could need it, or after 30 days; a case stored again under the
-  id takes it away. The records are kept in the `images` object store under a key no
+  id takes it away. Each record the store writes takes those older than 30 days away
+  in its transaction, so they do not pile up for someone who never signs in (no
+  engine run forgets them then). The records are kept in the `images` object store under a key no
   case's images can have (`!deleted/<id>`), not in a store of their own: a new store
   needs a new version of the database, which an older build can no longer open, so a
   rolled-back release, or the main branch on a profile this branch has used, would
