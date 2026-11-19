@@ -1508,7 +1508,9 @@ was a finding, checked here before it was fixed):
   `pageKey(location.href)`), looks again for the marks that were not there, a few a
   tick and twice more for content that comes after the address, and judges anew which
   mark is on its own page. The panel, when the tab's address is another page than the
-  one its numbers are about, asks the page for the matches again (`case:matches`) and
+  one its numbers are about (or has none: Chrome reports "loading" for a `pushState`
+  too, at which the panel drops what was found, so in a real browser the line under
+  the case went empty), asks the page for the matches again (`case:matches`) and
   once more a moment later; "found on …", "on another page" and the page list then say
   the same thing. An AI app's `highlight` and `get_mark_element` ask about one mark and
   get it looked for at once.

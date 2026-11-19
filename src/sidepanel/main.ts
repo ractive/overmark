@@ -373,11 +373,12 @@ async function readMatches(
 	const result = (await chrome.tabs
 		.sendMessage(tabId, { type: "case:matches", caseId: c.id })
 		.catch(() => null)) as LoadResult | null;
+	// Not for what another draw put there meanwhile.
 	if (
 		result === null ||
 		!showing(c.id) ||
-		state.loaded?.tabId !== tabId ||
-		state.loaded.caseId !== c.id
+		(state.loaded !== undefined &&
+			(state.loaded.tabId !== tabId || state.loaded.caseId !== c.id))
 	)
 		return;
 	update((s) => {

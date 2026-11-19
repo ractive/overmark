@@ -587,6 +587,36 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 	);
 
 	slowTest(
+		"the page goes on within itself (a single-page app's next route): the panel's numbers are about the page it shows now",
+		async () => {
+			await fresh();
+			const a = await annotated("Route change");
+			await a.page.activate();
+			await openPanel();
+			await openCase(a.caseId);
+			await until(
+				async () => (await pageCase(a.tabId)) === a.caseId,
+				"the marks on the tab in front",
+			);
+			await h.control.waitFor(
+				`/marks found on [^ ]+\\/v1\\.$/.test(${id("case-hint")}.textContent)`,
+			);
+			// The address changes within the page, as a router does it: no
+			// load, the case stays drawn, and the page is another one now.
+			await a.page.eval(
+				`history.pushState({}, "", location.pathname.replace("v1", "v2"))`,
+			);
+			await h.control.waitFor(
+				`/marks found on [^ ]+\\/v2\\.$/.test(${id("case-hint")}.textContent)`,
+			);
+			expect(await pageCase(a.tabId)).toBe(a.caseId);
+			expect(await h.control.eval(`${id("load-case")}.textContent`)).toBe(
+				"Hide marks",
+			);
+		},
+	);
+
+	slowTest(
 		"opening a case draws its marks on the tab in front, and they follow to the next tab",
 		async () => {
 			await fresh();

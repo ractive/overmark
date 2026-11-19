@@ -202,7 +202,8 @@ export function noneHere(
 /**
  * The tab went on to another page while the case stayed drawn on it (a
  * single-page app's next route): what the panel knows of the draw is about
- * the page before, and has to be read again.
+ * the page before, or was dropped (Chrome says "loading" for a pushState
+ * too, and what was found is forgotten then), and has to be read again.
  */
 export function movedOn(
 	loaded: Pick<Loaded, "caseId" | "tabId" | "url"> | undefined,
@@ -210,13 +211,11 @@ export function movedOn(
 	tab: { id: number; url: string } | undefined,
 	pageCase: string | undefined,
 ): boolean {
+	if (tab === undefined || tab.url === "" || pageCase !== caseId) return false;
+	if (loaded === undefined) return true;
 	return (
-		loaded !== undefined &&
-		tab !== undefined &&
-		pageCase === caseId &&
 		loaded.caseId === caseId &&
 		loaded.tabId === tab.id &&
-		tab.url !== "" &&
 		!samePage(loaded.url, tab.url)
 	);
 }

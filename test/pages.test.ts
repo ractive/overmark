@@ -779,7 +779,10 @@ describe("what a draw found, judged for the page in front", () => {
 		expect(movedOn(drawn, "c_flow", { id: 8, url: PAY }, "c_flow")).toBe(false);
 		expect(movedOn(drawn, "c_flow", tab(PAY), "c_other")).toBe(false);
 		expect(movedOn(drawn, "c_flow", tab(PAY), undefined)).toBe(false);
-		expect(movedOn(undefined, "c_flow", tab(PAY), "c_flow")).toBe(false);
+		// What was found was forgotten (Chrome says "loading" for a pushState):
+		// the page still shows the case, so it is read again.
+		expect(movedOn(undefined, "c_flow", tab(PAY), "c_flow")).toBe(true);
+		expect(movedOn(undefined, "c_flow", tab(PAY), undefined)).toBe(false);
 		expect(movedOn(drawn, "c_flow", tab(""), "c_flow")).toBe(false);
 	});
 });
