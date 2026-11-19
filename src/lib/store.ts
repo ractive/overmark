@@ -121,10 +121,11 @@ export class MemoryStore implements CaseStore {
 	}
 
 	async deleteCase(id: string, quiet = false): Promise<void> {
-		const had = this.cases.delete(id);
+		this.cases.delete(id);
 		for (const key of [...this.images.keys()])
 			if (key.startsWith(`${id}/`)) this.images.delete(key);
-		if (had && !quiet) this.deleted.set(id, Date.now());
+		// Also of a case that was not there: whoever asked meant it gone.
+		if (!quiet) this.deleted.set(id, Date.now());
 	}
 
 	async deletedCases(): Promise<DeletedCase[]> {

@@ -86,6 +86,14 @@ export const storeContract: Record<
 			await store.deleteCase("c_1");
 			await store.forgetDeleted(["c_1", "c_nothing"]);
 			same(await store.deletedCases(), []);
+			// Asked for a case that is not there (a list that is behind): on
+			// record all the same; a delete on a condition that finds none is not.
+			await store.deleteCase("c_never");
+			same(await store.deleteCaseIf("c_none", () => true), false);
+			same(
+				(await store.deletedCases()).map((r) => r.id),
+				["c_never"],
+			);
 		},
 
 	"lists newest first and returns copies": async (store) => {
