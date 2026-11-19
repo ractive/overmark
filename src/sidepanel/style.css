@@ -1167,6 +1167,36 @@ ul.cases .title {
 	color: var(--ink);
 }
 
+/* Whether the case is the team's, and "Share with team" (DEC-039). */
+.case-team {
+	margin-top: -4px;
+}
+
+/* A case the team does not have, in the list. */
+.cases .device-only {
+	align-self: start;
+}
+
+/* What the server did not take: one line each, under the status. */
+.cloud-problems {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.cloud-problems li + li {
+	margin-top: var(--s1);
+}
+
+.cloud-server summary {
+	cursor: pointer;
+	color: var(--ink-2);
+}
+
+.cloud select {
+	max-width: 100%;
+}
+
 /*
  * The case's link and its Edit in one line under the meta line (DEC-028): a
  * long address is cut with an ellipsis, never wider than the panel.

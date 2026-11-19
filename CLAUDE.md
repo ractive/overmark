@@ -126,8 +126,14 @@ with `kb/design/overview.md` and `kb/iterations/`.
   (`state.ts` the panel's one state, `view.ts` draws it, `main.ts` the actions; `mcp.ts`
   and `tools.ts` for the AI app), `src/lib/` (case format, element details with the
   allow-list of what is recorded, matching and `candidates.ts`, zip, export, store,
-  images, `marks.ts` how a mark looks). `scripts/build.ts` builds `dist/` (load it unpacked); `scripts/icons.ts` makes
-  the icons; `bun test/e2e/pilot.ts <url>` measures matching on a real page.
+  images, `marks.ts` how a mark looks), `src/lib/cloud/` (the account at sitegloss.dev
+  and the sync with a team, DEC-039: `auth.ts` sign-in and tokens, `api.ts` the client,
+  `wire.ts` what differs and how it merges, `engine.ts` a run, `book.ts` its
+  bookkeeping; `src/worker/cloud.ts` runs it, `src/sidepanel/cloud.ts` and
+  `cloud-view.ts` show it). `scripts/build.ts` builds `dist/` (load it unpacked); `scripts/icons.ts` makes
+  the icons; `bun test/e2e/pilot.ts <url>` measures matching on a real page;
+  `bun scripts/api-types.ts` writes `src/lib/cloud/api.gen.ts` from the committed
+  OpenAPI document (DEC-040).
 - Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
   `bun run fix` to format; `bun run build`, `bun run zip`.
 - Firefox: `bun scripts/build.ts --firefox` (`--test`, `--store --zip`) builds it from the
@@ -143,6 +149,10 @@ with `kb/design/overview.md` and `kb/iterations/`.
   with the rest; a lock lets one run at a time.
 - Only runtime dependency: `@ractive-ch/tab-mcp-client`. Prefer a few lines of own code
   over a package. No JavaScript from an AI app or server ever runs (fixed tools only).
+- Tests against a real sitegloss.dev server run only with `SITEGLOSS_SERVER` set (and
+  its demo users' password in `SITEGLOSS_PASSWORD`)
+  (`test/cloud-server.test.ts`, `test/e2e/cloud.test.ts`, `test/e2e/firefox/cloud.test.ts`);
+  the rest of the sync is tested against `test/cloud-fake.ts`, which keeps the server's rules.
 - Always the latest versions of Bun, TypeScript, Biome and every dependency, pinned
   exactly.
 - Biome ignores `.claude/` and `kb/`.

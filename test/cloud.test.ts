@@ -18,7 +18,7 @@ import {
 	withTitle,
 	withVerified,
 } from "../src/lib/case.ts";
-import type { Op } from "../src/lib/cloud/api.ts";
+import { ApiFailure, type Op } from "../src/lib/cloud/api.ts";
 import {
 	type Account,
 	type CaseBook,
@@ -647,6 +647,49 @@ describe("what the server does not take", () => {
 		tess.api.hasBlob = has;
 		expect(server.marksOf("c_blob").map((m) => m.comment)).toEqual(["One"]);
 		expect(server.blobs.size).toBe(2);
+		expect(status(tess)?.state).toBe("synced");
+	});
+});
+
+describe("the team's storage", () => {
+	test("full: the image is not taken, its mark not shared, said in plain words, and not uploaded again at every run", async () => {
+		await signIn(tess);
+		await startCase(tess, "c_full");
+		await addMark(tess, "c_full", "Fits");
+		await tess.engine.request();
+		const put = tess.api.putBlob.bind(tess.api);
+		tess.api.putBlob = async () => {
+			tess.api.calls.push("PUT blob (refused)");
+			throw new ApiFailure(
+				"refused",
+				"The team's storage is full.",
+				507,
+				"quota",
+			);
+		};
+		await addMark(tess, "c_full", "Does not fit");
+		await tess.engine.request();
+		expect(status(tess)?.state).toBe("problem");
+		expect(status(tess)?.problems).toEqual([
+			{
+				caseId: "c_full",
+				title: "Your cart",
+				text: "An image was not taken, so its mark is not shared: The team's storage is full. 1 more of its changes were not taken either.",
+			},
+		]);
+		expect(server.marksOf("c_full").map((m) => m.comment)).toEqual(["Fits"]);
+		// Not a server that is down: nothing is tried again by itself.
+		tess.api.calls.length = 0;
+		await tess.engine.request();
+		await tess.engine.request();
+		expect(tess.api.calls.filter((c) => c.startsWith("PUT"))).toEqual([]);
+		// Room again, and "Sync now".
+		tess.api.putBlob = put;
+		await tess.engine.retry();
+		expect(server.marksOf("c_full").map((m) => m.comment)).toEqual([
+			"Fits",
+			"Does not fit",
+		]);
 		expect(status(tess)?.state).toBe("synced");
 	});
 });

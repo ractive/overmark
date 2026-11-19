@@ -150,6 +150,39 @@ export function openPanel(options: {
 	);
 }
 
+/** `identity`, the part used here: the same calls in Chrome and Firefox. */
+interface Identity {
+	getRedirectURL(path?: string): string;
+	launchWebAuthFlow(details: {
+		url: string;
+		interactive: boolean;
+	}): Promise<string | undefined>;
+}
+
+const identity = (): Identity =>
+	(chrome as unknown as { identity: Identity }).identity;
+
+/**
+ * Where the browser's sign-in window ends for this extension (DEC-039): a
+ * address no site has, which the browser keeps to itself. Chrome's is
+ * `https://<extension id>.chromiumapp.org/`; Firefox's is
+ * `https://<hash of the add-on's id>.extensions.allizom.org/`. The server
+ * allows both, by name.
+ */
+export function signInRedirect(): string {
+	return identity().getRedirectURL();
+}
+
+/**
+ * Open the browser's own sign-in window on `url` and answer the address it
+ * ended on (`identity.launchWebAuthFlow`, the same in both browsers).
+ * Rejects when the user closes the window. Called from the side panel, a
+ * page that stays open while the user signs in.
+ */
+export function webAuthFlow(url: string): Promise<string | undefined> {
+	return identity().launchWebAuthFlow({ url, interactive: true });
+}
+
 /** A notification's options; Firefox takes no buttons and no `requireInteraction`. */
 export function notificationOptions(
 	options: chrome.notifications.NotificationCreateOptions,

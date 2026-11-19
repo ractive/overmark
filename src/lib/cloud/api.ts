@@ -98,6 +98,10 @@ async function refusal(response: Response): Promise<ApiFailure> {
 	const said = message ?? `The server answered ${response.status}.`;
 	if (response.status === 401)
 		return new ApiFailure("unauthorized", said, 401, code);
+	// The team's storage is full (507, `quota`): a no to this image, not a
+	// server that is down. Asking again changes nothing.
+	if (response.status === 507 || code === "quota")
+		return new ApiFailure("refused", said, response.status, code ?? "quota");
 	if (response.status >= 500 || response.status === 429)
 		return new ApiFailure("server", said, response.status, code);
 	return new ApiFailure("refused", said, response.status, code);

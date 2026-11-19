@@ -368,6 +368,10 @@ export interface components {
 						viewport: components["schemas"]["Viewport"];
 						capturedAt: components["schemas"]["Timestamp"];
 					};
+					page?: {
+						title?: string;
+						lang?: string;
+					};
 			  }
 			| {
 					opId: components["schemas"]["Id"];
@@ -448,7 +452,7 @@ export interface components {
 			results: components["schemas"]["OpResult"][];
 			cursor: number;
 		};
-		/** @description A page of the case: origin, path and hash route, no query. */
+		/** @description A page of the case: origin, path and hash route, no query. A case lists a page once, and a page is its path in whatever environment: `https://shop.example/cart` and `http://localhost:3000/cart/` are one page, two sites' home pages are two (the rule and its test cases: `pageKey` and `vectors/page-key.json` in the API package). The server keeps the list: a screenshot of a page the case does not have adds it, and a page leaves with its last screenshot, except the last page of all. */
 		Page: {
 			url: string;
 			title: string;

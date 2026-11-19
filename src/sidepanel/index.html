@@ -28,6 +28,8 @@
 		<dialog id="questions" class="questions" aria-label="Questions from AI apps"><p id="question-status" class="visually-hidden" role="status"></p></dialog>
 		<!-- The sync paused or failed, above every view (DEC-025): drawn by sync-view.ts. -->
 		<div id="sync-banner" class="sync-banner" role="status" hidden></div>
+		<!-- A question of the sync with a team, above every view (DEC-039): drawn by cloud-view.ts. -->
+		<div id="cloud-banner" class="sync-banner" role="status" hidden></div>
 		<main id="home">
 			<section aria-labelledby="page-heading">
 				<h2 id="page-heading">This page</h2>
@@ -56,6 +58,11 @@
 					<p id="import-error-text"></p>
 					<button id="import-dismiss" type="button">Dismiss</button>
 				</div>
+				<!-- The account at sitegloss.dev and the sync with a team (DEC-039): drawn by cloud-view.ts. -->
+				<section id="cloud-section" class="sync cloud" aria-labelledby="cloud-heading">
+					<h3 id="cloud-heading" class="group-title">Account</h3>
+					<div id="cloud" aria-live="polite"></div>
+				</section>
 				<!-- The sync to Downloads or a folder (DEC-021, DEC-025): drawn by sync-view.ts. -->
 				<section id="sync-section" class="sync" aria-labelledby="sync-heading">
 					<h3 id="sync-heading" class="group-title">Sync</h3>

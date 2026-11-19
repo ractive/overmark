@@ -6,6 +6,7 @@
  */
 
 import type { Case, ResolveChoice, StatusGroup } from "../lib/case.ts";
+import type { CloudStatus, SyncMode } from "../lib/cloud/book.ts";
 import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
 import type { SyncStatus, SyncTargetKind } from "../lib/sync.ts";
@@ -213,6 +214,35 @@ export interface PanelState {
 		/** The user said no to Allow access or Allow downloads. */
 		refused: boolean;
 	};
+	/** The account at sitegloss.dev and the sync with a team (DEC-039). */
+	cloud: {
+		/** The server's address in use (sitegloss.dev's, unless another is set). */
+		server: string;
+		/** Who is signed in; `undefined`: nobody. */
+		account:
+			| {
+					name: string;
+					email: string;
+					userId: string;
+					/** Where they are signed in. */
+					server: string;
+					/** Their teams, with what they may do in each (`case:create`, …). */
+					teams: { id: string; name: string; permissions: string[] }[];
+					/** The team the cases sync with; none chosen yet: `undefined`. */
+					teamId: string | undefined;
+					/** The server refused the sign-in: sign in again. */
+					expired: boolean;
+			  }
+			| undefined;
+		/** What the worker's sync is at, once it has run. */
+		status: CloudStatus | undefined;
+		/** How each case syncs, by its id; one not named was made since. */
+		modes: Record<string, SyncMode>;
+		/** The browser's sign-in window is open. */
+		signingIn: boolean;
+		/** What the panel itself could not do (the sign-in, the address). */
+		problem: string | undefined;
+	};
 	ai: {
 		status: string;
 		connected: boolean;
@@ -278,6 +308,14 @@ export const initialState = (): PanelState => ({
 		asking: false,
 		changing: false,
 		refused: false,
+	},
+	cloud: {
+		server: "https://app.sitegloss.dev",
+		account: undefined,
+		status: undefined,
+		modes: {},
+		signingIn: false,
+		problem: undefined,
 	},
 	ai: {
 		status: "Not connected",

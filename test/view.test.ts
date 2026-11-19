@@ -1727,6 +1727,360 @@ describe("a case of several pages (DEC-038)", () => {
 	});
 });
 
+describe("the account and the sync with a team (DEC-039)", () => {
+	type Cloud = PanelState["cloud"];
+	const TEAM = {
+		id: "t_1",
+		name: "Pedal & Pine web",
+		permissions: ["case:create", "case:delete", "mark:create"],
+	};
+	const account = (
+		more: Partial<NonNullable<Cloud["account"]>> = {},
+	): NonNullable<Cloud["account"]> => ({
+		name: "Tess Tester",
+		email: "tess@example.com",
+		userId: "u_tess",
+		server: "https://app.sitegloss.dev",
+		teams: [TEAM],
+		teamId: "t_1",
+		expired: false,
+		...more,
+	});
+	const home = (cloud: Partial<Cloud>, actions: Actions = noActions) => {
+		const state = initialState();
+		Object.assign(state.cloud, cloud);
+		render(state, actions);
+		return state;
+	};
+	const button = (action: string, within = "cloud") =>
+		el(within).querySelector(
+			`[data-action="${action}"]`,
+		) as unknown as HTMLButtonElement | null;
+
+	test("signed out: what signing in sends where, in one sentence, and Sign in", () => {
+		const clicked: string[] = [];
+		home({}, actionsWith({ cloudSignIn: () => void clicked.push("in") }));
+		expect(el("cloud-heading").textContent).toBe("Account");
+		expect(el("cloud").dataset["cloud"]).toBe("off");
+		expect(el("cloud").textContent).toContain(
+			"Sign in to sync with your team.",
+		);
+		expect(el("cloud").textContent).toContain(
+			"Signed in, your cases go to app.sitegloss.dev and to the members of your team: their marks, comments, findings, page addresses and screenshots. Without an account everything stays in this browser, as now.",
+		);
+		button("cloud-sign-in")?.click();
+		expect(clicked).toEqual(["in"]);
+		expect(el("cloud-banner").hidden).toBe(true);
+		// The browser's window is open: no second one.
+		home({ signingIn: true });
+		expect(button("cloud-sign-in")?.disabled).toBe(true);
+		expect(button("cloud-sign-in")?.textContent).toBe("Signing in…");
+	});
+
+	test("another server: said where the cases would go, and set as the relay is", () => {
+		const set: string[] = [];
+		home(
+			{ server: "http://localhost:3200" },
+			actionsWith({ cloudServer: (text) => void set.push(text) }),
+		);
+		expect(el("cloud").textContent).toContain(
+			"your cases go to localhost:3200",
+		);
+		const field = el<HTMLInputElement>("cloud-server");
+		expect(field.value).toBe("http://localhost:3200");
+		field.value = "https://sitegloss.example";
+		field.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(set).toEqual(["https://sitegloss.example"]);
+	});
+
+	test("signed in: who, which team, what the sync is at, Sync now and Sign out", () => {
+		const did: string[] = [];
+		const actions = actionsWith({
+			cloudSyncNow: () => void did.push("sync"),
+			cloudSignOut: () => void did.push("out"),
+		});
+		home(
+			{
+				account: account(),
+				status: {
+					state: "synced",
+					lastSyncedAt: "2026-11-19T10:00:00.000Z",
+					problems: [],
+					undecided: 0,
+				},
+			},
+			actions,
+		);
+		expect(el("cloud-who").textContent).toBe(
+			"Signed in as Tess Tester (tess@example.com)",
+		);
+		expect(el("cloud-team-name").textContent).toBe("Team: Pedal & Pine web");
+		expect(el("cloud-status").textContent).toStartWith("Synced ");
+		expect(el("cloud").dataset["cloud"]).toBe("synced");
+		button("cloud-sync-now")?.click();
+		button("cloud-sign-out")?.click();
+		expect(did).toEqual(["sync", "out"]);
+
+		const at = (status: Cloud["status"]) => {
+			home({ account: account(), status }, actions);
+			return el("cloud-status").textContent;
+		};
+		expect(at({ state: "syncing", left: 3, problems: [], undecided: 0 })).toBe(
+			"Syncing 3 cases…",
+		);
+		expect(
+			at({
+				state: "offline",
+				text: "The server cannot be reached. Your changes are kept and sent when it can.",
+				problems: [],
+				undecided: 0,
+			}),
+		).toBe(
+			"Offline, will retry. The server cannot be reached. Your changes are kept and sent when it can.",
+		);
+		// What the server did not take, in its words, by case.
+		at({
+			state: "problem",
+			problems: [
+				{
+					caseId: "c_1",
+					title: "Checkout",
+					text: "A change to a mark was not taken: A mark holds at most 20 findings.",
+				},
+			],
+			undecided: 0,
+		});
+		expect(el("cloud-problems").textContent).toBe(
+			"“Checkout”: A change to a mark was not taken: A mark holds at most 20 findings.",
+		);
+	});
+
+	test("several teams: a chooser; no team yet: where to make one", () => {
+		const chosen: string[] = [];
+		const teams = [TEAM, { id: "t_2", name: "Other team", permissions: [] }];
+		home(
+			{ account: account({ teams, teamId: undefined }) },
+			actionsWith({ cloudTeam: (id) => void chosen.push(id) }),
+		);
+		const select = el<HTMLSelectElement>("cloud-team");
+		expect([...select.options].map((o) => o.textContent)).toEqual([
+			"Choose a team…",
+			"Pedal & Pine web",
+			"Other team",
+		]);
+		expect(el("cloud-status").textContent).toBe("Choose a team to sync with.");
+		select.value = "t_2";
+		select.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(chosen).toEqual(["t_2"]);
+		home({ account: account({ teams: [], teamId: undefined }) });
+		expect(el("cloud-status").textContent).toBe(
+			"You are in no team yet. Create or join one on app.sitegloss.dev, then click Sync now.",
+		);
+	});
+
+	test("cases that were here before the team: asked above every view, with what sharing means", () => {
+		const answers: boolean[] = [];
+		const state = home(
+			{
+				account: account(),
+				status: { state: "synced", problems: [], undecided: 2 },
+			},
+			actionsWith({ cloudDecide: (share) => void answers.push(share) }),
+		);
+		const banner = el("cloud-banner");
+		expect(banner.hidden).toBe(false);
+		expect(banner.textContent).toContain(
+			"2 cases are on this device only. Sync them with “Pedal & Pine web”? Its members will see them, with their marks and screenshots.",
+		);
+		button("cloud-sync-them", "cloud-banner")?.click();
+		button("cloud-keep-them", "cloud-banner")?.click();
+		expect(answers).toEqual([true, false]);
+		expect(button("cloud-keep-them", "cloud-banner")?.textContent).toBe(
+			"Keep them on this device",
+		);
+		// In a case too: the banner is above the views.
+		state.view = { kind: "case", id: "c_x" };
+		state.current = sampleCase("c_x");
+		render(state, noActions);
+		expect(el("cloud-banner").hidden).toBe(false);
+		// One case, and a role that may not share.
+		home({
+			account: account({ teams: [{ ...TEAM, permissions: [] }] }),
+			status: { state: "synced", problems: [], undecided: 1 },
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"1 case is on this device only. Your role in the team does not allow sharing cases with it.",
+		);
+		expect(button("cloud-sync-them", "cloud-banner")).toBeNull();
+	});
+
+	test("a sign-in that ran out: said above every view, with Sign in again", () => {
+		const clicked: string[] = [];
+		home(
+			{ account: account({ expired: true }) },
+			actionsWith({ cloudSignIn: () => void clicked.push("in") }),
+		);
+		expect(el("cloud-banner").textContent).toContain(
+			"Team sync is signed out. Sign in again to go on syncing; what you change meanwhile is kept and sent then.",
+		);
+		button("cloud-sign-in", "cloud-banner")?.click();
+		expect(clicked).toEqual(["in"]);
+		expect(el("cloud").dataset["cloud"]).toBe("signed-out");
+		expect(button("cloud-sync-now")).toBeNull();
+	});
+
+	test("a case says whether the team has it; one on this device only can be shared, and is tagged in the list", () => {
+		const shared: string[] = [];
+		const c = sampleCase("c_local");
+		const cloud: Partial<Cloud> = {
+			account: account(),
+			modes: { c_local: "local", c_team: "synced" },
+		};
+		const state = caseState(c, (s) => Object.assign(s.cloud, cloud));
+		render(state, actionsWith({ cloudShare: (id) => void shared.push(id) }));
+		expect(el("case-team").hidden).toBe(false);
+		expect(el("case-team").firstElementChild?.textContent).toBe(
+			"On this device only. ",
+		);
+		expect(el("share-case").hidden).toBe(false);
+		el("share-case").click();
+		expect(shared).toEqual(["c_local"]);
+		// The team's case, and one made since (the sync has not seen it yet).
+		for (const id of ["c_team", "c_new"]) {
+			const team = caseState(sampleCase(id), (s) =>
+				Object.assign(s.cloud, cloud),
+			);
+			render(team, noActions);
+			expect(el("case-team").firstElementChild?.textContent).toBe(
+				"Synced with “Pedal & Pine web”",
+			);
+			expect(el("share-case").hidden).toBe(true);
+		}
+		// Nobody signed in: nothing about a team anywhere.
+		render(caseState(sampleCase("c_local")), noActions);
+		expect(el("case-team").hidden).toBe(true);
+
+		const list = initialState();
+		Object.assign(list.cloud, cloud);
+		list.cases = [sampleCase("c_local"), sampleCase("c_team")];
+		render(list, noActions);
+		const tag = (id: string) =>
+			window.document.querySelector(`[data-case="${id}"] .device-only`)
+				?.textContent;
+		expect(tag("c_local")).toBe("This device only");
+		expect(tag("c_team")).toBeUndefined();
+	});
+
+	test("deleting a case the team has says that it deletes it for the team; a role that may not cannot", () => {
+		const cloud: Partial<Cloud> = {
+			account: account(),
+			modes: { c_team: "synced" },
+		};
+		const armed = (id: string, with_: Partial<Cloud>, arm: boolean) => {
+			const state = caseState(sampleCase(id), (s) => {
+				Object.assign(s.cloud, with_);
+				s.deleteArmedAt = arm ? 1 : undefined;
+			});
+			render(state, noActions);
+			return el<HTMLButtonElement>("delete-case");
+		};
+		expect(armed("c_team", cloud, false).title).toBe(
+			"Delete this case and its screenshots, here and for everyone in “Pedal & Pine web” (click twice). Files exported before stay.",
+		);
+		expect(armed("c_team", cloud, true).textContent).toBe(
+			"Really delete for the team?",
+		);
+		expect(armed("c_team", cloud, true).title).toBe(
+			"Click again to delete this case and its screenshots, here and for everyone in “Pedal & Pine web”",
+		);
+		// A case on this device only is deleted as ever.
+		expect(
+			armed("c_local", { ...cloud, modes: { c_local: "local" } }, true)
+				.textContent,
+		).toBe("Really delete?");
+		const noDelete = {
+			...cloud,
+			account: account({ teams: [{ ...TEAM, permissions: ["case:create"] }] }),
+		};
+		const button = armed("c_team", noDelete, false);
+		expect(button.disabled).toBe(true);
+		expect(button.title).toBe(
+			"Your role in “Pedal & Pine web” does not allow deleting its cases",
+		);
+		expect(
+			armed("c_local", { ...noDelete, modes: { c_local: "local" } }, false)
+				.disabled,
+		).toBe(false);
+	});
+
+	test("who did something shows: by Dana, by Claude for Dana, added by Tess", () => {
+		const c = sampleCase("c_who");
+		const app = {
+			id: "https://claude.ai/oauth",
+			name: "Claude",
+			host: "claude.ai",
+		};
+		const marked: Case = {
+			...c,
+			shots: [
+				{
+					id: "s1",
+					image: "shots/s1.webp",
+					scrollX: 0,
+					scrollY: 0,
+					viewport: { width: 1280, height: 800, dpr: 2 },
+					capturedAt: "2026-11-19T09:00:00.000Z",
+				},
+			],
+			annotations: [
+				{
+					id: "a1",
+					number: 1,
+					shot: "s1",
+					comment: "Too pale",
+					author: "user",
+					shape: { kind: "note", at: { x: 1, y: 2 } },
+					crop: "crops/a1.webp",
+					element: null,
+					createdBy: { id: "u_tess", name: "Tess Tester" },
+					resolution: {
+						kind: "fixed",
+						at: "2026-11-19T10:00:00.000Z",
+						app,
+						user: { id: "u_dana", name: "Dana Developer" },
+						verified: {
+							at: "2026-11-19T11:00:00.000Z",
+							user: { id: "u_tess", name: "Tess Tester" },
+						},
+					},
+					findings: [
+						{
+							id: "f_1",
+							text: "The token is overridden",
+							app,
+							at: "2026-11-19T09:30:00.000Z",
+							user: { id: "u_dana", name: "Dana Developer" },
+						},
+					],
+				},
+			],
+		};
+		render(caseState(marked), noActions);
+		const mark = el("case-view").querySelector('[data-annotation="a1"]');
+		const history = [...(mark?.querySelectorAll(".history li") ?? [])].map(
+			(li) => li.textContent,
+		);
+		expect(history[0]).toContain("by Claude (claude.ai) for Dana Developer");
+		expect(history[1]).toContain("by Tess Tester");
+		expect(mark?.querySelector(".finding-meta")?.textContent).toContain(
+			"Claude (claude.ai) for Dana Developer",
+		);
+		expect(mark?.querySelector(".mark-by")?.textContent).toBe(
+			"Added by Tess Tester",
+		);
+	});
+});
+
 describe("what stays between renders", () => {
 	test("the open case's buttons stay the same elements", () => {
 		const c = sampleCase("c_keep");
@@ -2462,11 +2816,16 @@ describe("a case's link (DEC-028)", () => {
 			caseState(c),
 			actionsWith({ startLink: (x) => void called.push(x.id) }),
 		);
-		// The list of pages between them shows only for a case of several (DEC-038).
-		const pages = el("case-link").previousElementSibling as HTMLElement;
-		expect(pages.id).toBe("case-pages");
-		expect(pages.hidden).toBe(true);
-		expect(pages.previousElementSibling?.className).toContain("case-meta");
+		// Between them, shown only when they have something to say: the list of
+		// pages (a case of several, DEC-038) and the team's line (DEC-039).
+		let above = el("case-link").previousElementSibling as HTMLElement;
+		const between: string[] = [];
+		while (above.hidden) {
+			between.push(above.id);
+			above = above.previousElementSibling as HTMLElement;
+		}
+		expect(between).toEqual(["case-team", "case-pages"]);
+		expect(above.className).toContain("case-meta");
 		expect(shown("case-link-open")).toBe(false);
 		expect(edit().textContent).toBe("Add a link");
 		expect(edit().className).toContain("link");

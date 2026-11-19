@@ -51,6 +51,7 @@ import {
 	MAX_SAME_SENDS,
 	OFF,
 	type Queue,
+	type Rejected,
 	readAccount,
 	teamOf,
 } from "./book.ts";
@@ -667,6 +668,8 @@ export class CloudSync {
 		);
 		const refs = new Map<string, ImageRef>();
 		const blobs = new Map<string, Blob>();
+		/** Images the server refused, as they are said. */
+		const unsent: Rejected[] = [];
 		const mayUpload = may.has(PERMISSION["mark.create"]);
 		for (const path of wanted) {
 			const stored = await store.getImage(c.id, path);
@@ -679,7 +682,31 @@ export class CloudSync {
 				bytes: stored.blob.size,
 			});
 			blobs.set(sha, stored.blob);
-			if (mayUpload) await this.#upload(api, team, sha, stored.blob);
+			if (!mayUpload) continue;
+			// An image the server did not take (the team's storage is full, it
+			// is too large): its mark is not shared, that is said, and it is
+			// not uploaded again at every run. "Sync now" tries once more.
+			const before = (given.rejected ?? []).find(
+				(r) => r.key === `blob:${sha}`,
+			);
+			if (before !== undefined) {
+				refs.delete(path);
+				unsent.push(before);
+				continue;
+			}
+			try {
+				await this.#upload(api, team, sha, stored.blob);
+			} catch (error) {
+				if (!(error instanceof ApiFailure) || error.kind !== "refused")
+					throw error;
+				// Not this team's member any more: the run's to say.
+				if (error.status === 403 || error.status === 404) throw error;
+				refs.delete(path);
+				unsent.push({
+					key: `blob:${sha}`,
+					text: `An image was not taken, so its mark is not shared: ${whyOf(error.code ?? "", error.message)}.`,
+				});
+			}
 		}
 		const book = structuredClone(given);
 		book.title = c.title;
@@ -691,10 +718,15 @@ export class CloudSync {
 		);
 		// What the server refused before is not sent again as it was.
 		const keys = new Set(ops.map(opKey));
-		const refused = (book.rejected ?? []).filter((r) => keys.has(r.key));
+		const refused = [
+			...(book.rejected ?? []).filter((r) => keys.has(r.key)),
+			...unsent,
+		];
 		const held = new Set(refused.map((r) => r.key));
 		if (refused.length > 0) book.rejected = refused;
 		else delete book.rejected;
+		// An image the server refused is not one that is missing here.
+		const absent = missing.length - unsent.length;
 		const forbidden = ops.filter((op) => !may.has(PERMISSION[op.type]));
 		if (forbidden.length > 0)
 			this.#problems.push({
@@ -702,11 +734,11 @@ export class CloudSync {
 				title: c.title,
 				text: `Your role in “${team.name}” does not allow ${forbidden.length === 1 ? "a change" : `${forbidden.length} changes`} you made here; ${forbidden.length === 1 ? "it stays" : "they stay"} on this device.`,
 			});
-		if (missing.length > 0)
+		if (absent > 0)
 			this.#problems.push({
 				caseId: c.id,
 				title: c.title,
-				text: `${missing.length === 1 ? "An image" : `${missing.length} images`} of the case ${missing.length === 1 ? "is" : "are"} missing on this device, so ${missing.length === 1 ? "its mark is" : "their marks are"} not shared.`,
+				text: `${absent === 1 ? "An image" : `${absent} images`} of the case ${absent === 1 ? "is" : "are"} missing on this device, so ${absent === 1 ? "its mark is" : "their marks are"} not shared.`,
 			});
 		let sending = ops.filter(
 			(op) => may.has(PERMISSION[op.type]) && !held.has(opKey(op)),

@@ -71,6 +71,8 @@ describe.skipIf(browserBinary === undefined)("the store package", () => {
 		expect(granted.permissions.sort()).toEqual([
 			"activeTab",
 			"alarms",
+			// The browser's sign-in window, for sitegloss.dev (DEC-039).
+			"identity",
 			"notifications",
 			"offscreen",
 			"scripting",

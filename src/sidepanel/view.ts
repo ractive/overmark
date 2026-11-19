@@ -40,10 +40,17 @@ import {
 	type StatusGroup,
 	samePage,
 	samePath,
+	type UserRef,
 	viewportAt,
 } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
+import {
+	type CloudActions,
+	caseSync,
+	renderCloudBanner,
+	renderCloudSection,
+} from "./cloud-view.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
 import { foundLine, isFound, matchesHere, noneFound } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
@@ -55,7 +62,7 @@ import {
 } from "./sync-view.ts";
 
 /** What the user can do; main.ts carries it out and updates the state. */
-export interface Actions extends SyncActions {
+export interface Actions extends SyncActions, CloudActions {
 	/** "New case for this page": a new case, stored at once and opened (DEC-026). */
 	annotate(): void;
 	openCase(id: string): void;
@@ -402,7 +409,11 @@ function renderSaved(
 // --- home ----------------------------------------------------------------------
 
 /** A case: opening it draws its marks on the tab in front (DEC-022). */
-function caseItem(c: Case, actions: Actions): HTMLLIElement {
+function caseItem(
+	c: Case,
+	actions: Actions,
+	deviceOnly = false,
+): HTMLLIElement {
 	const count = c.annotations.length;
 	// The bar beside it is a picture; the words say the same.
 	const counts = countsText(caseCounts(c));
@@ -418,6 +429,10 @@ function caseItem(c: Case, actions: Actions): HTMLLIElement {
 				onclick: () => actions.openCase(c.id),
 			},
 			h("span", { class: "title" }, c.title),
+			// Signed in, a case the team does not have says so (DEC-039).
+			deviceOnly
+				? h("span", { class: "tag device-only" }, "This device only")
+				: null,
 			h("span", { class: "meta" }, pagesLine(c)),
 			h(
 				"span",
@@ -442,9 +457,10 @@ let importKey: string | undefined;
 
 function renderCases(state: PanelState, actions: Actions): void {
 	const url = state.tab?.url ?? "";
+	const local = (c: Case) => caseSync(state.cloud, c.id).kind === "local";
 	const key = JSON.stringify([
 		url,
-		state.cases.map((c) => [c.id, c.updatedAt, c.importedAt]),
+		state.cases.map((c) => [c.id, c.updatedAt, c.importedAt, local(c)]),
 	]);
 	if (key === casesKey) return;
 	casesKey = key;
@@ -467,7 +483,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 					h(
 						"ul",
 						{ class: "cases", "data-group": "here" },
-						...own.map((c) => caseItem(c, actions)),
+						...own.map((c) => caseItem(c, actions, local(c))),
 					),
 				]
 			: []),
@@ -493,7 +509,7 @@ function renderCases(state: PanelState, actions: Actions): void {
 				: h(
 						"ul",
 						{ class: "cases", "data-group": "other" },
-						...other.map((c) => caseItem(c, actions)),
+						...other.map((c) => caseItem(c, actions, local(c))),
 					),
 	);
 }
@@ -611,6 +627,7 @@ function renderHome(state: PanelState, actions: Actions): void {
 	);
 	renderCases(state, actions);
 	renderImportPrompt(state, actions);
+	renderCloudSection(state, actions);
 	renderSyncSection(state, actions);
 }
 
@@ -769,6 +786,10 @@ interface CaseParts {
 	/** The case's pages, where it has several (DEC-038). */
 	pages: HTMLUListElement;
 	pagesKey: string;
+	/** Whether the case syncs with the team, and "Share with team" (DEC-039). */
+	team: HTMLElement;
+	teamText: HTMLElement;
+	share: HTMLButtonElement;
 	/** The address where it is not a web page (only text, never a link). */
 	about: HTMLSpanElement;
 	madeAt: HTMLSpanElement;
@@ -956,6 +977,19 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		),
 		linkHint,
 	);
+	const teamText = h("span");
+	const share: HTMLButtonElement = h(
+		"button",
+		{
+			type: "button",
+			class: "link",
+			id: "share-case",
+			title:
+				"Send this case to your team: its members see it, with its screenshots, and what anyone changes syncs",
+			onclick: () => actions.cloudShare(created.current.id),
+		},
+		"Share with team",
+	);
 	const created: CaseParts = {
 		current: c,
 		title,
@@ -989,6 +1023,14 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		meta: h("p", { class: "meta case-meta" }, page, about, madeAt, madeOn),
 		pages: h("ul", { class: "case-pages", id: "case-pages", hidden: true }),
 		pagesKey: "",
+		team: h(
+			"p",
+			{ class: "meta case-team", id: "case-team", hidden: true },
+			teamText,
+			share,
+		),
+		teamText,
+		share,
 		linkRow: h(
 			"div",
 			{ class: "case-link", id: "case-link" },
@@ -1110,6 +1152,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		created.rename,
 		created.meta,
 		created.pages,
+		created.team,
 		created.linkRow,
 		created.origin,
 		h(
@@ -1391,6 +1434,8 @@ interface HistoryLine {
 	label: string;
 	at: string;
 	app: FindingApp | undefined;
+	/** Who did it, in a case synced with a team (DEC-039). */
+	user: UserRef | undefined;
 	note: string | undefined;
 	/** Came in from a file: who and when is what the file says. */
 	imported: boolean;
@@ -1404,6 +1449,7 @@ function resolutionHistory(r: Resolution): HistoryLine[] {
 			label: RESOLUTION_LABEL[r.kind],
 			at: r.at,
 			app: r.app,
+			user: r.user,
 			note: r.note,
 			imported: r.imported === true,
 		},
@@ -1414,12 +1460,25 @@ function resolutionHistory(r: Resolution): HistoryLine[] {
 						label: "Verified",
 						at: r.verified.at,
 						app: r.verified.app,
+						user: r.verified.user,
 						note: undefined,
 						imported: r.verified.imported === true,
 					},
 				]
 			: []),
 	];
+}
+
+/**
+ * ` by Dana`, ` by Claude (claude.ai) for Dana`, ` by Claude (claude.ai)`:
+ * who did something, the person as the team's server wrote it down (DEC-039).
+ */
+export function byWhom(
+	app: FindingApp | undefined,
+	user: UserRef | undefined,
+): string {
+	if (app) return ` by ${appLabel(app)}${user ? ` for ${user.name}` : ""}`;
+	return user ? ` by ${user.name}` : "";
 }
 
 /** What became of the mark, oldest first: each reopen, then how it is settled now. */
@@ -1431,6 +1490,7 @@ function historyList(a: Annotation): HTMLElement | null {
 			label: "Reopened",
 			at: r.at,
 			app: r.app,
+			user: r.user,
 			note: r.note,
 			imported: r.imported === true,
 		});
@@ -1444,7 +1504,7 @@ function historyList(a: Annotation): HTMLElement | null {
 				"li",
 				{ "data-kind": l.kind },
 				h("span", { class: "kind" }, l.label),
-				` ${historyTime(l.at)}${l.app ? ` by ${appLabel(l.app)}` : ""}${l.imported ? ", as the file says" : ""}`,
+				` ${historyTime(l.at)}${byWhom(l.app, l.user)}${l.imported ? ", as the file says" : ""}`,
 				l.note ? h("span", { class: "note" }, ` · ${l.note}`) : null,
 			),
 		),
@@ -1900,12 +1960,35 @@ function renderCase(state: PanelState, actions: Actions): void {
 	p.noneFound.text.textContent = none ? noneFoundText(c, state.tab?.url) : "";
 	p.noneFound.button.hidden =
 		!none || !isWebPage(c.page.url) || isPageOf(c, state.tab?.url ?? "");
+	// With a team (DEC-039): whether the case is the team's, and what a
+	// delete then means.
+	const sync = caseSync(state.cloud, c.id);
+	p.team.hidden = sync.kind === "off";
+	p.team.dataset["sync"] = sync.kind;
+	p.teamText.textContent =
+		sync.kind === "synced"
+			? `Synced with “${sync.team}”`
+			: sync.kind === "local"
+				? "On this device only. "
+				: "";
+	p.share.hidden = !sync.mayShare;
 	const armed = state.deleteArmedAt !== undefined;
 	p.deleteButton.toggleAttribute("data-armed", armed);
-	p.deleteButton.textContent = armed ? "Really delete?" : "Delete";
-	p.deleteButton.title = armed
-		? "Click again to delete this case and its screenshots"
-		: "Delete this case and its screenshots from this browser (click twice). Files exported before stay.";
+	p.deleteButton.disabled = !sync.mayDelete;
+	p.deleteButton.textContent = !armed
+		? "Delete"
+		: sync.kind === "synced"
+			? "Really delete for the team?"
+			: "Really delete?";
+	p.deleteButton.title = !sync.mayDelete
+		? `Your role in “${sync.team}” does not allow deleting its cases`
+		: sync.kind === "synced"
+			? armed
+				? `Click again to delete this case and its screenshots, here and for everyone in “${sync.team}”`
+				: `Delete this case and its screenshots, here and for everyone in “${sync.team}” (click twice). Files exported before stay.`
+			: armed
+				? "Click again to delete this case and its screenshots"
+				: "Delete this case and its screenshots from this browser (click twice). Files exported before stay.";
 	const of = (e: Exported["of"] | undefined) =>
 		e !== undefined && e !== "all" && e.caseId === c.id;
 	renderSaved(
@@ -2219,6 +2302,9 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 		x.page !== undefined
 			? h("p", { class: "meta mark-page" }, `On ${shortUrl(x.page)}`)
 			: null,
+		a.createdBy
+			? h("p", { class: "meta mark-by" }, `Added by ${a.createdBy.name}`)
+			: null,
 		a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
 		m ? matchView(c.id, a, m, actions) : null,
 		edit
@@ -2325,7 +2411,7 @@ function findingsList(
 						h(
 							"span",
 							{ class: "meta" },
-							`${appLabel(f.app)}${f.imported ? ", as the file says" : ""}, ${findingTime(f.at, f.editedAt)}`,
+							`${appLabel(f.app)}${f.user ? ` for ${f.user.name}` : ""}${f.imported ? ", as the file says" : ""}, ${findingTime(f.at, f.editedAt)}`,
 						),
 						h(
 							"button",
@@ -2494,6 +2580,7 @@ function renderBack(state: PanelState, actions: Actions): void {
 export function render(state: PanelState, actions: Actions): void {
 	lastActions = actions;
 	renderSyncBanner(state, actions);
+	renderCloudBanner(state, actions);
 	renderAi(state);
 	renderBack(state, actions);
 	allSites.checked = state.allSites;

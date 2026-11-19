@@ -52,6 +52,8 @@ import {
 import { IdbStore } from "../lib/store.ts";
 import { inject, NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { blurFormsNow, startAi } from "./ai.ts";
+import { cloudActions, startCloud } from "./cloud.ts";
+import { caseSync } from "./cloud-view.ts";
 import { byId, isWebPage, sitePattern } from "./dom.ts";
 import {
 	askForDownloads,
@@ -1717,6 +1719,8 @@ const actions: Actions = {
 			return;
 		}
 		if (Date.now() - armedAt < DELETE_CLICK_GAP_MS) return;
+		// The team's case, and not this user's to delete there (DEC-039).
+		if (!caseSync(state.cloud, c.id).mayDelete) return;
 		const hint = caseHintWriter();
 		void (async () => {
 			// The toolbar adding to it goes first, with the marks not in it yet.
@@ -1969,10 +1973,14 @@ const actions: Actions = {
 	},
 
 	...syncActions(() => panelSync),
+	...cloudActions(() => panelCloud),
 };
 
 /** The sync to Downloads or a folder (DEC-021, DEC-025): the worker writes, the panel chooses. */
 const panelSync = startSync(update);
+
+/** The account at sitegloss.dev and the sync with a team (DEC-039): the worker syncs, the panel asks. */
+const panelCloud = startCloud(update);
 
 // --- settings and import -------------------------------------------------------------
 
@@ -2363,6 +2371,7 @@ function hear(news: Broadcast, sender: chrome.runtime.MessageSender): false {
 		caseChanged(news.caseId);
 		void refreshTab();
 	} else if (news?.type === "sync:changed") void panelSync.refresh();
+	else if (news?.type === "cloud:changed") void panelCloud.refresh();
 	return false;
 }
 

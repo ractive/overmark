@@ -295,7 +295,60 @@ export type Broadcast =
 	 * From the side panel: bring the sync up to date now; `force` (Try again,
 	 * a new choice) also after a failure only the user can end.
 	 */
-	| { type: "sync:run"; force?: boolean };
+	| { type: "sync:run"; force?: boolean }
+	/** The worker's account or team sync changed (DEC-039): read it again. */
+	| { type: "cloud:changed" };
+
+/**
+ * What the side panel asks of the worker about the account and the sync
+ * with a team (DEC-039); from an extension page only. The worker holds the
+ * tokens and is the one that syncs.
+ */
+export type CloudRequest =
+	/** Start a sign-in: the answer's `url` is what the browser's window opens. */
+	| { type: "cloud:begin" }
+	/** The browser's window ended on `redirect`: finish the sign-in. */
+	| { type: "cloud:finish"; redirect: string }
+	| { type: "cloud:sign-out" }
+	| { type: "cloud:team"; teamId: string }
+	/** The cases that were here before the team: share them, or keep them here. */
+	| { type: "cloud:decide"; share: boolean }
+	/** Share one case kept on this device with the team. */
+	| { type: "cloud:share"; caseId: string }
+	/**
+	 * Sync now. `cursor`: the team is at this revision (the events stream
+	 * said so), nothing to do when this device is too. `retry`: also what the
+	 * server refused before.
+	 */
+	| { type: "cloud:run"; cursor?: number; retry?: boolean }
+	/** An access token, for the events stream; `fresh`: the last was refused. */
+	| { type: "cloud:token"; fresh?: boolean }
+	/** The server's address; empty: sitegloss.dev's. Only while signed out. */
+	| { type: "cloud:server"; server: string };
+
+export type CloudAnswer =
+	| { ok: true; url?: string; token?: string }
+	| { ok: false; error: string };
+
+const CLOUD_REQUESTS: ReadonlySet<string> = new Set<CloudRequest["type"]>([
+	"cloud:begin",
+	"cloud:finish",
+	"cloud:sign-out",
+	"cloud:team",
+	"cloud:decide",
+	"cloud:share",
+	"cloud:run",
+	"cloud:token",
+	"cloud:server",
+]);
+
+export function isCloudRequest(message: unknown): message is CloudRequest {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		CLOUD_REQUESTS.has((message as { type?: unknown }).type as string)
+	);
+}
 
 /**
  * What a page asks of the side panel about a mark of the case drawn on it

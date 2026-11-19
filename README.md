@@ -295,12 +295,61 @@ notifications").
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
 relay with a public HTTPS address that allows Sitegloss's ID, such as the hosted one.
 
+## With a team
+
+Sitegloss works without an account, and nothing in it asks for one. If your team uses
+[sitegloss.dev](https://sitegloss.dev), "Sign in" in the side panel's Account section
+(on Home, under the cases) syncs your cases with the team, both ways:
+
+- You sign in on the service's own page, in a window of the browser. With several
+  teams you choose one; with one, that is it.
+- Cases that were in the browser before are not sent without a word: a banner says how
+  many there are and that the team's members will see them, with "Sync them" and "Keep
+  them on this device". A case kept here has "Share with team" in its view, and the list
+  tags it "This device only". A case you make while signed in is the team's once it has
+  a mark.
+- Everything is still stored in the browser first. What you change goes to the team a
+  moment later; what a teammate changes, in the extension or on the website, shows in
+  the open side panel within a second or two, and otherwise within a few minutes. With
+  the server away, your changes wait and are sent when it is back.
+- Two people who change different things of one mark both keep their change; for the
+  same thing the later one wins. Two who add a mark at once: the later one gets the next
+  number (its pin in the screenshot keeps the number it was drawn with).
+- A resolution, a verification, a reopen and a finding say who made them ("by Dana"),
+  and a mark who added it.
+- Deleting a case the team has deletes it for the team; the button says so. A case
+  deleted for the team goes here too.
+- The Account section shows who is signed in, the team, what the sync is at (synced,
+  syncing, offline and trying again, or what the server did not take and why), "Sync
+  now" and "Sign out". Signing out stops the sync and keeps the cases, on this device
+  only.
+- "Server" there takes another server's address (https, or plain http on this
+  computer), while nobody is signed in.
+
+The sync to a folder above is another thing and stays as it is: one way, to files.
+Permission for signing in: `identity` (no install warning).
+
 ## Development
 
 ```sh
 bun run verify     # Biome, type check, tests
 bun run fix        # format and apply safe lint fixes
 ```
+
+`bun scripts/api-types.ts` writes the types of the sitegloss.dev API
+(`src/lib/cloud/api.gen.ts`) from the copy of its OpenAPI document in
+`src/lib/cloud/openapi-v1.json`; with a path, it takes a new copy first. Both files are
+committed, and a test fails when they disagree.
+
+Three tests run only against a real sitegloss.dev server, named in `SITEGLOSS_SERVER`
+(the server's `bun scripts/serve-local.ts 3200 --demo` and
+`SITEGLOSS_SERVER=http://localhost:3200`, with its demo users' password in
+`SITEGLOSS_PASSWORD`): `test/cloud-server.test.ts` (the sync engine),
+`test/e2e/cloud.test.ts` (the extension in Chromium) and
+`test/e2e/firefox/cloud.test.ts` (in Firefox; the server has to allow Firefox's
+redirect address, in its `EXTENSION_REDIRECT_URIS`). In both browsers "Sign in" opens
+the browser's real sign-in window, and the test signs the demo user in there. Without
+the variable they are skipped.
 
 The end-to-end tests load the extension into Chrome for Testing or Chromium
 (`CHROME_PATH`, or Playwright's download in its usual cache). Branded Chrome ignores

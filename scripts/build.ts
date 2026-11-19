@@ -125,6 +125,8 @@ export function createManifest(
 		permissions: [
 			"activeTab",
 			"alarms",
+			// The browser's own sign-in window, for sitegloss.dev (DEC-039).
+			"identity",
 			"notifications",
 			// The sync to Downloads makes its blob URLs there (DEC-025).
 			"offscreen",
@@ -201,6 +203,8 @@ export function createFirefoxManifest(
 		permissions: [
 			"activeTab",
 			"alarms",
+			// The browser's own sign-in window, for sitegloss.dev (DEC-039).
+			"identity",
 			"notifications",
 			"scripting",
 			"storage",

@@ -1599,6 +1599,98 @@ describe("findings", () => {
 		expect(lines.join("\n")).toContain("It is not this AI app's own");
 	});
 
+	test("in a case synced with a team, a finding is its app's own only for the person it was written for (DEC-039)", async () => {
+		await seed();
+		await store.updateCase("c_1", (c) => {
+			const value = structuredClone(c as Case);
+			(value.annotations[0] as Annotation).findings = [
+				{
+					id: "f_dana",
+					text: "Dana's Claude found this",
+					app: { id: CLAUDE.id, host: "claude.ai" },
+					at: "2026-11-01T00:00:00Z",
+					user: { id: "u_dana", name: "Dana Developer" },
+				},
+				{
+					id: "f_tess",
+					text: "Tess's Claude found this",
+					app: { id: CLAUDE.id, host: "claude.ai" },
+					at: "2026-11-01T00:00:00Z",
+					user: { id: "u_tess", name: "Tess Tester" },
+				},
+			];
+			return { value };
+		});
+		// Tess is signed in here: the same app, connected to her browser.
+		build({ me: async () => "u_tess" });
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		expect(
+			view.marks[0].findings.map((f: { id: string; own: boolean }) => [
+				f.id,
+				f.own,
+			]),
+		).toEqual([
+			["f_dana", false],
+			["f_tess", true],
+		]);
+		await expect(
+			call("edit_finding", {
+				caseId: "c_1",
+				mark: 1,
+				finding: "f_dana",
+				text: "Overwritten",
+			}),
+		).rejects.toThrow(
+			"Finding f_dana was written for another member of the team (Dana Developer)",
+		);
+		await call("edit_finding", {
+			caseId: "c_1",
+			mark: 1,
+			finding: "f_tess",
+			text: "Edited by its own app",
+		});
+		const signal = new AbortController().signal;
+		const lines = await confirmLines(
+			store,
+			tab,
+			{
+				tool: { name: "delete_finding", description: "Does it." },
+				arguments: { caseId: "c_1", mark: 1, finding: "f_dana" },
+				client: CLAUDE,
+				signal,
+			},
+			{ me: async () => "u_tess" },
+		);
+		expect(lines.join("\n")).toContain(
+			"Finding by claude.ai, for Dana Developer: “Dana's Claude found this”. It is not this AI app's own",
+		);
+		// Nobody signed in: a finding that says whose it is is nobody's here.
+		build();
+		await expect(
+			call("delete_finding", { caseId: "c_1", mark: 1, finding: "f_tess" }),
+		).rejects.toThrow("written for another member of the team");
+	});
+
+	test("deleting a case the team has: the question says that it goes for everyone (DEC-039)", async () => {
+		await seed();
+		const ask = (team?: string) =>
+			confirmLines(
+				store,
+				tab,
+				{
+					tool: { name: "delete_case", description: "Does it." },
+					arguments: { caseId: "c_1" },
+					client: CLAUDE,
+					signal: new AbortController().signal,
+				},
+				{ team: async () => team },
+			);
+		expect((await ask("Pedal & Pine web")).join("\n")).toContain(
+			"It syncs with the team “Pedal & Pine web”: deleting it deletes it for everyone there.",
+		);
+		expect((await ask(undefined)).join("\n")).not.toContain("team");
+	});
+
 	test("a finding from a file is no app's own", async () => {
 		await seed();
 		await store.updateCase("c_1", (c) => {

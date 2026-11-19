@@ -108,6 +108,12 @@ export interface ToolDeps {
 	blurForms?: () => boolean | Promise<boolean>;
 	/** The relay's message limit for this session, when connected. */
 	maxMessageBytes?: () => number | undefined;
+	/**
+	 * The id of whoever is signed in to sitegloss.dev here (DEC-039); none:
+	 * nobody. In a case synced with a team a finding is its app's own only
+	 * when it was written for this person.
+	 */
+	me?: () => Promise<string | undefined>;
 	/** How long the page may take to answer. */
 	pageTimeoutMs?: number;
 }
@@ -220,6 +226,7 @@ function findingsView(
 	a: Annotation,
 	clientId: string | undefined,
 	compact: boolean,
+	me: string | undefined,
 ) {
 	return (a.findings ?? []).map((f) => {
 		// In a large case, a long finding is a preview only.
@@ -232,7 +239,7 @@ function findingsView(
 			at: f.at,
 			...(f.editedAt ? { editedAt: f.editedAt } : {}),
 			...(f.imported ? { imported: true } : {}),
-			own: clientId !== undefined && isOwnFinding(f, clientId),
+			own: clientId !== undefined && isOwnFinding(f, clientId, me),
 		};
 	});
 }
@@ -305,7 +312,12 @@ export function pagesText(c: Case): string {
  * A case for the AI app `clientId`; `compact` summarizes elements and cuts
  * long texts.
  */
-function caseView(c: Case, clientId: string | undefined, compact = false) {
+function caseView(
+	c: Case,
+	clientId: string | undefined,
+	compact = false,
+	me?: string,
+) {
 	return {
 		caseId: c.id,
 		title: c.title,
@@ -350,7 +362,7 @@ function caseView(c: Case, clientId: string | undefined, compact = false) {
 				element:
 					compact && a.element !== null ? summarize(a.element) : a.element,
 				// AI apps', never the user's: the comment is the user's.
-				findings: findingsView(a, clientId, compact),
+				findings: findingsView(a, clientId, compact, me),
 			})),
 	};
 }
@@ -656,11 +668,12 @@ export function createTools(deps: ToolDeps): Tool[] {
 			const c = await mustGet(caseId);
 			const limit = budget();
 			const self = ownerId(client);
-			let content: Content[] = [text(caseView(c, self))];
+			const me = await deps.me?.();
+			let content: Content[] = [text(caseView(c, self, false, me))];
 			let used = content.reduce((n, b) => n + sizeOf(b), 0);
 			if (used > limit / 2) {
 				content = [
-					text(caseView(c, self, true)),
+					text(caseView(c, self, true, me)),
 					text(
 						`The case is large: element details are summarized and long texts cut; a finding with cut: true shows its first ${FINDING_PREVIEW} characters only, and a mark shows its last ${COMPACT_REOPENS} reopens. load_case reports the elements on the page in front.`,
 					),
@@ -1243,6 +1256,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		a: Annotation,
 		findingId: string,
 		client: RelayClient,
+		me: string | undefined,
 	): Finding {
 		const f = a.findings?.find((x) => x.id === findingId);
 		if (f === undefined)
@@ -1253,9 +1267,14 @@ export function createTools(deps: ToolDeps): Tool[] {
 			throw new CaseError(
 				`Finding ${findingId} came in with the case from a file: no AI app may change it. Add a finding of your own instead.`,
 			);
-		if (!isOwnFinding(f, findingApp(client).id))
+		if (f.app.id !== findingApp(client).id)
 			throw new CaseError(
 				`Finding ${findingId} is another AI app's (${appLabel(f.app)}): only the app that wrote it may change it. Add a finding of your own instead.`,
+			);
+		// The same app, connected to a teammate's browser (DEC-039).
+		if (!isOwnFinding(f, findingApp(client).id, me))
+			throw new CaseError(
+				`Finding ${findingId} was written for another member of the team${f.user ? ` (${f.user.name})` : ""}: only they may change it through their AI app. Add a finding of your own instead.`,
 			);
 		return f;
 	}
@@ -1335,9 +1354,10 @@ export function createTools(deps: ToolDeps): Tool[] {
 		execute: async ({ caseId, mark, finding, text: body }, { client }) => {
 			const writer = findingWriter(client);
 			const now = new Date().toISOString();
+			const me = await deps.me?.();
 			await store.updateCase(caseId, (current) => {
 				const { c, a } = caseAndMark(current, caseId, mark);
-				ownFinding(a, finding, writer);
+				ownFinding(a, finding, writer, me);
 				return { value: withFindingText(c, a.id, finding, body, now) };
 			});
 			deps.onChange?.(caseId);
@@ -1363,9 +1383,10 @@ export function createTools(deps: ToolDeps): Tool[] {
 			execute: async ({ caseId, mark, finding }, { client }) => {
 				const writer = findingWriter(client);
 				const now = new Date().toISOString();
+				const me = await deps.me?.();
 				await store.updateCase(caseId, (current) => {
 					const { c, a } = caseAndMark(current, caseId, mark);
-					ownFinding(a, finding, writer);
+					ownFinding(a, finding, writer, me);
 					return { value: withoutFinding(c, a.id, finding, now) };
 				});
 				deps.onChange?.(caseId);
@@ -1378,7 +1399,8 @@ export function createTools(deps: ToolDeps): Tool[] {
 	const deleteCase: Tool<{ caseId: string }> = {
 		name: "delete_case",
 		title: "Delete a case",
-		description: "Delete a case with its screenshots. The user is asked first.",
+		description:
+			"Delete a case with its screenshots. A case synced with a team is deleted for the whole team. The user is asked first.",
 		inputSchema: {
 			type: "object",
 			properties: { caseId: CASE_ID },
@@ -1512,6 +1534,14 @@ export async function confirmLines(
 	store: CaseStore,
 	tab: TabBridge,
 	request: ConfirmRequest,
+	/**
+	 * Of the account at sitegloss.dev (DEC-039): who is signed in here, and
+	 * the team a case syncs with (none: it is on this device only).
+	 */
+	cloud: {
+		me?: () => Promise<string | undefined>;
+		team?: (caseId: string) => Promise<string | undefined>;
+	} = {},
 ): Promise<string[]> {
 	const lines: string[] = [];
 	const caseId = request.arguments["caseId"];
@@ -1555,9 +1585,18 @@ export async function confirmLines(
 				? a?.findings?.find((x) => x.id === findingId)
 				: undefined;
 		const self = ownerId(request.client);
+		const me = f === undefined ? undefined : await cloud.me?.();
 		if (f !== undefined)
 			lines.push(
-				`Finding by ${appLabel(f.app)}: “${cut(f.text, 200)}”.${self !== undefined && isOwnFinding(f, self) ? "" : " It is not this AI app's own, so Sitegloss will refuse the change whatever you answer."}`,
+				`Finding by ${appLabel(f.app)}${f.user ? `, for ${f.user.name}` : ""}: “${cut(f.text, 200)}”.${self !== undefined && isOwnFinding(f, self, me) ? "" : " It is not this AI app's own, so Sitegloss will refuse the change whatever you answer."}`,
+			);
+	}
+	// Deleting a case the team has deletes it for everyone: said before the answer.
+	if (request.tool.name === "delete_case" && typeof caseId === "string") {
+		const team = await cloud.team?.(caseId).catch(() => undefined);
+		if (team !== undefined && (await store.getCase(caseId)) !== undefined)
+			lines.push(
+				`It syncs with the team “${team}”: deleting it deletes it for everyone there.`,
 			);
 	}
 	if (request.tool.name === "add_annotation") {

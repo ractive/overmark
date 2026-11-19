@@ -33,7 +33,8 @@ a [tab-mcp](https://github.com/ractive/tab-mcp) relay.
    `https://dev.example.com/…`, later prod, and checks the fix.
 
 Sitegloss never opens or switches environments itself: a case's marks are drawn on
-whatever tab is in front (DEC-022). Forwarding cases to a team (tickets, links) is out of scope for now.
+whatever tab is in front (DEC-022). A team shares its cases through sitegloss.dev, for
+whoever signs in (DEC-039); tickets and links to other tools are out of scope.
 
 ## The screenshot is the record
 
@@ -218,6 +219,31 @@ for builds that know only it; every screenshot has the address of its page (`url
 mark's page is its screenshot's. A case stored before `pages` has none, and its pages are
 read from `page` and its screenshots (`casePages`). A page is told by its path, whatever
 the origin, as a case's page always was.
+
+## A team at sitegloss.dev
+
+Sitegloss is local first: the cases are in the browser, and nothing needs an account.
+Someone signed in to sitegloss.dev (DEC-039) has their cases synced with their team in
+both directions, by the service worker:
+
+- **Sign-in** is OAuth 2.1 with PKCE as a public client, in the browser's own window
+  (`identity.launchWebAuthFlow`); the tokens are in the worker's database
+  `sitegloss-cloud`, out of the pages' reach.
+- **Sending:** each synced case is compared with what the server last had of it, and
+  the difference becomes operations (a new mark, a changed comment, a status, a finding,
+  a delete), written down with ids of their own before they are sent, images first. The
+  server applies an operation's id once.
+- **Fetching:** everything after the team's revision this browser has seen; what was
+  not changed here becomes the server's, what was changed here stays and is sent next.
+- **Ids:** `a<number>` and `s<n>` stay what they are here; the server knows marks and
+  screenshots by ids of their own, and the bookkeeping maps one to the other. A mark's
+  number is the server's to give when two people drew the same one.
+- **Live:** the open side panel listens to the server's events stream and tells the
+  worker; without a panel an alarm looks every five minutes.
+
+The case format gains only who did something, where the server wrote it down:
+`user { id, name }` on a resolution, a verification, a reopen and a finding, and
+`createdBy` on a mark. The sync to a folder (DEC-021) is apart from this and unchanged.
 
 ## Finding an element again
 

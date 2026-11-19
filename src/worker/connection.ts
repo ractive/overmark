@@ -81,6 +81,10 @@ export interface ConnectionDeps {
 	capture: Capture;
 	/** A tool changed or deleted a case (the sync writes it, DEC-021). */
 	changed?: (caseId: string) => void;
+	/** Who is signed in to sitegloss.dev here, by id (DEC-039); none: nobody. */
+	me?: () => Promise<string | undefined>;
+	/** The team a case syncs with, by name; none: it is on this device only. */
+	team?: (caseId: string) => Promise<string | undefined>;
 	/** The settings database: `openKv()` unless given (a memory one in tests). */
 	kv?: Kv;
 }
@@ -402,6 +406,7 @@ export class Connection {
 			// write to the store succeeded, so this is what the panel shows.
 			blurForms: () => this.#settings.blurForms,
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
+			...(this.#deps.me ? { me: this.#deps.me } : {}),
 		});
 		// AI apps through the relay only: no WebMCP (off anyway, and a worker
 		// has no document) and no served port. `tools.ts` refuses other
@@ -429,7 +434,10 @@ export class Connection {
 			{
 				always: this.#always,
 				ask: async (r) => {
-					const lines = await confirmLines(this.#deps.store, this.#tab, r);
+					const lines = await confirmLines(this.#deps.store, this.#tab, r, {
+						...(this.#deps.me ? { me: this.#deps.me } : {}),
+						...(this.#deps.team ? { team: this.#deps.team } : {}),
+					});
 					const front = await tabInFront().catch(() => undefined);
 					// No answer in time is "timeout": `decide` tells the library
 					// "unanswered", which the AI app hears as such, not as a no.

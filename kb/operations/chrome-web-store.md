@@ -225,8 +225,42 @@ in other environments, alone or with an AI app the user connects.
 | `downloads` (optional) | Asked for when the user clicks Export (or Export all cases) or "Sync to Downloads" in the side panel. Sitegloss saves its own export file through `chrome.downloads.download` and reads that one download's path (`downloads.search` by its id), to show the user where the file went with Copy and "Show in folder" (`downloads.show`). With the sync to Downloads it writes each case as its own file to `Sitegloss/` in the downloads folder, overwriting that case's file when the case changes, and erases its own previous entry from the download list (`downloads.erase`, the file stays). It reads no other download. Without it the export is saved as a plain download, without the path, and the sync can only go to a folder the user chooses. |
 | `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page in a new tab (the case's address in its header, or "Open the case's page" when none of its marks were found on the tab in front), so the case's marks are drawn there without clicking the icon. All sites only when the user clicks "Allow on all sites" (in the side panel's notice on a tab Sitegloss may not run on yet) or turns on the option "Allow on all sites, without clicking the icon on each tab". |
 
+**For the version with team sync (DEC-039), to enter by hand before it is published:**
+
+- **New permission `identity`:** it has no install warning, so the update is not held
+  back for users to approve. Justification: "When the user clicks Sign in, open the
+  browser's own sign-in window (`identity.launchWebAuthFlow`) on the user's Sitegloss
+  account at app.sitegloss.dev (OAuth 2.1 with PKCE). It is not used to read the
+  browser's or the Google account's identity."
+- **`alarms`,** add: "and, while the user is signed in to sitegloss.dev, look for the
+  team's changes every five minutes when the side panel is closed."
+- **Description,** a paragraph after the one on export and the folder sync: "Working in
+  a team? Sign in to sitegloss.dev and your cases sync with your team, both ways and
+  live: everyone sees the same marks, statuses and findings, in the extension and on the
+  web. Without an account everything stays in your browser." And the last paragraph's
+  first sentence becomes: "Your cases stay in your browser unless you export them, sync
+  them, connect an AI app or sign in to sitegloss.dev."
+- **Single purpose:** add "and sharing them with the user's team".
+- **Data usage:** under *Collected*, add **Personally identifiable information** (the
+  signed-in user's name and e-mail address, received from the service and shown in the
+  side panel) and **Authentication information** (the OAuth tokens of the user's own
+  Sitegloss account, kept in the extension's IndexedDB). Under *Transmitted*, add: "and,
+  only for a user who signs in, to app.sitegloss.dev, the developer's service, where the
+  cases are stored for the user's team". Web history, website content and user activity
+  now also go there for such a user.
+- **Privacy policy:** the page at `ractive.ch/sitegloss/privacy/` has to be the new
+  `PRIVACY.md` before the version is submitted.
+- **Edge Add-ons:** the same texts.
+- **The service's side:** the store version's redirect address is that of the store's
+  key, `https://ldmcfigcnobhnbaigehcaodheklibeon.chromiumapp.org/` (the same as unpacked
+  builds, DEC-031), and Firefox's is in `firefox-add-ons.md`; both have to be in the
+  server's `EXTENSION_REDIRECT_URIS`. An Edge Add-ons build gets another id from that
+  store, and so another address (`https://<its id>.chromiumapp.org/`), to add there once
+  it is known.
+
 **Remote code:** No. All code is in the package; the connection to the relay carries
-data only, and no tool runs code an AI app sends.
+data only, and no tool runs code an AI app sends. The same holds for sitegloss.dev: the
+extension exchanges data with its API and runs nothing it sends.
 
 **Data usage (Privacy practices tab):**
 
