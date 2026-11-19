@@ -570,13 +570,16 @@ describe("each server is kept apart (DEC-041)", () => {
 		expect(
 			(await store.getCase("c_prod"))?.annotations.map((a) => a.comment),
 		).toEqual(["For the real team"]);
-		expect(status()?.problems).toEqual([
+		// A note, and no problem: the user chose where the case is.
+		expect(status()?.notes).toEqual([
 			{
 				caseId: "c_prod",
 				title: "Your cart",
 				text: "“Your cart” is on this device only, and the team already has this case. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two: marks only here are sent, the team's other marks come here.",
 			},
 		]);
+		expect(status()?.problems).toEqual([]);
+		expect(status()?.state).toBe("synced");
 
 		// A case made now is the development team's, and no one else's.
 		await startCase(here(), "c_dev");
@@ -708,8 +711,9 @@ describe("a case kept on this device stays there, whoever names its id (review B
 		expect(kept?.annotations.map((a) => a.comment)).toEqual([
 			"Not for the team",
 		]);
-		expect(status()?.state).toBe("problem");
-		expect(status()?.problems.map((p) => p.text)).toEqual([
+		expect(status()?.state).toBe("synced");
+		expect(status()?.problems).toEqual([]);
+		expect(status()?.notes?.map((p) => p.text)).toEqual([
 			"“Your cart” is on this device only, and the team already has this case. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two: marks only here are sent, the team's other marks come here.",
 		]);
 		// It stays said, and stays so, run after run and over a worker's restart.
@@ -717,7 +721,7 @@ describe("a case kept on this device stays there, whoever names its id (review B
 		now += 10 * 60_000;
 		await settled();
 		expect(comments(server, "c_private")).toEqual(["bait"]);
-		expect(status()?.problems).toHaveLength(1);
+		expect(status()?.notes).toHaveLength(1);
 
 		// The user shares it: the team's copy is read first, then what it lacks goes.
 		expect(

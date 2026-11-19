@@ -159,12 +159,28 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 			{ type: "cloud:server", server: "https://evil.example" },
 			{ type: "cloud:decide", share: true },
 			{ type: "cloud:share", caseId: "c_1" },
+			// A page must not end somebody's sign-in, nor say a case is being
+			// deleted (which would delete it for the team once it is gone).
+			{ type: "cloud:abandon", url: "https://app.sitegloss.dev/?state=x" },
+			{ type: "cloud:deleting", caseId: "c_1" },
+			{ type: "cloud:finish", redirect: "https://x.chromiumapp.org/?code=c" },
+			{ type: "cloud:team", teamId: "t" },
+			{ type: "cloud:run", retry: true },
 		])
 			expect(await fromPage(message)).toBeNull();
 		expect(await fromExtension(token)).toEqual({
 			ok: false,
 			error: "Not signed in.",
 		});
+		expect(
+			await fromExtension({
+				type: "cloud:abandon",
+				url: "https://app.sitegloss.dev/?state=x",
+			}),
+		).toEqual({ ok: true });
+		expect(
+			await fromExtension({ type: "cloud:deleting", caseId: "c_1" }),
+		).toEqual({ ok: true });
 		// Nothing a content script asked for happened: the server is still the service.
 		const chosen = await serviceWorker.eval<unknown>(
 			`new Promise((done) => { const open = indexedDB.open("sitegloss-cloud"); open.onsuccess = () => { const db = open.result; const names = [...db.objectStoreNames]; if (names.length === 0) return done(null); const all = db.transaction(names[0]).objectStore(names[0]).getAll(); all.onsuccess = () => done(JSON.stringify(all.result)); all.onerror = () => done("error"); }; open.onerror = () => done("error"); })`,

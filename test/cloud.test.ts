@@ -1193,7 +1193,9 @@ describe("a case the team already has (review B, sync 2 and 3)", () => {
 		await dana.engine.request();
 		expect(numbered("c_file")).toHaveLength(2);
 		expect(status(dana)?.joins).toBeUndefined();
-		expect(status(dana)?.problems.map((p) => p.text)).toEqual([
+		expect(status(dana)?.state).toBe("synced");
+		expect(status(dana)?.problems).toEqual([]);
+		expect(status(dana)?.notes?.map((p) => p.text)).toEqual([
 			"“Your cart” is on this device only, and the team already has this case. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two: marks only here are sent, the team's other marks come here, and where both differ the team's text is kept: 1 mark.",
 		]);
 		// Shared, having been told: the team's text on mark 1, her mark sent.
@@ -1408,13 +1410,16 @@ describe("a book taken up again (review B, sync 4)", () => {
 			return ops(team, list);
 		};
 		await signIn(tess);
-		expect(status(tess)?.problems).toEqual([
+		// A note, not a problem: nothing went wrong and nothing is to be done.
+		expect(status(tess)?.notes).toEqual([
 			{
 				caseId: "c_flow",
 				title: "Your cart",
 				text: "1 mark deleted while not syncing is back: the team still has it.",
 			},
 		]);
+		expect(status(tess)?.problems).toEqual([]);
+		expect(status(tess)?.state).toBe("synced");
 		await sync(tess, dana);
 		// No delete was sent; the edit and the new mark were.
 		expect(sent.filter((op) => op.type.endsWith(".delete"))).toEqual([]);
@@ -1427,6 +1432,7 @@ describe("a book taken up again (review B, sync 4)", () => {
 			look(await dana.store.getCase("c_flow")),
 		);
 		// Said once: the next run has nothing to say.
+		expect(status(tess)?.notes).toBeUndefined();
 		expect(status(tess)?.problems).toEqual([]);
 		expect(status(tess)?.state).toBe("synced");
 		// From here on a delete is a delete again.

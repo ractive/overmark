@@ -218,6 +218,8 @@ export class CloudSync {
 	#said: CloudStatus | undefined;
 	/** What the running run has to say besides the books' rejections. */
 	#problems: CloudStatus["problems"] = [];
+	/** And what it has to tell that is no problem (`CloudStatus.notes`). */
+	#notes: NonNullable<CloudStatus["notes"]> = [];
 
 	constructor(deps: EngineDeps) {
 		this.#deps = deps;
@@ -530,6 +532,7 @@ export class CloudSync {
 		const books = fresh ? read.all : await this.#books.all();
 		const here = new Map(cases.map((c) => [c.id, c]));
 		const problems = [...this.#problems];
+		const notes = [...this.#notes];
 		let undecided = 0;
 		const joins = { cases: 0, marks: 0 };
 		for (const book of books.values()) {
@@ -543,7 +546,8 @@ export class CloudSync {
 					joins.cases++;
 					joins.marks += differ;
 				}
-				problems.push({
+				// A note, not a problem: the user chose to keep it here.
+				notes.push({
 					caseId: book.caseId,
 					title: kept.title,
 					text: `“${kept.title}” is on this device only, and the team already has this case. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two: marks only here are sent, the team's other marks come here${differ === 0 ? "" : `, and where both differ the team's text is kept: ${differ === 1 ? "1 mark" : `${differ} marks`}`}.`,
@@ -581,6 +585,7 @@ export class CloudSync {
 		return {
 			state,
 			problems,
+			...(notes.length > 0 ? { notes } : {}),
 			undecided,
 			...(joins.cases > 0 ? { joins } : {}),
 			...(before.lastSyncedAt === undefined
@@ -627,6 +632,7 @@ export class CloudSync {
 			return;
 		}
 		this.#problems = [];
+		this.#notes = [];
 		if (account.expired) {
 			await this.#say(
 				await this.#status("signed-out", {
@@ -892,7 +898,7 @@ export class CloudSync {
 				if (applied.changed) changed.push(book.caseId);
 				const back = (marks ?? []).filter((m) => forgotten.has(m.id)).length;
 				if (back > 0)
-					this.#problems.push({
+					this.#notes.push({
 						caseId: book.caseId,
 						title: row.title,
 						text: `${back === 1 ? "1 mark" : `${back} marks`} deleted while not syncing ${back === 1 ? "is" : "are"} back: the team still has ${back === 1 ? "it" : "them"}.`,

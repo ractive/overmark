@@ -257,6 +257,12 @@ export interface CloudStatus {
 	lastSyncedAt?: string;
 	/** Changes the server did not take, and cases it could not give. */
 	problems: { caseId?: string; title?: string; text: string }[];
+	/**
+	 * What there is to tell that is nobody's fault and needs nothing done: a
+	 * case kept on this device that the team has too, marks that are back.
+	 * Shown, but no problem: the state is not `problem` for them.
+	 */
+	notes?: { caseId?: string; title?: string; text: string }[];
 	/** Cases that were here before the team was chosen and wait for an answer. */
 	undecided: number;
 	/**

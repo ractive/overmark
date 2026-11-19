@@ -1999,6 +1999,33 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		);
 	});
 
+	test("a note is said under the status, and not as a warning", () => {
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				lastSyncedAt: "2026-11-19T10:00:00.000Z",
+				problems: [],
+				notes: [
+					{
+						caseId: "c_1",
+						title: "Your cart",
+						text: "1 mark deleted while not syncing is back: the team still has it.",
+					},
+				],
+				undecided: 0,
+			},
+		});
+		expect(el("cloud").dataset["cloud"]).toBe("synced");
+		expect(el("cloud-problems")).toBeNull();
+		const note = el("cloud-notes").querySelector("li");
+		expect(note?.textContent).toBe(
+			"“Your cart”: 1 mark deleted while not syncing is back: the team still has it.",
+		);
+		expect(note?.getAttribute("role")).toBeNull();
+		expect(note?.className).toBe("meta");
+	});
+
 	test("cases that were here before the team: asked above every view, with what sharing means", () => {
 		const answers: boolean[] = [];
 		const state = home(

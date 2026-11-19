@@ -1836,6 +1836,10 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   (`src/lib/cloud/openapi-v1.json`, with `ajv`, a dev dependency for the tests alone)
   and to the limits of one request, so the contract is met in every test run and not
   only against a real server.
+- **Notes are no problems** (`CloudStatus.notes`): a case kept on this device whose
+  id the team names, and marks that are back after a time without syncing, are told in
+  the Account section in plain text, do not make the state "problem", and so give no
+  reason to look at the server more often. A problem is something that did not go.
 - **A cursor of 0 is none:** the whole state is asked for. (The server answered
   `since=0` as the whole state, which names no deletes; it answers it as any revision
   now, and the server in memory does the same.)

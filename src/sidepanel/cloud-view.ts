@@ -318,6 +318,22 @@ function signedIn(cloud: Cloud): HTMLElement[] {
 				),
 			),
 		);
+	// What there is to tell that needs nothing done: said, not as a warning.
+	const notes = status?.notes ?? [];
+	if (notes.length > 0)
+		parts.push(
+			h(
+				"ul",
+				{ class: "cloud-problems cloud-notes", id: "cloud-notes" },
+				...notes.map((n) =>
+					h(
+						"li",
+						{ class: "meta" },
+						n.title ? `“${n.title}”: ${n.text}` : n.text,
+					),
+				),
+			),
+		);
 	parts.push(
 		h(
 			"div",
