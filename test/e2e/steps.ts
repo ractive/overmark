@@ -334,9 +334,21 @@ export async function markElement(
 			);
 		});
 	// Near the left edge: the toolbar sits in the middle at the bottom.
-	const at = await page.eval<{ x: number; y: number }>(
-		`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + Math.min(12, r.width / 2), y: r.y + r.height / 2 }; })()`,
-	);
+	const where = `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + Math.min(12, r.width / 2), y: r.y + r.height / 2 }; })()`;
+	// The page may still be moving (the scroll above, the side panel taking
+	// its width): pressed at once, the click lands on what was at that spot
+	// before, and the mark is another element's (the filler above the
+	// footer). So the element has to have stayed put for two frames first.
+	let at = await page.eval<{ x: number; y: number }>(where);
+	for (let tries = 0; tries < 40; tries++) {
+		await page.eval(
+			"new Promise((r) => { requestAnimationFrame(() => requestAnimationFrame(r)); setTimeout(r, 200); })",
+		);
+		const now = await page.eval<{ x: number; y: number }>(where);
+		const stayed = now.x === at.x && now.y === at.y;
+		at = now;
+		if (stayed) break;
+	}
 	await page.mouse("mouseMoved", at.x, at.y);
 	await page.clickAt(at.x, at.y);
 	await comment(page, text);
