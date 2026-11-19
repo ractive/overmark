@@ -32,6 +32,7 @@ import {
 	pendingSignIns,
 	Session,
 	stateOf,
+	type Tokens,
 } from "../lib/cloud/auth.ts";
 import {
 	BOOK,
@@ -377,20 +378,38 @@ export class Cloud {
 							? "The sign-in's answer is not for this sign-in."
 							: "No sign-in is under way. Try again.",
 					);
-				// One try: its secrets go before the answer is examined.
-				const { [state]: _used, ...others } = all;
-				if (Object.keys(others).length > 0)
-					await kv.set({ [PENDING_KEY]: others });
-				else await kv.remove(PENDING_KEY);
-				const code = codeFrom(pending, request.redirect, this.#now());
-				const tokens = await exchangeCode(
-					this.#fetch,
-					pending,
-					code,
-					this.#now(),
-				);
-				await session.store(tokens);
+				// One try: a second answer for it is not taken. It stays in the
+				// book as "finishing" until the account is written (or the try
+				// failed): until then a sign-in is under way, and the server
+				// is not chosen anew from another window.
+				if (pending.finishing)
+					throw new AuthError("No sign-in is under way. Try again.");
+				await kv.set({
+					[PENDING_KEY]: { ...all, [state]: { ...pending, finishing: true } },
+				});
+				const over = async () => {
+					const { [state]: _used, ...others } = ((await kv.get(PENDING_KEY)) ??
+						{}) as PendingSignIns;
+					if (Object.keys(others).length > 0)
+						await kv.set({ [PENDING_KEY]: others });
+					else await kv.remove(PENDING_KEY);
+				};
+				let tokens: Tokens;
 				try {
+					const code = codeFrom(pending, request.redirect, this.#now());
+					tokens = await exchangeCode(this.#fetch, pending, code, this.#now());
+				} catch (error) {
+					await over();
+					throw error;
+				}
+				try {
+					// Still the server this sign-in began at: tokens of one
+					// server are never kept as another's.
+					if ((await this.server()) !== server)
+						throw new AuthError(
+							"The server was changed while signing in. Sign in again.",
+						);
+					await session.store(tokens);
 					const me = await httpApi({
 						server,
 						token: (fresh) => session.access(server, fresh),
@@ -401,7 +420,9 @@ export class Cloud {
 					// Signed in at the server, and not here: tokens without an
 					// account have no "Sign out" to end them, so they are ended
 					// now, here and at the server.
-					await session.end(server);
+					await session.forget();
+					await session.revoke(server, tokens).catch(() => undefined);
+					await over();
 					throw error;
 				}
 				// Signed in: any other sign-in begun is over.

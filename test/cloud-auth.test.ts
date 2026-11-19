@@ -166,8 +166,20 @@ function tokenServer(clock: { ms: number } = { ms: 0 }) {
 		if (lose()) throw new TypeError("Failed to fetch");
 		return Response.json(answer);
 	};
+	fetchers.set(state, fetcher);
 	return { state, fetcher };
 }
+
+/** The token server a state is of, for a second session over the same server. */
+const fetchers = new WeakMap<
+	object,
+	(input: string, init?: RequestInit) => Promise<Response>
+>();
+const tokenServerOf = (state: object) =>
+	fetchers.get(state) as (
+		input: string,
+		init?: RequestInit,
+	) => Promise<Response>;
 
 const pending = (at = 1000): PendingSignIn => ({
 	server: SERVER,
@@ -530,6 +542,70 @@ describe("the tokens", () => {
 		const late = await session.access(SERVER, true).catch((e: unknown) => e);
 		expect(late).toBeInstanceOf(AuthError);
 		expect((late as AuthError).signedOut).toBe(true);
+	});
+
+	test("signed out while a renewal waits for its next try: the tokens do not come back", async () => {
+		const { state, kv } = await signedIn();
+		// The same token server, with a session whose wait is the moment the
+		// user signs out and the network returns.
+		let session: Session;
+		const waits: number[] = [];
+		session = new Session(
+			kv,
+			(input, init) => tokenServerOf(state)(input, init),
+			() => 10_000,
+			async (ms) => {
+				waits.push(ms);
+				await session.forget();
+				state.offline = false;
+			},
+		);
+		state.offline = true;
+		const asked = state.requests.length;
+		const failed = await session.access(SERVER, true).catch((e: unknown) => e);
+		expect(failed).toBeInstanceOf(AuthError);
+		expect((failed as AuthError).signedOut).toBe(true);
+		expect(waits).toEqual([2000]);
+		// Not tried again after the sign-out, and nothing written back.
+		expect(state.requests.length).toBe(asked);
+		expect(kv.data.has(TOKENS_KEY)).toBe(false);
+	});
+
+	test("signed out, or signed in as someone else, while the answer is on its way: it is thrown away and its grant ended", async () => {
+		for (const then of ["out", "another"] as const) {
+			const { state, kv } = await signedIn();
+			let release: () => void = () => undefined;
+			const held = new Promise<void>((done) => {
+				release = done;
+			});
+			const real = tokenServerOf(state);
+			const session = new Session(
+				kv,
+				async (input, init) => {
+					const answer = await real(input, init);
+					// The refresh's answer waits on the wire.
+					if (String(init?.body ?? "").includes("grant_type=refresh_token"))
+						await held;
+					return answer;
+				},
+				() => 10_000,
+			);
+			const renewing = session.access(SERVER, true).catch((e: unknown) => e);
+			await Bun.sleep(5);
+			const theirs = { access: "a-dana", refresh: "r-dana", expiresAt: 9e12 };
+			if (then === "out") await session.forget();
+			else await session.store(theirs);
+			release();
+			const failed = await renewing;
+			expect((failed as AuthError).signedOut).toBe(true);
+			// What is stored is what the sign-out or the sign-in left.
+			expect(kv.data.get(TOKENS_KEY)).toEqual(
+				then === "out" ? undefined : theirs,
+			);
+			// The tokens that came were live and nobody's: ended at the server.
+			expect(state.revoked).toBe(true);
+			expect(state.requests.at(-1)?.get("token")).toBe("r2");
+		}
 	});
 
 	test("only the server's word that the grant is gone signs out; any other no is its trouble, tried again", async () => {
@@ -1126,5 +1202,57 @@ describe("the sign-ins under way", () => {
 		expect(stateOf(`${REDIRECT}?code=c&state=s-a`)).toBe("s-a");
 		expect(stateOf(`${REDIRECT}?code=c`)).toBe("");
 		expect(stateOf("not an address")).toBe("");
+	});
+});
+
+describe("small answers are read as small (review B, re-check C)", () => {
+	/** An answer that goes on for 80 MiB, and counts what was taken of it. */
+	function huge(status = 200) {
+		let pulled = 0;
+		const response = () =>
+			new Response(
+				new ReadableStream<Uint8Array>({
+					pull(controller) {
+						if (pulled++ >= 80) controller.close();
+						else controller.enqueue(new Uint8Array(1024 * 1024).fill(32));
+					},
+				}),
+				{ status, headers: { "content-type": "application/json" } },
+			);
+		return { response, pulled: () => pulled };
+	}
+
+	test("the discovery document, the token endpoint's answer and an error's body: a megabyte at most", async () => {
+		const discovery = huge();
+		await expect(
+			discover(async () => discovery.response(), SERVER),
+		).rejects.toThrow("larger than an answer may be");
+		expect(discovery.pulled()).toBeLessThan(4);
+
+		const token = huge();
+		await expect(
+			refreshTokens(
+				async () => token.response(),
+				SERVER,
+				ENDPOINTS,
+				{ access: "a", refresh: "r", expiresAt: 0 },
+				0,
+			),
+		).rejects.toThrow("larger than an answer may be");
+		expect(token.pulled()).toBeLessThan(4);
+
+		const refused = huge(400);
+		const api = httpApi({
+			server: SERVER,
+			token: async () => "a",
+			fetch: async () => refused.response(),
+		});
+		// Its words are lost with it, its status is not.
+		await expect(api.me()).rejects.toMatchObject({
+			kind: "refused",
+			status: 400,
+			message: "The server answered 400.",
+		});
+		expect(refused.pulled()).toBeLessThan(4);
 	});
 });

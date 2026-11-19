@@ -1286,7 +1286,7 @@ describe("a change of the team's that cannot be stored (review B, sync 1)", () =
 			{
 				caseId: "c_flow",
 				title: "Your cart",
-				text: "What the team changed could not be stored here: quota It is read again later.",
+				text: "What the team changed could not be stored here: quota. It is read again later.",
 			},
 		];
 		expect(status(tess)?.state).toBe("problem");
@@ -1948,6 +1948,53 @@ describe("an answer larger than an answer may be (review B, 11)", () => {
 		expect(asked.length).toBeGreaterThan(3);
 		expect((await dana.store.getCase("c_big"))?.annotations).toHaveLength(45);
 		expect(status(dana)?.state).toBe("synced");
+	});
+
+	test("a case too large to read by itself is that case's matter: it waits, longer each time, and the run and the other cases go on", async () => {
+		await signIn(tess);
+		await startCase(tess, "c_big");
+		await addMark(tess, "c_big", "Theirs");
+		await tess.engine.request();
+		// Dana has a case of that id, kept back, and shares it after all: the
+		// team's copy is to be read first, and it cannot be.
+		await startCase(dana, "c_big");
+		await addMark(dana, "c_big", "Mine", { url: PAY });
+		await signIn(dana);
+		await dana.engine.decide(false);
+		const getCase = dana.api.getCase.bind(dana.api);
+		let reads = 0;
+		dana.api.getCase = async (team, id) => {
+			if (id !== "c_big") return getCase(team, id);
+			reads++;
+			throw new ApiFailure(
+				"server",
+				"The server's answer is larger than an answer may be.",
+				200,
+				TOO_LARGE,
+			);
+		};
+		await dana.engine.share("c_big");
+		await startCase(dana, "c_new");
+		await addMark(dana, "c_new", "Made after");
+		for (let i = 0; i < 6; i++) {
+			dana.clock.now = new Date(dana.clock.now.getTime() + 10 * 60_000);
+			await dana.engine.request();
+		}
+		// The new case went; the run did not end at the large one.
+		expect(server.cases.has("c_new")).toBe(true);
+		expect(status(dana)?.text).toBeUndefined();
+		expect(status(dana)?.problems).toEqual([
+			{
+				caseId: "c_big",
+				title: "Your cart",
+				text: "The team's copy of this case is larger than can be read here. It is read again later.",
+			},
+		]);
+		// Asked for now and then, not at every run: 1, 5, 30 minutes, 6 hours.
+		expect(reads).toBeGreaterThan(1);
+		expect(reads).toBeLessThan(5);
+		// Nothing of the kept case was sent meanwhile.
+		expect(server.marksOf("c_big").map((m) => m.comment)).toEqual(["Theirs"]);
 	});
 
 	test("a small page that is still too large is the server's trouble: said, nothing stored, tried again later", async () => {

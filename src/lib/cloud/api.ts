@@ -9,6 +9,7 @@
 
 import type { components } from "./api.gen.ts";
 import { AuthError, OfflineError } from "./auth.ts";
+import { MAX_SMALL_BYTES, readBody, readJson, TooLarge } from "./body.ts";
 
 type Schemas = components["schemas"];
 
@@ -119,7 +120,8 @@ async function refusal(response: Response): Promise<ApiFailure> {
 	let code: string | undefined;
 	let message: string | undefined;
 	try {
-		const body = (await response.json()) as {
+		// An error is a few words: read as such, not whatever comes.
+		const body = ((await readJson(response, MAX_SMALL_BYTES)) ?? {}) as {
 			error?: { code?: unknown; message?: unknown };
 		};
 		if (typeof body.error?.code === "string") code = body.error.code;
@@ -250,52 +252,18 @@ export function httpApi(options: HttpApiOptions): Api {
 	};
 }
 
-/**
- * An answer's body, read up to `max` bytes: one that says it is longer, or
- * turns out to be, is given up (`TOO_LARGE`), not held in memory.
- */
+/** An answer's body, read up to `max` bytes (body.ts), with what went wrong said as the API's. */
 async function bodyOf(response: Response, max: number): Promise<Uint8Array> {
-	const tooLarge = () =>
-		new ApiFailure(
-			"server",
-			"The server's answer is larger than an answer may be.",
-			response.status,
-			TOO_LARGE,
-		);
-	const declared = Number(response.headers.get("content-length") ?? "");
-	const reader = response.body?.getReader();
-	if (Number.isFinite(declared) && declared > max) {
-		await reader?.cancel().catch(() => undefined);
-		throw tooLarge();
-	}
-	if (reader === undefined) return new Uint8Array(0);
-	const chunks: Uint8Array[] = [];
-	let size = 0;
 	try {
-		for (;;) {
-			const { value, done } = await reader.read();
-			if (done) break;
-			size += value.byteLength;
-			if (size > max) {
-				await reader.cancel().catch(() => undefined);
-				throw tooLarge();
-			}
-			chunks.push(value);
-		}
+		return await readBody(response, max);
 	} catch (error) {
-		if (error instanceof ApiFailure) throw error;
+		if (error instanceof TooLarge)
+			throw new ApiFailure("server", error.message, response.status, TOO_LARGE);
 		throw new ApiFailure(
 			"offline",
-			`The server's answer broke off${error instanceof Error && error.message ? ` (${error.message})` : ""}.`,
+			error instanceof Error ? error.message : String(error),
 		);
 	}
-	const bytes = new Uint8Array(size);
-	let at = 0;
-	for (const chunk of chunks) {
-		bytes.set(chunk, at);
-		at += chunk.byteLength;
-	}
-	return bytes;
 }
 
 /** The SHA-256 of an image's bytes, in lowercase hex: its name at the server. */

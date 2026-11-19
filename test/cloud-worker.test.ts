@@ -437,6 +437,80 @@ describe("signing out, and the server's address", () => {
 		expect(server.marksOf("c_slow")).toEqual([]);
 	});
 
+	test("nor while a sign-in is finishing: from the code to the account it is still under way", async () => {
+		const begun = await cloud.handle({ type: "cloud:begin" });
+		const state = stateOf((begun as { url: string }).url);
+		// The token endpoint takes its time.
+		let release: () => void = () => undefined;
+		const held = new Promise<void>((done) => {
+			release = done;
+		});
+		const real = http.fetch;
+		http.fetch = async (input, init) => {
+			if (input.endsWith("/oauth2/token")) await held;
+			return real(input, init);
+		};
+		const finishing = cloud.handle({
+			type: "cloud:finish",
+			redirect: `${REDIRECT}?code=code-tess&state=${state}`,
+		});
+		await Bun.sleep(30);
+		// Another window chooses a server meanwhile: no.
+		expect(await cloud.handle({ type: "cloud:server", server: DEV })).toEqual({
+			ok: false,
+			error:
+				"A sign-in is under way. Finish it, or close its window, before choosing another server.",
+		});
+		// And its answer is not taken a second time.
+		expect(
+			await cloud.handle({
+				type: "cloud:finish",
+				redirect: `${REDIRECT}?code=code-tess&state=${state}`,
+			}),
+		).toEqual({ ok: false, error: "No sign-in is under way. Try again." });
+		release();
+		expect(await finishing).toEqual({ ok: true });
+		http.fetch = real;
+		expect(await cloud.server()).toBe(SERVER);
+		expect((data.get(KEYS.account) as Account).user).toEqual(TESS);
+		expect(data.has(PENDING_KEY)).toBe(false);
+		// A finish that fails leaves no sign-in under way either.
+		await cloud.handle({ type: "cloud:sign-out" });
+		const again = await cloud.handle({ type: "cloud:begin" });
+		const failed = await cloud.handle({
+			type: "cloud:finish",
+			redirect: `${REDIRECT}?code=code-nobody&state=${stateOf((again as { url: string }).url)}`,
+		});
+		expect(failed.ok).toBe(false);
+		expect(data.has(PENDING_KEY)).toBe(false);
+		expect(await cloud.handle({ type: "cloud:server", server: DEV })).toEqual({
+			ok: true,
+		});
+	});
+
+	test("signed out while a refresh waits to be sent again, and the network returns: no tokens come back, and none stay live", async () => {
+		await signIn();
+		// The access token ran out; the network is down.
+		now += 2 * 3600_000;
+		http.state.offline = true;
+		const asked = cloud.handle({
+			type: "cloud:token",
+			server: SERVER,
+			teamId: TEAM,
+		});
+		await Bun.sleep(100);
+		const out = cloud.handle({ type: "cloud:sign-out" });
+		await Bun.sleep(100);
+		expect(data.has(TOKENS_KEY)).toBe(false);
+		// The network is back before the refresh's next try.
+		http.state.offline = false;
+		expect((await asked).ok).toBe(false);
+		await out;
+		await Bun.sleep(100);
+		expect(data.has(TOKENS_KEY)).toBe(false);
+		expect(data.has(KEYS.account)).toBe(false);
+	}, 15_000);
+
 	test("the server is not chosen while a sign-in is under way; its window closed, it is again", async () => {
 		const begun = await cloud.handle({ type: "cloud:begin" });
 		expect(await cloud.handle({ type: "cloud:server", server: DEV })).toEqual({

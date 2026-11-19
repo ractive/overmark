@@ -867,7 +867,22 @@ export class CloudSync {
 				mark.after > now
 			)
 				continue;
-			const detail = await api.getCase(team.id, book.caseId);
+			let detail: Awaited<ReturnType<Api["getCase"]>>;
+			try {
+				detail = await api.getCase(team.id, book.caseId);
+			} catch (error) {
+				// A case larger than can be read here is that case's matter:
+				// it waits, longer each time, and the run and the other cases
+				// go on. Anything else is the run's (no network, no access).
+				if (!(error instanceof ApiFailure) || error.code !== TOO_LARGE)
+					throw error;
+				await this.#readLater(
+					book.caseId,
+					mark.why,
+					"The team's copy of this case is larger than can be read here",
+				);
+				continue;
+			}
 			if (detail === undefined) {
 				await this.#notThere(book, team);
 				continue;
@@ -1005,7 +1020,9 @@ export class CloudSync {
 				after: this.#now().getTime() + wait,
 				...(wrong === undefined
 					? {}
-					: { text: `${wrong} It is read again later.` }),
+					: {
+							text: `${wrong.replace(/[.\s]+$/, "")}. It is read again later.`,
+						}),
 			},
 		});
 	}

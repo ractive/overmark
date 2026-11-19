@@ -12,6 +12,7 @@
  */
 
 import type { Kv } from "../kv.ts";
+import { MAX_SMALL_BYTES, readJson, TooLarge } from "./body.ts";
 
 /** The extension, as the server knows it: a public client, no secret. */
 export const CLIENT_ID = "sitegloss-extension";
@@ -61,9 +62,9 @@ export async function discover(
 	} catch (error) {
 		throw new OfflineError(error);
 	}
-	const body = (
-		response.ok ? await response.json().catch(() => undefined) : undefined
-	) as Record<string, unknown> | undefined;
+	const body = (response.ok ? await smallJson(response) : undefined) as
+		| Record<string, unknown>
+		| undefined;
 	const at = (name: string): string | undefined => {
 		const value = body?.[name];
 		try {
@@ -104,6 +105,12 @@ export interface Tokens {
 
 /** A sign-in under way: kept until the browser's window comes back. */
 export interface PendingSignIn {
+	/**
+	 * Its answer came and is being changed for tokens: no second answer is
+	 * taken for it, and it still counts as a sign-in under way (the server
+	 * is not chosen anew) until the account is written or the try failed.
+	 */
+	finishing?: true;
 	server: string;
 	/** Where the code is changed for tokens, as the server said when it began. */
 	token: string;
@@ -265,7 +272,7 @@ async function tokenRequest(
 	} catch (error) {
 		throw new OfflineError(error);
 	}
-	const body: unknown = await response.json().catch(() => undefined);
+	const body = await smallJson(response);
 	if (response.ok) return tokensOf(body, now, before);
 	const code = (body as { error?: unknown } | undefined)?.error;
 	// The grant is gone only when the server says so of this token or code
@@ -277,6 +284,16 @@ async function tokenRequest(
 	throw new AuthError(
 		`The server answered ${response.status}${typeof code === "string" ? ` (${code.slice(0, 80)})` : ""} to the sign-in.`,
 	);
+}
+
+/** A small answer (tokens, a discovery document), read as one: up to a megabyte. */
+async function smallJson(response: Response): Promise<unknown> {
+	try {
+		return await readJson(response, MAX_SMALL_BYTES);
+	} catch (error) {
+		if (error instanceof TooLarge) throw new AuthError(error.message);
+		throw new OfflineError(error);
+	}
 }
 
 /** The server could not be reached at all: try again later. */
@@ -403,6 +420,13 @@ const EARLY_MS = 60_000;
  */
 export class Session {
 	#renewing: Promise<Tokens> | undefined;
+	/**
+	 * Raised whenever the tokens are set or forgotten from outside a
+	 * renewal (a sign-in, a sign-out): a renewal under way, which can wait
+	 * for seconds between its tries, sees by it that its tokens are no
+	 * longer the ones to renew.
+	 */
+	#generation = 0;
 
 	constructor(
 		private readonly kv: Kv,
@@ -449,6 +473,11 @@ export class Session {
 	#renew(server: string, tokens: Tokens): Promise<Tokens> {
 		// One at a time: the second caller's refresh token would be the used one.
 		this.#renewing ??= (async () => {
+			// Whose tokens these are: a sign-out, or a sign-in of someone
+			// else, while this waits between its tries makes them nobody's.
+			const mine = this.#generation;
+			const over = () =>
+				new AuthError("The sign-in changed meanwhile. Sign in again.", true);
 			try {
 				const endpoints = await this.endpoints(server);
 				// A request whose answer did not come may have arrived: the
@@ -458,6 +487,7 @@ export class Session {
 				// times within that while, before it is given up as offline;
 				// waiting for the next run would be the try that signs out.
 				for (let attempt = 0; ; attempt++) {
+					if (this.#generation !== mine) throw over();
 					try {
 						const next = await refreshTokens(
 							this.fetcher,
@@ -466,6 +496,15 @@ export class Session {
 							tokens,
 							this.now(),
 						);
+						// Signed out, or signed in anew, while the answer was on
+						// its way: these tokens are live and nobody's. They are
+						// not stored (they would bring a signed-out account's
+						// tokens back, or put one person's under another's
+						// account), and their grant is ended at the server.
+						if (this.#generation !== mine) {
+							await revokeTokens(this.fetcher, endpoints, next);
+							throw over();
+						}
 						// Stored before it is used: the old refresh token is spent.
 						await this.kv.set({ [TOKENS_KEY]: next });
 						return next;
@@ -484,11 +523,13 @@ export class Session {
 	}
 
 	async store(tokens: Tokens): Promise<void> {
+		this.#generation++;
 		await this.kv.set({ [TOKENS_KEY]: tokens });
 	}
 
 	/** Forget the tokens here, at once; what they were, for the server to be told. */
 	async forget(): Promise<Tokens | undefined> {
+		this.#generation++;
 		const tokens = await this.tokens();
 		await this.kv.remove(TOKENS_KEY);
 		return tokens;
