@@ -8,8 +8,12 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
+	type Annotation,
 	type Case,
 	isOwnFinding,
+	markByKey,
+	markKey,
+	validateCase,
 	withChoice,
 	withComment,
 	withFinding,
@@ -30,9 +34,11 @@ import {
 	KEYS,
 	type Queue,
 } from "../src/lib/cloud/book.ts";
+import { undoAdd } from "../src/lib/save.ts";
 import type { StoredImage } from "../src/lib/store.ts";
+import { editAfter, type MarkEdit } from "../src/sidepanel/state.ts";
 import type { FakeApi } from "./cloud-fake.ts";
-import { FakeServer, TEAM } from "./cloud-fake.ts";
+import { FakeServer, requestProblem, TEAM } from "./cloud-fake.ts";
 import {
 	addMark,
 	CART,
@@ -62,6 +68,16 @@ beforeEach(() => {
 	tess = device("tess", server.api(TESS));
 	dana = device("dana", server.api(DANA));
 });
+
+/** The same device after its worker started anew: its store and database, nothing kept in memory. */
+function restarted(d: Device<FakeApi>): Device<FakeApi> {
+	const again = device(d.name, d.api);
+	for (const [key, value] of d.kv.data) again.kv.data.set(key, value);
+	for (const [key, value] of d.store.cases) again.store.cases.set(key, value);
+	for (const [key, value] of d.store.images) again.store.images.set(key, value);
+	again.clock.now = d.clock.now;
+	return again;
+}
 
 /** Wait until something is so (a run under way reaches a point). */
 async function until(is: () => boolean): Promise<void> {
@@ -152,7 +168,12 @@ describe("the first time a device meets its team", () => {
 		await addMark(tess, "c_new", "First mark");
 		await tess.engine.request();
 		const calls = tess.api.calls.filter((c) => !c.startsWith("GET"));
-		const firstPost = calls.findIndex((c) => c.startsWith("POST ops"));
+		// The new case goes alone, before any image is read (it names none);
+		// then the images, then the screenshots and marks that name them.
+		expect(calls[0]).toBe("POST ops 1");
+		const firstPost = calls.findIndex(
+			(c, i) => i > 0 && c.startsWith("POST ops"),
+		);
 		expect(
 			calls.slice(0, firstPost).filter((c) => c.startsWith("PUT blob")),
 		).toHaveLength(2);
@@ -515,17 +536,538 @@ describe("mark numbers", () => {
 		]);
 	});
 
-	test("a number the team has used is not given again here after an Undo", async () => {
+	test("a number the team has used is not given again here after the panel's delete", async () => {
 		await shared();
 		await addMark(tess, "c_flow", "Third");
 		await sync(tess, dana);
-		// Tess takes it out again (the panel's delete keeps the number; so does this).
+		// Tess takes it out again: the panel's delete, which keeps the number.
 		await change(tess, "c_flow", (c, now) => withoutAnnotation(c, "a3", now));
 		await sync(tess, dana);
 		const next = await addMark(dana, "c_flow", "Dana's next");
 		expect(next.number).toBe(4);
 		await sync(tess, dana);
 		expect(server.marksOf("c_flow").map((m) => m.number)).toEqual([1, 2, 4]);
+	});
+});
+
+describe("a form open on a mark that takes another number (review B, sync 8)", () => {
+	test("the form follows its mark: what was typed for one's own mark is not saved onto the teammate's that got its id", async () => {
+		await shared();
+		// Each adds a third mark; Tess has her comment form open on hers.
+		await addMark(tess, "c_flow", "Tess's third");
+		await addMark(dana, "c_flow", "Dana's third", { url: PAY });
+		const before = (await tess.store.getCase("c_flow")) as Case;
+		const mine = before.annotations.find((a) => a.id === "a3") as Annotation;
+		const edit: MarkEdit = {
+			annotationId: "a3",
+			mark: markKey(before, mine),
+			mode: "comment",
+			kind: "fixed",
+			text: "Typed while the sync ran",
+		};
+		await dana.engine.request();
+		await sync(tess, dana);
+		// Her mark is 4 now, and "a3" is Dana's.
+		const after = (await tess.store.getCase("c_flow")) as Case;
+		expect(after.annotations.map((a) => [a.id, a.comment])).toEqual([
+			["a1", "Total is cut off"],
+			["a2", "Pay button too pale"],
+			["a3", "Dana's third"],
+			["a4", "Tess's third"],
+		]);
+		expect(editAfter(edit, after)).toEqual({ ...edit, annotationId: "a4" });
+		// A change is held to the mark it was opened on, not to the id.
+		expect(markByKey(after, edit.mark)?.comment).toBe("Tess's third");
+		expect(markKey(after, after.annotations[2] as Annotation)).not.toBe(
+			edit.mark,
+		);
+		// The mark deleted meanwhile: the form closes, and nothing is its mark.
+		const gone = withoutAnnotation(after, "a4", after.updatedAt).value;
+		expect(editAfter(edit, gone)).toBeUndefined();
+		expect(markByKey(gone, edit.mark)).toBeUndefined();
+		// Unchanged: the same form.
+		expect(editAfter(edit, before)).toBe(edit);
+	});
+});
+
+describe("the toolbar's Undo in a synced case (review B, sync 12)", () => {
+	/** Undo the add of a mark, as the toolbar does: its number and its screenshot's id are free again. */
+	async function undo(d: Device, id: string): Promise<void> {
+		const c = (await d.store.getCase("c_flow")) as Case;
+		const a = c.annotations.find((x) => x.id === id) as Annotation;
+		d.clock.now = new Date(d.clock.now.getTime() + 1000);
+		const done = await undoAdd(
+			d.store,
+			"c_flow",
+			id,
+			{ shot: a.shot, comment: a.comment },
+			d.clock.now,
+		);
+		expect(done.removed).toBe(true);
+	}
+	const agree = async () => {
+		const mine = await tess.store.getCase("c_flow");
+		expect(look(mine)).toEqual(look(await dana.store.getCase("c_flow")));
+		expect(await images(tess, "c_flow")).toEqual(await images(dana, "c_flow"));
+		expect(server.marksOf("c_flow").map((m) => [m.number, m.comment])).toEqual(
+			look(mine)?.marks.map((m) => [m.number, m.comment]) as never,
+		);
+		expect(server.shotsOf("c_flow")).toHaveLength(mine?.shots.length ?? -1);
+		expect(status(tess)?.problems).toEqual([]);
+	};
+
+	test("undone, and the same element marked again before any run: the team gets the new mark with the new screenshot, and the old one goes", async () => {
+		await shared();
+		await addMark(tess, "c_flow", "Third", { element: true });
+		await sync(tess, dana);
+		const old = (await tess.store.getCase("c_flow"))?.annotations.find(
+			(a) => a.id === "a3",
+		) as Annotation;
+		const before = server.shotsOf("c_flow").map((s) => s.id);
+		await undo(tess, "a3");
+		const again = await addMark(tess, "c_flow", "Third", { element: true });
+		// The very same drawing, on a screenshot with the id the old one had.
+		expect(again.shot).toBe(old.shot);
+		await change(tess, "c_flow", (c, now) => ({
+			...c,
+			updatedAt: now,
+			annotations: c.annotations.map((a) =>
+				a.id === again.id
+					? { ...a, shape: old.shape, element: old.element }
+					: a,
+			),
+		}));
+		await sync(tess, dana);
+		await sync(tess, dana);
+		await agree();
+		// Not the old screenshot under the new mark.
+		const now = server.shotsOf("c_flow").map((s) => s.id);
+		expect(now).toHaveLength(3);
+		expect(now.filter((id) => !before.includes(id))).toHaveLength(1);
+	});
+
+	test("undone and marked again with another drawing, with and without a run in between", async () => {
+		await shared();
+		await addMark(tess, "c_flow", "Third", { element: true });
+		await sync(tess, dana);
+		await undo(tess, "a3");
+		await addMark(tess, "c_flow", "Third, taken again");
+		await sync(tess, dana);
+		await sync(tess, dana);
+		await agree();
+		// And with a run after the Undo: the number is the team's to give.
+		const last = (await tess.store.getCase("c_flow"))?.annotations.at(-1);
+		await undo(tess, last?.id as string);
+		await sync(tess, dana);
+		await addMark(tess, "c_flow", "Once more");
+		await sync(tess, dana);
+		await sync(tess, dana);
+		await agree();
+	});
+});
+
+describe("what never changes of a mark is compared as it is sent (review B, sync 5)", () => {
+	test("an element whose id is longer than the server takes: one mark, sent once, and it stays that mark", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_el");
+		await addMark(tess, "c_el", "One", { element: true });
+		await change(tess, "c_el", (c, now) =>
+			validateCase({
+				...c,
+				updatedAt: now,
+				annotations: c.annotations.map((a) => ({
+					...a,
+					element:
+						a.element === null
+							? null
+							: {
+									...a.element,
+									id: "x".repeat(600),
+									testId: "t".repeat(700),
+									role: "r".repeat(300),
+								},
+				})),
+			}),
+		);
+		await sync(tess, dana);
+		const rows = () =>
+			[...server.marks.values()].map((r) => [r.value.number, r.deleted]);
+		expect(rows()).toEqual([[1, false]]);
+		// The server has it cut, as its contract asks.
+		expect(server.marksOf("c_el")[0]?.element?.id).toHaveLength(500);
+		for (let i = 0; i < 3; i++) {
+			await change(tess, "c_el", (c, now) => withTitle(c, `Title ${i}`, now));
+			await sync(tess, dana);
+		}
+		tess.api.calls.length = 0;
+		for (let i = 0; i < 3; i++) await sync(tess, dana);
+		expect(rows()).toEqual([[1, false]]);
+		expect(posts(tess)).toEqual([]);
+		expect(status(tess)?.state).toBe("synced");
+		// Here it is whole still.
+		expect(
+			(await tess.store.getCase("c_el"))?.annotations[0]?.element?.id,
+		).toHaveLength(600);
+	});
+});
+
+describe("operations written down, and their images (review B, sync 9 and 11)", () => {
+	test("taken up from the queue when the server no longer has their images: not held against the case, the same run sends them with the images", async () => {
+		await shared();
+		await addMark(tess, "c_flow", "Third");
+		const ops = tess.api.ops.bind(tess.api);
+		tess.api.ops = async () => {
+			throw new ApiFailure("offline", "gone");
+		};
+		await tess.engine.request();
+		tess.api.ops = ops;
+		expect(
+			(tess.kv.data.get(KEYS.queue) as Queue).ops.map((op) => op.type),
+		).toEqual(["case.patch", "shot.create", "mark.create"]);
+		// More than a day later: the server swept the images nothing named.
+		const kept = new Set(
+			[...server.shots.values()].map((s) => s.value.image.sha256),
+		);
+		for (const m of server.marks.values()) kept.add(m.value.crop.sha256);
+		for (const sha of [...server.blobs.keys()])
+			if (!kept.has(sha)) server.blobs.delete(sha);
+		// A new worker: nothing is remembered of what was uploaded.
+		const again = restarted(tess);
+		await again.engine.request();
+		expect(status(again)?.state).toBe("synced");
+		expect(status(again)?.problems).toEqual([]);
+		expect(server.marksOf("c_flow").map((m) => m.comment)).toEqual([
+			"Total is cut off",
+			"Pay button too pale",
+			"Third",
+		]);
+		expect(book(again, "c_flow")?.rejected).toBeUndefined();
+	});
+
+	test("the operations and the ids they name are written in one transaction: a worker that stops there makes no mark twice", async () => {
+		await shared();
+		await addMark(tess, "c_flow", "Third");
+		const put = tess.kv.set.bind(tess.kv);
+		const writes: string[][] = [];
+		let stopped = false;
+		tess.kv.set = async (entries) => {
+			if (stopped) throw new Error("stopped");
+			writes.push(Object.keys(entries));
+			await put(entries);
+			// The worker is gone right after the queue is written.
+			if (entries[KEYS.queue] !== undefined) stopped = true;
+		};
+		const ops = tess.api.ops.bind(tess.api);
+		tess.api.ops = (() => {
+			throw new Error("stopped");
+		}) as never;
+		await tess.engine.request();
+		tess.kv.set = put;
+		tess.api.ops = ops;
+		expect(writes.at(-1)?.sort()).toEqual(["case:c_flow", KEYS.queue].sort());
+		expect(Object.keys(book(tess, "c_flow")?.marks ?? {})).toContain("a3");
+		await sync(restarted(tess), dana);
+		// One mark 3, no mark deleted and made again under 4.
+		expect(
+			[...server.marks.values()].map((r) => [r.value.number, r.deleted]),
+		).toEqual([
+			[1, false],
+			[2, false],
+			[3, false],
+		]);
+	});
+});
+
+describe("what the server refused (review B, sync 14)", () => {
+	test("a refusal the fetch settles goes with it: a change to a mark a teammate deleted is not said for ever", async () => {
+		await shared();
+		await change(dana, "c_flow", (c, now) => withoutAnnotation(c, "a2", now));
+		await dana.engine.request();
+		await change(tess, "c_flow", (c, now) =>
+			withComment(c, "a2", "Tess edits the deleted mark", now),
+		);
+		await tess.engine.request();
+		// The mark is gone here too, and there is nothing left to say.
+		expect(
+			(await tess.store.getCase("c_flow"))?.annotations.map((a) => a.id),
+		).toEqual(["a1"]);
+		await tess.engine.request();
+		expect(status(tess)?.problems).toEqual([]);
+		expect(status(tess)?.state).toBe("synced");
+		expect(book(tess, "c_flow")?.rejected).toBeUndefined();
+	});
+
+	test("more refusals than are kept: sending for that case stops and says so, instead of sending them again in turns", async () => {
+		await signIn(tess);
+		await startCase(tess, "c_many");
+		await addMark(tess, "c_many", "The first");
+		await tess.engine.request();
+		for (let i = 0; i < 60; i++) await addMark(tess, "c_many", `Mark ${i}`);
+		// A server that takes no further mark of this case.
+		const ops = tess.api.ops.bind(tess.api);
+		tess.api.ops = async (team, list) => {
+			const answer = await ops(
+				team,
+				list.filter((op) => op.type !== "mark.create"),
+			);
+			return {
+				...answer,
+				results: list.map(
+					(op) =>
+						answer.results?.find((r) => r.opId === op.opId) ?? {
+							opId: op.opId,
+							status: "rejected" as const,
+							error: { code: "limit" as const, message: "No more marks." },
+						},
+				),
+			};
+		};
+		await tess.engine.request();
+		expect(book(tess, "c_many")?.rejected).toHaveLength(50);
+		for (let run = 0; run < 3; run++) {
+			tess.api.calls.length = 0;
+			await tess.engine.request();
+			expect(posts(tess)).toEqual([]);
+		}
+		expect(status(tess)?.problems.map((p) => p.text)).toContain(
+			"50 changes to this case were not taken, so nothing more of it is sent. Sync now tries again.",
+		);
+	});
+});
+
+describe("what a run costs (review B, sync 13)", () => {
+	/** Count what a run reads. */
+	function counted(d: Device<FakeApi>) {
+		const count = { images: 0, hashed: 0, lists: 0, all: 0 };
+		const getImage = d.store.getImage.bind(d.store);
+		d.store.getImage = async (a, b) => {
+			count.images++;
+			return getImage(a, b);
+		};
+		const list = d.store.listCases.bind(d.store);
+		d.store.listCases = async () => {
+			count.lists++;
+			return list();
+		};
+		const all = d.kv.all.bind(d.kv);
+		d.kv.all = async () => {
+			count.all++;
+			return all();
+		};
+		const digest = crypto.subtle.digest.bind(crypto.subtle);
+		crypto.subtle.digest = (async (algorithm: never, data: never) => {
+			count.hashed++;
+			return digest(algorithm, data);
+		}) as never;
+		const zero = () => {
+			count.images = count.hashed = count.lists = count.all = 0;
+			d.api.calls.length = 0;
+		};
+		return {
+			count,
+			zero,
+			done: () => {
+				crypto.subtle.digest = digest;
+			},
+		};
+	}
+
+	test("cases the role may not send: no image is read or hashed, at the first run or any later, and it stays said", async () => {
+		await signIn(tess);
+		tess.api.permissions = tess.api.permissions.filter(
+			(p) => p !== "mark:create" && p !== "case:create",
+		);
+		await tess.engine.retry();
+		for (let n = 0; n < 5; n++) {
+			await startCase(tess, `c_${n}`);
+			for (let i = 0; i < 4; i++) await addMark(tess, `c_${n}`, `Mark ${i}`);
+		}
+		const { count, zero, done } = counted(tess);
+		try {
+			for (let run = 0; run < 3; run++) {
+				zero();
+				await tess.engine.request();
+				expect([count.images, count.hashed]).toEqual([0, 0]);
+				expect(
+					tess.api.calls.filter((c) => !c.startsWith("GET changes")),
+				).toEqual([]);
+				expect(status(tess)?.problems).toHaveLength(5);
+				expect(status(tess)?.problems[0]?.text).toContain(
+					"Your role in “Pedal & Pine web” does not allow",
+				);
+			}
+			// The role allows it again: a reason to look once more.
+			tess.api.permissions = [
+				...tess.api.permissions,
+				"mark:create",
+				"case:create",
+			];
+			await tess.engine.retry();
+			expect(server.cases.size).toBe(5);
+			expect(status(tess)?.problems).toEqual([]);
+		} finally {
+			done();
+		}
+	});
+
+	test("a run with nothing to do reads the cases once and the sync's database once; a first sync of thirty cases does not read them thirty times", async () => {
+		await signIn(tess);
+		for (let n = 0; n < 30; n++) {
+			await startCase(tess, `c_${n}`);
+			await addMark(tess, `c_${n}`, "Mark");
+		}
+		const { count, zero, done } = counted(tess);
+		try {
+			zero();
+			await tess.engine.request();
+			expect(server.cases.size).toBe(30);
+			// (Before: the cases 33 times, the database 35 times.)
+			expect(count.lists).toBeLessThan(6);
+			expect(count.all).toBeLessThan(10);
+			// (The run after it fetches what it sent itself; then there is nothing.)
+			await tess.engine.request();
+			zero();
+			await tess.engine.request();
+			expect([count.lists, count.all, count.images, count.hashed]).toEqual([
+				1, 1, 0, 0,
+			]);
+		} finally {
+			done();
+		}
+	});
+
+	test("a case the server refuses whole, in a worker that starts anew: nothing is read, hashed, asked or uploaded for it again", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_big");
+		for (let i = 0; i < 10; i++) await addMark(tess, "c_big", `Mark ${i}`);
+		await sync(tess, dana);
+		// Dana keeps hers, the team deletes the case, and Dana shares hers
+		// again: the id is taken (open question 10b).
+		await dana.engine.signOut();
+		await removeCase(tess, "c_big");
+		await tess.engine.request();
+		await signIn(dana);
+		await dana.engine.share("c_big");
+		await dana.engine.request();
+		expect(
+			status(dana)
+				?.problems.map((p) => p.text)
+				.join(" "),
+		).toContain("The case's id is taken");
+		server.blobs.clear();
+		for (let start = 0; start < 2; start++) {
+			const again = restarted(dana);
+			const { count, done } = counted(again);
+			again.api.calls.length = 0;
+			try {
+				await again.engine.request();
+				expect([count.images, count.hashed]).toEqual([0, 0]);
+				expect(
+					again.api.calls.filter((c) => !c.startsWith("GET changes")),
+				).toEqual([]);
+				expect(status(again)?.state).toBe("problem");
+			} finally {
+				done();
+			}
+		}
+	});
+});
+
+describe("the contract, in every run (review B, sync 15)", () => {
+	test("the server in memory takes only what the API's schemas take, and no more than one request may hold", () => {
+		const good: Op = {
+			opId: "o_1",
+			type: "case.patch",
+			caseId: "c_1",
+			title: "A title",
+		};
+		expect(requestProblem([good])).toBeUndefined();
+		for (const [what, bad] of [
+			["a title over 500 characters", { ...good, title: "t".repeat(501) }],
+			["a field of another type", { ...good, title: 7 }],
+			["an operation the API does not have", { ...good, type: "case.rename" }],
+			[
+				"a time that is none",
+				{
+					opId: "o_2",
+					type: "shot.create",
+					caseId: "c_1",
+					shot: {
+						id: "sh_1",
+						url: "https://shop.example/",
+						image: { sha256: "a".repeat(64), width: 1, height: 1, bytes: 1 },
+						scrollX: 0,
+						scrollY: 0,
+						viewport: { width: 1, height: 1, dpr: 1 },
+						capturedAt: "yesterday",
+					},
+				},
+			],
+		] as const)
+			expect([what, requestProblem([bad as never])?.status]).toEqual([
+				what,
+				400,
+			]);
+		// 500 characters are 500 characters, also when each is two code units.
+		expect(
+			requestProblem([{ ...good, title: "😀".repeat(500) }]),
+		).toBeUndefined();
+		expect(
+			requestProblem(Array.from({ length: 201 }, () => good))?.status,
+		).toBe(400);
+		expect(
+			requestProblem([{ ...good, summary: "s".repeat(50_000) }]),
+		).toBeUndefined();
+		expect(
+			requestProblem(
+				Array.from({ length: 200 }, (_, i) => ({
+					...good,
+					opId: `o_${i}`,
+					summary: "s".repeat(50_000),
+				})),
+			)?.status,
+		).toBe(413);
+	});
+
+	test("a request the server refuses whole is found out one operation at a time: the one it does not take is said, the others go", async () => {
+		await shared();
+		await addMark(tess, "c_flow", "A good one");
+		await addMark(tess, "c_flow", "One this server does not take");
+		// A server whose contract is narrower in something (a later one's
+		// rule, a proxy's): the request with that mark is refused whole.
+		const ops = tess.api.ops.bind(tess.api);
+		tess.api.ops = async (team, list) => {
+			if (
+				list.some(
+					(op) =>
+						op.type === "mark.create" &&
+						op.mark.comment === "One this server does not take",
+				)
+			)
+				throw new ApiFailure(
+					"refused",
+					"The request is not one the API takes.",
+					400,
+					"invalid",
+				);
+			return ops(team, list);
+		};
+		await tess.engine.request();
+		expect(server.marksOf("c_flow").map((m) => m.comment)).toEqual([
+			"Total is cut off",
+			"Pay button too pale",
+			"A good one",
+		]);
+		expect(status(tess)?.state).toBe("problem");
+		expect(status(tess)?.problems.map((p) => p.text)).toEqual([
+			"Mark 4 was not taken: The request is not one the API takes.",
+		]);
+		// Not asked again at every run.
+		tess.api.calls.length = 0;
+		await tess.engine.request();
+		expect(posts(tess)).toEqual([]);
 	});
 });
 
@@ -1473,6 +2015,37 @@ describe("a contract that has grown", () => {
 		expect(
 			look(await dana.store.getCase("c_many"))?.marks.map((m) => m.comment),
 		).toEqual([1, 2, 3, 4, 5, 6, 7].map((i) => `Mark ${i}`));
+		// Not a whole state now: changes since a revision, in pages, with a
+		// delete in them, and a change made between two of the pages.
+		for (let i = 8; i <= 12; i++) {
+			await addMark(tess, "c_many", `Mark ${i}`);
+			await tess.engine.request();
+		}
+		await change(tess, "c_many", (c, now) => withoutAnnotation(c, "a9", now));
+		await tess.engine.request();
+		const changes = dana.api.changes.bind(dana.api);
+		let asked = 0;
+		dana.api.changes = async (team, since, limit) => {
+			if (++asked === 2) {
+				await change(tess, "c_many", (c, now) =>
+					withComment(c, "a2", "Changed between two pages", now),
+				);
+				await tess.engine.request();
+			}
+			return changes(team, since, limit);
+		};
+		await dana.engine.request();
+		dana.api.changes = changes;
+		expect(asked).toBeGreaterThan(2);
+		expect(look(await dana.store.getCase("c_many"))).toEqual(
+			look(await tess.store.getCase("c_many")),
+		);
+		expect(
+			(await dana.store.getCase("c_many"))?.annotations.map((a) => a.number),
+		).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12]);
+		expect((await dana.store.getCase("c_many"))?.annotations[1]?.comment).toBe(
+			"Changed between two pages",
+		);
 		expect(Object.values(await images(dana, "c_many"))).not.toContain(
 			"MISSING",
 		);
@@ -1644,23 +2217,29 @@ describe("the worker stopped in the middle", () => {
 		await shared();
 		await addMark(tess, "c_flow", "Third");
 		await tess.engine.request();
-		// Dana's device stores the case and stops before it writes its book.
+		// Dana's device stores the case and stops before it writes its book:
+		// from there on nothing is written at all, and a new worker takes
+		// up what the stopped one left.
 		const put = dana.kv.set.bind(dana.kv);
 		let stopped = false;
 		dana.kv.set = async (entries) => {
 			const b = entries["case:c_flow"] as CaseBook | undefined;
 			// The book that would say the server has the new mark.
-			if (b?.shadow && Object.keys(b.shadow.marks).length === 3 && !stopped) {
-				stopped = true;
-				throw new Error("the worker stopped");
-			}
+			if (b?.shadow && Object.keys(b.shadow.marks).length === 3) stopped = true;
+			if (stopped) return new Promise<void>(() => undefined);
 			return put(entries);
 		};
-		await dana.engine.request();
-		expect(stopped).toBe(true);
+		void dana.engine.request();
+		await until(() => stopped);
 		expect((await dana.store.getCase("c_flow"))?.annotations).toHaveLength(3);
+		// The ids were written down first, each with its mark's drawing.
+		expect(Object.keys(book(dana, "c_flow")?.announced?.marks ?? {})).toEqual([
+			"a3",
+		]);
 		dana.kv.set = put;
+		dana = restarted(dana);
 		await sync(dana, tess);
+		expect(book(dana, "c_flow")?.announced).toBeUndefined();
 		expect(server.marksOf("c_flow")).toHaveLength(3);
 		expect(look(await dana.store.getCase("c_flow"))).toEqual(
 			look(await tess.store.getCase("c_flow")),
@@ -1679,16 +2258,16 @@ describe("the worker stopped in the middle", () => {
 		let stopped = false;
 		dana.kv.set = async (entries) => {
 			const b = entries["case:c_other"] as CaseBook | undefined;
-			if (b?.shadow !== undefined && !stopped) {
-				stopped = true;
-				throw new Error("the worker stopped");
-			}
+			if (b?.shadow !== undefined) stopped = true;
+			if (stopped) return new Promise<void>(() => undefined);
 			return put(entries);
 		};
-		await dana.engine.request();
-		expect(stopped).toBe(true);
+		void dana.engine.request();
+		await until(() => stopped);
 		expect((await dana.store.getCase("c_other"))?.annotations).toHaveLength(2);
 		dana.kv.set = put;
+		// A new worker, with what the stopped one had written.
+		dana = restarted(dana);
 		await sync(dana, tess);
 		expect(server.marksOf("c_other")).toHaveLength(2);
 		expect(server.shotsOf("c_other")).toHaveLength(2);

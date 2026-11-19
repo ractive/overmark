@@ -88,7 +88,11 @@ Only in four cases, all started by you:
    server can therefore tell when your panel is open. With the panel closed, Sitegloss
    asks the server every few minutes instead. A case you kept on this device is not
    sent because the server, or a teammate, has a case with the same id; Sitegloss tells
-   you, and "Share with team" is what joins the two.
+   you, and "Share with team" is what joins the two: marks only you have are then sent,
+   and where both have the same mark with other words the team's are kept, which
+   Sitegloss says before you click, with the number of marks. A case is deleted for
+   the team only when you delete it while it syncs; what you delete while signed out,
+   the team keeps, and it comes back to you at the next sign-in.
 
    In Firefox, the browser asks at "Sign in" for the same data collection consent as for
    an AI app (website content and browsing activity); taking it back signs you out.

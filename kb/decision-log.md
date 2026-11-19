@@ -1808,6 +1808,34 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   such a case becomes a `case.delete`. A synced case that is merely not in the store
   (its database lost, or made anew) is read from the server again; before, a lost
   database deleted every synced case for the team. Marks have no such record.
+- **What never changes of a mark is compared as it goes to the server and comes back**
+  (`fixedOf`: the element cut as it is sent, then read as it is received). An element
+  whose `id`, `testId` or `role` was longer than the server takes was "another mark"
+  at every comparison: deleted and made again, under a new number, for ever.
+- **The queue and the book are written in one transaction;** an image that was not at
+  the server when operations from the queue were sent (they have none at hand) is not
+  held against the case: the same run's look at the case has the images.
+- **Refusals:** a book's refusals go when a fetch leaves the case as the server has it
+  (a change to a mark a teammate deleted was said for ever). When a case has as many
+  refusals as are kept (50), nothing more of it is sent and that is said, instead of
+  sending the ones that fell off the list again in turns.
+- **A case that cannot be sent is passed by** until it or the role changes
+  (`CaseBook.idle`, with what there is to say about it), and what is held back or not
+  allowed is found out before any image is read (an operation's key no longer hangs
+  on its image). A new case goes alone before any of its images is read. A run with
+  nothing to do reads the cases once and the sync's database once; the progress
+  while sending reads nothing again. A worker's start looks at when the last sync was,
+  whatever came of it. Not done: keeping each image's SHA-256 in the book (it would
+  grow with every image; with the above no image of a case that cannot go is hashed,
+  and one that can is hashed when it is sent).
+- **A form open on a mark follows that mark** (`markKey`: when its screenshot was
+  taken, and its drawing), and a change made in the panel is held to the mark it was
+  opened on in the same transaction that writes it. The team's sync can give a mark
+  another number while its form is open, and the id it had is then a teammate's mark.
+- **The server in memory holds every request to the API's JSON schemas**
+  (`src/lib/cloud/openapi-v1.json`, with `ajv`, a dev dependency for the tests alone)
+  and to the limits of one request, so the contract is met in every test run and not
+  only against a real server.
 - **A cursor of 0 is none:** the whole state is asked for. (The server answered
   `since=0` as the whole state, which names no deletes; it answers it as any revision
   now, and the server in memory does the same.)

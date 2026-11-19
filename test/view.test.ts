@@ -231,6 +231,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a1",
+					mark: "",
 					mode: "resolve",
 					kind: "fixed",
 					text: "",
@@ -264,6 +265,7 @@ describe("a mark's status and actions", () => {
 			caseState({ ...c, updatedAt }, (s) => {
 				s.markEdit = {
 					annotationId: "a1",
+					mark: "",
 					mode: "comment",
 					kind: "fixed",
 					text: "x",
@@ -513,6 +515,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a2",
+					mark: "",
 					mode: "comment",
 					kind: "fixed",
 					text: "",
@@ -1002,6 +1005,7 @@ describe("Verify (DEC-023)", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a1",
+					mark: "",
 					mode: "resolve",
 					kind: "fixed",
 					text: "",
@@ -1048,6 +1052,7 @@ describe("Verify (DEC-023)", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a2",
+					mark: "",
 					mode: "reopen",
 					kind: "fixed",
 					text: "",

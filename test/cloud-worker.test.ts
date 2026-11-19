@@ -316,6 +316,28 @@ describe("syncing from the worker", () => {
 		expect(alarms.size).toBe(1);
 	});
 
+	test("nor does one whose last sync left something said: a refusal held back is no reason to ask at every start", async () => {
+		await signIn();
+		// A case the role may not send: the state is "problem", and stays so.
+		http.state.permissions = http.state.permissions.filter(
+			(p) => p !== "mark:create" && p !== "case:create",
+		);
+		await cloud.handle({ type: "cloud:run", retry: true });
+		await Bun.sleep(400);
+		await startCase(here(), "c_held");
+		await addMark(here(), "c_held", "Not allowed to send");
+		await settled();
+		expect(status()?.state).toBe("problem");
+		for (let start = 0; start < 3; start++) {
+			http.state.requests.length = 0;
+			now += 10_000;
+			cloud = worker();
+			cloud.start();
+			await Bun.sleep(400);
+			expect(http.state.requests).toEqual([]);
+		}
+	});
+
 	test("the alarms are the sync's: its own start a run, another's is left", async () => {
 		await signIn();
 		expect(cloud.alarm("sitegloss-keep-ai-on")).toBe(false);

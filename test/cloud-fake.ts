@@ -8,7 +8,45 @@
  * gets the whole state (`reset`).
  */
 
+import Ajv2020 from "ajv/dist/2020";
 import { MAX_PAGES, pageKey, samePage } from "../src/lib/case.ts";
+import contract from "../src/lib/cloud/openapi-v1.json" with { type: "json" };
+
+/**
+ * The contract itself: every request of operations is held to the JSON
+ * schemas of the API's document (the copy the types are generated from),
+ * as the real server holds it to the same schemas, and to its limits for
+ * one request. So what the extension sends meets the contract in every
+ * test run, not only in those against a real server.
+ */
+const ajv = new Ajv2020({ strict: false });
+ajv.addFormat(
+	"date-time",
+	/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/,
+);
+ajv.addFormat("binary", true);
+ajv.addSchema(contract, "v1");
+const validRequest = ajv.compile({ $ref: "v1#/components/schemas/OpsRequest" });
+
+/** The most one request of operations may weigh at the server. */
+export const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+
+/** Why the server would answer 400 or 413 to these operations as a whole; none: it takes them. */
+export function requestProblem(
+	ops: readonly Op[],
+): { status: number; message: string } | undefined {
+	const body = JSON.stringify({ ops });
+	if (new TextEncoder().encode(body).length > MAX_REQUEST_BYTES)
+		return { status: 413, message: "The request is too large." };
+	// As it arrives: what JSON does not carry is not there.
+	if (!validRequest(JSON.parse(body)))
+		return {
+			status: 400,
+			message: `The request is not one the API takes: ${ajv.errorsText(validRequest.errors)}`,
+		};
+	return undefined;
+}
+
 import {
 	type Api,
 	ApiFailure,
@@ -753,6 +791,16 @@ export class FakeServer {
 			},
 			async ops(_team, ops) {
 				reach(`POST ops ${ops.length}`);
+				// Refused as a whole, as the server refuses what its schemas
+				// do not take: nothing of it is applied.
+				const wrong = requestProblem(ops);
+				if (wrong !== undefined)
+					throw new ApiFailure(
+						"refused",
+						wrong.message,
+						wrong.status,
+						wrong.status === 413 ? "too_large" : "invalid",
+					);
 				const answer = server.applyOps(
 					ops,
 					{ id: user.id, name: user.name },

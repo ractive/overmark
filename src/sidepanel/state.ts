@@ -5,7 +5,12 @@
  * of work for the same thing makes an older one drop its result (`Latest`).
  */
 
-import type { Case, ResolveChoice, StatusGroup } from "../lib/case.ts";
+import {
+	type Case,
+	markByKey,
+	type ResolveChoice,
+	type StatusGroup,
+} from "../lib/case.ts";
 import type { CloudStatus, SyncMode } from "../lib/cloud/book.ts";
 import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
@@ -14,6 +19,11 @@ import type { Size } from "./size.ts";
 
 export interface MarkEdit {
 	annotationId: string;
+	/**
+	 * Which mark the form was opened on (`markKey`): its id can come to be
+	 * another mark's while the form is open (the team's sync renumbers).
+	 */
+	mark: string;
 	/** Resolve… or Change…, Edit comment, or Reopen… with its note (DEC-023). */
 	mode: "resolve" | "comment" | "reopen";
 	/** The status chosen (resolve). */
@@ -351,3 +361,20 @@ export class Panel {
 }
 
 export { Latest } from "../lib/latest.ts";
+
+/**
+ * The open form after the case changed: still on its mark, also when that
+ * mark has another id now (the team's sync gave it another number, and
+ * the id it had is a teammate's mark). Closed when the mark is gone.
+ */
+export function editAfter(
+	edit: MarkEdit | undefined,
+	c: Case | undefined,
+): MarkEdit | undefined {
+	if (edit === undefined || c === undefined) return edit;
+	const now = markByKey(c, edit.mark);
+	if (now === undefined) return undefined;
+	return now.id === edit.annotationId
+		? edit
+		: { ...edit, annotationId: now.id };
+}

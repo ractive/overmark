@@ -100,10 +100,21 @@ export function hashText(text: string): string {
 	return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-/** An operation without its id, as one short text: the same change again has the same. */
+/**
+ * An operation without its id, as one short text: the same change again has
+ * the same. Without its image too (a new screenshot's, a new mark's crop):
+ * which operation it is does not hang on that, and so what is held back is
+ * known before any image is read.
+ */
 export function opKey(op: Op): string {
 	const { opId: _id, ...rest } = op;
-	return `${op.type}:${hashText(canonical(rest))}`;
+	const plain =
+		rest.type === "shot.create"
+			? { ...rest, shot: { ...rest.shot, image: null } }
+			: rest.type === "mark.create"
+				? { ...rest, mark: { ...rest.mark, crop: null } }
+				: rest;
+	return `${op.type}:${hashText(canonical(plain))}`;
 }
 
 // --- what of a case syncs --------------------------------------------------------
@@ -131,9 +142,18 @@ export function markContent(a: Annotation): MarkContent {
 	};
 }
 
-/** What never changes of a mark once it is made, as one text. */
+/**
+ * What never changes of a mark once it is made, as one text: its drawing
+ * and its element, as they are after the way to the server and back. Both
+ * sides are compared in that form everywhere: an element is cut on the way
+ * out (an `id` of 600 characters goes as 500) and on the way in, and a
+ * mark compared uncut here with itself cut there was "another mark", made
+ * anew at every run.
+ */
 export function fixedOf(a: Pick<Annotation, "shape" | "element">): string {
-	return hashText(canonical([a.shape, a.element]));
+	return hashText(
+		canonical([shapeIn(a.shape), elementIn(elementOut(a.element))]),
+	);
 }
 
 // --- to the server ---------------------------------------------------------------
@@ -1330,8 +1350,10 @@ export function mergeCase(
 	// Nothing left to send: the next look at the case can pass it by.
 	if (isClean(c, book)) {
 		book.cleanAt = c.updatedAt;
-		// The server and this device agree: what was sent last arrived.
+		// The server and this device agree: what was sent last arrived, and
+		// what it refused before is no longer wanted here either.
 		delete book.sent;
+		delete book.rejected;
 	} else delete book.cleanAt;
 	return {
 		value: c,

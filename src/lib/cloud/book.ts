@@ -143,6 +143,14 @@ export interface CaseBook {
 	 * They are not sent a fourth time (`MAX_SAME_SENDS`).
 	 */
 	sent?: { keys: string; times: number };
+	/**
+	 * Nothing of the case could be sent as it was at `at` (its `updatedAt`),
+	 * with what the user may do (`may`): what is left is held back, not
+	 * allowed, or lacks its image. Until one of the two changes the case is
+	 * passed by, with nothing read, hashed or asked, and `texts` is what
+	 * there is to say about it. "Sync now" looks again.
+	 */
+	idle?: { at: string; may: string; texts: string[] };
 	/** Its title, for a sentence about it once it is gone. */
 	title?: string;
 	/**
@@ -263,6 +271,9 @@ export const OFF: CloudStatus = { state: "off", problems: [], undecided: 0 };
 
 /** The books, read and written through the database. */
 export class Books {
+	/** How often a book was written or removed: whoever read them knows whether to read again. */
+	writes = 0;
+
 	constructor(private readonly kv: Kv) {}
 
 	async all(): Promise<Map<string, CaseBook>> {
@@ -281,12 +292,14 @@ export class Books {
 
 	async put(...books: CaseBook[]): Promise<void> {
 		if (books.length === 0) return;
+		this.writes++;
 		await this.kv.set(
 			Object.fromEntries(books.map((b) => [BOOK + b.caseId, b])),
 		);
 	}
 
 	async remove(caseId: string): Promise<void> {
+		this.writes++;
 		await this.kv.remove(BOOK + caseId);
 	}
 

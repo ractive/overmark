@@ -214,9 +214,9 @@ export class Cloud {
 			const last = Date.parse(
 				(status as CloudStatus | undefined)?.lastSyncedAt ?? "",
 			);
-			const fresh =
-				(status as CloudStatus | undefined)?.state === "synced" &&
-				this.#now() - last < START_QUIET_MS;
+			// Whatever came of it (a refusal held back leaves the state at
+			// "problem" for long): it looked, and need not at every start.
+			const fresh = this.#now() - last < START_QUIET_MS;
 			if (queue === undefined && fresh) return;
 			this.request();
 		})();

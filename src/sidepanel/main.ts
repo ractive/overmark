@@ -14,6 +14,8 @@ import {
 	linkProblem,
 	MAX_COMMENT,
 	MAX_LINK,
+	markByKey,
+	markKey,
 	markStatus,
 	newId,
 	nextNumbers,
@@ -75,6 +77,7 @@ import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
 	type CaseHint,
 	type Exported,
+	editAfter,
 	type ImportBatch,
 	Latest,
 	Panel,
@@ -767,7 +770,11 @@ async function refreshCase(): Promise<void> {
 		!opened &&
 		state.current?.annotations.length === 0 &&
 		c.annotations.length > 0;
-	update((s) => (s.current = c));
+	update((s) => {
+		s.current = c;
+		// An open form stays on its mark, whatever the mark's id is now.
+		s.markEdit = editAfter(s.markEdit, c);
+	});
 	// Just opened, or its first mark is in: its marks go to the tab in front
 	// (DEC-022, DEC-026).
 	if (opened || first) void follow();
@@ -1798,12 +1805,13 @@ const actions: Actions = {
 		})().catch((error: unknown) => hint(`Could not delete: ${message(error)}`));
 	},
 
-	editMark(_c, a, mode) {
+	editMark(c, a, mode) {
 		const status = markStatus(a);
 		update((s) => {
 			s.markDeleteArmed = undefined;
 			s.markEdit = {
 				annotationId: a.id,
+				mark: markKey(c, a),
 				mode,
 				kind: status === "open" ? "fixed" : status,
 				text:
@@ -1828,15 +1836,15 @@ const actions: Actions = {
 
 	resolveMark(c, a, kind, note) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
-			value: withChoice(current, a.id, kind, note, now),
+		void changeMark(c, a, (current, id) => ({
+			value: withChoice(current, id, kind, note, now),
 		}));
 	},
 
 	verifyMark(c, a) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
-			value: withVerified(current, a.id, undefined, now),
+		void changeMark(c, a, (current, id) => ({
+			value: withVerified(current, id, undefined, now),
 		}));
 	},
 
@@ -1844,9 +1852,9 @@ const actions: Actions = {
 		// The developer reads it first: in the panel, a reopen says why.
 		if (note.trim() === "") return;
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
+		void changeMark(c, a, (current, id) => ({
 			// Opened meanwhile: the form stays, and says why.
-			value: withReopen(current, a.id, { note, refuseOpen: true }, now),
+			value: withReopen(current, id, { note, refuseOpen: true }, now),
 		}));
 	},
 
@@ -1863,8 +1871,8 @@ const actions: Actions = {
 
 	saveComment(c, a, text) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
-			value: withComment(current, a.id, text, now),
+		void changeMark(c, a, (current, id) => ({
+			value: withComment(current, id, text, now),
 		}));
 	},
 
@@ -1888,8 +1896,8 @@ const actions: Actions = {
 		if (deleting.has(a.id)) return;
 		deleting.add(a.id);
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) =>
-			withoutAnnotation(current, a.id, now),
+		void changeMark(c, a, (current, id) =>
+			withoutAnnotation(current, id, now),
 		).finally(() => deleting.delete(a.id));
 	},
 
@@ -1915,9 +1923,9 @@ const actions: Actions = {
 		deleting.add(key);
 		const now = new Date().toISOString();
 		void changeMark(
-			c.id,
-			a.id,
-			(current) => ({ value: withoutFinding(current, a.id, findingId, now) }),
+			c,
+			a,
+			(current, id) => ({ value: withoutFinding(current, id, findingId, now) }),
 			// The mark's comment or resolve form, unsaved, stays open.
 			{ keepEdit: true },
 		).finally(() => {
@@ -2243,17 +2251,30 @@ const deleting = new Set<string>();
  */
 /** Answers why it was not saved, if it was not (the hint says so too). */
 async function changeMark(
-	caseId: string,
-	annotationId: string,
-	change: (current: Case) => { value: Case; images?: string[] },
+	c: Case,
+	a: Annotation,
+	/** `id`: the mark's id in the case as it is stored now. */
+	change: (current: Case, id: string) => { value: Case; images?: string[] },
 	{ keepEdit = false } = {},
 ): Promise<string | undefined> {
 	const hint = caseHintWriter();
+	const caseId = c.id;
+	let annotationId = a.id;
+	// Which mark it is about, whatever its id is by now: the team's sync can
+	// give a mark another number while its form is open, and the id it had
+	// is then a teammate's mark (DEC-039).
+	const key = markKey(c, a);
 	try {
 		// The images go in the same transaction: a save may take a freed path.
 		const saved = await store.updateCase(caseId, (current) => {
 			if (current === undefined) throw new Error("The case no longer exists.");
-			const next = change(current);
+			const now = markByKey(current, key);
+			if (now === undefined)
+				throw new Error(
+					"This mark is no longer in the case as it was: it was changed or removed meanwhile. Nothing was saved.",
+				);
+			annotationId = now.id;
+			const next = change(current, now.id);
 			return {
 				value: validateCase(next.value),
 				deleteImages: next.images ?? [],
@@ -2324,18 +2345,18 @@ function answerMark(
 				answer({ ok: false, error: "That comment is too long." });
 				return false;
 			}
-			void changeMark(c.id, a.id, (current) => ({
-				value: withComment(current, a.id, request.text, now),
+			void changeMark(c, a, (current, id) => ({
+				value: withComment(current, id, request.text, now),
 			})).then(done);
 			return true;
 		case "mark:resolve":
-			void changeMark(c.id, a.id, (current) => ({
-				value: withChoice(current, a.id, request.kind, request.note, now),
+			void changeMark(c, a, (current, id) => ({
+				value: withChoice(current, id, request.kind, request.note, now),
 			})).then(done);
 			return true;
 		case "mark:verify":
-			void changeMark(c.id, a.id, (current) => ({
-				value: withVerified(current, a.id, undefined, now),
+			void changeMark(c, a, (current, id) => ({
+				value: withVerified(current, id, undefined, now),
 			})).then(done);
 			return true;
 		case "mark:reopen":
@@ -2344,11 +2365,11 @@ function answerMark(
 				answer({ ok: false, error: "Say what is still wrong." });
 				return false;
 			}
-			void changeMark(c.id, a.id, (current) => ({
+			void changeMark(c, a, (current, id) => ({
 				// Opened meanwhile: the form stays, and says why.
 				value: withReopen(
 					current,
-					a.id,
+					id,
 					{ note: request.note, refuseOpen: true },
 					now,
 				),
@@ -2360,8 +2381,8 @@ function answerMark(
 				return false;
 			}
 			deleting.add(a.id);
-			void changeMark(c.id, a.id, (current) =>
-				withoutAnnotation(current, a.id, now),
+			void changeMark(c, a, (current, id) =>
+				withoutAnnotation(current, id, now),
 			)
 				.then(done)
 				.finally(() => deleting.delete(a.id));

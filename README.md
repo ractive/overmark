@@ -322,7 +322,12 @@ Sitegloss works without an account, and nothing in it asks for one. If your team
 - A resolution, a verification, a reopen and a finding say who made them ("by Dana"),
   and a mark who added it.
 - Deleting a case the team has deletes it for the team; the button says so. A case
-  deleted for the team goes here too.
+  deleted for the team goes here too. What you delete while signed out is not deleted
+  for the team: at the next sign-in the team's marks are back, and Sitegloss says so.
+- A case the team already has (the same file on two devices) is joined with the
+  team's, not sent a second time: marks only here are sent, the team's other marks
+  come here, and where both differ the team's text is kept. Sitegloss says so before
+  you share, with the number of marks.
 - The Account section shows who is signed in, the team, what the sync is at (synced,
   syncing, offline and trying again, or what the server did not take and why), "Sync
   now" and "Sign out". Signing out stops the sync and keeps the cases, on this device

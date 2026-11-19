@@ -632,6 +632,27 @@ export function pageKey(address: string): string {
 export const samePage = (a: string, b: string): boolean =>
 	pageKey(a) === pageKey(b);
 
+/**
+ * What tells a mark from every other mark of its case, whatever its number:
+ * when its screenshot was taken, and its drawing. A mark's id (`a<number>`)
+ * is another mark's after the team's sync gave it another number (DEC-039),
+ * so what is opened on one mark is held to this, not to the id.
+ */
+export function markKey(c: Case, a: Annotation): string {
+	const shot = c.shots.find((s) => s.id === a.shot);
+	return JSON.stringify([
+		shot?.capturedAt ?? "",
+		a.shape,
+		a.element?.selector ?? null,
+		a.element?.rect ?? null,
+	]);
+}
+
+/** The mark of `c` that `key` is of (`markKey`); none: it is not in the case. */
+export function markByKey(c: Case, key: string): Annotation | undefined {
+	return c.annotations.find((a) => markKey(c, a) === key);
+}
+
 /** The address of the page a screenshot was taken on. */
 export const shotUrl = (c: Case, shot: Shot | undefined): string =>
 	shot?.url ?? c.page.url;
