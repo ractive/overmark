@@ -6,7 +6,13 @@
  * half-typed address survive every other render.
  */
 
-import { DEFAULT_SERVER } from "../lib/cloud/auth.ts";
+import {
+	DEVELOPMENT_SERVER,
+	PRODUCTION_SERVER,
+	serverKind,
+	serverLabel,
+	serverNote,
+} from "../lib/cloud/servers.ts";
 import { byId, formatDate, h } from "./dom.ts";
 import type { PanelState } from "./state.ts";
 
@@ -52,7 +58,7 @@ export function teamOf(cloud: Cloud) {
 
 /** What signing in sends where: said before the click, in one sentence. */
 export const SIGN_IN_NOTE = (server: string) =>
-	`Signed in, your cases go to ${hostOf(server)} and to the members of your team: their marks, comments, findings, page addresses and screenshots. Without an account everything stays in this browser, as now.`;
+	`Signed in, your cases go to ${hostOf(server)} and to the members of your team: their marks, comments, findings and screenshots, and the address of every page you marked (without its query). Without an account everything stays in this browser, as now.`;
 
 export const SIGN_IN_TITLE =
 	"Sign in at the server in a window of the browser; Sitegloss then syncs your cases with your team, both ways";
@@ -144,33 +150,87 @@ function button(
 	);
 }
 
-/** The server's address, as the relay's: a field that saves when it is left. */
-function serverField(cloud: Cloud): HTMLElement {
+/**
+ * Which server to sign in to (DEC-041): the service, its development
+ * server, or another address typed here (as the relay's: saved when the
+ * field is left). Folded away: whoever never opens it signs in to the
+ * service and is never asked. Only while nobody is signed in.
+ */
+function serverChooser(cloud: Cloud): HTMLElement {
+	const kind = serverKind(cloud.server);
 	const input: HTMLInputElement = h("input", {
 		type: "url",
 		id: "cloud-server",
 		spellcheck: "false",
 		autocomplete: "off",
-		placeholder: DEFAULT_SERVER,
-		onchange: act((a) => a.cloudServer(input.value)),
+		placeholder: "https://…",
+		"aria-label": "The other server's address",
+		onchange: act((a) => {
+			// An empty field chooses nothing: the server stays the one it was.
+			if (input.value.trim() !== "") a.cloudServer(input.value);
+		}),
 	});
-	input.value = cloud.server === DEFAULT_SERVER ? "" : cloud.server;
-	return h(
+	input.value = kind === "other" ? cloud.server : "";
+	const other = h(
+		"label",
+		{ class: "field", id: "cloud-server-other", hidden: kind !== "other" },
+		"Its address: https, or http on this computer only.",
+		input,
+	);
+	const option = (value: string, label: string) =>
+		h(
+			"option",
+			{ value, ...(value === kind ? { selected: true } : {}) },
+			label,
+		);
+	const select: HTMLSelectElement = h(
+		"select",
+		{
+			id: "cloud-server-choice",
+			onchange: act((a) => {
+				other.hidden = select.value !== "other";
+				// Empty: the service's own address.
+				if (select.value === "production") a.cloudServer("");
+				else if (select.value === "development")
+					a.cloudServer(DEVELOPMENT_SERVER);
+				else input.focus();
+			}),
+		},
+		option("production", serverLabel(PRODUCTION_SERVER)),
+		option("development", serverLabel(DEVELOPMENT_SERVER)),
+		option("other", "Another address…"),
+	);
+	select.value = kind;
+	const details = h(
 		"details",
-		{ class: "cloud-server" },
+		{ class: "cloud-server", ...(kind === "production" ? {} : { open: true }) },
 		h("summary", {}, "Server"),
 		h(
 			"label",
 			{ class: "field" },
-			`The server to sign in to; empty: ${hostOf(DEFAULT_SERVER)}. Plain http: only for localhost.`,
-			input,
+			"The server to sign in to. Each server has its own account, team and cases: what synced with one is not sent to another.",
+			select,
 		),
+		other,
 	);
+	return details;
+}
+
+/**
+ * A server that is not the service, in words beside the account, so nobody
+ * takes test data for real.
+ */
+function serverLine(server: string): HTMLElement[] {
+	const note = serverNote(server);
+	return note === undefined
+		? []
+		: [h("p", { class: "cloud-server-note", id: "cloud-server-name" }, note)];
 }
 
 function signedOut(cloud: Cloud): HTMLElement[] {
 	return [
 		h("p", { class: "sync-state" }, "Sign in to sync with your team."),
+		...serverLine(cloud.server),
 		h("p", { class: "meta" }, SIGN_IN_NOTE(cloud.server)),
 		h(
 			"div",
@@ -183,7 +243,7 @@ function signedOut(cloud: Cloud): HTMLElement[] {
 				{ strong: true, disabled: cloud.signingIn },
 			),
 		),
-		serverField(cloud),
+		serverChooser(cloud),
 	];
 }
 
@@ -199,6 +259,7 @@ function signedIn(cloud: Cloud): HTMLElement[] {
 			h("strong", {}, account.name),
 			` (${account.email})`,
 		),
+		...serverLine(account.server),
 	];
 	if (account.teams.length > 1 || (account.teams.length === 1 && !team)) {
 		const select: HTMLSelectElement = h(
@@ -284,14 +345,6 @@ function signedIn(cloud: Cloud): HTMLElement[] {
 			),
 		),
 	);
-	if (account.server !== DEFAULT_SERVER)
-		parts.push(
-			h(
-				"p",
-				{ class: "meta", id: "cloud-server-name" },
-				`Server: ${account.server}`,
-			),
-		);
 	return parts;
 }
 
@@ -321,6 +374,9 @@ export function renderCloudSection(
 			: cloud.account.expired
 				? "signed-out"
 				: (cloud.status?.state ?? "off");
+	// The chooser is drawn anew when a server was chosen in it: the keyboard
+	// stays where it was.
+	const choosing = document.activeElement?.id === "cloud-server-choice";
 	box.replaceChildren(
 		...(cloud.account === undefined ? signedOut(cloud) : signedIn(cloud)),
 		...(cloud.problem === undefined
@@ -333,6 +389,7 @@ export function renderCloudSection(
 					),
 				]),
 	);
+	if (choosing) document.getElementById("cloud-server-choice")?.focus();
 }
 
 /** What the banner asks or says; none: no banner. */
@@ -354,7 +411,7 @@ export function bannerOf(
 				n === 1
 					? "1 case is on this device only."
 					: `${n} cases are on this device only.`,
-			text: `Sync ${n === 1 ? "it" : "them"} with “${team.name}”? Its members will see ${n === 1 ? "it" : "them"}, with ${n === 1 ? "its" : "their"} marks and screenshots.`,
+			text: `Sync ${n === 1 ? "it" : "them"} with “${team.name}”? Its members will see ${n === 1 ? "it" : "them"}, with ${n === 1 ? "its" : "their"} marks, screenshots and the addresses of the pages marked.`,
 		};
 	return undefined;
 }

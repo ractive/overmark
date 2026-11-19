@@ -127,7 +127,8 @@ with `kb/design/overview.md` and `kb/iterations/`.
   and `tools.ts` for the AI app), `src/lib/` (case format, element details with the
   allow-list of what is recorded, matching and `candidates.ts`, zip, export, store,
   images, `marks.ts` how a mark looks), `src/lib/cloud/` (the account at sitegloss.dev
-  and the sync with a team, DEC-039: `auth.ts` sign-in and tokens, `api.ts` the client,
+  and the sync with a team, DEC-039: `servers.ts` the servers there are and each one's
+  own part of the database (DEC-041), `auth.ts` sign-in and tokens, `api.ts` the client,
   `wire.ts` what differs and how it merges, `engine.ts` a run, `book.ts` its
   bookkeeping; `src/worker/cloud.ts` runs it, `src/sidepanel/cloud.ts` and
   `cloud-view.ts` show it). `scripts/build.ts` builds `dist/` (load it unpacked); `scripts/icons.ts` makes

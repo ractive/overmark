@@ -15,17 +15,13 @@
 import { askDataConsent, BROWSER, PANEL, webAuthFlow } from "../lib/browser.ts";
 import { eventsUrl } from "../lib/cloud/api.ts";
 import {
-	DEFAULT_SERVER,
-	serverOrigin,
-	serverProblem,
-} from "../lib/cloud/auth.ts";
-import {
 	type Account,
 	CLOUD_DATABASE,
 	type CloudStatus,
 	KEYS,
 	type SyncMode,
 } from "../lib/cloud/book.ts";
+import { chosenServer, scopedKv, serverProblem } from "../lib/cloud/servers.ts";
 import { listen } from "../lib/cloud/sse.ts";
 import { type Kv, kvWhenOpen, openKv } from "../lib/kv.ts";
 import type { CloudAnswer, CloudRequest } from "../lib/messages.ts";
@@ -113,11 +109,15 @@ export function startCloud(
 	}
 
 	async function refresh(): Promise<void> {
-		// Only what the panel shows: the books, which may be large, stay unread.
+		// Only what the panel shows, of the server chosen (each server has its
+		// own part of the database): the books, which may be large, stay unread.
 		const all: Record<string, unknown> = {};
+		let server: string;
 		try {
-			for (const key of [KEYS.account, KEYS.server, KEYS.status, KEYS.modes])
-				all[key] = await kv.get(key);
+			server = await chosenServer(kv);
+			const mine = scopedKv(kv, server);
+			for (const key of [KEYS.account, KEYS.status, KEYS.modes])
+				all[key] = await mine.get(key);
 		} catch (error) {
 			problem(
 				`Could not read the account: ${message(error)} Close and open the ${PANEL} to try again.`,
@@ -125,11 +125,8 @@ export function startCloud(
 			return;
 		}
 		const account = all[KEYS.account] as Account | undefined;
-		const server = all[KEYS.server];
 		update((s) => {
-			s.cloud.server =
-				(typeof server === "string" ? serverOrigin(server) : undefined) ??
-				DEFAULT_SERVER;
+			s.cloud.server = server;
 			s.cloud.account =
 				account === undefined
 					? undefined

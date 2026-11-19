@@ -1766,8 +1766,15 @@ describe("the account and the sync with a team (DEC-039)", () => {
 			"Sign in to sync with your team.",
 		);
 		expect(el("cloud").textContent).toContain(
-			"Signed in, your cases go to app.sitegloss.dev and to the members of your team: their marks, comments, findings, page addresses and screenshots. Without an account everything stays in this browser, as now.",
+			"Signed in, your cases go to app.sitegloss.dev and to the members of your team: their marks, comments, findings and screenshots, and the address of every page you marked (without its query). Without an account everything stays in this browser, as now.",
 		);
+		// The service itself: no word about the server, and nothing to choose
+		// unless one opens "Server".
+		expect(el("cloud-server-name")).toBeNull();
+		const details = el("cloud").querySelector(
+			".cloud-server",
+		) as unknown as HTMLDetailsElement;
+		expect(details.hasAttribute("open")).toBe(false);
 		button("cloud-sign-in")?.click();
 		expect(clicked).toEqual(["in"]);
 		expect(el("cloud-banner").hidden).toBe(true);
@@ -1777,20 +1784,87 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		expect(button("cloud-sign-in")?.textContent).toBe("Signing in…");
 	});
 
-	test("another server: said where the cases would go, and set as the relay is", () => {
+	test("the server is chosen from three: the service, the development server, another address (DEC-041)", () => {
 		const set: string[] = [];
-		home(
-			{ server: "http://localhost:3200" },
-			actionsWith({ cloudServer: (text) => void set.push(text) }),
+		const actions = actionsWith({
+			cloudServer: (text) => void set.push(text),
+		});
+		home({}, actions);
+		const choice = () => el<HTMLSelectElement>("cloud-server-choice");
+		const pick = (value: string) => {
+			choice().value = value;
+			choice().dispatchEvent(new window.Event("change") as unknown as Event);
+		};
+		expect(
+			[...choice().querySelectorAll("option")].map((o) => [
+				o.getAttribute("value"),
+				o.textContent,
+			]),
+		).toEqual([
+			["production", "Sitegloss (app.sitegloss.dev)"],
+			["development", "Development server"],
+			["other", "Another address…"],
+		]);
+		expect(choice().value).toBe("production");
+		expect(el("cloud-server-other").hidden).toBe(true);
+		pick("development");
+		expect(set).toEqual(["https://app.dev.sitegloss.dev"]);
+		// Another address: the field shows, and nothing is chosen until one is typed.
+		pick("other");
+		expect(set).toHaveLength(1);
+		expect(el("cloud-server-other").hidden).toBe(false);
+		const field = el<HTMLInputElement>("cloud-server");
+		field.value = "  ";
+		field.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(set).toHaveLength(1);
+		field.value = "http://localhost:3200";
+		field.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(set).toEqual([
+			"https://app.dev.sitegloss.dev",
+			"http://localhost:3200",
+		]);
+		// Back to the service: its own address, said as "none set".
+		field.blur();
+		pick("production");
+		expect(set.at(-1)).toBe("");
+	});
+
+	test("a server that is not the service is said in words, beside the account and before signing in", () => {
+		home({ server: "https://app.dev.sitegloss.dev" });
+		expect(el("cloud-server-name").textContent).toBe(
+			"Development server (app.dev.sitegloss.dev): not the real Sitegloss",
+		);
+		expect(el<HTMLSelectElement>("cloud-server-choice").value).toBe(
+			"development",
 		);
 		expect(el("cloud").textContent).toContain(
-			"your cases go to localhost:3200",
+			"your cases go to app.dev.sitegloss.dev",
 		);
-		const field = el<HTMLInputElement>("cloud-server");
-		expect(field.value).toBe("http://localhost:3200");
-		field.value = "https://sitegloss.example";
-		field.dispatchEvent(new window.Event("change") as unknown as Event);
-		expect(set).toEqual(["https://sitegloss.example"]);
+		// The other address the development server may get is it as well.
+		home({ server: "https://app-dev.sitegloss.dev" });
+		expect(el("cloud-server-name").textContent).toBe(
+			"Development server (app-dev.sitegloss.dev): not the real Sitegloss",
+		);
+		home({ server: "http://localhost:3200" });
+		expect(el("cloud-server-name").textContent).toBe(
+			"Another server (localhost:3200): not sitegloss.dev",
+		);
+		expect(el<HTMLSelectElement>("cloud-server-choice").value).toBe("other");
+		expect(el<HTMLInputElement>("cloud-server").value).toBe(
+			"http://localhost:3200",
+		);
+		expect(el("cloud-server-other").hidden).toBe(false);
+		// Signed in: beside the account, and nothing to choose any more.
+		home({
+			server: "https://app.dev.sitegloss.dev",
+			account: account({ server: "https://app.dev.sitegloss.dev" }),
+		});
+		expect(el("cloud-server-name").textContent).toBe(
+			"Development server (app.dev.sitegloss.dev): not the real Sitegloss",
+		);
+		expect(el("cloud-server-choice")).toBeNull();
+		home({ account: account() });
+		expect(el("cloud-server-name")).toBeNull();
 	});
 
 	test("signed in: who, which team, what the sync is at, Sync now and Sign out", () => {
@@ -1890,7 +1964,7 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		const banner = el("cloud-banner");
 		expect(banner.hidden).toBe(false);
 		expect(banner.textContent).toContain(
-			"2 cases are on this device only. Sync them with “Pedal & Pine web”? Its members will see them, with their marks and screenshots.",
+			"2 cases are on this device only. Sync them with “Pedal & Pine web”? Its members will see them, with their marks, screenshots and the addresses of the pages marked.",
 		);
 		button("cloud-sync-them", "cloud-banner")?.click();
 		button("cloud-keep-them", "cloud-banner")?.click();

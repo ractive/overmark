@@ -323,8 +323,12 @@ Sitegloss works without an account, and nothing in it asks for one. If your team
   syncing, offline and trying again, or what the server did not take and why), "Sync
   now" and "Sign out". Signing out stops the sync and keeps the cases, on this device
   only.
-- "Server" there takes another server's address (https, or plain http on this
-  computer), while nobody is signed in.
+- "Server" there chooses where to sign in, while nobody is signed in: Sitegloss
+  itself (app.sitegloss.dev, unless you choose otherwise), its development server, or
+  another address (https, or plain http on this computer). When it is not Sitegloss
+  itself, the Account section says so. Each server has its own account, team and
+  sync: a case synced with one is on this device only as far as another goes, until
+  you share it there, and switching back finds everything as it was.
 
 The sync to a folder above is another thing and stays as it is: one way, to files.
 Permission for signing in: `identity` (no install warning).

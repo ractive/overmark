@@ -777,6 +777,14 @@ export function fakeHttp(
 		state.requests.push(`${method} ${url.pathname}`);
 		if (state.offline) throw new TypeError("Failed to fetch");
 		if (url.origin !== origin) return new Response("", { status: 404 });
+		// Where this server signs people in, as it says itself.
+		if (url.pathname === "/.well-known/oauth-authorization-server/api/auth")
+			return Response.json({
+				issuer: `${origin}/api/auth`,
+				authorization_endpoint: `${origin}/api/auth/oauth2/authorize`,
+				token_endpoint: `${origin}/api/auth/oauth2/token`,
+				revocation_endpoint: `${origin}/api/auth/oauth2/revoke`,
+			});
 		if (url.pathname === "/api/auth/oauth2/token") {
 			const body = new URLSearchParams(String(init?.body ?? ""));
 			if (body.get("grant_type") === "authorization_code") {

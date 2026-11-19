@@ -30,7 +30,7 @@ import {
 	signInRedirect,
 } from "./lib/browser.ts";
 import { isSafeId, pendingImage } from "./lib/case.ts";
-import { CLOUD_DATABASE, KEYS, readAccount, teamOf } from "./lib/cloud/book.ts";
+import { CLOUD_DATABASE } from "./lib/cloud/book.ts";
 import {
 	cropImages,
 	drawMarks,
@@ -451,17 +451,8 @@ const ready = Connection.start({
 	},
 	// Whose findings are this app's own, and what deleting a case means,
 	// in a case synced with a team (DEC-039).
-	me: async () => (await readAccount(cloudKv).catch(() => undefined))?.user.id,
-	team: async (caseId) => {
-		const account = await readAccount(cloudKv).catch(() => undefined);
-		const team = teamOf(account);
-		if (team === undefined || account?.expired) return undefined;
-		const modes = (await cloudKv.get(KEYS.modes).catch(() => undefined)) as
-			| Record<string, string>
-			| undefined;
-		const mode = modes?.[caseId];
-		return mode === undefined || mode === "synced" ? team.name : undefined;
-	},
+	me: () => cloud.me().catch(() => undefined),
+	team: (caseId) => cloud.teamOf(caseId).catch(() => undefined),
 });
 ready.catch((error: unknown) =>
 	console.error("Sitegloss: AI connection", error),

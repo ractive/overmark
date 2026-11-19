@@ -12,20 +12,40 @@ import {
 	CLIENT_ID,
 	challengeOf,
 	codeFrom,
+	discover,
+	ENDPOINTS_KEY,
+	type Endpoints,
 	exchangeCode,
 	OfflineError,
 	type PendingSignIn,
 	Session,
-	serverOrigin,
-	serverProblem,
 	TOKENS_KEY,
 	type Tokens,
 } from "../src/lib/cloud/auth.ts";
+import {
+	DEVELOPMENT_SERVER,
+	DEVELOPMENT_SERVERS,
+	PRODUCTION_SERVER,
+	scopedKv,
+	serverKind,
+	serverLabel,
+	serverNote,
+	serverOrigin,
+	serverProblem,
+} from "../src/lib/cloud/servers.ts";
 import { changeCursor, EventParser, listen } from "../src/lib/cloud/sse.ts";
 import { memoryKv } from "../src/lib/kv.ts";
 
 const SERVER = "https://app.sitegloss.dev";
 const REDIRECT = "https://ldmcfigcnobhnbaigehcaodheklibeon.chromiumapp.org/";
+
+/** Where the server signs people in, as its discovery document says. */
+const ENDPOINTS: Endpoints = {
+	authorize: `${SERVER}/api/auth/oauth2/authorize`,
+	token: `${SERVER}/api/auth/oauth2/token`,
+	revoke: `${SERVER}/api/auth/oauth2/revoke`,
+};
+const DISCOVERY = `${SERVER}/.well-known/oauth-authorization-server/api/auth`;
 
 /** A token endpoint whose refresh tokens rotate: a used one ends the grant. */
 function tokenServer() {
@@ -33,6 +53,8 @@ function tokenServer() {
 	const state = {
 		refresh: "r0",
 		revoked: false,
+		/** How often the server was asked where it signs people in. */
+		discoveries: 0,
 		requests: [] as URLSearchParams[],
 		/** How each request was sent: with the browser's cookies, or without. */
 		credentials: [] as (RequestCredentials | undefined)[],
@@ -45,6 +67,16 @@ function tokenServer() {
 		init?: RequestInit,
 	): Promise<Response> => {
 		if (state.offline) throw new TypeError("Failed to fetch");
+		if (input === DISCOVERY) {
+			state.discoveries++;
+			return Response.json({
+				issuer: `${SERVER}/api/auth`,
+				authorization_endpoint: ENDPOINTS.authorize,
+				token_endpoint: ENDPOINTS.token,
+				revocation_endpoint: ENDPOINTS.revoke,
+				jwks_uri: `${SERVER}/api/auth/jwks`,
+			});
+		}
 		const body = new URLSearchParams(String(init?.body ?? ""));
 		state.requests.push(body);
 		state.credentials.push(init?.credentials);
@@ -84,6 +116,7 @@ function tokenServer() {
 
 const pending = (at = 1000): PendingSignIn => ({
 	server: SERVER,
+	token: ENDPOINTS.token,
 	verifier: "the-verifier",
 	state: "the-state",
 	redirect: REDIRECT,
@@ -108,6 +141,116 @@ describe("the server's address", () => {
 	});
 });
 
+describe("the servers there are to choose from (DEC-041)", () => {
+	test("the service, its development server under either of its addresses, and any other", () => {
+		expect(PRODUCTION_SERVER).toBe("https://app.sitegloss.dev");
+		expect(DEVELOPMENT_SERVERS).toEqual([
+			"https://app.dev.sitegloss.dev",
+			"https://app-dev.sitegloss.dev",
+		]);
+		expect(DEVELOPMENT_SERVER).toBe(DEVELOPMENT_SERVERS[0] as string);
+		expect(serverKind(PRODUCTION_SERVER)).toBe("production");
+		for (const dev of DEVELOPMENT_SERVERS)
+			expect(serverKind(dev)).toBe("development");
+		expect(serverKind("http://localhost:3200")).toBe("other");
+		expect(serverLabel(PRODUCTION_SERVER)).toBe(
+			"Sitegloss (app.sitegloss.dev)",
+		);
+		expect(serverLabel(DEVELOPMENT_SERVER)).toBe("Development server");
+		expect(serverLabel("http://localhost:3200")).toBe("localhost:3200");
+	});
+
+	test("a server that is not the service is said to be none, in words", () => {
+		expect(serverNote(PRODUCTION_SERVER)).toBeUndefined();
+		expect(serverNote(DEVELOPMENT_SERVER)).toBe(
+			"Development server (app.dev.sitegloss.dev): not the real Sitegloss",
+		);
+		expect(serverNote("http://localhost:3200")).toBe(
+			"Another server (localhost:3200): not sitegloss.dev",
+		);
+	});
+
+	test("each server has its own part of the database, and sees no other's", async () => {
+		const kv = memoryKv();
+		const a = scopedKv(kv, PRODUCTION_SERVER);
+		const b = scopedKv(kv, DEVELOPMENT_SERVER);
+		await a.set({ tokens: "A's", cursor: 7 });
+		await b.set({ tokens: "B's" });
+		expect(await a.get("tokens")).toBe("A's");
+		expect(await b.get("tokens")).toBe("B's");
+		expect(await b.get("cursor")).toBeUndefined();
+		expect(await a.all()).toEqual({ tokens: "A's", cursor: 7 });
+		await a.remove("tokens");
+		expect(await a.all()).toEqual({ cursor: 7 });
+		expect(await b.all()).toEqual({ tokens: "B's" });
+		expect([...kv.data.keys()].sort()).toEqual([
+			"@https://app.dev.sitegloss.dev tokens",
+			"@https://app.sitegloss.dev cursor",
+		]);
+	});
+});
+
+describe("where a server signs people in", () => {
+	const doc =
+		(body: unknown, status = 200) =>
+		async () =>
+			Response.json(body, { status });
+
+	test("is what the server's own discovery document says", async () => {
+		const { fetcher, state } = tokenServer();
+		expect(await discover(fetcher, SERVER)).toEqual(ENDPOINTS);
+		expect(state.discoveries).toBe(1);
+	});
+
+	test("an address elsewhere is refused: the password and the tokens go to the chosen server only", async () => {
+		const elsewhere = doc({
+			issuer: `${SERVER}/api/auth`,
+			authorization_endpoint: "https://evil.example/authorize",
+			token_endpoint: ENDPOINTS.token,
+		});
+		await expect(discover(elsewhere, SERVER)).rejects.toThrow(
+			"app.sitegloss.dev does not answer as a Sitegloss server (its sign-in addresses are missing or lead elsewhere).",
+		);
+		await expect(discover(doc({}), SERVER)).rejects.toThrow(
+			"missing or lead elsewhere",
+		);
+		// Another server's document, handed out here: not this server's.
+		await expect(
+			discover(
+				doc({
+					issuer: "https://evil.example/api/auth",
+					authorization_endpoint: ENDPOINTS.authorize,
+					token_endpoint: ENDPOINTS.token,
+				}),
+				SERVER,
+			),
+		).rejects.toThrow("missing or lead elsewhere");
+		await expect(discover(doc("not found", 404), SERVER)).rejects.toThrow(
+			"it answered 404",
+		);
+		// Nowhere to end a grant: the server is only forgotten here.
+		expect(
+			await discover(
+				doc({
+					issuer: `${SERVER}/api/auth`,
+					authorization_endpoint: ENDPOINTS.authorize,
+					token_endpoint: ENDPOINTS.token,
+					revocation_endpoint: "https://evil.example/revoke",
+				}),
+				SERVER,
+			),
+		).toEqual({ authorize: ENDPOINTS.authorize, token: ENDPOINTS.token });
+	});
+
+	test("a server that is not reached is said to be that", async () => {
+		await expect(
+			discover(async () => {
+				throw new TypeError("Failed to fetch");
+			}, SERVER),
+		).rejects.toBeInstanceOf(OfflineError);
+	});
+});
+
 describe("a sign-in", () => {
 	test("the challenge is the verifier's SHA-256 (RFC 7636's example)", async () => {
 		expect(
@@ -116,7 +259,12 @@ describe("a sign-in", () => {
 	});
 
 	test("the window's address asks for the code with PKCE, the scopes and the API as resource", async () => {
-		const { pending: p, url } = await beginSignIn(SERVER, REDIRECT, 1000);
+		const { pending: p, url } = await beginSignIn(
+			SERVER,
+			ENDPOINTS,
+			REDIRECT,
+			1000,
+		);
 		const at = new URL(url);
 		expect(`${at.origin}${at.pathname}`).toBe(
 			`${SERVER}/api/auth/oauth2/authorize`,
@@ -133,7 +281,7 @@ describe("a sign-in", () => {
 		expect(q.get("resource")).toBe(`${SERVER}/api`);
 		expect(q.get("state")).toBe(p.state);
 		// Each sign-in has secrets of its own, and none of them is in the address.
-		const again = await beginSignIn(SERVER, REDIRECT, 1000);
+		const again = await beginSignIn(SERVER, ENDPOINTS, REDIRECT, 1000);
 		expect(again.pending.verifier).not.toBe(p.verifier);
 		expect(again.pending.state).not.toBe(p.state);
 		expect(url).not.toContain(p.verifier);
@@ -227,6 +375,9 @@ describe("the tokens", () => {
 			resource: `${SERVER}/api`,
 		});
 		expect((kv.data.get(TOKENS_KEY) as Tokens).refresh).toBe("r2");
+		// Where to renew was asked of the server, once, and kept.
+		expect(kv.data.get(ENDPOINTS_KEY)).toEqual(ENDPOINTS);
+		expect(state.discoveries).toBe(1);
 		// The next renewal uses the new one: the grant lives on.
 		expect(await session.access(SERVER, true)).toBe("a3");
 		expect(state.revoked).toBe(false);

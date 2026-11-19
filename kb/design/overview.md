@@ -229,6 +229,11 @@ both directions, by the service worker:
 - **Sign-in** is OAuth 2.1 with PKCE as a public client, in the browser's own window
   (`identity.launchWebAuthFlow`); the tokens are in the worker's database
   `sitegloss-cloud`, out of the pages' reach.
+- **Which server** (DEC-041): the service, unless the user chose its development server
+  or another address under "Server" while signed out; the Account section says so when
+  it is not the service. Where a server signs people in is read from its discovery
+  document. Everything below is kept per server, so nothing synced with one reaches
+  another unless the user shares that case there.
 - **Sending:** each synced case is compared with what the server last had of it, and
   the difference becomes operations (a new mark, a changed comment, a status, a finding,
   a delete), written down with ids of their own before they are sent, images first. The

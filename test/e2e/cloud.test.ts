@@ -51,9 +51,20 @@ describe.skipIf(SERVER === undefined || browserBinary === undefined)(
 				"your cases go to app.sitegloss.dev and to the members of your team",
 			);
 
-			// The server's address, as the relay's: typed, saved when the field is left.
+			// The service itself: no word about the server, the chooser folded away.
+			expect(
+				await panel.eval<boolean>(
+					`${id("cloud-server-name")} === null && !document.querySelector(".cloud-server").open && ${id("cloud-server-choice")}.value === "production"`,
+				),
+			).toBe(true);
+
+			// Another server (DEC-041): "Another address…", typed, saved when the
+			// field is left.
 			await panel.eval(
-				`(() => { document.querySelector(".cloud-server").open = true; const field = ${id("cloud-server")}; field.focus(); field.value = ${JSON.stringify(base)}; field.dispatchEvent(new Event("change")); field.blur(); })()`,
+				`(() => { document.querySelector(".cloud-server").open = true; const choice = ${id("cloud-server-choice")}; choice.value = "other"; choice.dispatchEvent(new Event("change")); const field = ${id("cloud-server")}; field.value = ${JSON.stringify(base)}; field.dispatchEvent(new Event("change")); field.blur(); return true; })()`,
+			);
+			await panel.waitFor(
+				`${id("cloud-server-name")}?.textContent === ${JSON.stringify(`Another server (${new URL(base).host}): not sitegloss.dev`)}`,
 			);
 			await panel.waitFor(
 				`${text("cloud")}.includes(${JSON.stringify(new URL(base).host)})`,
@@ -121,9 +132,13 @@ describe.skipIf(SERVER === undefined || browserBinary === undefined)(
 				`${text("cloud-status")}.startsWith("Synced")`,
 				30_000,
 			);
+			// Signed in at a server that is not the service: said beside the account.
 			expect(await panel.eval<string>(text("cloud-server-name"))).toBe(
-				`Server: ${base}`,
+				`Another server (${new URL(base).host}): not sitegloss.dev`,
 			);
+			expect(
+				await panel.eval<boolean>(`${id("cloud-server-choice")} === null`),
+			).toBe(true);
 
 			// The team's demo case is here, with its marks and pictures.
 			const demo = "Home and booking: what is off before the launch";

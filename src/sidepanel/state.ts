@@ -216,7 +216,7 @@ export interface PanelState {
 	};
 	/** The account at sitegloss.dev and the sync with a team (DEC-039). */
 	cloud: {
-		/** The server's address in use (sitegloss.dev's, unless another is set). */
+		/** The server chosen: the service's address, unless another was chosen (DEC-041). */
 		server: string;
 		/** Who is signed in; `undefined`: nobody. */
 		account:

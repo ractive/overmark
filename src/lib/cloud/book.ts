@@ -25,10 +25,11 @@ import type {
 
 export const CLOUD_DATABASE = "sitegloss-cloud";
 
-/** Keys in the database (the tokens' are in auth.ts). */
+/**
+ * Keys in one server's part of the database (servers.ts: everything here is
+ * kept per server; the tokens' keys are in auth.ts).
+ */
 export const KEYS = {
-	/** The server's address, when the user set another one. */
-	server: "server",
 	account: "account",
 	/** The team's revision the changes were read up to. */
 	cursor: "cursor",
@@ -41,7 +42,8 @@ export const KEYS = {
 	whole: "whole",
 } as const;
 
-const BOOK = "case:";
+/** What a case's book is kept under, before the case's id. */
+export const BOOK = "case:";
 
 /** Who is signed in, and where. */
 export interface Account {

@@ -70,8 +70,10 @@ Only in four cases, all started by you:
    the team keeps its copies, and the tokens are deleted.
 
    You sign in on the service's own page, in a window of the browser: Sitegloss never
-   sees your password. If you enter another server's address, all of this goes to that
-   server instead.
+   sees your password. Under "Server" you can choose another server than the service
+   (its development server, or an address you type) before you sign in; all of this
+   then goes to that server instead, the Account section says which, and what synced
+   with one server is not sent to another unless you share that case there.
 
    In Firefox, the browser asks at "Sign in" for the same data collection consent as for
    an AI app (website content and browsing activity); taking it back signs you out.

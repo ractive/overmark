@@ -19,37 +19,78 @@ export const CLIENT_ID = "sitegloss-extension";
 export const SCOPE =
 	"openid profile email offline_access cases:read cases:write";
 
-/** The service, unless the user set another address. */
-export const DEFAULT_SERVER = "https://app.sitegloss.dev";
-
-/** Hosts a server may have over plain http: one's own machine. */
-const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-/** Why `value` is no server address, or `undefined`. */
-export function serverProblem(value: string): string | undefined {
-	let url: URL;
-	try {
-		url = new URL(value);
-	} catch {
-		return "Not an address.";
-	}
-	if (url.protocol === "https:") return undefined;
-	if (url.protocol !== "http:") return "Use an https: address.";
-	return LOOPBACK.has(url.hostname)
-		? undefined
-		: "Plain http: works only for localhost; use https: for other hosts.";
-}
-
-/** A server address as it is kept: its origin. `undefined`: not one. */
-export function serverOrigin(value: string): string | undefined {
-	return serverProblem(value) === undefined ? new URL(value).origin : undefined;
-}
-
 /** The API's name in a token request: what makes the access token one for it. */
 const resourceOf = (server: string) => `${server}/api`;
 
-const endpoint = (server: string, name: "authorize" | "token" | "revoke") =>
-	`${server}/api/auth/oauth2/${name}`;
+/**
+ * Where a server signs people in, as its own discovery document says
+ * (RFC 8414). Nothing here knows these paths: they are what the server at
+ * the chosen address answers, and they have to be at that address.
+ */
+export interface Endpoints {
+	authorize: string;
+	token: string;
+	/** Where a grant is ended; a server without one is only forgotten here. */
+	revoke?: string;
+}
+
+/** The discovery document of the server at `server` (its issuer is `<server>/api/auth`). */
+export const discoveryUrl = (server: string) =>
+	`${server}/.well-known/oauth-authorization-server/api/auth`;
+
+/** The key a server's endpoints are kept under, in that server's part of the database. */
+export const ENDPOINTS_KEY = "endpoints";
+
+/**
+ * Ask the server where it signs people in. An endpoint anywhere else than at
+ * the server's own address is refused: the address the user chose (or never
+ * had to choose) is where the password and the tokens go, nowhere else.
+ */
+export async function discover(
+	fetcher: Fetch,
+	server: string,
+): Promise<Endpoints> {
+	let response: Response;
+	try {
+		response = await fetcher(discoveryUrl(server), {
+			credentials: "omit",
+			cache: "no-store",
+		});
+	} catch (error) {
+		throw new OfflineError(error);
+	}
+	const body = (
+		response.ok ? await response.json().catch(() => undefined) : undefined
+	) as Record<string, unknown> | undefined;
+	const at = (name: string): string | undefined => {
+		const value = body?.[name];
+		try {
+			return typeof value === "string" && new URL(value).origin === server
+				? value
+				: undefined;
+		} catch {
+			return undefined;
+		}
+	};
+	const authorize = at("authorization_endpoint");
+	const token = at("token_endpoint");
+	// The document has to be this server's own (RFC 8414, 3.3).
+	const own = body?.["issuer"] === `${server}/api/auth`;
+	if (!own || authorize === undefined || token === undefined)
+		throw new AuthError(
+			`${hostOf(server)} does not answer as a Sitegloss server (${response.ok ? "its sign-in addresses are missing or lead elsewhere" : `it answered ${response.status}`}).`,
+		);
+	const revoke = at("revocation_endpoint");
+	return { authorize, token, ...(revoke === undefined ? {} : { revoke }) };
+}
+
+const hostOf = (server: string): string => {
+	try {
+		return new URL(server).host;
+	} catch {
+		return server;
+	}
+};
 
 /** What the server gave at sign-in or at the last refresh. */
 export interface Tokens {
@@ -62,6 +103,8 @@ export interface Tokens {
 /** A sign-in under way: kept until the browser's window comes back. */
 export interface PendingSignIn {
 	server: string;
+	/** Where the code is changed for tokens, as the server said when it began. */
+	token: string;
 	verifier: string;
 	state: string;
 	redirect: string;
@@ -104,11 +147,13 @@ export async function challengeOf(verifier: string): Promise<string> {
 /** A sign-in's secret parts, and the address the browser's window opens. */
 export async function beginSignIn(
 	server: string,
+	endpoints: Endpoints,
 	redirect: string,
 	now: number,
 ): Promise<{ pending: PendingSignIn; url: string }> {
 	const pending: PendingSignIn = {
 		server,
+		token: endpoints.token,
 		verifier: randomToken(),
 		state: randomToken(),
 		redirect,
@@ -124,7 +169,7 @@ export async function beginSignIn(
 		code_challenge_method: "S256",
 		resource: resourceOf(server),
 	});
-	return { pending, url: `${endpoint(server, "authorize")}?${query}` };
+	return { pending, url: `${endpoints.authorize}?${query}` };
 }
 
 /** How long a sign-in's window may stay open. */
@@ -190,13 +235,14 @@ function tokensOf(body: unknown, now: number, before?: Tokens): Tokens {
 async function tokenRequest(
 	fetcher: Fetch,
 	server: string,
+	endpoint: string,
 	fields: Record<string, string>,
 	now: number,
 	before?: Tokens,
 ): Promise<Tokens> {
 	let response: Response;
 	try {
-		response = await fetcher(endpoint(server, "token"), {
+		response = await fetcher(endpoint, {
 			method: "POST",
 			// No cookies, ever: the browser has the user's session with the
 			// server after the sign-in window, and a request that carries it
@@ -247,6 +293,7 @@ export function exchangeCode(
 	return tokenRequest(
 		fetcher,
 		pending.server,
+		pending.token,
 		{
 			grant_type: "authorization_code",
 			code,
@@ -261,12 +308,14 @@ export function exchangeCode(
 export function refreshTokens(
 	fetcher: Fetch,
 	server: string,
+	endpoints: Endpoints,
 	tokens: Tokens,
 	now: number,
 ): Promise<Tokens> {
 	return tokenRequest(
 		fetcher,
 		server,
+		endpoints.token,
 		{ grant_type: "refresh_token", refresh_token: tokens.refresh },
 		now,
 		tokens,
@@ -276,11 +325,12 @@ export function refreshTokens(
 /** End the grant at the server; a server that cannot be reached is left. */
 export async function revokeTokens(
 	fetcher: Fetch,
-	server: string,
+	endpoints: Endpoints,
 	tokens: Tokens,
 ): Promise<boolean> {
+	if (endpoints.revoke === undefined) return false;
 	try {
-		const response = await fetcher(endpoint(server, "revoke"), {
+		const response = await fetcher(endpoints.revoke, {
 			method: "POST",
 			credentials: "omit",
 			headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -304,9 +354,10 @@ export const PENDING_KEY = "sign-in";
 const EARLY_MS = 60_000;
 
 /**
- * The tokens of the signed-in user: read from the database at each use (a
- * worker restarts), renewed when they are about to run out, one renewal at a
- * time. `server` is where they are from.
+ * The tokens of whoever is signed in at one server (`kv` is that server's
+ * part of the database): read at each use (a worker restarts), renewed when
+ * they are about to run out, one renewal at a time. Where the server signs
+ * people in is what it said itself (`discover`), kept beside the tokens.
  */
 export class Session {
 	#renewing: Promise<Tokens> | undefined;
@@ -323,6 +374,18 @@ export class Session {
 			typeof stored.refresh === "string"
 			? stored
 			: undefined;
+	}
+
+	/**
+	 * The server's sign-in addresses: asked for now (`fresh`, at a sign-in),
+	 * else as last answered, and asked for when never answered.
+	 */
+	async endpoints(server: string, fresh = false): Promise<Endpoints> {
+		const kept = (await this.kv.get(ENDPOINTS_KEY)) as Endpoints | undefined;
+		if (!fresh && typeof kept?.token === "string") return kept;
+		const now = await discover(this.fetcher, server);
+		await this.kv.set({ [ENDPOINTS_KEY]: now });
+		return now;
 	}
 
 	/**
@@ -346,6 +409,7 @@ export class Session {
 				const next = await refreshTokens(
 					this.fetcher,
 					server,
+					await this.endpoints(server),
 					tokens,
 					this.now(),
 				);
@@ -367,7 +431,9 @@ export class Session {
 	async end(server: string | undefined): Promise<void> {
 		const tokens = await this.tokens();
 		await this.kv.remove(TOKENS_KEY);
-		if (tokens !== undefined && server !== undefined)
-			await revokeTokens(this.fetcher, server, tokens);
+		if (tokens === undefined || server === undefined) return;
+		const endpoints = await this.endpoints(server).catch(() => undefined);
+		if (endpoints !== undefined)
+			await revokeTokens(this.fetcher, endpoints, tokens);
 	}
 }

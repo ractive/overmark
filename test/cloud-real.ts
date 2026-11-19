@@ -95,7 +95,13 @@ export async function real(
 ): Promise<Signed> {
 	const kv = memoryKv();
 	const session = new Session(kv, (input, init) => fetch(input, init));
-	const { pending, url } = await beginSignIn(base, REDIRECT, Date.now());
+	// Where the server signs people in is what its discovery document says.
+	const { pending, url } = await beginSignIn(
+		base,
+		await session.endpoints(base, true),
+		REDIRECT,
+		Date.now(),
+	);
 	const ended = await signInWindow(base, email, url);
 	const code = codeFrom(pending, ended, Date.now());
 	await session.store(

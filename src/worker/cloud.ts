@@ -12,30 +12,42 @@
  * stop when it is over. While a run is under way a call to an extension API
  * every 20 seconds keeps the browser from stopping the worker in the middle
  * of it; what a stopped run left is taken up by the next one.
+ *
+ * Everything is one server's (DEC-041): the server chosen in the panel (the
+ * service itself, unless the user chose another) has its own part of the
+ * database, its own tokens and its own engine. Another server never sees
+ * what synced with this one.
  */
 
 import { dataConsent, FIREFOX } from "../lib/browser.ts";
-import { type Api, ApiFailure, httpApi } from "../lib/cloud/api.ts";
+import { ApiFailure, httpApi } from "../lib/cloud/api.ts";
 import {
 	AuthError,
 	beginSignIn,
 	codeFrom,
-	DEFAULT_SERVER,
 	exchangeCode,
 	OfflineError,
 	PENDING_KEY,
 	type PendingSignIn,
 	Session,
-	serverOrigin,
-	serverProblem,
 } from "../lib/cloud/auth.ts";
 import {
+	BOOK,
+	type CaseBook,
 	type CloudStatus,
 	KEYS,
 	readAccount,
 	teamOf,
 } from "../lib/cloud/book.ts";
 import { CloudSync } from "../lib/cloud/engine.ts";
+import {
+	chosenServer,
+	SERVER_KEY,
+	scopedKv,
+	scopeOf,
+	serverOrigin,
+	serverProblem,
+} from "../lib/cloud/servers.ts";
 import type { Kv } from "../lib/kv.ts";
 import type { CloudAnswer, CloudRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
@@ -77,11 +89,18 @@ export interface CloudDeps {
 const describe = (error: unknown) =>
 	error instanceof Error ? error.message : String(error);
 
+/** One server's part: its database, its tokens, its engine. */
+export interface ServerScope {
+	server: string;
+	kv: Kv;
+	session: Session;
+	engine: CloudSync;
+}
+
 /** The account and the sync, as the worker runs them. */
 export class Cloud {
-	readonly engine: CloudSync;
 	readonly #deps: CloudDeps;
-	readonly #session: Session;
+	readonly #scopes = new Map<string, ServerScope>();
 	readonly #fetch: (input: string, init?: RequestInit) => Promise<Response>;
 	readonly #now: () => number;
 	#timer: ReturnType<typeof setTimeout> | undefined;
@@ -94,11 +113,24 @@ export class Cloud {
 		this.#deps = deps;
 		this.#fetch = deps.fetch ?? ((input, init) => fetch(input, init));
 		this.#now = deps.now ?? Date.now;
-		this.#session = new Session(deps.kv, this.#fetch, this.#now);
-		this.engine = new CloudSync({
+	}
+
+	/** The part of `server`: made once, and kept apart from every other server's. */
+	#scope(server: string): ServerScope {
+		const known = this.#scopes.get(server);
+		if (known !== undefined) return known;
+		const deps = this.#deps;
+		const kv = scopedKv(deps.kv, server);
+		const session = new Session(kv, this.#fetch, this.#now);
+		const api = httpApi({
+			server,
+			token: (fresh) => session.access(server, fresh),
+			fetch: this.#fetch,
+		});
+		const engine = new CloudSync({
 			store: deps.store,
-			kv: deps.kv,
-			api: (server) => this.#api(server),
+			kv,
+			api: () => api,
 			now: () => new Date(this.#now()),
 			onChange: (ids) => {
 				for (const id of ids) deps.changed(id);
@@ -106,23 +138,56 @@ export class Cloud {
 			onStatus: (status) => this.#heard(status),
 			// The panel's question is answered once the choice is written down.
 			later: (run) => void this.#run(() => run),
+			elsewhere: () => this.#elsewhere(server),
 		});
+		const scope: ServerScope = { server, kv, session, engine };
+		this.#scopes.set(server, scope);
+		return scope;
 	}
 
-	#api(server: string): Api {
-		return httpApi({
-			server,
-			token: (fresh) => this.#session.access(server, fresh),
-			fetch: this.#fetch,
-		});
+	/**
+	 * The cases another server than `server` had from this device: its books
+	 * that say what that server last confirmed.
+	 */
+	async #elsewhere(server: string): Promise<Set<string>> {
+		const mine = scopeOf(server);
+		const found = new Set<string>();
+		for (const [key, value] of Object.entries(await this.#deps.kv.all())) {
+			if (!key.startsWith("@") || key.startsWith(mine)) continue;
+			const at = key.indexOf(` ${BOOK}`);
+			if (at < 0) continue;
+			if ((value as CaseBook | undefined)?.shadow !== undefined)
+				found.add(key.slice(at + 1 + BOOK.length));
+		}
+		return found;
 	}
 
-	async server(): Promise<string> {
-		const set = await this.#deps.kv.get(KEYS.server).catch(() => undefined);
-		return (
-			(typeof set === "string" ? serverOrigin(set) : undefined) ??
-			DEFAULT_SERVER
-		);
+	/** The server chosen: the service, unless the user chose another. */
+	server(): Promise<string> {
+		return chosenServer(this.#deps.kv);
+	}
+
+	/** The chosen server's part. */
+	async current(): Promise<ServerScope> {
+		return this.#scope(await this.server());
+	}
+
+	/** Who is signed in at the chosen server, by id; none: nobody. */
+	async me(): Promise<string | undefined> {
+		return (await readAccount((await this.current()).kv))?.user.id;
+	}
+
+	/** The team a case syncs with, by name; none: it is on this device only. */
+	async teamOf(caseId: string): Promise<string | undefined> {
+		const { kv } = await this.current();
+		const account = await readAccount(kv);
+		const team = teamOf(account);
+		if (team === undefined || account?.expired) return undefined;
+		const modes = (await kv.get(KEYS.modes)) as
+			| Record<string, string>
+			| undefined;
+		const mode = modes?.[caseId];
+		return mode === undefined || mode === "synced" ? team.name : undefined;
 	}
 
 	/**
@@ -134,7 +199,7 @@ export class Cloud {
 	start(): void {
 		void this.#schedule();
 		void (async () => {
-			const kv = this.#deps.kv;
+			const { kv } = await this.current();
 			const [status, queue] = await Promise.all([
 				kv.get(KEYS.status).catch(() => undefined),
 				kv.get(KEYS.queue).catch(() => undefined),
@@ -156,7 +221,10 @@ export class Cloud {
 		this.#timer = setTimeout(() => void this.#run(), QUIET_MS);
 	}
 
-	async #run(work: () => Promise<void> = () => this.engine.request()) {
+	async #run(
+		work: () => Promise<void> = async () =>
+			(await this.current()).engine.request(),
+	) {
 		this.#running++;
 		// A long upload makes no extension API call by itself.
 		this.#keep ??= setInterval(() => this.#deps.keepAlive?.(), KEEPALIVE_MS);
@@ -193,7 +261,9 @@ export class Cloud {
 	async #schedule(): Promise<void> {
 		const alarms = this.#deps.alarms;
 		if (alarms === undefined) return;
-		const account = await readAccount(this.#deps.kv).catch(() => undefined);
+		const account = await readAccount((await this.current()).kv).catch(
+			() => undefined,
+		);
 		if (teamOf(account) === undefined || account?.expired) {
 			await alarms.clear(CLOUD_ALARM);
 			return;
@@ -216,15 +286,16 @@ export class Cloud {
 	 */
 	async consentChanged(): Promise<void> {
 		if (!FIREFOX || (await dataConsent())) return;
-		if ((await readAccount(this.#deps.kv)) !== undefined) await this.#signOut();
+		if ((await readAccount((await this.current()).kv)) !== undefined)
+			await this.#signOut();
 	}
 
 	async #signOut(): Promise<void> {
-		const account = await readAccount(this.#deps.kv);
-		await this.engine.signOut();
+		const { kv, engine, session, server } = await this.current();
+		await engine.signOut();
 		// The tokens go here whatever the server says; it is told if it answers.
-		await this.#session.end(account?.server);
-		await this.#deps.kv.remove(PENDING_KEY);
+		await session.end(server);
+		await kv.remove(PENDING_KEY);
 		await this.#schedule();
 		this.#deps.news();
 	}
@@ -247,11 +318,13 @@ export class Cloud {
 	}
 
 	async #handle(request: CloudRequest): Promise<CloudAnswer> {
-		const kv = this.#deps.kv;
+		const { kv, engine, session, server } = await this.current();
 		switch (request.type) {
 			case "cloud:begin": {
+				// Where this server signs people in: asked of the server itself.
 				const { pending, url } = await beginSignIn(
-					await this.server(),
+					server,
+					await session.endpoints(server, true),
 					this.#deps.redirect(),
 					this.#now(),
 				);
@@ -262,7 +335,7 @@ export class Cloud {
 				const pending = (await kv.get(PENDING_KEY)) as
 					| PendingSignIn
 					| undefined;
-				if (pending === undefined)
+				if (pending === undefined || pending.server !== server)
 					throw new AuthError("No sign-in is under way. Try again.");
 				await kv.remove(PENDING_KEY);
 				const code = codeFrom(pending, request.redirect, this.#now());
@@ -272,9 +345,13 @@ export class Cloud {
 					code,
 					this.#now(),
 				);
-				await this.#session.store(tokens);
-				const me = await this.#api(pending.server).me();
-				await this.engine.signedIn(pending.server, me);
+				await session.store(tokens);
+				const me = await httpApi({
+					server,
+					token: (fresh) => session.access(server, fresh),
+					fetch: this.#fetch,
+				}).me();
+				await engine.signedIn(server, me);
 				await this.#schedule();
 				this.#deps.news();
 				return { ok: true };
@@ -283,16 +360,16 @@ export class Cloud {
 				await this.#signOut();
 				return { ok: true };
 			case "cloud:team":
-				await this.engine.chooseTeam(request.teamId);
+				await engine.chooseTeam(request.teamId);
 				await this.#schedule();
 				this.#deps.news();
 				return { ok: true };
 			case "cloud:decide":
-				await this.engine.decide(request.share);
+				await engine.decide(request.share);
 				this.#deps.news();
 				return { ok: true };
 			case "cloud:share":
-				await this.engine.share(request.caseId);
+				await engine.share(request.caseId);
 				this.#deps.news();
 				return { ok: true };
 			case "cloud:run": {
@@ -303,7 +380,7 @@ export class Cloud {
 					if (typeof seen === "number" && seen >= request.cursor)
 						return { ok: true };
 				}
-				if (request.retry) void this.#run(() => this.engine.retry());
+				if (request.retry) void this.#run(() => engine.retry());
 				else this.request();
 				return { ok: true };
 			}
@@ -314,23 +391,24 @@ export class Cloud {
 					return { ok: false, error: "Not signed in." };
 				return {
 					ok: true,
-					token: await this.#session.access(
-						account.server,
-						request.fresh === true,
-					),
+					token: await session.access(server, request.fresh === true),
 				};
 			}
 			case "cloud:server": {
+				// Another server is another account: signed out here first, so
+				// nothing of this one's is ever sent there by a switch.
 				if ((await readAccount(kv)) !== undefined)
-					throw new AuthError("Sign out before changing the server.");
+					throw new AuthError("Sign out before choosing another server.");
 				const text = request.server.trim();
 				if (text === "") {
-					await kv.remove(KEYS.server);
-					return { ok: true };
+					await this.#deps.kv.remove(SERVER_KEY);
+				} else {
+					const problem = serverProblem(text);
+					if (problem !== undefined) throw new AuthError(problem);
+					await this.#deps.kv.set({ [SERVER_KEY]: serverOrigin(text) });
 				}
-				const problem = serverProblem(text);
-				if (problem !== undefined) throw new AuthError(problem);
-				await kv.set({ [KEYS.server]: serverOrigin(text) });
+				await this.#schedule();
+				this.#deps.news();
 				return { ok: true };
 			}
 		}

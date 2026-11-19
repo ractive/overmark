@@ -1539,8 +1539,7 @@ handled elsewhere") and DEC-007's spirit holds: no new runtime dependency.
 11. **The panel.** An Account section on Home: signed out, "Sign in to sync with your
     team" with one sentence on what leaves the device; signed in, who, the team (a
     chooser when there are several), the sync's status, "Sync now" and "Sign out". The
-    server's address is a field there, as the relay's (default `https://app.sitegloss.dev`;
-    plain http only on this machine; only while signed out). The folder sync (DEC-021,
+    server is chosen there too, while signed out (DEC-041). The folder sync (DEC-021,
     DEC-025) stays and knows nothing of this.
 12. **Privacy and stores.** `PRIVACY.md` has the fourth way data leaves the computer and
     what the service keeps; the manifests have `identity`; the listings' changes are in
@@ -1613,3 +1612,57 @@ at it. When `openapi-typescript` runs on TypeScript 7, `typescript-5` and the bu
 go. The alternative was a generator of our own for the part of OpenAPI the document
 uses; rejected for now because the plan named the tool, and because the document will
 grow.
+
+## DEC-041: The server is chosen from three, and each server's state is its own
+
+2026-11-19, with DEC-039, asked for by the owner while it was built. There are two
+servers: the service (`https://app.sitegloss.dev`) and its development server
+(`https://app.dev.sitegloss.dev`, which may become `https://app-dev.sitegloss.dev`).
+Both addresses of the second are known, in one module with the first
+(`src/lib/cloud/servers.ts`); the chooser sets the first of them, and either is named
+"Development server".
+
+- **A chooser, folded away.** "Server" in the Account section, shown while nobody is
+  signed in: "Sitegloss (app.sitegloss.dev)", "Development server", "Another
+  address…" (a field: https, or http on this computer only). Whoever never opens it
+  signs in to the service and is never asked. The server is chosen before signing in
+  and can be changed only while signed out: another server is another account.
+- **Not the service: said in words.** Whenever the server is not the service, the
+  Account section says so beside the account and before the sign-in ("Development
+  server (app.dev.sitegloss.dev): not the real Sitegloss", "Another server
+  (localhost:3200): not sitegloss.dev"), so nobody takes test data for real or the
+  other way round.
+- **Everything the sync keeps is kept per server.** The cloud's database holds one
+  entry that is nobody's, the server chosen; every other key is under the server's
+  origin (`@<origin> <key>`, `scopedKv`): the tokens, the sign-in under way, the
+  account and team, how far the changes were read, the queue of operations, the
+  status, each case's book (which mark here is which there, what the server last
+  confirmed) and so each case's local-only flag. The worker has one engine and one
+  session per server and uses the chosen one's. So a case synced with the development
+  server is never sent to the service by a switch, and switching back finds what was
+  there: the same marks at the server, no second copy.
+- **A case another server has is on this device only here, until shared.** At a
+  sign-in, the cases that were here before are asked about in one go (DEC-039, 6);
+  the ones that synced with another server are left out of that question and are
+  "This device only" for this server. "Share with team" on such a case sends it,
+  that one case, because the user said so. The alternative, asking about all of them
+  together, makes one click on "Sync them" copy a team's real cases to a test
+  server.
+- **A case deleted while signed out is not deleted for the team by signing in.** The
+  book of such a case is dropped at the sign-in and the team's copy comes back with
+  the next read: with several servers, deleting a case while with another one is
+  ordinary, and nobody was told it would delete anything elsewhere.
+- **Where a server signs people in is what it says itself.** The authorization, token
+  and revocation addresses are read from the server's discovery document
+  (`<origin>/.well-known/oauth-authorization-server/api/auth`, RFC 8414) at each
+  sign-in and kept with that server's tokens for the renewals; no path of them is
+  written in the extension. A document whose issuer is not `<origin>/api/auth`, or
+  whose addresses are not at the chosen origin, is refused ("… does not answer as a
+  Sitegloss server"): the password and the tokens go to the address the user chose
+  and nowhere else. A server that names no revocation address is only forgotten here
+  at sign-out. The client id (`sitegloss-extension`), the scopes and the redirect
+  addresses are the same for every server.
+- **Tested** in `test/cloud-worker.test.ts` ("each server is kept apart") with two
+  servers in memory: a case synced with one never reaches the other, the first is
+  not asked anything while the second is chosen, its tokens go nowhere else, and
+  back at the first the case goes on with the marks it had.

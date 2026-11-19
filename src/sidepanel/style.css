@@ -1197,6 +1197,17 @@ ul.cases .title {
 	max-width: 100%;
 }
 
+/* Not the service: said as a warning is, beside the account (DEC-041). */
+.cloud-server-note {
+	margin: 0;
+	padding: var(--s1) var(--s2);
+	border: 1px solid var(--warn-edge);
+	border-radius: var(--r-control);
+	background: var(--warn-bg);
+	color: var(--warn);
+	font-weight: 600;
+}
+
 /*
  * The case's link and its Edit in one line under the meta line (DEC-028): a
  * long address is cut with an ellipsis, never wider than the panel.

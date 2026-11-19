@@ -87,6 +87,12 @@ export interface EngineDeps {
 	 * run.
 	 */
 	later?: (run: Promise<void>) => void;
+	/**
+	 * The cases that synced with another server (DEC-041). They are on this
+	 * device only as far as this server goes, and are not among "the cases
+	 * that were here before": each one is shared here by itself, or not.
+	 */
+	elsewhere?: () => Promise<ReadonlySet<string>>;
 }
 
 /** What each operation needs the user to be allowed to do in the team. */
@@ -267,30 +273,42 @@ export class CloudSync {
 			this.#have.clear();
 		}
 		const books = await this.#books.all();
+		const cases = await this.#deps.store.listCases();
+		const here = new Set(cases.map((c) => c.id));
 		const changed: CaseBook[] = [];
 		for (const book of books.values()) {
 			// Another team's: it stays on this device.
 			if (book.mode === "synced" && book.teamId !== teamId)
 				changed.push({ ...book, mode: "local" });
 			// This team had it before (signed out, or another team in between):
-			// it goes on where it was.
+			// it goes on where it was. A case deleted here meanwhile is not
+			// deleted for the team by signing in: nobody was told it would be.
 			else if (
 				book.mode === "local" &&
 				book.teamId === teamId &&
 				book.shadow !== undefined
-			)
-				changed.push({ ...book, mode: "synced" });
+			) {
+				if (here.has(book.caseId)) changed.push({ ...book, mode: "synced" });
+				else await this.#books.remove(book.caseId);
+			}
 		}
 		// What is here already is not sent without a word: the user is asked.
 		// Not after a sign-in that only ran out: what was made meanwhile is the
 		// team's, as it would have been. A case without a mark is nothing yet.
-		if (!resume)
-			for (const c of await this.#deps.store.listCases())
+		// What synced with another server is that server's: not asked about in
+		// one go with the rest, but on this device only until it is shared.
+		if (!resume) {
+			const elsewhere = (await this.#deps.elsewhere?.()) ?? new Set<string>();
+			for (const c of cases)
 				if (
 					!books.has(c.id) &&
 					(c.annotations.length > 0 || c.lastNumber !== undefined)
 				)
-					changed.push({ ...emptyBook(c.id, "undecided"), title: c.title });
+					changed.push({
+						...emptyBook(c.id, elsewhere.has(c.id) ? "local" : "undecided"),
+						title: c.title,
+					});
+		}
 		await this.#books.put(...changed);
 		const { expired: _e, ...rest } = account;
 		await kv.set({ [KEYS.account]: { ...rest, teamId } });
@@ -830,7 +848,9 @@ export class CloudSync {
 			if (
 				!(error instanceof ApiFailure) ||
 				error.kind !== "refused" ||
-				(error.status !== 400 && error.status !== 413)
+				// A no to what was sent (not to who sent it): found out one
+				// operation at a time, and that one is said and left out.
+				![400, 409, 413, 422].includes(error.status ?? 0)
 			)
 				throw error;
 			const [only] = batch;

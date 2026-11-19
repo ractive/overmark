@@ -80,8 +80,8 @@ timestamp: 2026-11-04T17:00:00+01:00
     once) keeps the old number on its pin in the screenshot and in its crop: the image
     is not painted again. The list, the page and the AI tools show the new number.
     Painting it again would need the screenshot without marks, which is not kept.
-    (b) Ids are global at the server: a case that synced with one team cannot be shared
-    with another, and a case the team deleted cannot be shared again from a device that
+    (b) Ids are global at a server: a case that synced with one team cannot be shared
+    with another team of the same server (another server is no trouble, DEC-041), and a case the team deleted cannot be shared again from a device that
     kept it. The server says "The case's id is taken", and the panel shows that.
     Export and "Keep both" on import make a copy with a new id. Giving such a case a
     new id on "Share with team" would be the fix here.

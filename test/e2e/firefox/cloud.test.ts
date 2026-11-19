@@ -64,7 +64,7 @@ describe.skipIf(SERVER === undefined || !firefoxReady)(
 			const panel = h.panel;
 			await h.rdp.eval(
 				panel,
-				`(() => { document.querySelector(".cloud-server").open = true; const field = ${id("cloud-server")}; field.value = ${JSON.stringify(base)}; field.dispatchEvent(new Event("change")); return true; })()`,
+				`(() => { document.querySelector(".cloud-server").open = true; const choice = ${id("cloud-server-choice")}; choice.value = "other"; choice.dispatchEvent(new Event("change")); const field = ${id("cloud-server")}; field.value = ${JSON.stringify(base)}; field.dispatchEvent(new Event("change")); field.blur(); return true; })()`,
 			);
 			await h.rdp.waitFor(
 				panel,
