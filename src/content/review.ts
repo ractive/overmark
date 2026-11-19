@@ -17,6 +17,7 @@ import {
 	type Annotation,
 	type Case,
 	caseCounts,
+	MARK_CHANGED,
 	MAX_COMMENT,
 	MAX_REOPEN_NOTE,
 	type MarkStatus,
@@ -112,6 +113,8 @@ interface OpenMark {
 	 * it asks names the mark, not only the id.
 	 */
 	mark: string;
+	/** The case has more than one mark this could be: nothing is asked for it. */
+	lost?: boolean;
 	mode: "main" | "resolve" | "reopen";
 	/** The comment as the case has it, and as typed here. */
 	base: string;
@@ -889,6 +892,12 @@ export class Reviewer {
 	 * Answers whether it did, and `false` when the popover went meanwhile.
 	 */
 	async #request(open: OpenMark, request: MarkRequest): Promise<boolean> {
+		// Not to be told from another mark any more: nothing is asked for it.
+		if (open.lost) {
+			open.problem.textContent = MARK_CHANGED;
+			open.problem.hidden = false;
+			return false;
+		}
 		open.busy = true;
 		const was = open.controls.map((b) => b.disabled);
 		for (const b of open.controls) b.disabled = true;
@@ -991,13 +1000,23 @@ export class Reviewer {
 	#follow(c: Case): void {
 		const open = this.#open;
 		if (open === undefined) return;
-		// Its mark, under whatever id it has now. Gone, or no longer to be
-		// told from another mark: the popover goes, with what was typed.
+		// Its mark, under whatever id it has now. Gone: the popover goes,
+		// with what was typed.
 		const annotation = markFor(c, open.annotationId, open.mark);
-		if (annotation === undefined || annotation === "ambiguous") {
+		if (annotation === undefined) {
 			this.#closeMark();
 			return;
 		}
+		// The id is another mark's, and more than one mark has this one's
+		// screenshot and drawing: a change is not applied to the first found.
+		// It is refused and said, and what was typed stays to be read.
+		if (annotation === "ambiguous") {
+			open.lost = true;
+			open.problem.textContent = MARK_CHANGED;
+			open.problem.hidden = false;
+			return;
+		}
+		open.lost = false;
 		const moved = annotation.id !== open.annotationId;
 		open.annotationId = annotation.id;
 		const untouched = typed(open).trim() === open.base;

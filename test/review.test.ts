@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 import type { Overlay } from "../src/content/overlay.ts";
 import { LoadReplaced, NO_PANEL, Reviewer } from "../src/content/review.ts";
-import type { Annotation, Case, Shape } from "../src/lib/case.ts";
+import {
+	type Annotation,
+	type Case,
+	MARK_CHANGED,
+	type Shape,
+} from "../src/lib/case.ts";
 import { describeElement } from "../src/lib/element.ts";
 import type { MarkAnswer, MarkRequest } from "../src/lib/messages.ts";
 import { isMarkRequest } from "../src/lib/messages.ts";
@@ -1135,6 +1140,30 @@ describe("the popover and a mark that takes another number (review B, sync 8)", 
 			annotationId: "a4",
 			text: "Typed while the sync ran",
 		});
+	});
+
+	test("the id is another mark's and two marks have its screenshot and drawing: nothing is asked, and that is said (review B, re-check E)", async () => {
+		const { before, after } = cases();
+		await reviewer.load(before);
+		overlay.onPick?.(3);
+		field().value = "Typed while the sync ran";
+		// Tess's mark is 4 now, and a mark nothing tells from it is 5.
+		const own = after.annotations[1] as Annotation;
+		await reviewer.update({
+			...after,
+			annotations: [...after.annotations, { ...own, id: "a5", number: 5 }],
+		});
+		const problem = overlay.popover.querySelector(".problem");
+		expect(overlay.popover.hidden).toBe(false);
+		expect(problem?.textContent).toBe(MARK_CHANGED);
+		expect(field().value).toBe("Typed while the sync ran");
+		asked.length = 0;
+		button("mark-done").click();
+		await settled();
+		// Not the teammate's mark 3, not the first of the two: nothing.
+		expect(asked).toEqual([]);
+		expect(overlay.popover.hidden).toBe(false);
+		expect(problem?.textContent).toBe(MARK_CHANGED);
 	});
 
 	test("its mark gone from the case: the popover goes, and nothing is asked", async () => {
