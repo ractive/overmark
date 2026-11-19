@@ -45,8 +45,12 @@ declare const SITEGLOSS_FIREFOX: boolean | undefined;
 
 /** How long the panel must be visible and focused before Allow and Always allow count. */
 const ALLOW_DELAY_MS = 750;
-/** After a first click on New address with apps connected: the second makes it. */
+/** After a first click on Disconnect all apps with apps connected: the second does it. */
 const NEW_ADDRESS_ARMED_MS = 4000;
+/** The pairing code's place while there is none: as long as a code, `XXXX-XXXX`. */
+const CODE_PLACEHOLDER = "––––-––––";
+/** The button that disconnects every AI app (the library's `newAddress()`). */
+const DISCONNECT_ALL = "Disconnect all apps";
 
 /** How long the panel waits for the worker's Blur form fields before it starts an overlay. */
 const BLUR_KNOWN_MS = 2000;
@@ -105,7 +109,7 @@ export function statusText(a: AiState): string {
 		a.problem &&
 		`Not connected: ${a.problem}${a.retrying ? " Trying again…" : ""}`;
 	const replaced =
-		a.replaced && "Not connected: the address is in use elsewhere.";
+		a.replaced && "Not connected: Sitegloss's connection is in use elsewhere.";
 	return (
 		[a.relayNote, replaced ?? problem].filter(Boolean).join(" ") ||
 		"Not connected"
@@ -456,9 +460,10 @@ export async function startAi(
 		turnOn({ type: "connect" }),
 	);
 
-	// Under the code, and in the takeover notice: there AI access is off and
-	// the code is hidden, and a new address is what drops the apps paired
-	// with the address taken over.
+	// "Disconnect all apps", under the code and in the takeover notice: there
+	// AI access is off and the code is hidden, and a new secret is what drops
+	// the apps paired with the connection taken over. The address stays: it
+	// names the app (DEC-042).
 	const newAddressButtons = [
 		"pair-new-address",
 		"pair-replaced-new-address",
@@ -477,12 +482,12 @@ export async function startAi(
 				newAddressText("Really? Every app must pair again");
 				setTimeout(() => {
 					newAddressArmedAt = undefined;
-					newAddressText("New address");
+					newAddressText(DISCONNECT_ALL);
 				}, NEW_ADDRESS_ARMED_MS);
 				return;
 			}
 			newAddressArmedAt = undefined;
-			newAddressText("New address");
+			newAddressText(DISCONNECT_ALL);
 			send({ type: "new-address" });
 		});
 
@@ -683,8 +688,8 @@ export async function startAi(
 		byId("connect").hidden = !view.turnOn;
 		byId("pair-replaced").hidden = a.replaced === undefined;
 		byId("pair-replaced-text").textContent = a.replaced?.sibling
-			? "Sitegloss's address is in use elsewhere in this browser."
-			: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.";
+			? "Sitegloss's connection is in use elsewhere in this browser."
+			: "Another tab or program took over Sitegloss's connection, and the AI apps paired with it may now talk to it. Disconnect all apps to end that.";
 		const problem = [
 			a.relayNote,
 			a.state === "disconnected" ? a.problem : undefined,
@@ -752,8 +757,8 @@ export async function startAi(
 		byId("pair-address").textContent = view.address;
 		setup.show(view.address);
 		const code = a.code;
-		byId("pair-code").textContent =
-			code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
+		// As the relay sends it, `XXXX-XXXX`; typed with or without the dash.
+		byId("pair-code").textContent = code ?? CODE_PLACEHOLDER;
 		byId<HTMLButtonElement>("pair-copy-code").disabled = code === undefined;
 	}
 

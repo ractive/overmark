@@ -2,8 +2,8 @@
  * What the worker reads from the tab-mcp client library, checked against the
  * library itself and a relay in this process: the events and states the
  * connection (`connection.ts`) and Keep AI access on (`keep-on.ts`) follow,
- * what `revoke()` answers, who sees the tools, and what `newAddress()`
- * does after a takeover. The fakes in `keep-on.test.ts` send the same
+ * what `revoke()` answers, who sees the tools, the address, and what
+ * `newAddress()` ("Disconnect all apps") does after a takeover. The fakes in `keep-on.test.ts` send the same
  * shapes; this is where a change of the library shows.
  */
 
@@ -31,6 +31,7 @@ import {
 	unattributed,
 } from "../src/worker/connection.ts";
 import { KeepOn } from "../src/worker/keep-on.ts";
+import { APP_ID } from "../src/worker/protocol.ts";
 
 /** A memory store whose revocations fail while `failing`, as a store that is down. */
 class FlakyStore extends MemoryTokenStore {
@@ -49,6 +50,7 @@ function page(relay: string, storage: Map<string, string> | null = null) {
 	const mcp = new TabMcp({
 		relay,
 		server: { name: "sitegloss", version: "0.0.0" },
+		app: APP_ID,
 		storage:
 			storage === null
 				? null
@@ -194,7 +196,7 @@ describe("the library's state, as the worker reads it", () => {
 	});
 });
 
-describe("tab-mcp client 0.16 with a relay", () => {
+describe("tab-mcp client 0.18 with a relay", () => {
 	const store = new FlakyStore();
 	// A session nobody paired with ends as idle at the first heartbeat after
 	// 300 ms.
@@ -250,7 +252,7 @@ describe("tab-mcp client 0.16 with a relay", () => {
 		const { mcp } = page(relay.url);
 		const named = async (clientId: string) => {
 			const { address } = await mcp.connect();
-			await tokenFor(relay.store, address, {
+			await tokenFor(relay, address, {
 				clientId,
 				clientName: "Test",
 			});
@@ -370,10 +372,7 @@ describe("tab-mcp client 0.16 with a relay", () => {
 		});
 		channel.port2.onmessage = (event) => tunnel.receive(event.data);
 		try {
-			const relayed = await listed(
-				undefined,
-				await tokenFor(relay.store, address),
-			);
+			const relayed = await listed(undefined, await tokenFor(relay, address));
 			expect(relayed.names).toEqual(["t"]);
 			expect(relayed.call.isError).toBeFalsy();
 			const local = await listed(tunnel.fetch);
@@ -389,13 +388,33 @@ describe("tab-mcp client 0.16 with a relay", () => {
 		}
 	});
 
-	test("taken over, newAddress() takes the address back itself, also in a page that never saw the takeover", async () => {
+	test("the address names the app: the same for every installation, and after Disconnect all apps", async () => {
+		const one = page(relay.url);
+		const two = page(relay.url);
+		try {
+			const { address } = await one.mcp.connect();
+			expect(address).toBe(`${relay.url}/s/${APP_ID}/mcp`);
+			// Another installation (another secret): the same address.
+			expect((await two.mcp.connect()).address).toBe(address);
+			two.mcp.disconnect();
+			await one.mcp.newAddress();
+			expect(one.mcp.session?.address).toBe(address);
+		} finally {
+			one.mcp.disconnect();
+			two.mcp.disconnect();
+		}
+	});
+
+	test("taken over, newAddress() takes the connection back itself, also in a page that never saw the takeover", async () => {
 		const storage = new Map<string, string>();
 		const a = page(relay.url, storage);
 		const b = page(relay.url, storage);
 		try {
 			const { address: old } = await a.mcp.connect();
-			// A program with a copy of the secret takes the address over.
+			const secret = [...storage.values()][0] as string;
+			// An AI app paired before the takeover.
+			const token = await tokenFor(relay, old, { secret });
+			// A program with a copy of the secret takes the connection over.
 			await b.mcp.connect();
 			await until(() => a.mcp.state === "disconnected");
 			expect(a.heard.at(-1)).toEqual({
@@ -409,9 +428,27 @@ describe("tab-mcp client 0.16 with a relay", () => {
 			expect(fresh.mcp.state).toBe("disconnected");
 			expect(fresh.heard.some((d) => d.state === "connected")).toBe(false);
 			await until(() => b.mcp.state === "disconnected");
+			// The address stays (it names the app); the secret behind it is new,
+			// under the same key.
+			expect([...storage.keys()]).toEqual([
+				`tab-mcp:secret:${relay.url}:sitegloss`,
+			]);
+			expect([...storage.values()][0]).not.toBe(secret);
 			const { address } = await fresh.mcp.connect();
-			expect(address).not.toBe(old);
+			expect(address).toBe(old);
 			expect(fresh.mcp.grants).toEqual([]);
+			// The AI app paired before is disconnected: its token is refused.
+			const call = await fetch(old, {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${token}`,
+					"Content-Type": "application/json",
+					Accept: "application/json, text/event-stream",
+					"MCP-Protocol-Version": "2026-07-28",
+				},
+				body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+			});
+			expect(call.status).toBe(401);
 			fresh.mcp.disconnect();
 		} finally {
 			a.mcp.disconnect();
@@ -447,7 +484,7 @@ describe("tab-mcp client 0.16 with a relay", () => {
 				new StreamableHTTPClientTransport(new URL(address), {
 					requestInit: {
 						headers: {
-							Authorization: `Bearer ${await tokenFor(relay.store, address)}`,
+							Authorization: `Bearer ${await tokenFor(relay, address)}`,
 						},
 					},
 				}),

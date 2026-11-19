@@ -1,7 +1,7 @@
 /**
- * The worker's connection (`Connection`) with the real tab-mcp client 0.16
+ * The worker's connection (`Connection`) with the real tab-mcp client 0.18
  * and a relay in this process: Disconnect, the end of a session by the
- * relay, and New address after a takeover, as the panel sees them. Chrome is
+ * relay, and Disconnect all apps after a takeover, as the panel sees them. Chrome is
  * a fake that keeps the session area, the alarms and the badge; the settings
  * database is a memory one. From the review of PR 58 (its harness).
  */
@@ -184,7 +184,7 @@ async function startWorker(kv: Kv): Promise<Worker> {
 	};
 }
 
-describe("the worker's connection with client 0.16", () => {
+describe("the worker's connection with client 0.18", () => {
 	const store = new SlowStore();
 	// Workers of earlier tests stay connected: more than the 5 sessions a
 	// network may have by default.
@@ -195,6 +195,9 @@ describe("the worker's connection with client 0.16", () => {
 		await Bun.sleep(50);
 		await relay.stop();
 	});
+
+	/** Where the library keeps Sitegloss's secret for this relay. */
+	const secretKey = () => `tab-mcp:secret:${relay.url}:sitegloss`;
 
 	/** A worker on a fresh database, connected, with `names` paired, each with Allow all changes. */
 	async function paired(names: string[]) {
@@ -209,8 +212,11 @@ describe("the worker's connection with client 0.16", () => {
 		w.send({ type: "connect" });
 		await until(() => w.last()?.state === "connected");
 		const address = w.last().address as string;
+		// Several workers are connected at the app's one address: the
+		// secret says which one is paired.
 		for (const name of names)
-			await tokenFor(relay.store, address, {
+			await tokenFor(relay, address, {
+				secret: (await kv.get(secretKey())) as string,
 				clientId: `https://${name.toLowerCase()}.example/client.json`,
 				clientName: name,
 			});
@@ -389,8 +395,9 @@ describe("the worker's connection with client 0.16", () => {
 		},
 	);
 
-	test("Review of PR 58, 4: after a takeover, New address clears it even when the connect after it fails", async () => {
+	test("Review of PR 58, 4: after a takeover, Disconnect all apps clears it even when the connect after it fails", async () => {
 		const first = await paired([]);
+		const secret = await first.kv.get(secretKey());
 		first.w.send({ type: "stop" });
 		await until(() => first.w.last().state === "disconnected");
 		// A new worker after a takeover it did not see.
@@ -417,10 +424,12 @@ describe("the worker's connection with client 0.16", () => {
 		expect(sockets).toBe(2);
 		expect(w.last().replaced).toBeUndefined();
 		expect(await first.kv.get("replaced")).toBeUndefined();
-		// The connect again works, with a new address.
+		// The connect again works, at the same address (it names the app),
+		// with a new secret behind it.
 		w.send({ type: "connect" });
 		await until(() => w.last().state === "connected");
-		expect(w.last().address).not.toBe(first.address);
+		expect(w.last().address).toBe(first.address);
+		expect(await first.kv.get(secretKey())).not.toBe(secret);
 	});
 
 	test("a stored relay the library refuses gives a note, and the default relay", async () => {
@@ -435,15 +444,16 @@ describe("the worker's connection with client 0.16", () => {
 		expect(w.last().relayNote).toContain(`using ${DEFAULT_RELAY}.`);
 	});
 
-	test("New address after a takeover this worker saw: a rejection after the address changed clears the takeover", async () => {
+	test("Disconnect all apps after a takeover this worker saw: a rejection after the secret changed clears the takeover", async () => {
 		const { w, kv, address } = await paired([]);
-		// A program with a copy of the address secret takes the address over.
-		const key = `tab-mcp:secret:${relay.url}:sitegloss`;
+		// A program with a copy of the address secret takes the connection over.
+		const key = secretKey();
 		const secret = (await kv.get(key)) as string;
 		expect(typeof secret).toBe("string");
 		const other = new TabMcp({
 			relay: relay.url,
 			server: { name: "sitegloss", version: "0.0.0" },
+			app: "sitegloss",
 			storage: {
 				getItem: (k) => (k === key ? secret : null),
 				setItem() {},
@@ -452,8 +462,8 @@ describe("the worker's connection with client 0.16", () => {
 		await other.connect();
 		try {
 			await until(() => w.last().replaced !== undefined);
-			// The library takes the address back and connects with the new one
-			// itself (it saw the takeover); that connect cannot.
+			// The library takes the connection back and connects with the new
+			// secret itself (it saw the takeover); that connect cannot.
 			const Real = before.WebSocket as typeof WebSocket;
 			let sockets = 0;
 			globals["WebSocket"] = class extends Real {
@@ -469,12 +479,13 @@ describe("the worker's connection with client 0.16", () => {
 				globals["WebSocket"] = before.WebSocket;
 			}
 			expect(sockets).toBe(2);
-			// The address is new all the same: no takeover notice for it.
+			// The secret is new all the same: no takeover notice for it.
 			expect(w.last().replaced).toBeUndefined();
 			expect(await kv.get("replaced")).toBeUndefined();
 			w.send({ type: "connect" });
 			await until(() => w.last().state === "connected");
-			expect(w.last().address).not.toBe(address);
+			expect(w.last().address).toBe(address);
+			expect(await kv.get(key)).not.toBe(secret);
 		} finally {
 			other.disconnect();
 		}

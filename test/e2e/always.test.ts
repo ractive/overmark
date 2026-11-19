@@ -97,7 +97,7 @@ describe.skipIf(browserBinary === undefined)(
 		 * the relay list it, as pairing would.
 		 */
 		const pairApp = async () => {
-			client = await mcpClient(relay.store, address);
+			client = await mcpClient(relay, address);
 			await panel.eval(`${byId("stop-ai")}.click()`);
 			await panel.waitFor(
 				`document.documentElement.dataset.aiState === "disconnected"`,

@@ -17,6 +17,15 @@ export const PANEL_PORT = "ai";
  */
 export const SERVER_NAME = "sitegloss";
 
+/**
+ * Sitegloss's app id: its MCP address is `<relay>/s/sitegloss/mcp`, the same
+ * for every installation, the Firefox build's too (DEC-042, tab-mcp's
+ * DEC-196); the pairing code alone says which installation an AI app is
+ * paired with. Set, not left to the library to derive from `SERVER_NAME`,
+ * so that a change of the server's name cannot change the address.
+ */
+export const APP_ID = "sitegloss";
+
 /** The side panel's page in the build. */
 export const PANEL_PATH = "/sidepanel/index.html";
 
@@ -118,7 +127,7 @@ export interface AiState {
 	/** A panel's pairing view is open. */
 	pairing: boolean;
 	code?: string;
-	/** Another tab or program took the address over. */
+	/** Another tab or program took Sitegloss's connection over (it connects with Sitegloss's secret). */
 	replaced?: { sibling: boolean };
 	lastCall?: CallView;
 	questions: QuestionView[];

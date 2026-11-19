@@ -8,7 +8,7 @@ import {
 	Client,
 	StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { tokenFor } from "@ractive-ch/tab-mcp/testing";
+import { type TestRelay, tokenFor } from "@ractive-ch/tab-mcp/testing";
 import type { Page } from "./browser.ts";
 import type { Harness } from "./harness.ts";
 import { worker } from "./steps.ts";
@@ -152,24 +152,25 @@ async function connectPanel(
 
 /**
  * An MCP client paired with `address` (a token straight from the relay's
- * store); `app` names another AI app than the default test client.
+ * store, for the one Sitegloss connected to `relay`); `app` names another
+ * AI app than the default test client.
  */
 export async function mcpClient(
-	store: Parameters<typeof tokenFor>[0],
+	relay: TestRelay,
 	address: string,
 	app: { clientId?: string; clientName?: string } = {},
 ): Promise<Client> {
 	return step(`pair an MCP client (${app.clientName ?? "Test client"})`, () =>
-		pairClient(store, address, app),
+		pairClient(relay, address, app),
 	);
 }
 
 async function pairClient(
-	store: Parameters<typeof tokenFor>[0],
+	relay: TestRelay,
 	address: string,
 	app: { clientId?: string; clientName?: string },
 ): Promise<Client> {
-	const token = await tokenFor(store, address, app);
+	const token = await tokenFor(relay, address, app);
 	const client = new Client(
 		{ name: "e2e", version: "1.0.0" },
 		{ versionNegotiation: { mode: { pin: "2026-07-28" } } },

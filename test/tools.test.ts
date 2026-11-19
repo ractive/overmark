@@ -1752,7 +1752,7 @@ describe("through a relay", () => {
 		});
 		for (const tool of tools.values()) await mcp.registerTool(tool);
 		const session = await mcp.connect();
-		const token = await tokenFor(relay.store, session.address);
+		const token = await tokenFor(relay, session.address);
 		const client = new Client(
 			{ name: "test", version: "1.0.0" },
 			{ versionNegotiation: { mode: { pin: "2026-07-28" } } },

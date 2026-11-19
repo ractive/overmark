@@ -36,6 +36,7 @@ import { endedProblem, KeepOn } from "./keep-on.ts";
 import { type Kv, openKv } from "./kv.ts";
 import {
 	type AiState,
+	APP_ID,
 	type CallView,
 	type PanelCommand,
 	parseCommand,
@@ -386,6 +387,7 @@ export class Connection {
 				instructions: INSTRUCTIONS,
 				icons: [],
 			},
+			app: APP_ID,
 			appName: "Sitegloss",
 			storage: this.#storage,
 			onConfirm: (request) => this.#decide(mcp, request),
@@ -611,7 +613,7 @@ export class Connection {
 		});
 	}
 
-	/** The alarm runs while AI access is on (and the address is ours). */
+	/** The alarm runs while AI access is on (and the connection is ours, not taken over). */
 	async #syncAlarm(): Promise<void> {
 		const on =
 			(this.#settings.keepOn || this.#sessionOn) &&
@@ -743,7 +745,7 @@ export class Connection {
 				return;
 			case "connect":
 				if (FIREFOX && !(await this.#consented())) return;
-				// The user's click takes the address back after a takeover. AI
+				// The user's click takes the connection back after a takeover. AI
 				// access is on for the session once connected ("connected").
 				await this.#setReplaced(undefined);
 				await this.#setStopped(false);
@@ -829,14 +831,17 @@ export class Connection {
 	}
 
 	/**
-	 * A new address. The library first takes the old address back, connected
-	 * or not, taken over or not (since client 0.16), so the relay revokes
-	 * every grant of it and disconnects the AI apps that may now talk to
-	 * whoever took it; then it connects with the new one if it was on. After
-	 * a takeover AI access is off, and a new worker's library knows nothing
-	 * of the takeover: the new address connects, so the card shows it to
-	 * pair again. Once the address is new, the takeover notice goes, also
-	 * when connecting with it fails (`addressChanged`, client 0.16.1).
+	 * "Disconnect all apps" (the library's `newAddress()`). The address the
+	 * AI apps are added with stays: it names the app (DEC-042). What is new is
+	 * the secret behind it, the page the relay knows. The library first takes
+	 * the old page back, connected or not, taken over or not, so the relay
+	 * revokes every grant of it and disconnects the AI apps that may now talk
+	 * to whoever took it; then it connects with the new secret if it was on.
+	 * After a takeover AI access is off, and a new worker's library knows
+	 * nothing of the takeover: it connects, so the card shows the address and
+	 * a code to pair again. Once the secret is new, the takeover notice goes,
+	 * also when connecting with it fails (`addressChanged`, which still names
+	 * the secret's change).
 	 */
 	async #newAddress(): Promise<void> {
 		const replaced = this.#settings.replaced !== undefined;
@@ -845,14 +850,14 @@ export class Connection {
 		try {
 			// "connected" turns AI access on.
 			await this.#mcp.newAddress();
-			// The address is new: no longer the one taken over, also should
+			// The secret is new: no longer the one taken over, also should
 			// the connect after it fail.
 			await this.#setReplaced(undefined);
 			if (replaced && (!FIREFOX || (await this.#consented())))
 				await this.#mcp.connect({ resume: true });
 		} catch (error) {
 			this.#problem = message(error);
-			// The address changed, and only connecting with it failed (the
+			// The secret changed, and only connecting with it failed (the
 			// library connects itself after a takeover it saw).
 			if ((error as { addressChanged?: unknown }).addressChanged === true)
 				await this.#setReplaced(undefined).catch(() => {});
