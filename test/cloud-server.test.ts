@@ -206,6 +206,21 @@ serverTest("against a real server", () => {
 		).toEqual(["https://shop.example/cart", PAY]);
 		expect(status(tess.device)?.problems).toEqual([]);
 
+		// The case is lost from Dana's store (nobody deleted it): it is read
+		// from the server by itself, whole, and nothing is deleted for the team.
+		dana.device.store.cases.delete(id);
+		for (const key of [...dana.device.store.images.keys()])
+			if (key.startsWith(`${id}/`)) dana.device.store.images.delete(key);
+		await dana.device.engine.request();
+		expect(look(await dana.device.store.getCase(id))).toEqual(
+			look(await tess.device.store.getCase(id)),
+		);
+		expect(await images(dana.device, id)).toEqual(
+			await images(tess.device, id),
+		);
+		await tess.device.engine.request();
+		expect(await tess.device.store.getCase(id)).toBeDefined();
+
 		// Deleted on one device: deleted for the team, and gone on the other.
 		await removeCase(tess.device, id);
 		await tess.device.engine.request();
