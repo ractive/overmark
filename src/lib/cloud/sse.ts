@@ -15,6 +15,23 @@ export interface StreamEvent {
 }
 
 /**
+ * The longest line, and the most data of one event, in characters: this
+ * API's events are a line of a few dozen. More is given up (`StreamTooLong`).
+ */
+export const MAX_LINE = 64 * 1024;
+
+/** How long one connection is kept before it is made anew. */
+export const MAX_STREAM_AGE_MS = 20 * 60_000;
+
+/** A line or an event longer than any of this API's. */
+export class StreamTooLong extends Error {
+	override name = "StreamTooLong";
+	constructor() {
+		super("the stream sent a line longer than a line may be");
+	}
+}
+
+/**
  * Reads server-sent events from text as it arrives: `push` returns the
  * events that are complete now. Comment lines and fields other than `event`,
  * `data` and `retry` are left out, as the format asks.
@@ -23,6 +40,7 @@ export class EventParser {
 	#rest = "";
 	#event = "";
 	#data: string[] = [];
+	#size = 0;
 	/** The server's `retry:`, in ms, once it sent one. */
 	retry: number | undefined;
 
@@ -31,6 +49,10 @@ export class EventParser {
 		this.#rest += text;
 		for (;;) {
 			const end = this.#rest.search(/\r\n|\n|\r/);
+			// A line that does not end, or an event that does not: no stream
+			// of this API's, and not held in memory any longer.
+			if ((end < 0 ? this.#rest.length : end) > MAX_LINE)
+				throw new StreamTooLong();
 			if (end < 0) break;
 			const line = this.#rest.slice(0, end);
 			// A lone \r at the very end may be the first half of \r\n.
@@ -46,15 +68,19 @@ export class EventParser {
 					});
 				this.#event = "";
 				this.#data = [];
+				this.#size = 0;
 				continue;
 			}
 			if (line.startsWith(":")) continue;
 			const colon = line.indexOf(":");
 			const field = colon < 0 ? line : line.slice(0, colon);
 			const value = colon < 0 ? "" : line.slice(colon + 1).replace(/^ /, "");
-			if (field === "event") this.#event = value;
-			else if (field === "data") this.#data.push(value);
-			else if (field === "retry" && /^\d+$/.test(value))
+			if (field === "event") this.#event = value.slice(0, 200);
+			else if (field === "data") {
+				this.#size += value.length + 1;
+				if (this.#size > MAX_LINE) throw new StreamTooLong();
+				this.#data.push(value);
+			} else if (field === "retry" && /^\d+$/.test(value))
 				this.retry = Number(value);
 		}
 		return events;
@@ -89,6 +115,8 @@ export interface ListenOptions {
 	sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 	/** No line for this long (the server sends one every 20 s): connect again. */
 	silenceMs?: number;
+	/** A connection older than this is made anew (`MAX_STREAM_AGE_MS`). */
+	maxAgeMs?: number;
 }
 
 /** The longest wait between two tries. */
@@ -117,6 +145,7 @@ export async function listen(options: ListenOptions): Promise<void> {
 	const fetcher = options.fetch ?? fetch;
 	const sleep = options.sleep ?? wait;
 	const silence = options.silenceMs ?? 60_000;
+	const maxAge = options.maxAgeMs ?? MAX_STREAM_AGE_MS;
 	let backoff = FIRST_BACKOFF_MS;
 	let fresh = false;
 	while (!options.signal.aborted) {
@@ -129,6 +158,13 @@ export async function listen(options: ListenOptions): Promise<void> {
 			clearTimeout(timer);
 			timer = setTimeout(stop, silence);
 		};
+		// Any byte counts as heard, so a server could hold one connection
+		// for ever: it has an age, after which it is made anew.
+		let aged = false;
+		const age = setTimeout(() => {
+			aged = true;
+			stop();
+		}, maxAge);
 		try {
 			const token = await options.token(fresh);
 			if (token === undefined) return;
@@ -172,9 +208,16 @@ export async function listen(options: ListenOptions): Promise<void> {
 				pause = parser.retry ?? FIRST_BACKOFF_MS;
 			}
 		} catch {
-			backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
+			// Its time was up: nothing went wrong, soon again.
+			if (aged) {
+				backoff = FIRST_BACKOFF_MS;
+				pause = FIRST_BACKOFF_MS;
+			} else backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
 		} finally {
+			// Whatever ended it, the connection is let go.
+			quiet.abort();
 			clearTimeout(timer);
+			clearTimeout(age);
 			options.signal.removeEventListener("abort", stop);
 		}
 		if (options.signal.aborted) return;

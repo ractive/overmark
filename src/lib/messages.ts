@@ -323,6 +323,8 @@ export type CloudRequest =
 	| { type: "cloud:begin" }
 	/** The browser's window ended on `redirect`: finish the sign-in. */
 	| { type: "cloud:finish"; redirect: string }
+	/** The window of the sign-in begun with `url` closed without an answer: forget it. */
+	| { type: "cloud:abandon"; url: string }
 	| { type: "cloud:sign-out" }
 	| { type: "cloud:team"; teamId: string }
 	/** The cases that were here before the team: share them, or keep them here. */
@@ -335,8 +337,12 @@ export type CloudRequest =
 	 * server refused before.
 	 */
 	| { type: "cloud:run"; cursor?: number; retry?: boolean }
-	/** An access token, for the events stream; `fresh`: the last was refused. */
-	| { type: "cloud:token"; fresh?: boolean }
+	/**
+	 * An access token for the events stream of that team at that server;
+	 * `fresh`: the last was refused. Refused when they are not the account's
+	 * (a stream that outlived its account must not get another server's token).
+	 */
+	| { type: "cloud:token"; server: string; teamId: string; fresh?: boolean }
 	/** The server's address; empty: sitegloss.dev's. Only while signed out. */
 	| { type: "cloud:server"; server: string };
 
@@ -347,6 +353,7 @@ export type CloudAnswer =
 const CLOUD_REQUESTS: ReadonlySet<string> = new Set<CloudRequest["type"]>([
 	"cloud:begin",
 	"cloud:finish",
+	"cloud:abandon",
 	"cloud:sign-out",
 	"cloud:team",
 	"cloud:decide",

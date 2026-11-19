@@ -41,12 +41,16 @@ export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
 /**
  * The largest JSON answer that is read. A page of `changes` is the largest
- * honest one: 500 things by default, each a few to some tens of kilobytes
- * (a mark with its element's details), so some megabytes; a mark at every
- * limit at once (comment, notes, 20 findings, 20 reopens, in four-byte
- * characters) is about 2.5 MB. 64 MiB holds a default page of marks of 128 KB
- * each. A page over it is asked for again in pages of `SMALL_PAGE` things,
- * which fits also when every thing is at every limit (20 × 2.5 MB).
+ * honest one: 500 things by default, each a few to some tens of kilobytes (a
+ * mark with its element's details), so some megabytes. 64 MiB holds a
+ * default page of marks of 128 KB each. A page over it is asked for again
+ * with `limit=SMALL_PAGE`: 20 things, or what one request changed when that
+ * is more (the server never splits a revision, and a request holds at most
+ * 200 operations in 8 MiB), which 64 MiB holds at 320 KB a thing. A mark at
+ * every limit at once (comment, notes, 20 findings, 20 reopens, in four-byte
+ * characters) is about 2.5 MB; only a request that changed 26 or more such
+ * marks at once makes a page that is not read, and that is said as the
+ * server's trouble.
  */
 export const MAX_JSON_BYTES = 64 * 1024 * 1024;
 export const SMALL_PAGE = 20;

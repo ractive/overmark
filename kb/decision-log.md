@@ -1705,6 +1705,53 @@ handled elsewhere") and DEC-007's spirit holds: no new runtime dependency.
   path. The sign-in text, the question about the cases that were here before, and
   `PRIVACY.md` say so.
 
+**After the review of the sign-in, the tokens and the server chooser** (2026-11-19;
+eleven findings, each confirmed with the reviewer's proof before it was fixed; finding 1
+is in DEC-041):
+
+- **No request follows a redirect** (`redirect: "error"` on discovery, the token
+  request, the revoke, every API call and the events stream). `discover` held the
+  endpoints to the chosen origin for the first hop only: a 307 from the chosen server
+  sent the refresh token, the code or the API's token on, or brought another site's
+  content back as a screenshot.
+- **A fetched image is taken only when it is the image named:** its SHA-256 is the name
+  it was asked by, its type is `image/webp`, and it is no larger than the API holds
+  (30 MiB, read up to that and no further). One that is not, also one the server does
+  not have, is not stored; the new mark or screenshot that needs it is left out and
+  that is said, and the rest of the case and of the run go on. "Sync now" reads the
+  team's whole state again, which brings it once the image is right.
+- **Answers have a size.** JSON up to 64 MiB; a page of `changes` over that is asked
+  for again with `limit=20` (20 things, or what one request changed when that is more:
+  the server never splits a revision). A line of the events stream, and the data of one
+  event, up to 64 KiB; one connection of the stream lives 20 minutes and is then made
+  anew.
+- **A refresh whose answer is lost is asked again in time.** The server rotates the
+  token when the request arrives, gives the same answer again for 30 s, and ends the
+  grant on a later second use. The stored token is the old one until the answer is
+  here, so the same request is sent again after 2, 8 and 18 s before it is given up as
+  offline; the worker's own retry (half a minute at the earliest) was the try that
+  signed the user out.
+- **Only `invalid_grant` is "the grant is gone".** Any other no from the token endpoint
+  (`invalid_client` after a bad deploy, `invalid_request`, a 400 or 401 from a proxy) is
+  the server's trouble and is tried again with back-off; it marked the account expired
+  before, which only a new sign-in cleared.
+- **A sign-in that fails after the code was changed for tokens ends them** at the
+  server and removes them here: tokens without an account had no "Sign out".
+- **Sign-ins under way are kept by their `state`**, so two windows do not take each
+  other's secrets. An answer is matched to its sign-in before anything else is read of
+  it, also a "no" (`error`); an answer that is nobody's takes nothing away. The panel
+  tells the worker when the window closed without an answer (`cloud:abandon`).
+- **Sign-out removes the tokens first,** then tells the server (10 s at most) and the
+  engine: a run under way ends at its next request and does not hold the click.
+- **The server is not chosen while a sign-in is under way** (the chooser is off, and
+  the worker refuses), so nobody ends up signed in at one server with the chooser at
+  another.
+- **`cloud:token` names the server and the team** the stream is of, and the worker
+  refuses any other.
+- **The question about the cases that were here names the host** on a server that is
+  not the service ("… with “Acme” on sync.example.org?"): the team's name is that
+  server's word.
+
 ## DEC-040: The API's types are generated, with TypeScript 5 for the generator alone
 
 2026-11-19, with DEC-039. `src/lib/cloud/api.gen.ts` is generated from a copy of the

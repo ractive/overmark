@@ -9,6 +9,8 @@ import {
 	ApiFailure,
 	httpApi,
 	MAX_IMAGE_BYTES,
+	MAX_JSON_BYTES,
+	SMALL_PAGE,
 	TOO_LARGE,
 } from "../src/lib/cloud/api.ts";
 import {
@@ -23,9 +25,11 @@ import {
 	exchangeCode,
 	OfflineError,
 	type PendingSignIn,
+	pendingSignIns,
 	refreshTokens,
 	revokeTokens,
 	Session,
+	stateOf,
 	TOKENS_KEY,
 	type Tokens,
 } from "../src/lib/cloud/auth.ts";
@@ -40,7 +44,13 @@ import {
 	serverOrigin,
 	serverProblem,
 } from "../src/lib/cloud/servers.ts";
-import { changeCursor, EventParser, listen } from "../src/lib/cloud/sse.ts";
+import {
+	changeCursor,
+	EventParser,
+	listen,
+	MAX_LINE,
+	StreamTooLong,
+} from "../src/lib/cloud/sse.ts";
 import { memoryKv } from "../src/lib/kv.ts";
 
 const SERVER = "https://app.sitegloss.dev";
@@ -54,12 +64,22 @@ const ENDPOINTS: Endpoints = {
 };
 const DISCOVERY = `${SERVER}/.well-known/oauth-authorization-server/api/auth`;
 
-/** A token endpoint whose refresh tokens rotate: a used one ends the grant. */
-function tokenServer() {
+/**
+ * A token endpoint whose refresh tokens rotate, as the real one's: a used
+ * one gives the same answer again for 30 s (the answer may have been lost),
+ * and ends the grant after that.
+ */
+function tokenServer(clock: { ms: number } = { ms: 0 }) {
 	let n = 0;
+	/** The refresh token before this one, its answer, and when it was used. */
+	let last: { refresh: string; answer: object; at: number } | undefined;
 	const state = {
 		refresh: "r0",
 		revoked: false,
+		/** The next so many refresh requests arrive, and their answers do not. */
+		loseAnswers: 0,
+		/** What the token endpoint answers instead, when set: a server in trouble. */
+		trouble: undefined as Response | undefined,
 		/** How often the server was asked where it signs people in. */
 		discoveries: 0,
 		requests: [] as URLSearchParams[],
@@ -88,9 +108,16 @@ function tokenServer() {
 		state.requests.push(body);
 		state.credentials.push(init?.credentials);
 		if (input.endsWith("/revoke")) {
+			// Only this client's own, current refresh token ends the grant.
+			if (
+				body.get("client_id") !== CLIENT_ID ||
+				body.get("token") !== state.refresh
+			)
+				return Response.json({ error: "invalid_request" }, { status: 400 });
 			state.revoked = true;
 			return Response.json({});
 		}
+		if (state.trouble !== undefined) return state.trouble.clone();
 		if (body.get("grant_type") === "authorization_code") {
 			if (body.get("code") !== "the-code")
 				return Response.json({ error: "invalid_grant" }, { status: 400 });
@@ -103,7 +130,23 @@ function tokenServer() {
 				somethingNew: true,
 			});
 		}
-		if (state.revoked || body.get("refresh_token") !== state.refresh) {
+		const used = body.get("refresh_token");
+		const lose = () => {
+			if (state.loseAnswers === 0) return false;
+			state.loseAnswers--;
+			return true;
+		};
+		// The one before, again, within the grace period: the same answer.
+		if (
+			!state.revoked &&
+			last !== undefined &&
+			used === last.refresh &&
+			clock.ms - last.at <= 30_000
+		) {
+			if (lose()) throw new TypeError("Failed to fetch");
+			return Response.json(last.answer);
+		}
+		if (state.revoked || used !== state.refresh) {
 			// An old refresh token: the whole grant is gone.
 			state.revoked = true;
 			return Response.json(
@@ -111,12 +154,17 @@ function tokenServer() {
 				{ status: 400 },
 			);
 		}
-		state.refresh = `r${++n}`;
-		return Response.json({
+		const before = state.refresh;
+		state.refresh = state.keepRefresh ? before : `r${++n}`;
+		if (state.keepRefresh) n++;
+		const answer = {
 			access_token: `a${n}`,
 			...(state.keepRefresh ? {} : { refresh_token: state.refresh }),
 			expires_in: 3600,
-		});
+		};
+		if (!state.keepRefresh) last = { refresh: before, answer, at: clock.ms };
+		if (lose()) throw new TypeError("Failed to fetch");
+		return Response.json(answer);
 	};
 	return { state, fetcher };
 }
@@ -314,10 +362,19 @@ describe("a sign-in", () => {
 		expect(() =>
 			codeFrom(
 				pending(),
-				`${REDIRECT}?error=server_error&error_description=Try+later`,
+				`${REDIRECT}?error=server_error&error_description=Try+later&state=the-state`,
 				2000,
 			),
 		).toThrow("The sign-in failed: Try later");
+		// A "no" is this sign-in's only with this sign-in's state, as a code
+		// is: one without it, or with another's, is nobody's word.
+		for (const foreign of [
+			`${REDIRECT}?error=server_error&error_description=Made+up`,
+			`${REDIRECT}?error=access_denied&state=another`,
+		])
+			expect(() => codeFrom(pending(), foreign, 2000)).toThrow(
+				"The sign-in's answer is not for this sign-in.",
+			);
 		expect(() =>
 			codeFrom(pending(), `${REDIRECT}?state=the-state`, 2000),
 		).toThrow("without a code");
@@ -356,13 +413,25 @@ describe("a sign-in", () => {
 
 describe("the tokens", () => {
 	async function signedIn(now = { ms: 10_000 }) {
-		const server = tokenServer();
+		const server = tokenServer(now);
 		const kv = memoryKv();
-		const session = new Session(kv, server.fetcher, () => now.ms);
+		/** The waits between tries of one refresh; the clock goes on with them. */
+		const slept: number[] = [];
+		const session = new Session(
+			kv,
+			server.fetcher,
+			() => now.ms,
+			async (ms) => {
+				slept.push(ms);
+				now.ms += ms;
+			},
+		);
 		await session.store(
 			await exchangeCode(server.fetcher, pending(), "the-code", now.ms),
 		);
-		return { ...server, kv, session, now };
+		// As after a sign-in: where the server signs people in is known.
+		await session.endpoints(SERVER, true);
+		return { ...server, kv, session, now, slept };
 	}
 
 	test("an access token is used while it holds, and renewed a minute before it runs out", async () => {
@@ -391,7 +460,7 @@ describe("the tokens", () => {
 		expect((kv.data.get(TOKENS_KEY) as Tokens).refresh).toBe("r3");
 	});
 
-	test("two who need a new token at once share one renewal: a refresh token is never used twice", async () => {
+	test("two who need a new token at once share one renewal", async () => {
 		const { state, session } = await signedIn();
 		const [a, b, c] = await Promise.all([
 			session.access(SERVER, true),
@@ -423,27 +492,99 @@ describe("the tokens", () => {
 	});
 
 	test("a server that is not reached is no sign-out: the tokens stay", async () => {
-		const { state, session, kv } = await signedIn();
+		const { state, session, kv, slept } = await signedIn();
 		state.offline = true;
 		await expect(session.access(SERVER, true)).rejects.toBeInstanceOf(
 			OfflineError,
 		);
+		// Asked again a few times within the server's 30 s, then given up.
+		expect(slept).toEqual([2000, 6000, 10_000]);
 		expect((kv.data.get(TOKENS_KEY) as Tokens).refresh).toBe("r1");
 		state.offline = false;
 		expect(await session.access(SERVER, true)).toBe("a2");
 	});
 
+	test("a refresh that arrived and whose answer was lost is asked again in time: no sign-out", async () => {
+		const { state, session, kv, slept } = await signedIn();
+		// The server rotates the token; the answer does not come, twice.
+		state.loseAnswers = 2;
+		expect(await session.access(SERVER, true)).toBe("a2");
+		expect(slept).toEqual([2000, 6000]);
+		// The same request three times, with the token the server had rotated.
+		expect(state.requests.slice(-3).map((r) => r.get("refresh_token"))).toEqual(
+			["r1", "r1", "r1"],
+		);
+		expect(state.revoked).toBe(false);
+		expect((kv.data.get(TOKENS_KEY) as Tokens).refresh).toBe("r2");
+		expect(await session.access(SERVER, true)).toBe("a3");
+	});
+
+	test("lost for longer than the server repeats its answer: that try ends the grant, and it is said as it is", async () => {
+		const { state, session, now } = await signedIn();
+		state.loseAnswers = 4;
+		await expect(session.access(SERVER, true)).rejects.toBeInstanceOf(
+			OfflineError,
+		);
+		// Much later (the browser was closed): the token is spent.
+		now.ms += 5 * 60_000;
+		const late = await session.access(SERVER, true).catch((e: unknown) => e);
+		expect(late).toBeInstanceOf(AuthError);
+		expect((late as AuthError).signedOut).toBe(true);
+	});
+
+	test("only the server's word that the grant is gone signs out; any other no is its trouble, tried again", async () => {
+		for (const trouble of [
+			Response.json({ error: "invalid_client" }, { status: 401 }),
+			Response.json({ error: "invalid_request" }, { status: 400 }),
+			Response.json({ error: "invalid_target" }, { status: 400 }),
+			new Response("<html>Bad Request</html>", { status: 400 }),
+			new Response("Bad Gateway", { status: 502 }),
+		]) {
+			const { state, session, kv } = await signedIn();
+			state.trouble = trouble;
+			const failed = await session
+				.access(SERVER, true)
+				.catch((e: unknown) => e);
+			expect(failed).toBeInstanceOf(AuthError);
+			expect((failed as AuthError).signedOut).toBe(false);
+			expect((failed as AuthError).message).toStartWith(
+				`The server answered ${trouble.status}`,
+			);
+			// The API says "the server's fault" of it, which a run tries again.
+			const api = httpApi({
+				server: SERVER,
+				token: (fresh) => session.access(SERVER, fresh || true),
+				fetch: async () => Response.json({}),
+			});
+			await expect(api.me()).rejects.toMatchObject({ kind: "server" });
+			// Nothing was given up: the tokens are there, and work once it is over.
+			expect((kv.data.get(TOKENS_KEY) as Tokens).refresh).toBe("r1");
+			state.trouble = undefined;
+			expect(await session.access(SERVER, true)).toBe("a2");
+		}
+	});
+
 	test("signing out wipes the tokens here and ends the grant at the server", async () => {
-		const { state, session, kv } = await signedIn();
+		const { state, session, kv, fetcher } = await signedIn();
 		await session.end(SERVER);
 		expect(kv.data.has(TOKENS_KEY)).toBe(false);
-		expect(state.revoked).toBe(true);
 		const revoke = state.requests.at(-1) as URLSearchParams;
 		expect(Object.fromEntries(revoke)).toEqual({
 			token: "r1",
 			token_type_hint: "refresh_token",
 			client_id: CLIENT_ID,
 		});
+		// The server took it (it ends only this client's current token), and
+		// the refresh token is worth nothing afterwards.
+		expect(state.revoked).toBe(true);
+		const after = await refreshTokens(
+			fetcher,
+			SERVER,
+			ENDPOINTS,
+			{ access: "a1", refresh: "r1", expiresAt: 0 },
+			0,
+		).catch((e: unknown) => e);
+		expect((after as AuthError).signedOut).toBe(true);
 		// Offline: wiped here all the same.
 		const other = await signedIn();
 		other.state.offline = true;
@@ -581,6 +722,103 @@ describe("the events stream", () => {
 		]);
 		expect(changeCursor({ event: "later", data: "x" })).toBeUndefined();
 		expect(changeCursor({ event: "change", data: "not json" })).toBeUndefined();
+	});
+
+	test("a line that does not end, or an event that does not, is given up and not held", () => {
+		const parser = new EventParser();
+		// Long, and still within what a line may be.
+		expect(parser.push(`data: ${"x".repeat(MAX_LINE - 100)}\n\n`)).toHaveLength(
+			1,
+		);
+		expect(() => {
+			for (let i = 0; i < 100; i++) parser.push("y".repeat(1024));
+		}).toThrow(StreamTooLong);
+		const many = new EventParser();
+		expect(() => {
+			for (let i = 0; i < 100; i++) many.push(`data: ${"z".repeat(1000)}\n`);
+		}).toThrow(StreamTooLong);
+	});
+
+	test("a stream that never ends its line is let go and connected again; one connection has an age", async () => {
+		// A server that sends bytes for ever and never a line end.
+		let pulled = 0;
+		let cancelled = 0;
+		const endless = () =>
+			new Response(
+				new ReadableStream<Uint8Array>({
+					pull(controller) {
+						pulled++;
+						controller.enqueue(new TextEncoder().encode("x".repeat(8192)));
+					},
+					cancel() {
+						cancelled++;
+					},
+				}),
+			);
+		const end = new AbortController();
+		const waits: number[] = [];
+		await listen({
+			url: "https://app.sitegloss.dev/api/v1/teams/t/events",
+			token: async () => "a",
+			onChange: () => undefined,
+			signal: end.signal,
+			fetch: async (_url, init) => {
+				const response = endless();
+				init?.signal?.addEventListener("abort", () =>
+					response.body?.cancel().catch(() => undefined),
+				);
+				return response;
+			},
+			sleep: async (ms) => {
+				waits.push(ms);
+				end.abort();
+			},
+		});
+		// Given up after about 64 KiB, not read on and on; then a wait as after a failure.
+		expect(pulled).toBeLessThan(20);
+		expect(waits).toEqual([2000]);
+
+		// Comment lines all the time (each resets the silence): after its
+		// age the connection is made anew, soon, as nothing went wrong.
+		const again = new AbortController();
+		const pauses: number[] = [];
+		let connections = 0;
+		await listen({
+			url: "https://app.sitegloss.dev/api/v1/teams/t/events",
+			token: async () => "a",
+			onChange: () => undefined,
+			signal: again.signal,
+			maxAgeMs: 60,
+			fetch: async (_url, init) => {
+				connections++;
+				let timer: ReturnType<typeof setInterval>;
+				return new Response(
+					new ReadableStream<Uint8Array>({
+						start(controller) {
+							timer = setInterval(
+								() =>
+									controller.enqueue(new TextEncoder().encode(": ping\n\n")),
+								5,
+							);
+							init?.signal?.addEventListener("abort", () => {
+								clearInterval(timer);
+								controller.error(new DOMException("aborted", "AbortError"));
+							});
+						},
+						cancel() {
+							clearInterval(timer);
+						},
+					}),
+				);
+			},
+			sleep: async (ms) => {
+				pauses.push(ms);
+				if (pauses.length === 2) again.abort();
+			},
+		});
+		expect(connections).toBe(2);
+		expect(pauses).toEqual([2000, 2000]);
+		expect(cancelled).toBeGreaterThanOrEqual(0);
 	});
 
 	/** A stream that sends `text` and ends. */
@@ -828,5 +1066,65 @@ describe("the chosen server answers, nobody it points at (review B, 2)", () => {
 		).rejects.toMatchObject({ code: TOO_LARGE });
 		expect(read).toBeGreaterThan(29);
 		expect(read).toBeLessThan(35);
+	});
+});
+
+describe("an answer is read up to what an answer may be (review B, 11)", () => {
+	test("JSON: a page of changes can be asked for in fewer things; an answer over the limit is given up", async () => {
+		const urls: string[] = [];
+		let read = 0;
+		const api = (answer: () => Response) =>
+			httpApi({
+				server: SERVER,
+				token: async () => "a",
+				fetch: async (url) => {
+					urls.push(url);
+					return answer();
+				},
+			});
+		const page = () => Response.json({ cursor: 3, more: false });
+		expect((await api(page).changes("t", undefined)).cursor).toBe(3);
+		await api(page).changes("t", 7, SMALL_PAGE);
+		await api(page).changes("t", undefined, SMALL_PAGE);
+		expect(urls.map((u) => u.slice(u.indexOf("/changes")))).toEqual([
+			"/changes",
+			`/changes?since=7&limit=${SMALL_PAGE}`,
+			`/changes?limit=${SMALL_PAGE}`,
+		]);
+		const endless = () =>
+			new Response(
+				new ReadableStream<Uint8Array>({
+					pull(controller) {
+						read++;
+						controller.enqueue(new Uint8Array(4 * 1024 * 1024).fill(32));
+					},
+				}),
+			);
+		await expect(api(endless).changes("t", undefined)).rejects.toMatchObject({
+			kind: "server",
+			code: TOO_LARGE,
+		});
+		// 64 MiB in pieces of 4 MiB: given up there.
+		expect(read).toBeGreaterThanOrEqual(MAX_JSON_BYTES / (4 * 1024 * 1024));
+		expect(read).toBeLessThan(MAX_JSON_BYTES / (4 * 1024 * 1024) + 4);
+	});
+});
+
+describe("the sign-ins under way", () => {
+	test("are kept by their state, and one that took too long is no longer one", () => {
+		const a = { ...pending(1000), state: "s-a" };
+		const b = { ...pending(1000 + 16 * 60_000), state: "s-b" };
+		const stored = { "s-a": a, "s-b": b, "s-x": { ...a, state: "other" } };
+		expect(pendingSignIns(stored, 1000 + 60_000)).toEqual({
+			"s-a": a,
+			"s-b": b,
+		});
+		expect(pendingSignIns(stored, 1000 + 17 * 60_000)).toEqual({ "s-b": b });
+		// What an older build kept there (one sign-in, not by state) is none.
+		expect(pendingSignIns(pending(), 2000)).toEqual({});
+		expect(pendingSignIns(undefined, 2000)).toEqual({});
+		expect(stateOf(`${REDIRECT}?code=c&state=s-a`)).toBe("s-a");
+		expect(stateOf(`${REDIRECT}?code=c`)).toBe("");
+		expect(stateOf("not an address")).toBe("");
 	});
 });

@@ -83,6 +83,13 @@ Only in four cases, all started by you:
    then goes to that server instead, the Account section says which, and what synced
    with one server is not sent to another unless you share that case there.
 
+   While you are signed in and the side panel is open, the panel keeps a connection to
+   the server open, over which the server says when your team changed something. The
+   server can therefore tell when your panel is open. With the panel closed, Sitegloss
+   asks the server every few minutes instead. A case you kept on this device is not
+   sent because the server, or a teammate, has a case with the same id; Sitegloss tells
+   you, and "Share with team" is what joins the two.
+
    In Firefox, the browser asks at "Sign in" for the same data collection consent as for
    an AI app (website content and browsing activity); taking it back signs you out.
 

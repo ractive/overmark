@@ -21,7 +21,13 @@ import {
 	withoutAnnotation,
 } from "../src/lib/case.ts";
 import { eventsUrl } from "../src/lib/cloud/api.ts";
-import { TOKENS_KEY, type Tokens } from "../src/lib/cloud/auth.ts";
+import {
+	AuthError,
+	discover,
+	refreshTokens,
+	TOKENS_KEY,
+	type Tokens,
+} from "../src/lib/cloud/auth.ts";
 import type { Account } from "../src/lib/cloud/book.ts";
 import { listen } from "../src/lib/cloud/sse.ts";
 import {
@@ -210,8 +216,21 @@ serverTest("against a real server", () => {
 		// Signing out ends the grant at the server: its tokens are refused.
 		end.abort();
 		await listening;
-		const old = (tess.kv.data.get(TOKENS_KEY) as Tokens).access;
+		const { access: old, refresh: spent } = tess.kv.data.get(
+			TOKENS_KEY,
+		) as Tokens;
 		await tess.session.end(base);
+		// The real server took the extension's sign-out (a public client's,
+		// without a secret): the refresh token is worth nothing afterwards.
+		const again = await refreshTokens(
+			(input, init) => fetch(input, init),
+			base,
+			await discover((input, init) => fetch(input, init), base),
+			{ access: old, refresh: spent, expiresAt: 0 },
+			Date.now(),
+		).catch((error: unknown) => error);
+		expect(again).toBeInstanceOf(AuthError);
+		expect((again as AuthError).signedOut).toBe(true);
 		const refused = await fetch(`${base}/api/v1/me`, {
 			headers: { authorization: `Bearer ${old}` },
 		});

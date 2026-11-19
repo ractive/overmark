@@ -18,7 +18,12 @@ import {
 	withTitle,
 	withVerified,
 } from "../src/lib/case.ts";
-import { ApiFailure, type Op, TOO_LARGE } from "../src/lib/cloud/api.ts";
+import {
+	ApiFailure,
+	type Op,
+	SMALL_PAGE,
+	TOO_LARGE,
+} from "../src/lib/cloud/api.ts";
 import {
 	type Account,
 	type CaseBook,
@@ -839,6 +844,54 @@ describe("an image from the server is taken only when it is the image named (rev
 		expect(there.annotations).toHaveLength(2);
 		expect(there.shots).toHaveLength(2);
 		expect(status(dana)?.problems.map((p) => p.text)).toEqual([TEXT]);
+	});
+});
+
+describe("an answer larger than an answer may be (review B, 11)", () => {
+	test("a page of changes too large to read is asked for again in small pages, and all of it arrives", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_big");
+		// One request each: the server never splits what one request changed.
+		for (let i = 1; i <= 45; i++) {
+			await addMark(tess, "c_big", `Mark ${i}`);
+			await tess.engine.request();
+		}
+		// Dana's client refuses any answer of more than 30 things as too large.
+		const changes = dana.api.changes.bind(dana.api);
+		const asked: (number | undefined)[] = [];
+		dana.api.changes = async (team, since, limit) => {
+			asked.push(limit);
+			const answer = await changes(team, since, limit);
+			const things =
+				(answer.cases?.length ?? 0) +
+				(answer.shots?.length ?? 0) +
+				(answer.marks?.length ?? 0);
+			if (things > 30)
+				throw new ApiFailure("server", "Too large.", 200, TOO_LARGE);
+			return answer;
+		};
+		await dana.engine.request();
+		expect(asked[0]).toBeUndefined();
+		expect(asked.slice(1).every((limit) => limit === SMALL_PAGE)).toBe(true);
+		expect(asked.length).toBeGreaterThan(3);
+		expect((await dana.store.getCase("c_big"))?.annotations).toHaveLength(45);
+		expect(status(dana)?.state).toBe("synced");
+	});
+
+	test("a small page that is still too large is the server's trouble: said, nothing stored, tried again later", async () => {
+		await signIn(dana);
+		dana.api.changes = async () => {
+			throw new ApiFailure(
+				"server",
+				"The server's answer is larger than an answer may be.",
+				200,
+				TOO_LARGE,
+			);
+		};
+		await dana.engine.request();
+		expect(status(dana)?.state).toBe("problem");
+		expect(status(dana)?.text).toContain("larger than an answer may be");
 	});
 });
 

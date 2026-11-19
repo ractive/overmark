@@ -624,7 +624,7 @@ export class FakeServer {
 		return { results, cursor: this.seq };
 	}
 
-	changes(since: number | undefined): Changes {
+	changes(since: number | undefined, limit = this.pageSize): Changes {
 		const head = this.seq;
 		const reset = since !== undefined && since > head;
 		const from = reset || since === undefined ? 0 : since;
@@ -637,7 +637,7 @@ export class FakeServer {
 			.map((r) => r.rev)
 			.filter((r) => r > from)
 			.sort((a, b) => a - b);
-		const cut = revs[this.pageSize];
+		const cut = revs[limit];
 		// The page ends on a whole revision, as the server's does.
 		const upTo = cut === undefined ? head : cut;
 		const more = cut !== undefined;
@@ -732,9 +732,11 @@ export class FakeServer {
 					],
 				};
 			},
-			async changes(_team, since) {
-				reach(`GET changes ${since ?? ""}`.trim());
-				return server.changes(since);
+			async changes(_team, since, limit) {
+				reach(
+					`GET changes ${since ?? ""}${limit === undefined ? "" : ` limit ${limit}`}`.trim(),
+				);
+				return server.changes(since, limit);
 			},
 			async ops(_team, ops) {
 				reach(`POST ops ${ops.length}`);
@@ -798,6 +800,10 @@ export function fakeHttp(
 		access: new Map<string, string>(),
 		refresh: new Map<string, string>(),
 		revoked: [] as string[],
+		/** An answer in a request's stead (`"GET /api/v1/me"`): the API in trouble. */
+		broken: undefined as
+			| ((request: string) => Response | undefined)
+			| undefined,
 		requests: [] as string[],
 		offline: false,
 		/** Access tokens are refused, whatever they are. */
@@ -850,13 +856,21 @@ export function fakeHttp(
 			return Response.json(issue(person));
 		}
 		if (url.pathname === "/api/auth/oauth2/revoke") {
-			const token = new URLSearchParams(String(init?.body ?? "")).get("token");
-			if (token !== null) {
-				state.revoked.push(token);
-				state.refresh.delete(token);
-			}
+			// Only the extension's own refresh token that still holds ends a
+			// grant: nothing is ended on anybody's say-so.
+			const body = new URLSearchParams(String(init?.body ?? ""));
+			const token = body.get("token") ?? "";
+			if (
+				body.get("client_id") !== "sitegloss-extension" ||
+				!state.refresh.has(token)
+			)
+				return Response.json({ error: "invalid_request" }, { status: 400 });
+			state.revoked.push(token);
+			state.refresh.delete(token);
 			return Response.json({});
 		}
+		const broken = state.broken?.(`${method} ${url.pathname}`);
+		if (broken !== undefined) return broken;
 		const bearer = new Headers(init?.headers).get("authorization") ?? "";
 		const person = state.access.get(bearer.replace(/^Bearer /, ""));
 		const user = person === undefined ? undefined : people[person];
@@ -874,8 +888,13 @@ export function fakeHttp(
 		const [, , what, sha = ""] = route;
 		if (what === "changes") {
 			const since = url.searchParams.get("since");
+			const limit = url.searchParams.get("limit");
 			return Response.json(
-				await api.changes(TEAM, since === null ? undefined : Number(since)),
+				await api.changes(
+					TEAM,
+					since === null ? undefined : Number(since),
+					limit === null ? undefined : Number(limit),
+				),
 			);
 		}
 		if (what === "ops") {

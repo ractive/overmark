@@ -10,6 +10,7 @@ import { withComment } from "../src/lib/case.ts";
 import {
 	CLIENT_ID,
 	PENDING_KEY,
+	stateOf,
 	TOKENS_KEY,
 	type Tokens,
 } from "../src/lib/cloud/auth.ts";
@@ -140,7 +141,7 @@ describe("signing in", () => {
 	});
 
 	test("finish takes only its own sign-in's answer; then the tokens, who it is, the team, a first sync", async () => {
-		await cloud.handle({ type: "cloud:begin" });
+		const begun = await cloud.handle({ type: "cloud:begin" });
 		const wrong = await cloud.handle({
 			type: "cloud:finish",
 			redirect: `${REDIRECT}?code=code-tess&state=someone-elses`,
@@ -150,10 +151,25 @@ describe("signing in", () => {
 			error: "The sign-in's answer is not for this sign-in.",
 		});
 		expect(data.has(TOKENS_KEY)).toBe(false);
-		// One try per sign-in: its secrets are gone.
+		// An answer that is nobody's takes nothing away: the sign-in under
+		// way still waits for its own.
+		expect(data.has(PENDING_KEY)).toBe(true);
+		// Its own answer is taken once: its secrets go before it is examined.
+		const state = stateOf((begun as { url: string }).url);
+		const refused = await cloud.handle({
+			type: "cloud:finish",
+			redirect: `${REDIRECT}?error=access_denied&state=${state}`,
+		});
+		expect(refused).toEqual({
+			ok: false,
+			error: "The sign-in was not allowed.",
+		});
 		expect(data.has(PENDING_KEY)).toBe(false);
 		expect(
-			await cloud.handle({ type: "cloud:finish", redirect: REDIRECT }),
+			await cloud.handle({
+				type: "cloud:finish",
+				redirect: `${REDIRECT}?code=code-tess&state=${state}`,
+			}),
 		).toEqual({ ok: false, error: "No sign-in is under way. Try again." });
 
 		await signIn();
@@ -176,17 +192,72 @@ describe("signing in", () => {
 		expect(data.has(TOKENS_KEY)).toBe(false);
 	});
 
-	test("the token for the events stream: only for who is signed in, renewed when it was refused", async () => {
-		expect(await cloud.handle({ type: "cloud:token" })).toEqual({
+	test("the token for the events stream: only for who is signed in, for that server and team, renewed when it was refused", async () => {
+		const mine = { type: "cloud:token", server: SERVER, teamId: TEAM } as const;
+		expect(await cloud.handle(mine)).toEqual({
 			ok: false,
 			error: "Not signed in.",
 		});
 		await signIn();
-		const first = await cloud.handle({ type: "cloud:token" });
+		const first = await cloud.handle(mine);
 		expect(first).toEqual({ ok: true, token: "at_tess_1" });
-		const fresh = await cloud.handle({ type: "cloud:token", fresh: true });
+		// A stream of another server, or of another team: nothing.
+		for (const other of [
+			{ ...mine, server: DEV },
+			{ ...mine, teamId: "team_other" },
+		])
+			expect(await cloud.handle(other)).toEqual({
+				ok: false,
+				error: "Not signed in there.",
+			});
+		const fresh = await cloud.handle({ ...mine, fresh: true });
 		expect(fresh).toEqual({ ok: true, token: "at_tess_2" });
 		expect((data.get(TOKENS_KEY) as Tokens).refresh).toBe("rt_tess_2");
+	});
+
+	test("two windows sign in at once: each sign-in keeps its own secrets, and either can finish", async () => {
+		const one = await cloud.handle({ type: "cloud:begin" });
+		const two = await cloud.handle({ type: "cloud:begin" });
+		const stateOne = stateOf((one as { url: string }).url);
+		const stateTwo = stateOf((two as { url: string }).url);
+		expect(stateOne).not.toBe(stateTwo);
+		expect(Object.keys(data.get(PENDING_KEY) as object).sort()).toEqual(
+			[stateOne, stateTwo].sort(),
+		);
+		// The first window comes back first.
+		expect(
+			await cloud.handle({
+				type: "cloud:finish",
+				redirect: `${REDIRECT}?code=code-tess&state=${stateOne}`,
+			}),
+		).toEqual({ ok: true });
+		await settled();
+		expect((data.get(KEYS.account) as Account).user).toEqual(TESS);
+		// Signed in: the other sign-in is over, its secrets gone.
+		expect(data.has(PENDING_KEY)).toBe(false);
+	});
+
+	test("a sign-in that fails after the code was changed for tokens leaves none behind: ended at the server, removed here", async () => {
+		// The server gives tokens, and then cannot say who it is.
+		http.state.broken = (request) =>
+			request === "GET /api/v1/me"
+				? new Response("Bad Gateway", { status: 502 })
+				: undefined;
+		const begun = await cloud.handle({ type: "cloud:begin" });
+		const failed = await cloud.handle({
+			type: "cloud:finish",
+			redirect: `${REDIRECT}?code=code-tess&state=${stateOf((begun as { url: string }).url)}`,
+		});
+		expect(failed.ok).toBe(false);
+		expect(data.has(KEYS.account)).toBe(false);
+		// No tokens nobody could sign out of: gone here, and the server was told.
+		expect(data.has(TOKENS_KEY)).toBe(false);
+		expect(http.state.revoked).toEqual(["rt_tess_1"]);
+		expect(http.state.refresh.size).toBe(0);
+		// And the next try works.
+		http.state.broken = undefined;
+		await signIn();
+		expect((data.get(KEYS.account) as Account).user).toEqual(TESS);
 	});
 });
 
@@ -299,7 +370,10 @@ describe("signing out, and the server's address", () => {
 		expect(await cloud.handle({ type: "cloud:sign-out" })).toEqual({
 			ok: true,
 		});
+		// The server ended it (it ends only a refresh token that held): the
+		// token is worth nothing there any more.
 		expect(http.state.revoked).toEqual([refresh]);
+		expect(http.state.refresh.has(refresh)).toBe(false);
 		expect(data.has(TOKENS_KEY)).toBe(false);
 		expect(data.has(KEYS.account)).toBe(false);
 		expect(alarms.has(CLOUD_ALARM)).toBe(false);
@@ -311,6 +385,62 @@ describe("signing out, and the server's address", () => {
 			ok: true,
 		});
 		expect(data.has(TOKENS_KEY)).toBe(false);
+	});
+
+	test("the tokens go first: a run that hangs does not hold the sign-out, and gets no further", async () => {
+		await signIn();
+		await startCase(here(), "c_slow");
+		await addMark(here(), "c_slow", "Never arrives");
+		// The upload never answers.
+		let hung = 0;
+		const real = http.fetch;
+		http.fetch = (input, init) => {
+			if (init?.method === "PUT" || init?.method === "HEAD") {
+				hung++;
+				return new Promise<Response>(() => undefined);
+			}
+			return real(input, init);
+		};
+		const running = settled();
+		while (hung === 0) await Bun.sleep(5);
+		const out = cloud.handle({ type: "cloud:sign-out" });
+		// At once, though the run is still stuck: no tokens here, and the
+		// server was told.
+		await Bun.sleep(30);
+		expect(data.has(TOKENS_KEY)).toBe(false);
+		expect(http.state.revoked).toHaveLength(1);
+		// (The account goes once the run is over; here it never is.)
+		void running;
+		void out;
+		expect(server.marksOf("c_slow")).toEqual([]);
+	});
+
+	test("the server is not chosen while a sign-in is under way; its window closed, it is again", async () => {
+		const begun = await cloud.handle({ type: "cloud:begin" });
+		expect(await cloud.handle({ type: "cloud:server", server: DEV })).toEqual({
+			ok: false,
+			error:
+				"A sign-in is under way. Finish it, or close its window, before choosing another server.",
+		});
+		expect(await cloud.server()).toBe(SERVER);
+		// The panel says the window closed without an answer.
+		expect(
+			await cloud.handle({
+				type: "cloud:abandon",
+				url: (begun as { url: string }).url,
+			}),
+		).toEqual({ ok: true });
+		expect(data.has(PENDING_KEY)).toBe(false);
+		expect(await cloud.handle({ type: "cloud:server", server: DEV })).toEqual({
+			ok: true,
+		});
+		// A sign-in that took too long is none either.
+		await cloud.handle({ type: "cloud:server", server: "" });
+		await cloud.handle({ type: "cloud:begin" });
+		now += 16 * 60_000;
+		expect(await cloud.handle({ type: "cloud:server", server: DEV })).toEqual({
+			ok: true,
+		});
 	});
 
 	test("another server: https, or this machine; only while nobody is signed in", async () => {

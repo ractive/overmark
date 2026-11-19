@@ -130,4 +130,45 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 		expect(answer).toBeNull();
 		expect(await captures()).toBe(before);
 	});
+
+	test("the account and the tokens are asked for by a page of the extension only, never by a content script (DEC-039)", async () => {
+		await a.page.activate();
+		// As a content script would: a message from a web page's tab.
+		const fromPage = (message: object) =>
+			h.control.eval<unknown>(
+				`chrome.scripting.executeScript({
+					target: { tabId: ${a.tabId} },
+					func: (m) => chrome.runtime.sendMessage(m).then((answer) => answer ?? null, (e) => "error: " + e.message),
+					args: [${JSON.stringify(message)}],
+				}).then(([injected]) => injected.result)`,
+			);
+		// The same messages from the extension's own page get an answer.
+		const fromExtension = (message: object) =>
+			h.control.eval<{ ok: boolean; error?: string }>(
+				`chrome.runtime.sendMessage(${JSON.stringify(message)})`,
+			);
+		const token = {
+			type: "cloud:token",
+			server: "https://app.sitegloss.dev",
+			teamId: "t",
+		};
+		for (const message of [
+			token,
+			{ type: "cloud:begin" },
+			{ type: "cloud:sign-out" },
+			{ type: "cloud:server", server: "https://evil.example" },
+			{ type: "cloud:decide", share: true },
+			{ type: "cloud:share", caseId: "c_1" },
+		])
+			expect(await fromPage(message)).toBeNull();
+		expect(await fromExtension(token)).toEqual({
+			ok: false,
+			error: "Not signed in.",
+		});
+		// Nothing a content script asked for happened: the server is still the service.
+		const chosen = await serviceWorker.eval<unknown>(
+			`new Promise((done) => { const open = indexedDB.open("sitegloss-cloud"); open.onsuccess = () => { const db = open.result; const names = [...db.objectStoreNames]; if (names.length === 0) return done(null); const all = db.transaction(names[0]).objectStore(names[0]).getAll(); all.onsuccess = () => done(JSON.stringify(all.result)); all.onerror = () => done("error"); }; open.onerror = () => done("error"); })`,
+		);
+		expect(String(chosen)).not.toContain("evil.example");
+	});
 });

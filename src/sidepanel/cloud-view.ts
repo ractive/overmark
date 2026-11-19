@@ -161,6 +161,8 @@ function serverChooser(cloud: Cloud): HTMLElement {
 	const input: HTMLInputElement = h("input", {
 		type: "url",
 		id: "cloud-server",
+		// Not while a sign-in is under way: it ends at the server it began at.
+		disabled: cloud.signingIn,
 		spellcheck: "false",
 		autocomplete: "off",
 		placeholder: "https://…",
@@ -187,6 +189,7 @@ function serverChooser(cloud: Cloud): HTMLElement {
 		"select",
 		{
 			id: "cloud-server-choice",
+			disabled: cloud.signingIn,
 			onchange: act((a) => {
 				other.hidden = select.value !== "other";
 				// Empty: the service's own address.
@@ -404,6 +407,11 @@ export function bannerOf(
 			text: "Sign in again to go on syncing; what you change meanwhile is kept and sent then.",
 		};
 	const n = cloud.status?.undecided ?? 0;
+	// A team's name is the server's word, and this is where a click sends
+	// cases: on a server that is not the service, the server is named too.
+	const server = cloud.account?.server ?? cloud.server;
+	const where =
+		serverKind(server) === "production" ? "" : ` on ${hostOf(server)}`;
 	if (team !== undefined && n > 0)
 		return {
 			kind: "undecided",
@@ -411,7 +419,7 @@ export function bannerOf(
 				n === 1
 					? "1 case is on this device only."
 					: `${n} cases are on this device only.`,
-			text: `Sync ${n === 1 ? "it" : "them"} with “${team.name}”? Its members will see ${n === 1 ? "it" : "them"}, with ${n === 1 ? "its" : "their"} marks, screenshots and the addresses of the pages marked.`,
+			text: `Sync ${n === 1 ? "it" : "them"} with “${team.name}”${where}? Its members will see ${n === 1 ? "it" : "them"}, with ${n === 1 ? "its" : "their"} marks, screenshots and the addresses of the pages marked.`,
 		};
 	return undefined;
 }

@@ -95,8 +95,15 @@ export function startCloud(
 		stream = { key, end };
 		void listen({
 			url: eventsUrl(account.server, teamId),
+			// For this server and team, and no other: should this stream ever
+			// outlive its account, the worker gives it nothing.
 			token: async (fresh) => {
-				const answer = await send({ type: "cloud:token", fresh });
+				const answer = await send({
+					type: "cloud:token",
+					server: account.server,
+					teamId,
+					fresh,
+				});
 				return answer.ok ? answer.token : undefined;
 			},
 			onChange: (cursor) => void send({ type: "cloud:run", cursor }),
@@ -186,6 +193,8 @@ export function startCloud(
 				ended = await webAuthFlow(begun.url);
 			} catch (error) {
 				// Closed without signing in: nothing changes, and nothing is wrong.
+				// The worker forgets the sign-in, so the server can be chosen again.
+				await send({ type: "cloud:abandon", url: begun.url });
 				const text = message(error);
 				problem(
 					/cancel|closed|did not approve|not approve/i.test(text)
@@ -194,7 +203,10 @@ export function startCloud(
 				);
 				return;
 			}
-			if (ended === undefined) return;
+			if (ended === undefined) {
+				await send({ type: "cloud:abandon", url: begun.url });
+				return;
+			}
 			await finish(ended);
 		})().finally(() => update((s) => (s.cloud.signingIn = false)));
 	}

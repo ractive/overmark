@@ -28,8 +28,10 @@ import {
 	exchangeCode,
 	OfflineError,
 	PENDING_KEY,
-	type PendingSignIn,
+	type PendingSignIns,
+	pendingSignIns,
 	Session,
+	stateOf,
 } from "../lib/cloud/auth.ts";
 import {
 	BOOK,
@@ -292,10 +294,18 @@ export class Cloud {
 
 	async #signOut(): Promise<void> {
 		const { kv, engine, session, server } = await this.current();
-		await engine.signOut();
-		// The tokens go here whatever the server says; it is told if it answers.
-		await session.end(server);
+		// The tokens go first, and at once: a run under way (a long upload, a
+		// request that never answers) ends at its next request instead of
+		// going on after the click, and the sign-out is not lost behind it.
+		// They go whatever the server says; it is told if it answers.
+		const tokens = await session.forget();
+		const told =
+			tokens === undefined
+				? Promise.resolve()
+				: session.revoke(server, tokens).catch(() => undefined);
 		await kv.remove(PENDING_KEY);
+		await engine.signOut();
+		await told;
 		await this.#schedule();
 		this.#deps.news();
 	}
@@ -328,16 +338,45 @@ export class Cloud {
 					this.#deps.redirect(),
 					this.#now(),
 				);
-				await kv.set({ [PENDING_KEY]: pending });
+				// Kept by its state: a second window's sign-in is another one,
+				// and neither takes the other's secrets.
+				await kv.set({
+					[PENDING_KEY]: {
+						...pendingSignIns(await kv.get(PENDING_KEY), this.#now()),
+						[pending.state]: pending,
+					},
+				});
 				return { ok: true, url };
 			}
+			case "cloud:abandon": {
+				// Its window closed without an answer: no sign-in is under way.
+				const { [stateOf(request.url)]: _gone, ...rest } = pendingSignIns(
+					await kv.get(PENDING_KEY),
+					this.#now(),
+				);
+				if (Object.keys(rest).length > 0) await kv.set({ [PENDING_KEY]: rest });
+				else await kv.remove(PENDING_KEY);
+				return { ok: true };
+			}
 			case "cloud:finish": {
-				const pending = (await kv.get(PENDING_KEY)) as
-					| PendingSignIn
-					| undefined;
-				if (pending === undefined || pending.server !== server)
-					throw new AuthError("No sign-in is under way. Try again.");
-				await kv.remove(PENDING_KEY);
+				const all = ((await kv.get(PENDING_KEY)) ?? {}) as PendingSignIns;
+				const state = stateOf(request.redirect);
+				const pending = Object.hasOwn(all, state) ? all[state] : undefined;
+				if (
+					pending === undefined ||
+					pending.state !== state ||
+					pending.server !== server
+				)
+					throw new AuthError(
+						Object.keys(all).length > 0
+							? "The sign-in's answer is not for this sign-in."
+							: "No sign-in is under way. Try again.",
+					);
+				// One try: its secrets go before the answer is examined.
+				const { [state]: _used, ...others } = all;
+				if (Object.keys(others).length > 0)
+					await kv.set({ [PENDING_KEY]: others });
+				else await kv.remove(PENDING_KEY);
 				const code = codeFrom(pending, request.redirect, this.#now());
 				const tokens = await exchangeCode(
 					this.#fetch,
@@ -346,12 +385,22 @@ export class Cloud {
 					this.#now(),
 				);
 				await session.store(tokens);
-				const me = await httpApi({
-					server,
-					token: (fresh) => session.access(server, fresh),
-					fetch: this.#fetch,
-				}).me();
-				await engine.signedIn(server, me);
+				try {
+					const me = await httpApi({
+						server,
+						token: (fresh) => session.access(server, fresh),
+						fetch: this.#fetch,
+					}).me();
+					await engine.signedIn(server, me);
+				} catch (error) {
+					// Signed in at the server, and not here: tokens without an
+					// account have no "Sign out" to end them, so they are ended
+					// now, here and at the server.
+					await session.end(server);
+					throw error;
+				}
+				// Signed in: any other sign-in begun is over.
+				await kv.remove(PENDING_KEY);
 				await this.#schedule();
 				this.#deps.news();
 				return { ok: true };
@@ -389,6 +438,14 @@ export class Cloud {
 				const team = teamOf(account);
 				if (account === undefined || team === undefined || account.expired)
 					return { ok: false, error: "Not signed in." };
+				// For the server and team the stream is of, and no other: a
+				// stream that outlived its account gets nothing.
+				if (
+					request.server !== server ||
+					account.server !== server ||
+					request.teamId !== team.id
+				)
+					return { ok: false, error: "Not signed in there." };
 				return {
 					ok: true,
 					token: await session.access(server, request.fresh === true),
@@ -399,6 +456,13 @@ export class Cloud {
 				// nothing of this one's is ever sent there by a switch.
 				if ((await readAccount(kv)) !== undefined)
 					throw new AuthError("Sign out before choosing another server.");
+				// A sign-in under way would end at the server it began at,
+				// with the chooser at another: first finished, or its window closed.
+				const open = pendingSignIns(await kv.get(PENDING_KEY), this.#now());
+				if (Object.keys(open).length > 0)
+					throw new AuthError(
+						"A sign-in is under way. Finish it, or close its window, before choosing another server.",
+					);
 				const text = request.server.trim();
 				if (text === "") {
 					await this.#deps.kv.remove(SERVER_KEY);

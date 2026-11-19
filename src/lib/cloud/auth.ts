@@ -198,6 +198,10 @@ export function codeFrom(
 	const back = new URL(pending.redirect);
 	if (url.origin !== back.origin || url.pathname !== back.pathname)
 		throw new AuthError("The sign-in came back to another address.");
+	// Whose answer it is comes first: also a "no" is taken only from the
+	// sign-in it answers (the server returns the state with an error too).
+	if (url.searchParams.get("state") !== pending.state)
+		throw new AuthError("The sign-in's answer is not for this sign-in.");
 	const failed = url.searchParams.get("error");
 	if (failed !== null)
 		throw new AuthError(
@@ -205,8 +209,6 @@ export function codeFrom(
 				? "The sign-in was not allowed."
 				: `The sign-in failed: ${(url.searchParams.get("error_description") ?? failed).slice(0, 300)}`,
 		);
-	if (url.searchParams.get("state") !== pending.state)
-		throw new AuthError("The sign-in's answer is not for this sign-in.");
 	const code = url.searchParams.get("code");
 	if (code === null || code === "")
 		throw new AuthError("The sign-in came back without a code.");
@@ -266,15 +268,15 @@ async function tokenRequest(
 	const body: unknown = await response.json().catch(() => undefined);
 	if (response.ok) return tokensOf(body, now, before);
 	const code = (body as { error?: unknown } | undefined)?.error;
-	// The grant is gone: an answer of the server's about this token, not a
-	// server that is down.
-	if (
-		response.status === 400 ||
-		response.status === 401 ||
-		code === "invalid_grant"
-	)
+	// The grant is gone only when the server says so of this token or code
+	// (`invalid_grant`). Any other no (`invalid_client` after a bad deploy,
+	// `invalid_request`, a 400 or 401 from a proxy in front) is the server's
+	// trouble, tried again later: it must not sign everybody out.
+	if (code === "invalid_grant")
 		throw new AuthError("The sign-in is no longer valid. Sign in again.", true);
-	throw new AuthError(`The server answered ${response.status} to the sign-in.`);
+	throw new AuthError(
+		`The server answered ${response.status}${typeof code === "string" ? ` (${code.slice(0, 80)})` : ""} to the sign-in.`,
+	);
 }
 
 /** The server could not be reached at all: try again later. */
@@ -327,6 +329,9 @@ export function refreshTokens(
 }
 
 /** End the grant at the server; a server that cannot be reached is left. */
+/** How long the server has to answer a sign-out. */
+export const REVOKE_TIMEOUT_MS = 10_000;
+
 export async function revokeTokens(
 	fetcher: Fetch,
 	endpoints: Endpoints,
@@ -339,6 +344,8 @@ export async function revokeTokens(
 			credentials: "omit",
 			// The chosen server answers, nobody it points at.
 			redirect: "error",
+			// A sign-out does not wait for a server that does not answer.
+			signal: AbortSignal.timeout(REVOKE_TIMEOUT_MS),
 			headers: { "content-type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({
 				token: tokens.refresh,
@@ -356,6 +363,35 @@ export async function revokeTokens(
 export const TOKENS_KEY = "tokens";
 export const PENDING_KEY = "sign-in";
 
+/** The sign-ins under way, by their `state`: two windows may each have one. */
+export type PendingSignIns = Record<string, PendingSignIn>;
+
+/** What is kept under `PENDING_KEY`, without the sign-ins that took too long. */
+export function pendingSignIns(stored: unknown, now: number): PendingSignIns {
+	const live: PendingSignIns = {};
+	if (typeof stored !== "object" || stored === null) return live;
+	for (const [state, pending] of Object.entries(stored as PendingSignIns))
+		if (
+			typeof pending?.state === "string" &&
+			pending.state === state &&
+			now - pending.at <= SIGN_IN_MAX_MS
+		)
+			live[state] = pending;
+	return live;
+}
+
+/** The `state` in an address (the window's, or the one it ended on); none: "". */
+export function stateOf(address: string): string {
+	try {
+		return new URL(address).searchParams.get("state") ?? "";
+	} catch {
+		return "";
+	}
+}
+
+/** The waits between the tries of one refresh request whose answer did not come. */
+export const REFRESH_RETRY_MS: readonly number[] = [2000, 6000, 10_000];
+
 /** An access token is renewed this long before it runs out. */
 const EARLY_MS = 60_000;
 
@@ -372,6 +408,8 @@ export class Session {
 		private readonly kv: Kv,
 		private readonly fetcher: Fetch,
 		private readonly now: () => number = Date.now,
+		private readonly sleep: (ms: number) => Promise<void> = (ms) =>
+			new Promise((done) => setTimeout(done, ms)),
 	) {}
 
 	async tokens(): Promise<Tokens | undefined> {
@@ -412,16 +450,32 @@ export class Session {
 		// One at a time: the second caller's refresh token would be the used one.
 		this.#renewing ??= (async () => {
 			try {
-				const next = await refreshTokens(
-					this.fetcher,
-					server,
-					await this.endpoints(server),
-					tokens,
-					this.now(),
-				);
-				// Stored before it is used: the old refresh token is spent.
-				await this.kv.set({ [TOKENS_KEY]: next });
-				return next;
+				const endpoints = await this.endpoints(server);
+				// A request whose answer did not come may have arrived: the
+				// server has then rotated the token, and gives the same answer
+				// again for a short while (30 s), after which a second use ends
+				// the grant. So the same request is sent again soon, a few
+				// times within that while, before it is given up as offline;
+				// waiting for the next run would be the try that signs out.
+				for (let attempt = 0; ; attempt++) {
+					try {
+						const next = await refreshTokens(
+							this.fetcher,
+							server,
+							endpoints,
+							tokens,
+							this.now(),
+						);
+						// Stored before it is used: the old refresh token is spent.
+						await this.kv.set({ [TOKENS_KEY]: next });
+						return next;
+					} catch (error) {
+						const wait = REFRESH_RETRY_MS[attempt];
+						if (!(error instanceof OfflineError) || wait === undefined)
+							throw error;
+						await this.sleep(wait);
+					}
+				}
 			} finally {
 				this.#renewing = undefined;
 			}
@@ -433,13 +487,24 @@ export class Session {
 		await this.kv.set({ [TOKENS_KEY]: tokens });
 	}
 
-	/** Forget the tokens here, and end the grant at the server if it answers. */
-	async end(server: string | undefined): Promise<void> {
+	/** Forget the tokens here, at once; what they were, for the server to be told. */
+	async forget(): Promise<Tokens | undefined> {
 		const tokens = await this.tokens();
 		await this.kv.remove(TOKENS_KEY);
-		if (tokens === undefined || server === undefined) return;
+		return tokens;
+	}
+
+	/** End the grant of `tokens` at the server, if it answers. */
+	async revoke(server: string, tokens: Tokens): Promise<void> {
 		const endpoints = await this.endpoints(server).catch(() => undefined);
 		if (endpoints !== undefined)
 			await revokeTokens(this.fetcher, endpoints, tokens);
+	}
+
+	/** Forget the tokens here, and end the grant at the server if it answers. */
+	async end(server: string | undefined): Promise<void> {
+		const tokens = await this.forget();
+		if (tokens !== undefined && server !== undefined)
+			await this.revoke(server, tokens);
 	}
 }

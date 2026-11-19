@@ -1818,6 +1818,12 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		home({ signingIn: true });
 		expect(button("cloud-sign-in")?.disabled).toBe(true);
 		expect(button("cloud-sign-in")?.textContent).toBe("Signing in…");
+		// And no other server meanwhile: the sign-in ends where it began.
+		expect(el<HTMLSelectElement>("cloud-server-choice").disabled).toBe(true);
+		expect(el<HTMLInputElement>("cloud-server").disabled).toBe(true);
+		home({});
+		expect(el<HTMLSelectElement>("cloud-server-choice").disabled).toBe(false);
+		expect(el<HTMLInputElement>("cloud-server").disabled).toBe(false);
 	});
 
 	test("the server is chosen from three: the service, the development server, another address (DEC-041)", () => {
@@ -2008,6 +2014,26 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		expect(button("cloud-keep-them", "cloud-banner")?.textContent).toBe(
 			"Keep them on this device",
 		);
+		// On a server that is not the service the question names the server:
+		// a team's name is that server's word, and the click sends cases.
+		for (const [server, host] of [
+			["https://sync.example.org", "sync.example.org"],
+			["https://app.dev.sitegloss.dev", "app.dev.sitegloss.dev"],
+		] as const) {
+			home({
+				server,
+				account: account({ server }),
+				status: { state: "synced", problems: [], undecided: 2 },
+			});
+			expect(el("cloud-banner").textContent).toContain(
+				`Sync them with “Pedal & Pine web” on ${host}? Its members`,
+			);
+		}
+		home({
+			account: account(),
+			status: { state: "synced", problems: [], undecided: 2 },
+		});
+		expect(el("cloud-banner").textContent).not.toContain(" on app.");
 		// In a case too: the banner is above the views.
 		state.view = { kind: "case", id: "c_x" };
 		state.current = sampleCase("c_x");
