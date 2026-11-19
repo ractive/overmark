@@ -1772,6 +1772,23 @@ Both addresses of the second are known, in one module with the first
   and nowhere else. A server that names no revocation address is only forgotten here
   at sign-out. The client id (`sitegloss-extension`), the scopes and the redirect
   addresses are the same for every server.
+- **A case kept on this device is not the team's because a server names its id**
+  (review B, finding 1). An id is no secret: it is in every export, every connected AI
+  app reads it, and every server and team the case was shared with has it. Before, a
+  case in `changes` with the id of a case here was merged and adopted whatever its book
+  said, so a server (or a teammate who imported the same file) got the marks and
+  screenshots of a case the user had kept local, or of another server's case. Now a
+  case here whose book for this server is `local` or `undecided` is neither merged nor
+  adopted: it is skipped, the book notes it (`theirs`), and the Account section says "…
+  is on this device only, and the team has a case with the same id. … “Share with
+  team” on the case joins the two." Sharing (or "Sync them") then reads the team's copy
+  first, so the same marks become one, and sends what the team lacks. A case without a
+  book here (made or imported since the sign-in) is the team's as before.
+- **A mark keeps its identity at one server when another renumbers it.** Marks are
+  `a<number>` here, and a server's numbers count while with that server; the other
+  servers' books are not told. A book entry whose mark here has another drawing than
+  the server's mark is therefore dropped, and the server's mark finds its own again by
+  its drawing (`relink`), instead of being deleted and made anew.
 - **Tested** in `test/cloud-worker.test.ts` ("each server is kept apart") with two
   servers in memory: a case synced with one never reaches the other, the first is
   not asked anything while the second is chosen, its tokens go nowhere else, and

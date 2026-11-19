@@ -34,7 +34,9 @@ import {
 	change,
 	type Device,
 	device,
+	signIn as signInDevice,
 	startCase,
+	sync,
 } from "./cloud-helpers.ts";
 
 const SERVER = "https://app.sitegloss.dev";
@@ -398,18 +400,44 @@ describe("each server is kept apart (DEC-041)", () => {
 		expect(status()?.undecided).toBe(0);
 		expect(dev.cases.size).toBe(0);
 
+		// The other server names the id (its operator, or a teammate there
+		// who imported the same file, made a case with it): the case here is
+		// still not that server's. Nothing of it goes there, and that
+		// server's case is not taken either; it is said.
+		const mate = device("mate", dev.api({ id: "u_mal", name: "Mallory" }));
+		await signInDevice(mate);
+		await startCase(mate, "c_prod");
+		await addMark(mate, "c_prod", "bait");
+		await sync(mate);
+		expect(dev.marksOf("c_prod").map((m) => m.comment)).toEqual(["bait"]);
+		now += 10 * 60_000;
+		await settled();
+		await settled();
+		expect(modes()).toEqual({ c_prod: "local" });
+		expect(dev.marksOf("c_prod").map((m) => m.comment)).toEqual(["bait"]);
+		expect(
+			(await store.getCase("c_prod"))?.annotations.map((a) => a.comment),
+		).toEqual(["For the real team"]);
+		expect(status()?.problems).toEqual([
+			{
+				caseId: "c_prod",
+				title: "Your cart",
+				text: "“Your cart” is on this device only, and the team has a case with the same id. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two.",
+			},
+		]);
+
 		// A case made now is the development team's, and no one else's.
 		await startCase(here(), "c_dev");
 		await addMark(here(), "c_dev", "Only a test");
 		await settled();
-		expect([...dev.cases.keys()]).toEqual(["c_dev"]);
+		expect([...dev.cases.keys()].sort()).toEqual(["c_dev", "c_prod"]);
 		expect([...server.cases.keys()]).toEqual(["c_prod"]);
 		// A change to the service's case here stays here.
 		await change(here(), "c_prod", (c, at) =>
 			withComment(c, c.annotations[0]?.id ?? "", "Changed while on dev", at),
 		);
 		await settled();
-		expect(dev.cases.has("c_prod")).toBe(false);
+		expect(dev.marksOf("c_prod").map((m) => m.comment)).toEqual(["bait"]);
 		// The service was not asked anything all the while, and its tokens
 		// went nowhere else.
 		expect(http.state.requests.length).toBe(asked);
@@ -423,14 +451,20 @@ describe("each server is kept apart (DEC-041)", () => {
 		expect(book("c_prod")?.mode).toBe("local");
 		chosen = DEV;
 
-		// Shared there by the user, one case, in so many words: then it goes.
+		// Shared there by the user, one case, in so many words: then it goes,
+		// joined with the case that server has under its id.
 		expect(
 			await cloud.handle({ type: "cloud:share", caseId: "c_prod" }),
 		).toEqual({ ok: true });
 		await settled();
-		expect(dev.marksOf("c_prod").map((m) => m.comment)).toEqual([
-			"Changed while on dev",
-		]);
+		await settled();
+		expect(
+			dev
+				.marksOf("c_prod")
+				.map((m) => m.comment)
+				.sort(),
+		).toEqual(["Changed while on dev", "bait"]);
+		expect(status()?.problems).toEqual([]);
 
 		// Back to the service: the case goes on where it was, with the same
 		// marks at the server; the development server's case stays out.
@@ -439,10 +473,20 @@ describe("each server is kept apart (DEC-041)", () => {
 		await signIn();
 		expect(modes()).toEqual({ c_prod: "synced", c_dev: "local" });
 		expect(status()?.undecided).toBe(0);
-		expect(book("c_prod")?.marks).toEqual(before?.marks ?? {});
-		expect(server.marksOf("c_prod").map((m) => m.comment)).toEqual([
-			"Changed while on dev",
+		await settled();
+		// The team's mark is the same mark at the server as before, though
+		// the marks took other numbers while the case was joined with the
+		// other server's: not deleted and made again. The mark that came
+		// with that join is the case's now, and so goes to the team as new.
+		const [original] = Object.values(before?.marks ?? {});
+		expect(original).toBeDefined();
+		expect(
+			server.marksOf("c_prod").map((m) => [m.id === original, m.comment]),
+		).toEqual([
+			[true, "Changed while on dev"],
+			[false, "bait"],
 		]);
+		expect(book("c_prod")?.marks).toMatchObject(before?.marks ?? {});
 		expect([...server.cases.keys()]).toEqual(["c_prod"]);
 		expect(status()?.state).toBe("synced");
 		// The development server's part is still there, for the next time.
@@ -474,5 +518,108 @@ describe("each server is kept apart (DEC-041)", () => {
 		expect(server.cases.get("c_gone")?.deleted).toBe(false);
 		// It is the team's, so it is here again.
 		expect((await store.getCase("c_gone"))?.annotations).toHaveLength(1);
+	});
+});
+
+describe("a case kept on this device stays there, whoever names its id (review B, 1)", () => {
+	const modes = () => data.get(KEYS.modes) as Record<string, string>;
+	const comments = (s: FakeServer, id: string) =>
+		s
+			.marksOf(id)
+			.map((m) => m.comment)
+			.sort();
+
+	test("a teammate makes a case with the id of a case the user kept: neither is touched, it is said, and sharing joins them", async () => {
+		// A case here before the sign-in; the user answers "Keep them on this device".
+		await startCase(here(), "c_private");
+		await addMark(here(), "c_private", "Not for the team");
+		await signIn();
+		expect(status()?.undecided).toBe(1);
+		expect(await cloud.handle({ type: "cloud:decide", share: false })).toEqual({
+			ok: true,
+		});
+		await settled();
+		expect(modes()).toEqual({ c_private: "local" });
+
+		// Two people imported the same exported case, say: the id is no secret.
+		const mate = device("mate", server.api({ id: "u_mal", name: "Mallory" }));
+		await signInDevice(mate);
+		await startCase(mate, "c_private");
+		await addMark(mate, "c_private", "bait", { url: "https://shop.example/x" });
+		await sync(mate);
+		now += 10 * 60_000;
+		await settled();
+		await settled();
+		expect(modes()).toEqual({ c_private: "local" });
+		expect(comments(server, "c_private")).toEqual(["bait"]);
+		const kept = await store.getCase("c_private");
+		expect(kept?.annotations.map((a) => a.comment)).toEqual([
+			"Not for the team",
+		]);
+		expect(status()?.state).toBe("problem");
+		expect(status()?.problems.map((p) => p.text)).toEqual([
+			"“Your cart” is on this device only, and the team has a case with the same id. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two.",
+		]);
+		// It stays said, and stays so, run after run and over a worker's restart.
+		cloud = worker();
+		now += 10 * 60_000;
+		await settled();
+		expect(comments(server, "c_private")).toEqual(["bait"]);
+		expect(status()?.problems).toHaveLength(1);
+
+		// The user shares it: the team's copy is read first, then what it lacks goes.
+		expect(
+			await cloud.handle({ type: "cloud:share", caseId: "c_private" }),
+		).toEqual({ ok: true });
+		await settled();
+		await settled();
+		expect(modes()).toEqual({ c_private: "synced" });
+		expect(comments(server, "c_private")).toEqual(["Not for the team", "bait"]);
+		expect(
+			(await store.getCase("c_private"))?.annotations
+				.map((a) => a.comment)
+				.sort(),
+		).toEqual(["Not for the team", "bait"]);
+		expect(status()?.problems).toEqual([]);
+		expect(status()?.state).toBe("synced");
+	});
+
+	test("a case the user was not asked about yet is not taken either; Sync them joins it", async () => {
+		await signIn();
+		const mate = device("mate", server.api({ id: "u_mal", name: "Mallory" }));
+		await signInDevice(mate);
+		await startCase(mate, "c_same");
+		await addMark(mate, "c_same", "bait");
+		await sync(mate);
+		await cloud.handle({ type: "cloud:sign-out" });
+		// Here before the next sign-in, under the id the team has.
+		await store.deleteCase("c_same").catch(() => undefined);
+		await startCase(here(), "c_same");
+		await addMark(here(), "c_same", "Mine, undecided");
+		await signIn();
+		await settled();
+		expect(modes()).toEqual({ c_same: "undecided" });
+		expect(comments(server, "c_same")).toEqual(["bait"]);
+		expect(
+			(await store.getCase("c_same"))?.annotations.map((a) => a.comment),
+		).toEqual(["Mine, undecided"]);
+		expect(await cloud.handle({ type: "cloud:decide", share: true })).toEqual({
+			ok: true,
+		});
+		await settled();
+		await settled();
+		expect(comments(server, "c_same")).toEqual(["Mine, undecided", "bait"]);
+	});
+
+	test("a case made or imported while signed in, with an id the team has, is the team's as before", async () => {
+		await signIn();
+		const mate = device("mate", server.api({ id: "u_mal", name: "Mallory" }));
+		await signInDevice(mate);
+		await startCase(mate, "c_file");
+		await addMark(mate, "c_file", "From the file");
+		await sync(mate);
+		await settled();
+		expect(modes()).toEqual({ c_file: "synced" });
+		expect(status()?.problems).toEqual([]);
 	});
 });

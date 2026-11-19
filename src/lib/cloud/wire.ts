@@ -285,7 +285,8 @@ export function casePatch(
  * A mark here that has no id at the server, though the server has a mark
  * that no mark here stands for, with the same drawing on the same
  * screenshot: the same mark under another number (it was renumbered, and
- * the bookkeeping was not written before the worker stopped). They are put
+ * the bookkeeping was not written before the worker stopped, or it was
+ * renumbered while the case synced with another server). They are put
  * together again, so the mark is neither deleted nor made a second time.
  */
 export function relink(c: Case, book: CaseBook): void {
@@ -295,6 +296,17 @@ export function relink(c: Case, book: CaseBook): void {
 	for (const id of Object.keys(book.marks))
 		if (!here.has(id) && shadow.marks[book.marks[id] as string] === undefined)
 			delete book.marks[id];
+	// A mark here that stands for a mark of the server's with another drawing
+	// does not stand for it: its id here was another mark's (the marks took
+	// other numbers while the case synced with another server, DEC-041, and
+	// this server's book did not hear of it). The server's mark is then one
+	// that no mark stands for, and finds its own again below.
+	for (const a of c.annotations) {
+		const wire = book.marks[a.id];
+		const before = wire === undefined ? undefined : shadow.marks[wire];
+		if (before !== undefined && before.fixed !== fixedOf(a))
+			delete book.marks[a.id];
+	}
 	const stood = new Set(
 		Object.entries(book.marks)
 			.filter(([id]) => here.has(id))

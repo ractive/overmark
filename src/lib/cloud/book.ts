@@ -140,6 +140,13 @@ export interface CaseBook {
 	sent?: { keys: string; times: number };
 	/** Its title, for a sentence about it once it is gone. */
 	title?: string;
+	/**
+	 * The team has a case with this id, and the case here is kept on this
+	 * device (or is another server's): nothing of either was taken or sent.
+	 * Said in the status; sharing the case joins the two (the team's copy is
+	 * read first, then what it lacks is sent).
+	 */
+	theirs?: true;
 }
 
 /** How often the very same changes are sent in a row before the sync stops sending them. */

@@ -276,7 +276,10 @@ export class CloudSync {
 		const cases = await this.#deps.store.listCases();
 		const here = new Set(cases.map((c) => c.id));
 		const changed: CaseBook[] = [];
-		for (const book of books.values()) {
+		for (const given of books.values()) {
+			// Which team has a case of its id is asked anew of a team newly chosen.
+			const { theirs, ...plain } = given;
+			const book = resume ? given : plain;
 			// Another team's: it stays on this device.
 			if (book.mode === "synced" && book.teamId !== teamId)
 				changed.push({ ...book, mode: "local" });
@@ -290,7 +293,7 @@ export class CloudSync {
 			) {
 				if (here.has(book.caseId)) changed.push({ ...book, mode: "synced" });
 				else await this.#books.remove(book.caseId);
-			}
+			} else if (theirs && !resume) changed.push(book);
 		}
 		// What is here already is not sent without a word: the user is asked.
 		// Not after a sign-in that only ran out: what was made meanwhile is the
@@ -328,8 +331,11 @@ export class CloudSync {
 				(book.mode === "synced" && book.shadow === undefined)
 			)
 				await this.#books.remove(book.caseId);
-			else if (book.mode !== "local")
-				await this.#books.put({ ...book, mode: "local" });
+			else if (book.mode !== "local" || book.theirs) {
+				// Which team has a case of its id is another question next time.
+				const { theirs: _t, ...rest } = book;
+				await this.#books.put({ ...rest, mode: "local" });
+			}
 		}
 		await kv.remove(KEYS.cursor);
 		await kv.remove(KEYS.queue);
@@ -431,6 +437,16 @@ export class CloudSync {
 		let undecided = 0;
 		for (const book of (await this.#books.all()).values()) {
 			if (book.mode === "undecided" && here.has(book.caseId)) undecided++;
+			// The team has a case with the id of one kept here: neither was
+			// touched, and the user is told how to join them.
+			if (book.theirs && book.mode !== "synced" && here.has(book.caseId)) {
+				const title = here.get(book.caseId);
+				problems.push({
+					caseId: book.caseId,
+					...(title === undefined ? {} : { title }),
+					text: `${title === undefined ? "A case" : `“${title}”`} is on this device only, and the team has a case with the same id. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two.`,
+				});
+			}
 			const [first, ...rest] = book.rejected ?? [];
 			if (book.mode !== "synced" || first === undefined) continue;
 			const title = here.get(book.caseId) ?? book.title;
@@ -614,6 +630,7 @@ export class CloudSync {
 		const books = await this.#books.all();
 		const here = new Set(cases.map((c) => c.id));
 		const todo: [Case, CaseBook][] = [];
+		let join = false;
 		for (const c of cases) {
 			let book = books.get(c.id);
 			if (book === undefined) {
@@ -622,11 +639,19 @@ export class CloudSync {
 				await this.#books.put(book);
 			}
 			if (book.mode !== "synced" || book.teamId !== team.id) continue;
+			// Shared after the team named its id: the team's copy is read
+			// first (the whole state, by this run's pull), so that the same
+			// marks become one and only what the team lacks is sent.
+			if (book.theirs && book.shadow === undefined) {
+				join = true;
+				continue;
+			}
 			if (book.cleanAt === c.updatedAt) continue;
 			// A case without marks is not sent until it has one (as the folder sync).
 			if (book.shadow === undefined && c.annotations.length === 0) continue;
 			todo.push([c, book]);
 		}
+		if (join) await this.#deps.kv.set({ [KEYS.whole]: true });
 		const gone = [...books.values()].filter((b) => !here.has(b.caseId));
 		let left = todo.length + gone.filter((b) => b.shadow).length;
 		if (left > 0) await this.#say(await this.#status("syncing", { left }));
@@ -1139,6 +1164,13 @@ export class CloudSync {
 		if (whole) {
 			// What the server does not name it does not have (any more).
 			for (const book of (await this.#books.all()).values()) {
+				// The case that was to be joined with the team's is gone there:
+				// this one is sent as any new case.
+				if (book.theirs && !cases.has(book.caseId)) {
+					const { theirs: _t, ...rest } = book;
+					await this.#books.put(rest);
+					continue;
+				}
 				if (
 					book.mode !== "synced" ||
 					book.teamId !== team.id ||
@@ -1200,6 +1232,19 @@ export class CloudSync {
 	): Promise<boolean> {
 		const store = this.#deps.store;
 		const given = await this.#books.get(caseId);
+		// A case here that is kept on this device (the user said so, or it is
+		// another server's) is not the team's because the team names its id:
+		// an id is no secret (it is in every export, and every AI app and
+		// server the case was shared with has it). Nothing is merged, nothing
+		// is sent; it is said, and sharing the case joins the two.
+		if (given !== undefined && given.mode !== "synced") {
+			const kept = await store.getCase(caseId);
+			if (kept !== undefined) {
+				if (!given.theirs)
+					await this.#books.put({ ...given, theirs: true, title: kept.title });
+				return false;
+			}
+		}
 		const fetched = new Map<string, StoredImage>();
 		const crops = new Map<string, StoredImage>();
 		const options = {
