@@ -115,7 +115,9 @@ user agent. What differs from Chrome and Edge:
    those an AI app drew; with a mark not in the case yet the panel stays and says so,
    and a second click leaves without it. A new case starts there, with "New case for
    this page". Closing the side panel leaves marks and toolbar on the page; opening it again
-   opens the case the page shows.
+   opens the case the page shows. A case can span several pages: go on to the next page
+   of what you are testing, click "Add marks" again, and the marks you draw there go into
+   the same case, which lists its pages with their marks and opens each with a click.
 4. On the same page in another environment (say `localhost:3000`), click the case in the side panel:
    its marks are drawn on the tab in front, whatever page that is. While the case is open
    they follow the tab in front: another tab, a reload or a navigation draws them there
@@ -123,7 +125,8 @@ user agent. What differs from Chrome and Edge:
    "Hide marks" takes them off, and they stay off on that tab, also through a reload,
    until "Show marks" or the case is opened again. When none of the case's marks is
    found, the case says it is probably for another page and offers to open the case's
-   page. On a tab Sitegloss may not run on yet (after reloading the extension, say),
+   page. In a case of several pages the marks of the other pages count as "on another
+   page", not as lost, and Home lists the case under "This page" on each of its pages. On a tab Sitegloss may not run on yet (after reloading the extension, say),
    Chrome hides the address, and the side panel says so with a warning: click the
    Sitegloss icon there (or press Alt+Shift+O) and the marks are drawn, or press "Allow
    on all sites" in that notice; until then what needs the page is off. The case's
@@ -209,12 +212,12 @@ The tools:
 
 | Tool | What it does |
 |---|---|
-| `list_cases` | The saved cases, with their marks by status |
-| `get_case` | A case's summary for the developer and its marks with their comments, statuses, reopens, AI findings, element details and crops |
+| `list_cases` | The saved cases, with their pages and their marks by status |
+| `get_case` | A case's pages, its summary for the developer and its marks with their page, comments, statuses, reopens, AI findings, element details and crops |
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
-| `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children; a CSS selector reads one of its ancestors or an element inside it instead (for a mark without an element, an element of the case's page) |
+| `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children; a CSS selector reads one of its ancestors or an element inside it instead (for a mark without an element, an element of the mark's page) |
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |
 | `set_summary` | Records the summary for the developer: what should change overall, as agreed; asks first |

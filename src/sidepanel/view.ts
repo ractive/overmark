@@ -17,6 +17,7 @@ import {
 	appLabel,
 	type Case,
 	caseCounts,
+	casePages,
 	cleanTitle,
 	type FindingApp,
 	GROUP_LABEL,
@@ -28,18 +29,23 @@ import {
 	MAX_VERDICT,
 	type MarkStatus,
 	markStatus,
+	marksOnPage,
+	markUrl,
+	pageAt,
 	RESOLUTION_LABEL,
 	RESOLVE_CHOICES,
 	type Resolution,
 	type ResolveChoice,
 	STATUS_GROUPS,
 	type StatusGroup,
+	samePage,
 	samePath,
+	viewportAt,
 } from "../lib/case.ts";
 import { summarize } from "../lib/element.ts";
 import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
-import { foundLine, noneFound } from "./follow.ts";
+import { foundLine, isFound, matchesHere, noneFound } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
 import type { AiCall, AiProblem, Exported, PanelState } from "./state.ts";
 import {
@@ -78,7 +84,8 @@ export interface Actions extends SyncActions {
 	deleteMark(c: Case, a: Annotation): void;
 	/** An AI app's finding on a mark: the first click asks, the second deletes. */
 	deleteFinding(c: Case, a: Annotation, findingId: string): void;
-	openPage(c: Case): void;
+	/** Open one of the case's pages in a new tab (DEC-038); none named: the first. */
+	openPage(c: Case, url?: string): void;
 	/** Chrome's prompt for "Allow on all sites"; call it in the click. */
 	allowAllSites(): void;
 	/** Sitegloss's page in chrome://extensions ("Allow access to file URLs"). */
@@ -193,9 +200,24 @@ export function access(state: PanelState): "yes" | "ask" | "never" {
 /** "None of this case's marks were found on this page…" (DEC-022). */
 export function noneFoundText(c: Case, url: string | undefined): string {
 	const here = "None of this case's marks were found on this page.";
-	return url !== undefined && url !== "" && isPageOf(c, url)
-		? here
-		: `${here} It is probably for another page: ${shortUrl(c.page.url)}.`;
+	if (url !== undefined && url !== "" && isPageOf(c, url)) return here;
+	// Its pages, the first few by name (DEC-038).
+	const pages = casePages(c).map((p) => shortUrl(p.url));
+	const named = pages.slice(0, 3).join(", ");
+	const more = pages.length > 3 ? ` and ${pages.length - 3} more` : "";
+	return pages.length === 1
+		? `${here} It is probably for another page: ${named}.`
+		: `${here} It is probably for other pages: ${named}${more}.`;
+}
+
+/** `shop.example/cart and 2 more pages`: a case's pages in the list. */
+export function pagesLine(c: Case): string {
+	const [first, ...rest] = casePages(c);
+	const more =
+		rest.length === 0
+			? ""
+			: ` and ${rest.length} more page${rest.length === 1 ? "" : "s"}`;
+	return `${shortUrl(first?.url ?? c.page.url)}${more}`;
 }
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -396,7 +418,7 @@ function caseItem(c: Case, actions: Actions): HTMLLIElement {
 				onclick: () => actions.openCase(c.id),
 			},
 			h("span", { class: "title" }, c.title),
-			h("span", { class: "meta" }, shortUrl(c.page.url)),
+			h("span", { class: "meta" }, pagesLine(c)),
 			h(
 				"span",
 				{ class: "meta" },
@@ -428,7 +450,8 @@ function renderCases(state: PanelState, actions: Actions): void {
 	casesKey = key;
 	// The page's own cases stand under "This page" (the owner): going on with
 	// the case a page has is what is done most, a second case for it rarely.
-	const own = state.cases.filter((c) => url && samePath(c.page.url, url));
+	// Any of a case's pages (DEC-038), in whatever environment.
+	const own = state.cases.filter((c) => url && pageAt(c, url) !== undefined);
 	const other = state.cases.filter((c) => !own.includes(c));
 	const one = own.length === 1 ? own[0] : undefined;
 	here.hidden = own.length === 0;
@@ -743,6 +766,9 @@ interface CaseParts {
 	linkFormOpen: boolean;
 	/** The case's address, a link where it is a web page. */
 	page: HTMLButtonElement;
+	/** The case's pages, where it has several (DEC-038). */
+	pages: HTMLUListElement;
+	pagesKey: string;
 	/** The address where it is not a web page (only text, never a link). */
 	about: HTMLSpanElement;
 	madeAt: HTMLSpanElement;
@@ -961,6 +987,8 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		renameHint,
 		renameOpen: false,
 		meta: h("p", { class: "meta case-meta" }, page, about, madeAt, madeOn),
+		pages: h("ul", { class: "case-pages", id: "case-pages", hidden: true }),
+		pagesKey: "",
 		linkRow: h(
 			"div",
 			{ class: "case-link", id: "case-link" },
@@ -1081,6 +1109,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		created.titleRow,
 		created.rename,
 		created.meta,
+		created.pages,
 		created.linkRow,
 		created.origin,
 		h(
@@ -1734,6 +1763,54 @@ function reopenForm(
 	);
 }
 
+/**
+ * The pages of a case that has several (DEC-038): each with its marks
+ * counted, and a link that opens it; the one the tab in front shows says so.
+ */
+function renderPages(
+	p: CaseParts,
+	c: Case,
+	pages: ReturnType<typeof casePages>,
+	tabUrl: string | undefined,
+	actions: Actions,
+): void {
+	const here = tabUrl ? pageAt(c, tabUrl) : undefined;
+	const key = JSON.stringify([
+		pages.map((page) => [page.url, page.title, marksOnPage(c, page.url)]),
+		here?.url ?? null,
+	]);
+	if (key === p.pagesKey) return;
+	p.pagesKey = key;
+	p.pages.hidden = pages.length === 0;
+	p.pages.replaceChildren(
+		...pages.map((page) => {
+			const marks = marksOnPage(c, page.url);
+			const front = here !== undefined && samePage(here.url, page.url);
+			return h(
+				"li",
+				{ "data-page": page.url, ...(front ? { "data-here": true } : {}) },
+				isWebPage(page.url)
+					? h(
+							"button",
+							{
+								type: "button",
+								class: "link page-link",
+								title: `Open ${page.title || "this page"} in a new tab; the case's marks are drawn there`,
+								onclick: () => actions.openPage(p.current, page.url),
+							},
+							shortUrl(page.url),
+						)
+					: h("span", {}, page.url),
+				h(
+					"span",
+					{ class: "meta" },
+					` · ${marks} mark${marks === 1 ? "" : "s"}${front ? " · this tab" : ""}`,
+				),
+			);
+		}),
+	);
+}
+
 function renderCase(state: PanelState, actions: Actions): void {
 	const c = state.current;
 	if (c === undefined) {
@@ -1755,17 +1832,26 @@ function renderCase(state: PanelState, actions: Actions): void {
 
 	renderTitle(state, p, c);
 	renderLink(state, p, c);
-	const web = isWebPage(c.page.url);
+	const pages = casePages(c);
+	const several = pages.length > 1;
+	const web = !several && isWebPage(c.page.url);
 	p.page.hidden = !web;
 	p.page.textContent = web ? shortUrl(c.page.url) : "";
 	p.about.hidden = web;
-	p.about.textContent = web ? "" : c.page.url;
-	p.madeAt.textContent = sizeOf(c.page.viewport);
+	p.about.textContent = several
+		? `${pages.length} pages`
+		: web
+			? ""
+			: c.page.url;
+	renderPages(p, c, several ? pages : [], state.tab?.url, actions);
+	// The window the marks of the page in front were made in (DEC-038).
+	const madeAt = viewportAt(c, state.tab?.url);
+	p.madeAt.textContent = sizeOf(madeAt);
 	p.madeOn.textContent = formatDate(c.createdAt);
 	const size = state.tab?.size;
-	p.size.hidden = size === undefined || sameSize(size, c.page.viewport);
+	p.size.hidden = size === undefined || sameSize(size, madeAt);
 	p.sizeText.textContent = size
-		? `This tab is ${sizeOf(size)}, the marks were made at ${sizeOf(c.page.viewport)}. `
+		? `This tab is ${sizeOf(size)}, the marks were made at ${sizeOf(madeAt)}. `
 		: "";
 	setHint(
 		p.origin,
@@ -1794,11 +1880,12 @@ function renderCase(state: PanelState, actions: Actions): void {
 			: "Each mark you draw on the page goes into this case when its comment is done";
 	setHint(p.leaving, leavingText(state.leaving));
 	setHint(p.tabLine, ok ? tabLineText(state, c, p.adding) : undefined);
-	// The search is over and found none: the case is probably for another page.
+	// The search is over and found none of the marks this page should have:
+	// the case is probably for another page (judged per page, DEC-038).
 	const none =
 		here !== undefined &&
 		!here.settling &&
-		noneFound([...here.matches.values()]);
+		noneFound(matchesHere(c, [...here.matches.values()], here.url));
 	const looking =
 		state.drawing !== undefined &&
 		state.drawing === state.tab?.id &&
@@ -1881,7 +1968,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 		filter ?? null,
 		c.updatedAt,
 		images?.version,
-		loaded ? [...loaded.matches.values()] : null,
+		loaded ? [loaded.url, ...loaded.matches.values()] : null,
 		// What is typed stays out: a key press redraws nothing.
 		edit ? [edit.annotationId, edit.mode] : null,
 		markArmed ?? null,
@@ -1894,10 +1981,22 @@ function renderCase(state: PanelState, actions: Actions): void {
 			.filter(
 				(a) => filter === undefined || GROUP_OF[markStatus(a)] === filter,
 			);
-		const items = sorted.map((a) =>
-			markItem(c, a, {
+		// The page drawn on is one of the case's: a mark of another of its
+		// pages that is not here is "on another page", not lost (DEC-038).
+		const onCasePage =
+			several && loaded !== undefined && pageAt(c, loaded.url) !== undefined;
+		const items = sorted.map((a) => {
+			const match = loaded?.matches.get(a.id);
+			const elsewhere =
+				onCasePage &&
+				match !== undefined &&
+				!isFound(match) &&
+				!samePath(markUrl(c, a), loaded?.url ?? "");
+			return markItem(c, a, {
 				crop: images?.urls.get(a.crop),
-				match: loaded?.matches.get(a.id),
+				match: elsewhere ? undefined : match,
+				page: several ? markUrl(c, a) : undefined,
+				elsewhere,
 				edit: edit?.annotationId === a.id ? edit : undefined,
 				armed: markArmed === a.id,
 				findingArmed:
@@ -1907,8 +2006,8 @@ function renderCase(state: PanelState, actions: Actions): void {
 				actions,
 				canReach: ok,
 				changed: () => syncToggleAll(),
-			}),
-		);
+			});
+		});
 		const toggleAll: HTMLButtonElement = h("button", {
 			type: "button",
 			class: "link",
@@ -2039,6 +2138,10 @@ function setOpen(caseId: string, li: HTMLElement, open: boolean): void {
 interface MarkContext {
 	crop: string | undefined;
 	match: AnnotationMatch | undefined;
+	/** The mark's page, said in a case of several pages (DEC-038). */
+	page: string | undefined;
+	/** It is of another page of the case than the tab in front shows. */
+	elsewhere: boolean;
 	edit: PanelState["markEdit"];
 	armed: boolean;
 	/** The finding of this mark whose Delete was clicked once. */
@@ -2113,6 +2216,9 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 		x.crop ? cropView(c.id, a, x.crop) : null,
 		historyList(a),
 		findingsList(c, a, x.findingArmed, actions),
+		x.page !== undefined
+			? h("p", { class: "meta mark-page" }, `On ${shortUrl(x.page)}`)
+			: null,
 		a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
 		m ? matchView(c.id, a, m, actions) : null,
 		edit
@@ -2123,7 +2229,7 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 					: commentForm(c, a, edit.text, actions)
 			: markActions(c, a, x.armed, actions),
 	);
-	const sub = markSubline(c, a, m, edit === undefined, actions);
+	const sub = markSubline(c, a, m, edit === undefined, actions, x.elsewhere);
 	li.append(
 		h("div", { class: "mark-head" }, toggle, show),
 		...(sub ? [sub] : []),
@@ -2144,11 +2250,12 @@ function markSubline(
 	m: AnnotationMatch | undefined,
 	buttons: boolean,
 	actions: Actions,
+	elsewhere = false,
 ): HTMLElement | null {
 	const status = markStatus(a);
 	const pill = PILL[status];
 	const last = a.reopens?.at(-1);
-	const where = matchWord(m);
+	const where = elsewhere ? "On another page" : matchWord(m);
 	const findings = a.findings?.length ?? 0;
 	const parts = [
 		pill ? h("span", { class: "pill", "data-status": status }, pill) : null,

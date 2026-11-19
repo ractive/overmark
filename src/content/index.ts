@@ -3,7 +3,7 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import { isPageUrl } from "../lib/case.ts";
+import { isPageUrl, LANGUAGE } from "../lib/case.ts";
 import { cssSelector, describeElement } from "../lib/element.ts";
 import {
 	insideInput,
@@ -93,6 +93,9 @@ function mark(
 		scroll: { x: scrollX, y: scrollY },
 		url: location.href,
 		title: document.title,
+		lang: LANGUAGE.test(document.documentElement.lang)
+			? document.documentElement.lang
+			: "",
 	};
 }
 
@@ -124,12 +127,12 @@ function inspect(
 				match,
 			};
 		// Without an element to start from, a selector could name anything
-		// of any page; only the case's own page is searched.
+		// of any page; only the mark's own page is searched (DEC-038).
 		if (!isPageUrl(request.casePage, location.href))
 			return {
 				ok: false,
 				reason: "other-page",
-				error: `Mark ${n} was not drawn on an element, and the tab in front does not show the case's page, so the selector is not looked for here.`,
+				error: `Mark ${n} was not drawn on an element, and the tab in front does not show the mark's page, so the selector is not looked for here.`,
 				match,
 			};
 	} else if (target.element === undefined)

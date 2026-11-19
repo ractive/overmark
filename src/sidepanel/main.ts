@@ -8,6 +8,7 @@ import { BROWSER, FIREFOX, requestPermissions } from "../lib/browser.ts";
 import {
 	type Annotation,
 	type Case,
+	casePages,
 	cleanLink,
 	cleanTitle,
 	linkProblem,
@@ -18,6 +19,7 @@ import {
 	nextNumbers,
 	type PageInfo,
 	validateCase,
+	viewportAt,
 	withChoice,
 	withComment,
 	withLink,
@@ -1510,15 +1512,16 @@ const actions: Actions = {
 			);
 	},
 
-	openPage(c) {
-		if (!isWebPage(c.page.url)) return;
+	openPage(c, url = c.page.url) {
+		// One of the case's own pages only (DEC-038).
+		if (!isWebPage(url) || !casePages(c).some((p) => p.url === url)) return;
 		const hint = caseHintWriter();
 		// Now, while the click allows Chrome's prompt. The tab opens meanwhile;
 		// once it has loaded, the case's marks follow it there (DEC-022), and
 		// without a yes the icon's click lets Sitegloss run there.
-		void askForSite(c.page.url);
+		void askForSite(url);
 		void chrome.tabs
-			.create({ url: c.page.url })
+			.create({ url })
 			.catch((error: unknown) =>
 				hint(`Could not open the page: ${message(error)}`),
 			);
@@ -1528,11 +1531,10 @@ const actions: Actions = {
 		const hint = caseHintWriter();
 		void (async () => {
 			try {
-				const want = {
-					width: c.page.viewport.width,
-					height: c.page.viewport.height,
-				};
 				const first = await activeTab();
+				// The window the marks of the page in front were made in (DEC-038).
+				const made = viewportAt(c, first?.url ?? state.tab?.url);
+				const want = { width: made.width, height: made.height };
 				if (first?.id === undefined) return;
 				// A maximised or full-screen window takes no size; leaving that
 				// state takes a moment (an animation on macOS).

@@ -15,6 +15,8 @@ import {
 	type Annotation,
 	CASE_FORMAT,
 	type Case,
+	type CasePage,
+	casePages,
 	cropImage,
 	MAX_ANNOTATIONS,
 	MAX_SHOTS,
@@ -24,8 +26,10 @@ import {
 	plainUrl,
 	type Rect,
 	type Shot,
+	samePage,
 	shotImage,
 	validateCase,
+	withPagesOfShots,
 } from "./case.ts";
 import type { RenderedMark } from "./marks.ts";
 import type { CaseStore, StoredImage } from "./store.ts";
@@ -173,16 +177,28 @@ export async function saveCase(
 		const images = new Map<string, StoredImage>();
 		const finalIds = new Map<string, string>();
 		const shots = [...(current?.shots ?? [])];
+		// The first mark's page is the case's (review of PR 57): a case
+		// "New case for this page" made has the page as it was at that click,
+		// and the window or the route may have changed before the mark.
+		const started = current !== undefined && current.shots.length > 0;
+		const here = { ...request.page, url: plainUrl(request.page.url) };
+		// A mark on another page adds that page to the case (DEC-038).
+		const pages: CasePage[] = started ? casePages(current) : [];
 		let shotNumber = nextNumbers(current).shot;
 		for (const shot of request.shots) {
 			const id = `s${shotNumber++}`;
 			finalIds.set(shot.id, id);
-			shots.push({
-				...shot,
-				...(shot.url === undefined ? {} : { url: plainUrl(shot.url) }),
-				id,
-				image: shotImage(id),
-			});
+			// Every screenshot says which page it is of.
+			const url = shot.url === undefined ? here.url : plainUrl(shot.url);
+			shots.push({ ...shot, url, id, image: shotImage(id) });
+			if (!pages.some((p) => samePage(p.url, url)))
+				pages.push(
+					// The page's title and language are those of the page the
+					// marks were sent from, which is the screenshot's.
+					samePage(url, here.url)
+						? { url, title: here.title, lang: here.lang }
+						: { url, title: "", lang: "" },
+				);
 			const image = screenshots.get(shot.id);
 			if (image !== undefined)
 				images.set(shotImage(id), {
@@ -231,13 +247,11 @@ export async function saveCase(
 			title: current?.title ?? (request.title.trim() || "Untitled case"),
 			createdAt: current?.createdAt ?? stamp,
 			updatedAt: stamp,
-			// The first mark's page is the case's (review of PR 57): a case
-			// "New case for this page" made has the page as it was at that click,
-			// and the window or the route may have changed before the mark.
-			page:
-				current !== undefined && current.shots.length > 0
-					? current.page
-					: { ...request.page, url: plainUrl(request.page.url) },
+			page: started ? current.page : here,
+			pages:
+				pages.length > 0
+					? pages
+					: [{ url: here.url, title: here.title, lang: here.lang }],
 			shots,
 			annotations,
 			verdict: current?.verdict ?? null,
@@ -340,19 +354,23 @@ export async function undoAdd(
 			throw refuse("cannot be undone here");
 		removed = true;
 		const annotations = current.annotations.filter((a) => a !== gone);
-		const value = validateCase({
-			...current,
-			annotations,
-			shots: current.shots.filter((s) => s !== shot),
-			// A mark was stored, so the case is the user's (DEC-026, review of
-			// PR 57): `lastNumber` says so, set below the freed number so that
-			// the number is free again. A case with no mark left gets 0.
-			lastNumber: Math.max(
-				current.lastNumber ?? 0,
-				...annotations.map((a) => a.number),
-			),
-			updatedAt: now.toISOString(),
-		});
+		// The page of the screenshot that goes leaves the case with it, when
+		// it was its only one (DEC-038).
+		const value = validateCase(
+			withPagesOfShots({
+				...current,
+				annotations,
+				shots: current.shots.filter((s) => s !== shot),
+				// A mark was stored, so the case is the user's (DEC-026, review of
+				// PR 57): `lastNumber` says so, set below the freed number so that
+				// the number is free again. A case with no mark left gets 0.
+				lastNumber: Math.max(
+					current.lastNumber ?? 0,
+					...annotations.map((a) => a.number),
+				),
+				updatedAt: now.toISOString(),
+			}),
+		);
 		return { value, deleteImages: [gone.crop, shot.image] };
 	});
 	return { removed, next: nextNumbers(saved).annotation };

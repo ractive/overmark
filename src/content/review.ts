@@ -21,6 +21,7 @@ import {
 	MAX_REOPEN_NOTE,
 	type MarkStatus,
 	markStatus,
+	markUrl,
 	RESOLUTION_LABEL,
 	RESOLVE_CHOICES,
 	type Rect,
@@ -895,8 +896,8 @@ export class Reviewer {
 
 	/** A mark without an element, where it was; its page may be another route. */
 	#whereItWas(annotation: Annotation): ReviewItem | undefined {
-		const shot = this.#case?.shots.find((s) => s.id === annotation.shot);
-		const url = shot?.url ?? this.#case?.page.url ?? "";
+		// Only on its own page: a case spans pages (DEC-038).
+		const url = this.#case ? markUrl(this.#case, annotation) : "";
 		if (!samePath(url, location.href)) return undefined;
 		const win = this.overlay.doc.defaultView;
 		return {

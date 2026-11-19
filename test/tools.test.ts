@@ -327,6 +327,7 @@ describe("tools", () => {
 				caseId: "c_1",
 				title: "Button contrast",
 				url: "https://www.example.com/kk",
+				pages: ["https://www.example.com/kk"],
 				marks: { open: 2, toVerify: 0, verified: 0, closed: 0 },
 				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
@@ -356,6 +357,7 @@ describe("tools", () => {
 				caseId: "c_new",
 				title: "Your cart",
 				url: "https://www.example.com/kk",
+				pages: ["https://www.example.com/kk"],
 				marks: { open: 0, toVerify: 0, verified: 0, closed: 0 },
 				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
@@ -452,6 +454,9 @@ describe("tools", () => {
 		const loaded = json(await call("load_case", { caseId: "c_1" }));
 		expect(loaded.marks[1]).toEqual({
 			mark: 2,
+			// Its page, and that the page in front is it (DEC-038).
+			page: "https://www.example.com/kk",
+			onThisPage: true,
 			status: "found",
 			score: 0.91,
 			shownCandidate: 0,
@@ -1283,6 +1288,116 @@ describe("tools", () => {
 		await expect(
 			call("get_mark_element", { caseId: "c_1", mark: 1 }),
 		).rejects.toThrow("do not fit");
+	});
+
+	test("a case of several pages: its pages, each screenshot's and each mark's page (DEC-038)", async () => {
+		const c = await seed();
+		const pay = "https://www.example.com/checkout/pay";
+		await putCase(store, {
+			...c,
+			pages: [
+				{ url: c.page.url, title: "KK", lang: "de" },
+				{ url: pay, title: "Payment", lang: "de" },
+			],
+			shots: [
+				{ ...(c.shots[0] as Case["shots"][number]), url: c.page.url },
+				{
+					...(c.shots[0] as Case["shots"][number]),
+					id: "s2",
+					image: "shots/s2.webp",
+					url: `${pay}?token=secret`,
+					viewport: { width: 390, height: 800, dpr: 3 },
+				},
+			],
+			annotations: [mark(1), { ...mark(2), shot: "s2", element: null }],
+		});
+		expect(json(await call("list_cases"))[0].pages).toEqual([c.page.url, pay]);
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		// The first page stays where it was, for an app that reads `page`.
+		expect(view.page.url).toBe(c.page.url);
+		expect(view.pages).toEqual([
+			{ url: c.page.url, title: "KK", lang: "de", marks: 1 },
+			{ url: pay, title: "Payment", lang: "de", marks: 1 },
+		]);
+		expect(view.shots).toEqual([
+			{
+				id: "s1",
+				image: "shots/s1.webp",
+				scrollY: 0,
+				url: c.page.url,
+				viewport: { width: 1280, height: 800, dpr: 2 },
+			},
+			{
+				id: "s2",
+				image: "shots/s2.webp",
+				scrollY: 0,
+				// No query: as a page's address is told everywhere.
+				url: pay,
+				viewport: { width: 390, height: 800, dpr: 3 },
+			},
+		]);
+		expect(view.marks.map((m: { page: string }) => m.page)).toEqual([
+			c.page.url,
+			pay,
+		]);
+		// The page in front is the first page (on localhost): mark 2 is not its.
+		const loaded = json(await call("load_case", { caseId: "c_1" }));
+		expect(
+			loaded.marks.map((m: { onThisPage: boolean }) => m.onThisPage),
+		).toEqual([true, false]);
+		// A mark without an element is looked for on its own page only.
+		tab.inspected = {
+			ok: false,
+			reason: "other-page",
+			error:
+				"Mark 2 was not drawn on an element, and the tab in front does not show the mark's page, so the selector is not looked for here.",
+			match: { ...foundMatch, annotationId: "a2", number: 2 },
+		};
+		await expect(
+			call("get_mark_element", { caseId: "c_1", mark: 2, selector: "form" }),
+		).rejects.toThrow(`Open ${pay} in the user's tab in front`);
+		const asked = tab.sent.findLast((r) => r.type === "element:inspect");
+		expect(asked?.type === "element:inspect" && asked.casePage).toBe(
+			`${pay}?token=secret`,
+		);
+		const lines = await confirmLines(store, tab, {
+			tool: { name: "delete_case", description: "Does it." },
+			arguments: { caseId: "c_1" },
+			client: CLAUDE,
+			signal: new AbortController().signal,
+		});
+		expect(lines[0]).toBe(
+			"Case: “Button contrast” (www.example.com/kk and 1 more page, 2 marks).",
+		);
+	});
+
+	test("add_annotation on another page of the site adds that page to the case", async () => {
+		await seed();
+		// The same page in another environment is no new page.
+		await call("add_annotation", {
+			caseId: "c_1",
+			selector: "button",
+			comment: "On localhost",
+		});
+		let c = (await store.getCase("c_1")) as Case;
+		expect(c.shots.at(-1)?.url).toBe("http://localhost:3000/kk");
+		expect(c.pages).toEqual([
+			{ url: "https://www.example.com/kk", title: "KK", lang: "de" },
+		]);
+		tab.url = "http://localhost:3000/kk/step-2?session=secret";
+		await call("add_annotation", {
+			caseId: "c_1",
+			selector: "button",
+			comment: "The next step",
+		});
+		c = (await store.getCase("c_1")) as Case;
+		expect(c.shots.at(-1)?.url).toBe("http://localhost:3000/kk/step-2");
+		expect(c.pages).toEqual([
+			{ url: "https://www.example.com/kk", title: "KK", lang: "de" },
+			{ url: "http://localhost:3000/kk/step-2", title: "KK", lang: "" },
+		]);
+		expect(c.page.url).toBe("https://www.example.com/kk");
+		expect(INSTRUCTIONS).toContain("several pages of a site");
 	});
 
 	test("get_mark_element sends the case's page along and passes on refusals", async () => {

@@ -11,9 +11,9 @@ Sitegloss stores in your browser, on your computer:
 
 - the case's title, your comments, the summary for the developer, a link you attach,
   and a connected AI app's findings;
-- the page's address, title and language, the window size, and the browser's user
-  agent. The address is kept without its query string or fragment (only a fragment
-  that is a route of the page stays);
+- the address, title and language of each page you mark, the window size, and the
+  browser's user agent. An address is kept without its query string or fragment (only a
+  fragment that is a route of the page stays);
 - for each marked element: its tag, role, name, a short piece of its text, a few
   attributes, its position, and a CSS selector;
 - screenshots of the visible part of the tab, with the marks on them;
@@ -96,4 +96,4 @@ stay until you delete them.
 Jean-Pierre Bergamin, <https://ractive.ch>, james@ractive.ch.
 Source code: <https://github.com/ractive/sitegloss>.
 
-Last changed: 17 November 2026.
+Last changed: 19 November 2026.

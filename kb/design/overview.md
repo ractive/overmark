@@ -161,10 +161,13 @@ the export, so an export is the case plus its images:
   "format": "sitegloss/1",
   "id": "c_…", "title": "Login button contrast",
   "createdAt": "…", "updatedAt": "…",
-  "page": { "url": "https://www.example.com/…", "title": "…", "lang": "de",
+  "page": { "url": "https://www.example.com/cart", "title": "…", "lang": "de",
             "viewport": { "width": 1440, "height": 900, "dpr": 2 }, "userAgent": "…" },
+  "pages": [{ "url": "https://www.example.com/cart", "title": "…", "lang": "de" },
+            { "url": "https://www.example.com/checkout", "title": "…", "lang": "de" }],
   "shots": [{ "id": "s1", "image": "shots/s1.webp", "scrollX": 0, "scrollY": 0,
-              "viewport": { "width": 1440, "height": 900, "dpr": 2 }, "capturedAt": "…" }],
+              "viewport": { "width": 1440, "height": 900, "dpr": 2 }, "capturedAt": "…",
+              "url": "https://www.example.com/cart" }],
   "annotations": [{
     "id": "a1", "number": 1, "shot": "s1", "comment": "…", "author": "user",
     "shape": { "kind": "box", "rect": { "x": 10, "y": 20, "width": 200, "height": 40 } },
@@ -209,6 +212,13 @@ W3C Web Annotation `CssSelector`; a full W3C export is a follow-up if a consumer
 `plainUrl` in `src/lib/case.ts`. A case that came from a file also has `importedAt`, set
 on import whatever the file says.
 
+A case spans pages (DEC-038): a tester goes through a flow and marks each page of it in
+one case. `pages` lists them in order, the first one being `page`, which stays as it was
+for builds that know only it; every screenshot has the address of its page (`url`), and a
+mark's page is its screenshot's. A case stored before `pages` has none, and its pages are
+read from `page` and its screenshots (`casePages`). A page is told by its path, whatever
+the origin, as a case's page always was.
+
 ## Finding an element again
 
 Sitegloss stores a fingerprint of the element, not a selector, and scores every candidate
@@ -250,12 +260,12 @@ loading is searched for again.
 
 | Tool | What it does | Asks first |
 |---|---|---|
-| `list_cases` | Cases with title, page, their marks by status (`open`, `toVerify`, `verified`, `closed`), the start of the summary for the developer | no |
-| `get_case` | A case's summary, annotations with their status, resolution (`verified`, `by`), reopens and findings (`own` for the caller's), element details and crops | no |
+| `list_cases` | Cases with title, pages, their marks by status (`open`, `toVerify`, `verified`, `closed`), the start of the summary for the developer | no |
+| `get_case` | A case's pages and summary, its screenshots with their pages, annotations with their page, status, resolution (`verified`, `by`), reopens and findings (`own` for the caller's), element details and crops | no |
 | `get_image` | One screenshot or crop, scaled to at most 1568 px | no |
 | `load_case` | Loads a case onto the tab in front and reports what was found | no |
 | `highlight` | Scrolls to and outlines one annotation's element (or another candidate) | no |
-| `get_mark_element` | Reads one annotation's element (or, by selector, an ancestor or an element inside it; for an annotation without an element, an element of the case's page) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
+| `get_mark_element` | Reads one annotation's element (or, by selector, an ancestor or an element inside it; for an annotation without an element, an element of the annotation's page) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
 | `capture` | A screenshot of the tab in front | no |
 | `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes |
 | `set_summary` | Writes the case's summary for the developer (stored as `verdict`, DEC-019) | yes |

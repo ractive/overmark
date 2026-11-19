@@ -36,6 +36,7 @@ export function newCase(id: string, page: PageInfo, now: string): Case {
 		createdAt: now,
 		updatedAt: now,
 		page: kept,
+		pages: [{ url: kept.url, title: kept.title, lang: kept.lang }],
 		shots: [],
 		annotations: [],
 		verdict: null,

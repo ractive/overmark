@@ -1147,6 +1147,26 @@ ul.cases .title {
 	min-height: 0;
 }
 
+/* The pages of a case that has several (DEC-038): one a line, under the meta line. */
+.case-pages {
+	margin: -4px 0 0;
+	padding: 0;
+	list-style: none;
+}
+
+.case-pages li {
+	padding: 1px 0;
+}
+
+.case-pages button.page-link {
+	display: inline;
+	min-height: 0;
+}
+
+.case-pages li[data-here] .meta {
+	color: var(--ink);
+}
+
 /*
  * The case's link and its Edit in one line under the meta line (DEC-028): a
  * long address is cut with an ellipsis, never wider than the panel.

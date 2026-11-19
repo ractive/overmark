@@ -1522,6 +1522,211 @@ describe("the case's page and size", () => {
 	});
 });
 
+describe("a case of several pages (DEC-038)", () => {
+	const CART = "https://shop.example/cart";
+	const PAY = "https://shop.example/checkout/pay";
+	const shot = (id: string, url: string, width: number) => ({
+		id,
+		image: `shots/${id}.webp`,
+		scrollX: 0,
+		scrollY: 0,
+		viewport: { width, height: 800, dpr: 2 },
+		capturedAt: "2026-11-19T09:00:00.000Z",
+		url,
+	});
+	const mark = (n: number, shotId: string): Annotation => ({
+		id: `a${n}`,
+		number: n,
+		shot: shotId,
+		comment: `comment ${n}`,
+		author: "user",
+		shape: { kind: "box", rect: { x: 1, y: 2, width: 30, height: 40 } },
+		crop: `crops/a${n}.webp`,
+		element: {
+			tag: "button",
+			classes: [],
+			attributes: {},
+			ancestors: [],
+			rect: { x: 1, y: 2, width: 30, height: 40 },
+			page: { width: 1280, height: 2000 },
+			selector: "button",
+		},
+	});
+	const flow = (id: string): Case => ({
+		...sampleCase(id),
+		title: "Checkout flow",
+		page: { ...sampleCase(id).page, url: CART, title: "Your cart" },
+		pages: [
+			{ url: CART, title: "Your cart", lang: "en" },
+			{ url: PAY, title: "Payment", lang: "en" },
+		],
+		shots: [shot("s1", CART, 1280), shot("s2", PAY, 390)],
+		annotations: [mark(1, "s1"), mark(2, "s1"), mark(3, "s2")],
+	});
+	const match = (
+		n: number,
+		status: AnnotationMatch["status"],
+	): AnnotationMatch => ({
+		annotationId: `a${n}`,
+		number: n,
+		status,
+		score: status === "found" ? 0.9 : 0,
+		current: 0,
+		candidates:
+			status === "found"
+				? [
+						{
+							score: 0.9,
+							summary: "button",
+							selector: "button",
+							visible: true,
+							found: true,
+						},
+					]
+				: [],
+	});
+	const pages = () =>
+		[...el("case-pages").querySelectorAll("li")].map((li) => li.textContent);
+
+	test("Home: a case is this page's for any of its pages, and its row says how many it has", () => {
+		const state = initialState();
+		state.tab = {
+			id: 1,
+			url: "http://localhost:3000/checkout/pay?step=2",
+			title: "",
+			size: undefined,
+		};
+		state.cases = [flow("c_flow"), sampleCase("c_other")];
+		render(state, noActions);
+		expect(el("here").hidden).toBe(false);
+		const row = el("here-cases").querySelector('[data-case="c_flow"]');
+		expect(row?.textContent).toContain("shop.example/cart and 1 more page");
+		expect(
+			window.document.querySelector(
+				'ul.cases[data-group="other"] [data-case="c_other"]',
+			)?.textContent,
+		).toContain("www.example.com/kk");
+		expect(
+			window.document.querySelector(
+				'ul.cases[data-group="other"] [data-case="c_flow"]',
+			),
+		).toBeNull();
+	});
+
+	test("the header lists the pages with their marks, says which the tab shows, and opens each", () => {
+		const c = flow("c_pages");
+		const opened: (string | undefined)[] = [];
+		render(
+			caseState(c, (s) => {
+				s.tab = {
+					id: 1,
+					url: "http://localhost:3000/checkout/pay",
+					title: "",
+					size: undefined,
+				};
+			}),
+			actionsWith({ openPage: (_c, url) => void opened.push(url) }),
+		);
+		expect(el("case-pages").hidden).toBe(false);
+		expect(pages()).toEqual([
+			"shop.example/cart · 2 marks",
+			"shop.example/checkout/pay · 1 mark · this tab",
+		]);
+		// The one link of a case of one page gives way to the list.
+		expect(el("open-page").hidden).toBe(true);
+		expect(el("case-view").querySelector(".case-meta")?.textContent).toContain(
+			"2 pages",
+		);
+		const links = el("case-pages").querySelectorAll("button");
+		(links[1] as unknown as HTMLButtonElement).click();
+		(links[0] as unknown as HTMLButtonElement).click();
+		expect(opened).toEqual([PAY, CART]);
+	});
+
+	test("a case of one page has no list: its address is the link, as before", () => {
+		const c = sampleCase("c_one");
+		render(caseState(c), noActions);
+		expect(el("case-pages").hidden).toBe(true);
+		expect(el("open-page").hidden).toBe(false);
+		expect(el("open-page").textContent).toBe("www.example.com/kk");
+	});
+
+	test("the size offered is the one the marks of the page in front were made at", () => {
+		const c = flow("c_sizes");
+		const on = (url: string) =>
+			caseState(c, (s) => {
+				s.tab = { id: 1, url, title: "", size: { width: 1000, height: 800 } };
+			});
+		render(on("http://localhost:3000/cart"), noActions);
+		expect(el("case-size").textContent).toContain(
+			"This tab is 1000×800, the marks were made at 1280×800.",
+		);
+		render(on("http://localhost:3000/checkout/pay"), noActions);
+		expect(el("case-size").textContent).toContain(
+			"This tab is 1000×800, the marks were made at 390×800.",
+		);
+	});
+
+	test("a mark of another page is on another page, not lost; none found is said of the page's own", () => {
+		const c = flow("c_judged");
+		const on = (url: string, matches: AnnotationMatch[]) =>
+			caseState(c, (s) => {
+				s.tab = { id: 1, url, title: "", size: undefined };
+				s.loaded = {
+					caseId: c.id,
+					tabId: 1,
+					url,
+					matches: new Map(matches.map((m) => [m.annotationId, m])),
+				};
+				s.caseHint = { kind: "found" };
+			});
+		const word = (n: number) =>
+			el("case-view").querySelector(
+				`[data-annotation="a${n}"] .mark-sub .state`,
+			)?.textContent;
+		const cart = "http://localhost:3000/cart";
+		render(
+			on(cart, [match(1, "found"), match(2, "found"), match(3, "lost")]),
+			noActions,
+		);
+		expect(el("none-found").hidden).toBe(true);
+		expect(el("case-hint").textContent).toBe(
+			"2 of 2 marks found on localhost:3000/cart. 1 more is on other pages of the case.",
+		);
+		expect(word(1)).toContain("Found here");
+		expect(word(3)).toBe("On another page");
+		// Not red, and no "Not found" in its row.
+		const row = el("case-view").querySelector('[data-annotation="a3"]');
+		expect(row?.getAttribute("data-colour")).toBeNull();
+		expect(row?.textContent).toContain("On shop.example/checkout/pay");
+		expect(row?.textContent).not.toContain("Not found");
+
+		// The page's own marks are gone: that is said, of this page.
+		render(
+			on(cart, [match(1, "lost"), match(2, "lost"), match(3, "lost")]),
+			noActions,
+		);
+		expect(el("none-found").hidden).toBe(false);
+		expect(el("none-found").textContent).toContain(
+			"None of this case's marks were found on this page.",
+		);
+		expect(el("none-found").textContent).not.toContain("other pages");
+
+		// A page that is none of the case's: it names the case's pages.
+		render(
+			on("http://localhost:3000/account", [
+				match(1, "lost"),
+				match(2, "lost"),
+				match(3, "lost"),
+			]),
+			noActions,
+		);
+		expect(el("none-found").textContent).toContain(
+			"It is probably for other pages: shop.example/cart, shop.example/checkout/pay.",
+		);
+	});
+});
+
 describe("what stays between renders", () => {
 	test("the open case's buttons stay the same elements", () => {
 		const c = sampleCase("c_keep");
@@ -2257,9 +2462,11 @@ describe("a case's link (DEC-028)", () => {
 			caseState(c),
 			actionsWith({ startLink: (x) => void called.push(x.id) }),
 		);
-		expect(el("case-link").previousElementSibling?.className).toContain(
-			"case-meta",
-		);
+		// The list of pages between them shows only for a case of several (DEC-038).
+		const pages = el("case-link").previousElementSibling as HTMLElement;
+		expect(pages.id).toBe("case-pages");
+		expect(pages.hidden).toBe(true);
+		expect(pages.previousElementSibling?.className).toContain("case-meta");
 		expect(shown("case-link-open")).toBe(false);
 		expect(edit().textContent).toBe("Add a link");
 		expect(edit().className).toContain("link");

@@ -1397,3 +1397,62 @@ Not taken over, for the owner to decide:
 - "Not answered in time: <tool> did not run." for 15 s after a question ran out unseen.
 - One notification button only ("Allow once"; tab-mcp's DEC-139: a standing permission
   needs the whole question). Sitegloss's notification has Allow and Always allow.
+
+## DEC-038: A case spans several pages
+
+2026-11-19. The owner asked for it, with the plan for sitegloss.dev: a tester goes
+through a feature across pages (the cart, then the payment page) and marks all of it in
+one case. Until now a case had one page (`page.url`), though every screenshot already
+recorded its own address (DEC-012). How it is done is decided here and is the owner's to
+change.
+
+- **The format stays `sitegloss/1`,** and grows by one optional field: `pages`, the
+  case's pages in order, each `{ url, title, lang }` with the address as `plainUrl` keeps
+  it. `page` stays what it was, the first page with the window and browser the case was
+  started in, so a build before this one reads a new file: `validateCase` builds its
+  result from the fields it knows and leaves out the rest, and it knew `shots[].url`. Such
+  a build shows the first page only and loses `pages` when it stores the case again; the
+  screenshots keep their addresses, from which the pages are derived again.
+- **Nothing is migrated.** A case stored before has no `pages`; `casePages` reads its
+  pages from `page` and its screenshots' addresses. It gets the list with its next mark.
+- **Every screenshot says which page it is of.** The two that did not are fixed: an AI
+  app's `add_annotation` (the page in front), and an import, which now cuts the query off
+  the screenshots' and the pages' addresses as it did for `page.url`.
+- **A mark on another page adds that page to the open case.** The toolbar adds to the
+  open case on whatever page the tab shows (it always did; a navigation ends the toolbar,
+  "Add marks" starts it again on the new page), and saving the mark records the page. The
+  first mark's page is still the case's first page (a case started on one page and first
+  marked on another is that one's).
+- **A page is its path, in whatever environment,** as everywhere in Sitegloss (DEC-001,
+  `samePath`): a mark added on `localhost:3000/cart` to a case from `www.example.com/cart`
+  is on the same page, not on a second one. Two sites' home pages are two pages.
+- **Pages of another site are allowed.** A flow crosses from a shop to its payment
+  provider. Nothing in the code needs one origin: a mark belongs to a screenshot, a
+  screenshot has an address, and Sitegloss asks for each site as it always did (the
+  icon's click, or the prompt when a case's page is opened). The cost of telling pages by
+  path only: two pages of different sites with the same path (other than `/`) count as
+  one page. Accepted; a host mapping per case would be the fix, and DEC-001 ruled
+  environment settings out.
+- **A page leaves the list with its last screenshot** (a mark deleted, an Undo), and
+  `page` then follows the first page left. A case without screenshots keeps the page it
+  was started on.
+- **What is judged per page:** "This page" on Home lists a case for any of its pages. A
+  mark without an element is drawn only on its own page (it was already). After a draw on
+  one of the case's pages, the marks of its other pages that are not there are "on
+  another page", neither lost nor counted ("2 of 2 marks found on …. 1 more is on other
+  pages of the case."), and "None of this case's marks were found" is said of the page's
+  own marks. On a page that is none of the case's, every mark is looked for as before.
+  The size "the marks were made at", and Match size, are those of the first screenshot of
+  the page in front. `get_mark_element` looks for a selector, for a mark without an
+  element, only on the mark's own page.
+- **The case's header** lists the pages of a case that has several, each with its marks
+  counted and a link that opens it; a case of one page looks as before.
+- **AI tools, additive:** `list_cases` has `pages` (addresses) beside `url`; `get_case`
+  has `pages` (address, title, language, marks) beside `page`, each screenshot's `url` and
+  `viewport`, and each mark's `page`; `load_case` says each mark's `page` and
+  `onThisPage`. `case.md` lists the pages, and says each mark's and each screenshot's page
+  where the case has several; a case of one page gives the same file as before.
+
+Not done: a toolbar that comes back by itself after a navigation while marks are being
+added. The panel keeps the case open and "Add marks" is one click; whether the toolbar
+should follow is the owner's to decide (it touches DEC-023 and DEC-026).

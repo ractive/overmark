@@ -9,17 +9,21 @@ import {
 	appLabel,
 	type Case,
 	caseCounts,
+	casePages,
 	cropImage,
 	type Finding,
 	type FindingApp,
 	isSafeId,
 	isWebPage,
 	markStatus,
+	marksOnPage,
+	markUrl,
 	RESOLUTION_LABEL,
 	type Resolution,
 	type ShapeKind,
 	STATUS_LABEL,
 	shotImage,
+	shotUrl,
 } from "./case.ts";
 import { summarize } from "./element.ts";
 
@@ -162,13 +166,15 @@ function countsLine(c: Case): string {
 	return `- Marks: ${parts.length > 0 ? parts.join(", ") : "none"}`;
 }
 
-function annotation(a: Annotation): string {
+/** A mark; `page`: its page's address, said where the case has several. */
+function annotation(a: Annotation, page: string | undefined): string {
 	const lines = [
 		`### ${a.number}. ${KIND[a.shape.kind]}${a.author === "ai" ? " (by an AI app)" : ""}`,
 		"",
 	];
 	lines.push(a.comment ? block(a.comment) : "_No comment._", "");
 	lines.push(...status(a));
+	if (page !== undefined) lines.push(`- Page: ${address(page)}`);
 	if (a.element) {
 		lines.push(`- Element: ${inline(summarize(a.element))}`);
 		if (a.element.selector)
@@ -198,15 +204,30 @@ function annotation(a: Annotation): string {
 	return lines.join("\n");
 }
 
+/** `3 marks`, `1 mark`. */
+const marksCount = (n: number) => `${n} mark${n === 1 ? "" : "s"}`;
+
 export function caseMarkdown(c: Case): string {
 	const v = c.page.viewport;
+	const pages = casePages(c);
+	// A case of one page reads as before; one of several lists them (DEC-038).
+	const several = pages.length > 1;
 	const out = [
 		`# ${inline(c.title)}`,
 		"",
-		`- Page: ${address(c.page.url)}`,
+		...(several
+			? [
+					`- Pages (${pages.length}):`,
+					...pages.map(
+						(p) =>
+							`  - ${address(p.url)}${p.title ? `, ${inline(p.title)}` : ""} (${marksCount(marksOnPage(c, p.url))})`,
+					),
+				]
+			: [`- Page: ${address(c.page.url)}`]),
 		// The link the user attached (DEC-028), written as the page's address.
 		...(c.link === undefined ? [] : [`- Link: ${address(c.link)}`]),
-		`- Page title: ${inline(c.page.title)}`,
+		// A case of several pages has their titles in the list above.
+		...(several ? [] : [`- Page title: ${inline(c.page.title)}`]),
 		`- Window: ${v.width}×${v.height} CSS pixels, device pixel ratio ${v.dpr}${c.page.lang ? `, language ${inline(c.page.lang)}` : ""}`,
 		`- Created: ${inline(c.createdAt)}, updated: ${inline(c.updatedAt)}`,
 		countsLine(c),
@@ -219,7 +240,9 @@ export function caseMarkdown(c: Case): string {
 		"",
 		`## Marks (${c.annotations.length})`,
 		"",
-		...[...c.annotations].sort((a, b) => a.number - b.number).map(annotation),
+		...[...c.annotations]
+			.sort((a, b) => a.number - b.number)
+			.map((a) => annotation(a, several ? markUrl(c, a) : undefined)),
 		"## Screenshots",
 		"",
 		...c.shots.map(
@@ -228,7 +251,13 @@ export function caseMarkdown(c: Case): string {
 					`Screenshot ${inline(s.id)}, scrolled to ${Math.round(s.scrollX)}, ${Math.round(s.scrollY)}`,
 					s.image,
 					isSafeId(s.id) ? shotImage(s.id) : undefined,
-				)}\n`,
+				)}\n${
+					// Which page it is of and in what window, where the case has
+					// several (DEC-038): the first lines say it for a case of one.
+					several
+						? `\nScreenshot ${inline(s.id)} is of ${address(shotUrl(c, s))}, in a window of ${s.viewport.width}×${s.viewport.height} CSS pixels.\n`
+						: ""
+				}`,
 		),
 	];
 	return `${out.join("\n").trimEnd()}\n`;

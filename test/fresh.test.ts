@@ -31,6 +31,10 @@ describe("a case created by New case for this page (DEC-026)", () => {
 			updatedAt: NOW,
 			// Kept as a mark's page is: no query, no fragment (DEC-009).
 			page: { ...page(), url: "https://shop.example/cart" },
+			// Its first page, in the list a case's pages are in (DEC-038).
+			pages: [
+				{ url: "https://shop.example/cart", title: "Your cart", lang: "en" },
+			],
 			shots: [],
 			annotations: [],
 			verdict: null,

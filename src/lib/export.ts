@@ -438,6 +438,18 @@ export async function storeImport(
 				}
 			: {}),
 		page: { ...parsed.case.page, url: plainUrl(parsed.case.page.url) },
+		// The other pages' addresses too (DEC-038): its list's and its screenshots'.
+		...(parsed.case.pages === undefined
+			? {}
+			: {
+					pages: parsed.case.pages.map((p) => ({
+						...p,
+						url: plainUrl(p.url),
+					})),
+				}),
+		shots: parsed.case.shots.map((s) =>
+			s.url === undefined ? s : { ...s, url: plainUrl(s.url) },
+		),
 		annotations: parsed.case.annotations.map((a) => ({
 			...a,
 			...(a.findings === undefined

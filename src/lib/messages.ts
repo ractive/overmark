@@ -97,7 +97,10 @@ export type ContentRequest =
 			type: "element:inspect";
 			caseId: string;
 			annotationId: string;
-			/** The case's page: a mark without an element is looked for only there. */
+			/**
+			 * The mark's page, its screenshot's (DEC-038): a mark without an
+			 * element is looked for only there.
+			 */
 			casePage: string;
 			selector?: string;
 	  }
@@ -133,6 +136,8 @@ export type DescribedElement =
 			scroll: { x: number; y: number };
 			url: string;
 			title: string;
+			/** The page's language, where it names one (DEC-038). */
+			lang?: string;
 	  }
 	| { ok: false; error: string };
 

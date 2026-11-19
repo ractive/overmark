@@ -53,6 +53,9 @@ export const MAX_URL = 8000;
 /** The longest page title a case may hold. */
 export const MAX_PAGE_TITLE = 2000;
 
+/** The most pages a case lists (DEC-038). */
+export const MAX_PAGES = 200;
+
 export interface Point {
 	x: number;
 	y: number;
@@ -119,7 +122,11 @@ export interface Shot {
 	scrollY: number;
 	viewport: Viewport;
 	capturedAt: string;
-	/** The page's address when it was taken; a case can span an app's routes. */
+	/**
+	 * The page's address when it was taken: a case spans pages (DEC-038).
+	 * Every screenshot taken since has one; one from before may have none,
+	 * and is then the case's first page's (`shotUrl`).
+	 */
 	url?: string;
 }
 
@@ -324,13 +331,33 @@ export interface PageInfo {
 	userAgent: string;
 }
 
+/**
+ * A page of a case (DEC-038): its address as `plainUrl` gives it, and its
+ * title and language when the mark was made (empty where not known).
+ */
+export interface CasePage {
+	url: string;
+	title: string;
+	lang: string;
+}
+
 export interface Case {
 	format: typeof CASE_FORMAT;
 	id: string;
 	title: string;
 	createdAt: string;
 	updatedAt: string;
+	/**
+	 * The case's first page, and the window and browser it was started in.
+	 * Builds before DEC-038 know only this page.
+	 */
 	page: PageInfo;
+	/**
+	 * The pages the case's marks are on, the first one first (DEC-038). A case
+	 * stored before has none: read them with `casePages`, which also gives
+	 * those of such a case.
+	 */
+	pages?: CasePage[];
 	shots: Shot[];
 	annotations: Annotation[];
 	/** The summary for the developer: what should change, as agreed (DEC-019). */
@@ -551,11 +578,101 @@ export function samePath(a: string, b: string): boolean {
 }
 
 /**
- * The case is for `url`, sure enough to load it without a click: every site's
- * home page has the same path.
+ * One page in a case's list (DEC-038): the same path, whatever the origin,
+ * as everywhere (`samePath`: a mark added on localhost to a case from
+ * production is on the same page, not on a second one). Two sites' home
+ * pages are two pages (`isPageUrl`). What is no address (a file's) is itself
+ * only.
+ */
+export function samePage(a: string, b: string): boolean {
+	return isPageUrl(a, b) || a === b;
+}
+
+/** The address of the page a screenshot was taken on. */
+export const shotUrl = (c: Case, shot: Shot | undefined): string =>
+	shot?.url ?? c.page.url;
+
+/** The address of the page a mark is on: its screenshot's. */
+export function markUrl(c: Case, a: Annotation): string {
+	return shotUrl(
+		c,
+		c.shots.find((s) => s.id === a.shot),
+	);
+}
+
+/**
+ * The case's pages, the first one first (DEC-038): the stored list, or for a
+ * case from before the list the first page; and every page a screenshot was
+ * taken on that is not among them, without a title. A page is there once
+ * (`samePage`).
+ */
+export function casePages(c: Case): CasePage[] {
+	const pages: CasePage[] = [];
+	const add = (page: CasePage) => {
+		if (!pages.some((p) => samePage(p.url, page.url))) pages.push(page);
+	};
+	for (const page of c.pages ?? []) add(page);
+	if (c.pages === undefined || c.pages.length === 0)
+		add({ url: c.page.url, title: c.page.title, lang: c.page.lang });
+	for (const shot of c.shots)
+		if (shot.url !== undefined) add({ url: shot.url, title: "", lang: "" });
+	return pages.slice(0, MAX_PAGES);
+}
+
+/** How many of the case's marks are on the page `url` (`samePage`). */
+export function marksOnPage(c: Case, url: string): number {
+	return c.annotations.filter((a) => samePage(markUrl(c, a), url)).length;
+}
+
+/**
+ * The page of the case that the address `url` shows, whatever the origin
+ * (`samePath`: the case's page in another environment is the same page).
+ */
+export function pageAt(c: Case, url: string): CasePage | undefined {
+	return casePages(c).find((p) => samePath(p.url, url));
+}
+
+/**
+ * The case with its list of pages as its screenshots have them: a page no
+ * screenshot is of any more goes, and `page` follows the first one left. A
+ * case without screenshots keeps the pages it was started on; one stored
+ * before the list (DEC-038) stays without it.
+ */
+export function withPagesOfShots(c: Case): Case {
+	if (c.pages === undefined || c.shots.length === 0) return c;
+	const pages = casePages(c).filter((p) =>
+		c.shots.some((s) => samePage(shotUrl(c, s), p.url)),
+	);
+	const first = pages[0];
+	if (first === undefined) return c;
+	return {
+		...c,
+		pages,
+		page: samePage(first.url, c.page.url)
+			? c.page
+			: { ...c.page, url: first.url, title: first.title, lang: first.lang },
+	};
+}
+
+/**
+ * The window a mark of the page at `url` was made in: that of the page's
+ * first screenshot, else of the case's first page (DEC-038).
+ */
+export function viewportAt(c: Case, url: string | undefined): Viewport {
+	const page = url ? pageAt(c, url) : undefined;
+	const shot =
+		page === undefined
+			? undefined
+			: c.shots.find((s) => samePage(shotUrl(c, s), page.url));
+	return shot?.viewport ?? c.page.viewport;
+}
+
+/**
+ * The case is for `url`, sure enough to load it without a click: one of its
+ * pages (every site's home page has the same path).
  */
 export function isPageOf(c: Case, url: string): boolean {
-	return isPageUrl(c.page.url, url);
+	return casePages(c).some((p) => isPageUrl(p.url, url));
 }
 
 /** A web page's address, one a click may open (an imported case's is anyone's). */
@@ -827,6 +944,7 @@ export function validateCase(value: unknown): Case {
 	const importedAt = o["importedAt"];
 	const lastNumber = o["lastNumber"];
 	const link = o["link"];
+	const pages = o["pages"];
 	return {
 		format: CASE_FORMAT,
 		id: id(o["id"], "case.id"),
@@ -840,6 +958,7 @@ export function validateCase(value: unknown): Case {
 			viewport: viewport(page["viewport"], "case.page.viewport"),
 			userAgent: str(page["userAgent"], "case.page.userAgent", 2000),
 		},
+		...(pages === undefined ? {} : { pages: pagesOf(pages) }),
 		shots,
 		annotations,
 		verdict:
@@ -854,6 +973,19 @@ export function validateCase(value: unknown): Case {
 			? {}
 			: { lastNumber: highest(lastNumber, annotations) }),
 	};
+}
+
+/** A case's list of pages (DEC-038); a page's language may be left out. */
+function pagesOf(value: unknown): CasePage[] {
+	return arr(value, "case.pages", MAX_PAGES).map((v, i): CasePage => {
+		const p = `case.pages[${i}]`;
+		const page = obj(v, p);
+		return {
+			url: str(page["url"], `${p}.url`, MAX_URL),
+			title: str(page["title"], `${p}.title`, MAX_PAGE_TITLE),
+			lang: language(page["lang"] ?? "", `${p}.lang`),
+		};
+	});
 }
 
 /**
@@ -1312,7 +1444,8 @@ export function withoutAnnotation(
 	const shotUsed = annotations.some((a) => a.shot === gone.shot);
 	const shot = c.shots.find((s) => s.id === gone.shot);
 	return {
-		value: {
+		// A page whose last screenshot went with the mark leaves the list.
+		value: withPagesOfShots({
 			...c,
 			annotations,
 			shots: shotUsed ? c.shots : c.shots.filter((s) => s.id !== gone.shot),
@@ -1321,7 +1454,7 @@ export function withoutAnnotation(
 				...c.annotations.map((a) => a.number),
 			),
 			updatedAt: now,
-		},
+		}),
 		images: [
 			gone.crop,
 			...(shotUsed || shot === undefined ? [] : [shot.image]),

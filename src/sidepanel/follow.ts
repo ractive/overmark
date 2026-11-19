@@ -5,7 +5,7 @@
  * page. Pure: main.ts carries the steps out.
  */
 
-import { type Case, samePath } from "../lib/case.ts";
+import { type Case, markUrl, pageAt, samePath } from "../lib/case.ts";
 import type { AnnotationMatch } from "../lib/messages.ts";
 import { shortUrl } from "./dom.ts";
 import type { Loaded } from "./state.ts";
@@ -142,24 +142,49 @@ export function dashDrawn(
 		const a = c.annotations.find((x) => x.id === m.annotationId);
 		if (a === undefined || a.shape.kind === "note") return false;
 		if (m.status !== "no-element") return true;
-		const shot = c.shots.find((x) => x.id === a.shot);
-		return samePath(shot?.url ?? c.page.url, url);
+		return samePath(markUrl(c, a), url);
+	});
+}
+
+/**
+ * The matches that say something about the page at `url` (DEC-038): on one
+ * of the case's pages, the marks of that page, and those of its other pages
+ * that are there all the same (a header every page has). A mark of another
+ * page that is not there was not expected. On a page that is none of the
+ * case's, every mark is looked for, as in a case of one page.
+ */
+export function matchesHere(
+	c: Case,
+	matches: readonly AnnotationMatch[],
+	url: string,
+): AnnotationMatch[] {
+	if (pageAt(c, url) === undefined) return [...matches];
+	return matches.filter((m) => {
+		if (isFound(m)) return true;
+		const a = c.annotations.find((x) => x.id === m.annotationId);
+		return a === undefined || samePath(markUrl(c, a), url);
 	});
 }
 
 /**
  * What a draw found, in the case's This-tab block; `page` is the page's short
- * address. The page shows the rest: a mark's colour is its status, and only
+ * address, `matches` those that count for it (`matchesHere`). The page shows the rest: a mark's colour is its status, and only
  * the dash needs a word, where one was drawn (`dashed`, see `dashDrawn`).
  */
 export function foundText(
 	matches: readonly AnnotationMatch[],
 	page: string,
 	dashed: boolean,
+	elsewhere = 0,
 ): string {
 	const found = matches.filter(isFound).length;
 	const said = `${found} of ${matches.length} marks found on ${page}.`;
-	return dashed ? `${said} Dashed: unsure.` : said;
+	// The marks of the case's other pages, not expected here (DEC-038).
+	const rest =
+		elsewhere === 0
+			? ""
+			: ` ${elsewhere} more ${elsewhere === 1 ? "is" : "are"} on other pages of the case.`;
+	return `${said}${dashed ? " Dashed: unsure." : ""}${rest}`;
 }
 
 /**
@@ -173,13 +198,15 @@ export function foundLine(
 	c: Case,
 	loaded: Pick<Loaded, "matches" | "url" | "settling">,
 ): string | undefined {
-	const matches = [...loaded.matches.values()];
-	if (matches.length === 0 || (noneFound(matches) && !loaded.settling))
+	const all = [...loaded.matches.values()];
+	const matches = matchesHere(c, all, loaded.url);
+	if (all.length === 0 || (noneFound(matches) && !loaded.settling))
 		return undefined;
 	return foundText(
 		matches,
 		shortUrl(loaded.url),
 		dashDrawn(c, matches, loaded.url),
+		all.length - matches.length,
 	);
 }
 
