@@ -207,8 +207,6 @@ export interface Reread {
 	after: number;
 	/** What is wrong, said in the status until the read works. */
 	text?: string;
-	/** `resumed`: since when (ms). A delete of the user's after that is one for the team. */
-	since?: number;
 	/**
 	 * `join`: the user was told what the join replaces (how many marks get
 	 * the team's text) and said yes. Without it a join that would replace

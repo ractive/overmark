@@ -342,12 +342,7 @@ export class CloudSync {
 					changed.push({
 						...book,
 						mode: "synced",
-						reread: {
-							why: "resumed",
-							tries: 0,
-							after: 0,
-							since: this.#now().getTime(),
-						},
+						reread: { why: "resumed", tries: 0, after: 0 },
 					});
 				else await this.#books.remove(book.caseId);
 			} else if (theirs && !resume) changed.push(book);
@@ -370,6 +365,12 @@ export class CloudSync {
 					});
 		}
 		await this.#books.put(...changed);
+		// A book taken up again honours only a delete made from now on: no
+		// older record of its case is left. (There is none while the case is
+		// here, the store sees to that; this makes it so whatever happened.)
+		await this.#deps.store.forgetDeleted(
+			changed.filter((b) => b.reread?.why === "resumed").map((b) => b.caseId),
+		);
 		const { expired: _e, ...rest } = account;
 		await kv.set({ [KEYS.account]: { ...rest, teamId } });
 	}
@@ -827,12 +828,11 @@ export class CloudSync {
 				book.mode === "synced" &&
 				book.teamId === team.id &&
 				book.shadow !== undefined;
-			// A book taken up again honours only a delete made since: what was
-			// deleted while it did not sync comes back (DEC-041).
-			const honoured =
-				at !== undefined &&
-				(book.reread?.why !== "resumed" || at > (book.reread.since ?? 0));
-			if (theTeams && honoured) {
+			// (Also of a book taken up again: its older records went when it
+			// was taken up, so this is a delete made since, under a button
+			// that says what it does. What was deleted while it did not sync
+			// has no book any more and comes back, DEC-041.)
+			if (theTeams && at !== undefined) {
 				// At once, also for a case that waits to be read again.
 				await this.#deleteCase(api, team, book);
 				settled.push(book.caseId);

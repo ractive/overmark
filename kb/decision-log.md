@@ -1853,7 +1853,9 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   the delete without a word. Every delete path records it without knowing of the sync;
   the panel's Delete and `delete_case` return at once; there is no time limit. The
   engine sends `case.delete` for a synced case that is gone and has a record; a book
-  taken up again honours only a delete made since. A record leaves when it was taken
+  taken up again honours only a delete made since (a case deleted while it did not
+  sync has no book any more and comes back, DEC-041; what records there are leave
+  when the book is taken up, so no times are compared). A record leaves when it was taken
   up, when no book here could need it, or after 30 days; a case stored again under the
   id takes it away. The records are kept in the `images` object store under a key no
   case's images can have (`!deleted/<id>`), not in a store of their own: a new store

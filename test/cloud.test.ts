@@ -1766,6 +1766,26 @@ describe("a delete for the team is the user's delete (review B, sync 6)", () => 
 		expect(server.caseOf("c_flow")).toBeUndefined();
 	});
 
+	test("signed in again, and a case deleted before it was read again: the user's delete, made while signed in, is one for the team", async () => {
+		await shared();
+		await tess.engine.signOut();
+		// No network at the sign-in: the case waits to be read again.
+		const getCase = tess.api.getCase.bind(tess.api);
+		tess.api.getCase = async () => {
+			throw new ApiFailure("offline", "gone");
+		};
+		await signIn(tess);
+		expect(book(tess, "c_flow")?.reread?.why).toBe("resumed");
+		// The button says "deletes it for the team".
+		await removeCase(tess, "c_flow");
+		tess.api.getCase = getCase;
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeUndefined();
+		expect(await tess.store.getCase("c_flow")).toBeUndefined();
+		expect(await dana.store.getCase("c_flow")).toBeUndefined();
+		expect(await tess.store.deletedCases()).toEqual([]);
+	});
+
 	test("a delete of a case that waits to be read again goes at once, not when that read is due", async () => {
 		await shared();
 		await addMark(dana, "c_flow", "Dana's third");
