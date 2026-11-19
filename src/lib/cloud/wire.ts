@@ -206,7 +206,7 @@ export function newShotOf(
 		scrollX: shot.scrollX,
 		scrollY: shot.scrollY,
 		viewport: shot.viewport,
-		capturedAt: stamp(shot.capturedAt) ?? new Date(0).toISOString(),
+		capturedAt: stamp(shot.capturedAt) ?? EPOCH,
 	};
 }
 
@@ -309,19 +309,32 @@ export function casePatch(
  * by now (a mark the user made under that id since), loses the id. The
  * note itself goes: it is settled.
  */
-export function settleAnnounced(c: Case | undefined, book: CaseBook): void {
+export function settleAnnounced(
+	c: Case | undefined,
+	book: CaseBook,
+): Set<string> {
+	/** Marks of the server's that lost the id they were announced under. */
+	const loose = new Set<string>();
 	const told = book.announced;
-	if (told === undefined) return;
+	if (told === undefined) return loose;
 	const marks = new Map((c?.annotations ?? []).map((a) => [a.id, a]));
 	const shots = new Map((c?.shots ?? []).map((s) => [s.id, s]));
 	for (const [id, fixed] of Object.entries(told.marks)) {
 		const a = marks.get(id);
-		if (a === undefined || fixedOf(a) !== fixed) delete book.marks[id];
+		if (a === undefined || fixedOf(a) !== fixed) {
+			const wire = book.marks[id];
+			if (wire !== undefined) loose.add(wire);
+			delete book.marks[id];
+		}
 	}
 	for (const [id, capturedAt] of Object.entries(told.shots))
 		if (shots.get(id)?.capturedAt !== capturedAt) delete book.shots[id];
 	delete book.announced;
+	return loose;
 }
+
+/** What a time that the server does not take is sent as. */
+const EPOCH = new Date(0).toISOString();
 
 /** A time as an instant; what is no time is the epoch, as it is sent. */
 const instant = (time: string | undefined): number => {
@@ -352,15 +365,21 @@ const instant = (time: string | undefined): number => {
  * second time.
  */
 export function relink(c: Case, book: CaseBook): void {
-	settleAnnounced(c, book);
+	// A mark that was to move to an announced id and did not (the case was
+	// not stored) is still here, under the id it had: found again below.
+	const loose = settleAnnounced(c, book);
 	const shadow = book.shadow;
 	if (shadow === undefined) return;
 	for (const s of c.shots) {
 		const wire = book.shots[s.id];
 		const before = wire === undefined ? undefined : shadow.shots[wire];
+		// As instants, and the time here as it is sent: a time written another
+		// way than the server takes (an offset, no seconds, a space: a case
+		// from a file) goes as the epoch, and compared as it stands it would
+		// be "another screenshot" for ever, its marks deleted and made again.
 		if (
 			before?.capturedAt !== undefined &&
-			instant(before.capturedAt) !== instant(s.capturedAt)
+			instant(before.capturedAt) !== instant(stamp(s.capturedAt) ?? EPOCH)
 		)
 			delete book.shots[s.id];
 	}
@@ -372,11 +391,12 @@ export function relink(c: Case, book: CaseBook): void {
 	 * Marks of the server's whose mark here turned out to be another one, or
 	 * is under its old id no more (renumbered, the book not written).
 	 */
-	const freed = new Set<string>(
-		Object.entries(book.marks)
+	const freed = new Set<string>([
+		...loose,
+		...Object.entries(book.marks)
 			.filter(([id]) => !here.has(id))
 			.map(([, wire]) => wire),
-	);
+	]);
 	for (const a of c.annotations) {
 		const wire = book.marks[a.id];
 		const before = wire === undefined ? undefined : shadow.marks[wire];

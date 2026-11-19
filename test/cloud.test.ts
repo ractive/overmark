@@ -688,6 +688,110 @@ describe("the toolbar's Undo in a synced case (review B, sync 12)", () => {
 	});
 });
 
+describe("a screenshot's time is compared as an instant, as it is sent (review B, re-check C)", () => {
+	for (const written of [
+		"2026-11-19T10:00:05+00:00",
+		"2026-11-19T10:00Z",
+		"2026-11-19 10:00:05",
+		"yesterday",
+	])
+		test(`taken at “${written}” (a case from a file): its mark stays one mark, change after change`, async () => {
+			await signIn(tess);
+			await signIn(dana);
+			await startCase(tess, "c_time");
+			await addMark(tess, "c_time", "One", { element: true });
+			await change(tess, "c_time", (c, now) =>
+				validateCase({
+					...c,
+					updatedAt: now,
+					shots: c.shots.map((s) => ({ ...s, capturedAt: written })),
+				}),
+			);
+			await sync(tess, dana);
+			for (let i = 0; i < 3; i++) {
+				await change(tess, "c_time", (c, now) =>
+					withTitle(c, `Title ${i}`, now),
+				);
+				await sync(tess, dana);
+			}
+			expect(
+				[...server.marks.values()].map((r) => [r.value.number, r.deleted]),
+			).toEqual([[1, false]]);
+			expect(server.shotsOf("c_time")).toHaveLength(1);
+			expect(look(await dana.store.getCase("c_time"))?.marks).toHaveLength(1);
+			expect(status(tess)?.state).toBe("synced");
+		});
+});
+
+describe("an id that passes from one mark to another in a merge (review B, re-check D)", () => {
+	test("a renumbering that could not be stored, then a worker that stops between the ids and the case: both marks survive, each its own", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_flow");
+		await addMark(tess, "c_flow", "One");
+		await addMark(tess, "c_flow", "Two");
+		await sync(tess, dana);
+		await addMark(tess, "c_flow", "Tess's third");
+		await addMark(dana, "c_flow", "Dana's third", { url: PAY });
+		await dana.engine.request();
+		// Tess's device sends hers; the server gives it 4; storing the new
+		// number fails, once, and the run ends there.
+		const update = tess.store.updateCase.bind(tess.store);
+		const ops = tess.api.ops.bind(tess.api);
+		let posted = false;
+		tess.api.ops = async (team, list) => {
+			const answer = await ops(team, list);
+			posted = true;
+			return answer;
+		};
+		let failed = false;
+		tess.store.updateCase = async (id, how) => {
+			if (posted && !failed) {
+				failed = true;
+				throw new Error("the store failed once");
+			}
+			return update(id, how);
+		};
+		await tess.engine.request();
+		tess.api.ops = ops;
+		expect(failed).toBe(true);
+		// The next run: the worker stops between the ids and the case.
+		let reached = false;
+		tess.store.updateCase = () =>
+			new Promise<never>(() => {
+				reached = true;
+			});
+		void tess.engine.request();
+		await until(() => reached);
+		tess.store.updateCase = update;
+		// The id "a3" passes from Tess's mark to Dana's in that merge: it is
+		// announced, with Dana's drawing, like a new one.
+		expect(Object.keys(book(tess, "c_flow")?.announced?.marks ?? {})).toContain(
+			"a3",
+		);
+		const again = restarted(tess);
+		for (let i = 0; i < 4; i++) {
+			await again.engine.request();
+			await dana.engine.request();
+		}
+		const rows = [...server.marks.values()]
+			.filter((r) => !r.deleted)
+			.map((r) => [r.value.comment, r.value.createdBy?.name])
+			.sort();
+		expect(rows).toEqual([
+			["Dana's third", "Dana Developer"],
+			["One", "Tess Tester"],
+			["Tess's third", "Tess Tester"],
+			["Two", "Tess Tester"],
+		]);
+		expect([...server.marks.values()].filter((r) => r.deleted)).toEqual([]);
+		expect(look(await again.store.getCase("c_flow"))).toEqual(
+			look(await dana.store.getCase("c_flow")),
+		);
+		expect(await images(again, "c_flow")).toEqual(await images(dana, "c_flow"));
+	});
+});
+
 describe("what never changes of a mark is compared as it is sent (review B, sync 5)", () => {
 	test("an element whose id is longer than the server takes: one mark, sent once, and it stays that mark", async () => {
 		await signIn(tess);
@@ -1523,8 +1627,29 @@ describe("a delete for the team is the user's delete (review B, sync 6)", () => 
 	});
 });
 
-describe("a cursor of nothing read yet (review B, sync 7)", () => {
-	test("a first sync of an empty team, then a teammate's delete: it is told", async () => {
+describe("a cursor of 0 (review B, sync 7, and its re-check)", () => {
+	test("is a revision like any other: an empty team is not read whole at every run, and says nothing", async () => {
+		await signIn(tess);
+		expect(tess.kv.data.get(KEYS.cursor)).toBe(0);
+		const list = tess.store.listCases.bind(tess.store);
+		let lists = 0;
+		tess.store.listCases = async () => {
+			lists++;
+			return list();
+		};
+		tess.statuses.length = 0;
+		tess.api.calls.length = 0;
+		for (let run = 0; run < 3; run++) await tess.engine.request();
+		expect(tess.api.calls).toEqual([
+			"GET changes 0",
+			"GET changes 0",
+			"GET changes 0",
+		]);
+		expect(tess.statuses.map((s) => s.state)).not.toContain("syncing");
+		expect(lists).toBe(3);
+	});
+
+	test("a first push leaves it at 0, and a teammate's delete after that is told: of a mark, and of the whole case", async () => {
 		await signIn(tess);
 		await signIn(dana);
 		await startCase(tess, "c_zero");
@@ -1537,14 +1662,23 @@ describe("a cursor of nothing read yet (review B, sync 7)", () => {
 		await dana.engine.request();
 		await change(dana, "c_zero", (c, now) => withoutAnnotation(c, "a2", now));
 		await dana.engine.request();
-		await sync(tess, dana);
+		await tess.engine.request();
 		expect(
 			look(await tess.store.getCase("c_zero"))?.marks.map((m) => m.comment),
 		).toEqual(["One"]);
-		// And the whole case deleted in that window.
-		await removeCase(dana, "c_zero");
-		await sync(dana, tess);
-		expect(await tess.store.getCase("c_zero")).toBeUndefined();
+		// A second case, sent with the cursor still behind; the teammate
+		// deletes it whole: it goes here too, it is not kept as "local".
+		await startCase(tess, "c_gone");
+		await addMark(tess, "c_gone", "Short-lived");
+		tess.kv.data.set(KEYS.cursor, 0);
+		await tess.engine.request();
+		await dana.engine.request();
+		await removeCase(dana, "c_gone");
+		await dana.engine.request();
+		tess.kv.data.set(KEYS.cursor, 0);
+		await tess.engine.request();
+		expect(await tess.store.getCase("c_gone")).toBeUndefined();
+		expect(status(tess)?.problems).toEqual([]);
 	});
 
 	test("the server in memory answers since=0 as the real one does: as any revision, with what was deleted", async () => {

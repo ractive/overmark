@@ -1528,10 +1528,7 @@ export class CloudSync {
 		const kv = this.#deps.kv;
 		const stored = (await kv.get(KEYS.cursor)) as number | undefined;
 		const again = (await kv.get(KEYS.whole)) === true;
-		// A cursor of 0 is none: nothing was read yet, so the team's whole
-		// state is asked for (and a whole state names no deletes).
-		let since =
-			again || typeof stored !== "number" || stored === 0 ? undefined : stored;
+		let since = again || typeof stored !== "number" ? undefined : stored;
 		let whole = since === undefined;
 		let reset = false;
 		let cases = new Map<string, WireCase>();
@@ -1758,8 +1755,13 @@ export class CloudSync {
 		// count only for the marks they were meant for.
 		const given =
 			stored?.announced === undefined ? stored : structuredClone(stored);
-		if (given?.announced !== undefined)
-			settleAnnounced(await store.getCase(caseId), given);
+		if (given?.announced !== undefined) {
+			// And a mark that was to move to such an id and is still under
+			// its old one is put together with its mark of the server's.
+			const here = await store.getCase(caseId);
+			if (here === undefined) settleAnnounced(here, given);
+			else relink(here, given);
+		}
 		let incomplete: string | undefined;
 		// A case here that is kept on this device (the user said so, or it is
 		// another server's) is not the team's because the team names its id:
@@ -1865,11 +1867,15 @@ export class CloudSync {
 		);
 		if (first === undefined) return { changed: false, incomplete };
 		const known = given ?? emptyBook(caseId, "synced", team.id);
+		// Every id that stands for another mark or screenshot of the server's
+		// than the book said before: also one the book had, which the merge
+		// gives to another mark (a mark here takes the server's number, and
+		// a teammate's mark takes its old id).
 		const newMarks = Object.keys(first.book.marks).filter(
-			(id) => known.marks[id] === undefined,
+			(id) => known.marks[id] !== first.book.marks[id],
 		);
 		const newShots = Object.keys(first.book.shots).filter(
-			(id) => known.shots[id] === undefined,
+			(id) => known.shots[id] !== first.book.shots[id],
 		);
 		const announce =
 			given === undefined || newMarks.length > 0 || newShots.length > 0;

@@ -22,7 +22,8 @@ import contract from "../src/lib/cloud/openapi-v1.json" with { type: "json" };
 const ajv = new Ajv2020({ strict: false });
 ajv.addFormat(
 	"date-time",
-	/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/,
+	// As the server's `z.iso.datetime()`: UTC, written with Z, no offset.
+	/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/,
 );
 ajv.addFormat("binary", true);
 ajv.addSchema(contract, "v1");
