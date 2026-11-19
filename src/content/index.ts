@@ -106,6 +106,7 @@ function inspect(
 	request: {
 		caseId: string;
 		annotationId: string;
+		mark?: string;
 		casePage: string;
 		selector?: string;
 	},
@@ -114,6 +115,13 @@ function inspect(
 	if (activity.busy !== undefined)
 		return { ok: false, reason: "busy", error: activity.busy };
 	if (reviewer.caseId !== request.caseId) return null;
+	// The page's copy of the case has another mark under that id (it
+	// predates a renumbering): the asker loads the case again.
+	if (
+		request.mark !== undefined &&
+		!reviewer.holds(request.annotationId, request.mark)
+	)
+		return null;
 	const target = reviewer.target(request.annotationId);
 	if (target === undefined) return null;
 	const { match } = target;
@@ -280,7 +288,9 @@ function start(): void {
 						break;
 					}
 					sendResponse(
-						reviewer.caseId === message.caseId
+						reviewer.caseId === message.caseId &&
+							(message.mark === undefined ||
+								reviewer.holds(message.annotationId, message.mark))
 							? (reviewer.show(message.annotationId, message.candidate) ?? null)
 							: null,
 					);

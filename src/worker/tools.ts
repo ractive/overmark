@@ -897,6 +897,8 @@ export function createTools(deps: ToolDeps): Tool[] {
 							type: "case:show",
 							caseId: c.id,
 							annotationId: annotation.id,
+							// The mark meant: the page's copy may predate a renumbering.
+							mark: markKey(c, annotation),
 							...(candidate !== undefined ? { candidate } : {}),
 						});
 						if (m !== null && "error" in m) throw new CaseError(m.error);
@@ -966,6 +968,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 						type: "element:inspect",
 						caseId: c.id,
 						annotationId: annotation.id,
+						mark: markKey(c, annotation),
 						// The mark's own page (DEC-038).
 						casePage: markUrl(c, annotation),
 						...(selector !== undefined ? { selector } : {}),

@@ -186,13 +186,15 @@ export interface PanelState {
 	 */
 	picked: { caseId: string; annotationId: string; at: number } | undefined;
 	/** A mark's Delete, clicked once: the second click deletes. */
-	markDeleteArmed: { annotationId: string; at: number } | undefined;
+	markDeleteArmed:
+		| { annotationId: string; mark: string; at: number }
+		| undefined;
 	/**
 	 * A finding's Delete, clicked once: the second click deletes. A finding's
 	 * id is unique on its mark only (a case from a file).
 	 */
 	findingDeleteArmed:
-		| { annotationId: string; findingId: string; at: number }
+		| { annotationId: string; mark: string; findingId: string; at: number }
 		| undefined;
 	/**
 	 * Next to "Save summary": "Saved", or why not. The summary for the
@@ -378,4 +380,22 @@ export function editAfter(
 	return now.id === edit.annotationId
 		? edit
 		: { ...edit, annotationId: now.id };
+}
+
+/**
+ * What is held on a mark by its id (a delete asked once, a finding's) after
+ * the case changed: still on its mark, under the id the mark has now; gone
+ * when the mark is, or cannot be told from another. A "Really delete?" must
+ * not be waiting on a teammate's mark that got the id.
+ */
+export function heldAfter<T extends { annotationId: string; mark: string }>(
+	held: T | undefined,
+	c: Case | undefined,
+): T | undefined {
+	if (held === undefined || c === undefined) return held;
+	const now = markFor(c, held.annotationId, held.mark);
+	if (now === undefined || now === "ambiguous") return undefined;
+	return now.id === held.annotationId
+		? held
+		: { ...held, annotationId: now.id };
 }

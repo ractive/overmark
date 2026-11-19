@@ -36,7 +36,7 @@ import {
 } from "../src/lib/cloud/book.ts";
 import { undoAdd } from "../src/lib/save.ts";
 import type { StoredImage } from "../src/lib/store.ts";
-import { editAfter, type MarkEdit } from "../src/sidepanel/state.ts";
+import { editAfter, heldAfter, type MarkEdit } from "../src/sidepanel/state.ts";
 import type { FakeApi } from "./cloud-fake.ts";
 import { FakeServer, requestProblem, TEAM } from "./cloud-fake.ts";
 import {
@@ -601,6 +601,12 @@ describe("a form open on a mark that takes another number (review B, sync 8)", (
 		expect(markFor(twins, "a5", edit.mark)).toMatchObject({ id: "a5" });
 		expect(markFor(twins, "a3", edit.mark)).toBe("ambiguous");
 		expect(editAfter(edit, twins)).toBeUndefined();
+		// A delete asked once ("Really delete?") follows its mark the same
+		// way: its second click must not find the teammate's mark.
+		const armed = { annotationId: "a3", mark: edit.mark, at: 1 };
+		expect(heldAfter(armed, after)).toEqual({ ...armed, annotationId: "a4" });
+		expect(heldAfter(armed, gone)).toBeUndefined();
+		expect(heldAfter(armed, before)).toBe(armed);
 		// Unchanged: the same form.
 		expect(editAfter(edit, before)).toBe(edit);
 	});

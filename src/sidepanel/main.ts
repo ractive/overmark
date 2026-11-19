@@ -79,6 +79,7 @@ import {
 	type CaseHint,
 	type Exported,
 	editAfter,
+	heldAfter,
 	type ImportBatch,
 	Latest,
 	Panel,
@@ -773,8 +774,12 @@ async function refreshCase(): Promise<void> {
 		c.annotations.length > 0;
 	update((s) => {
 		s.current = c;
-		// An open form stays on its mark, whatever the mark's id is now.
+		// An open form stays on its mark, whatever the mark's id is now; so
+		// does a delete asked once (its second click must not find another
+		// mark under the id).
 		s.markEdit = editAfter(s.markEdit, c);
+		s.markDeleteArmed = heldAfter(s.markDeleteArmed, c);
+		s.findingDeleteArmed = heldAfter(s.findingDeleteArmed, c);
 	});
 	// Just opened, or its first mark is in: its marks go to the tab in front
 	// (DEC-022, DEC-026).
@@ -1883,7 +1888,7 @@ const actions: Actions = {
 			const at = Date.now();
 			update((s) => {
 				s.markEdit = undefined;
-				s.markDeleteArmed = { annotationId: a.id, at };
+				s.markDeleteArmed = { annotationId: a.id, mark: markKey(c, a), at };
 			});
 			setTimeout(() => {
 				update((s) => {
@@ -1907,7 +1912,13 @@ const actions: Actions = {
 		if (armed?.annotationId !== a.id || armed.findingId !== findingId) {
 			const at = Date.now();
 			update(
-				(s) => (s.findingDeleteArmed = { annotationId: a.id, findingId, at }),
+				(s) =>
+					(s.findingDeleteArmed = {
+						annotationId: a.id,
+						mark: markKey(c, a),
+						findingId,
+						at,
+					}),
 			);
 			setTimeout(() => {
 				update((s) => {

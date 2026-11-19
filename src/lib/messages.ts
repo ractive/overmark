@@ -66,6 +66,13 @@ export type ContentRequest =
 			/** `null` comes back when another case (or none) is loaded. */
 			caseId: string;
 			annotationId: string;
+			/**
+			 * Which mark is meant (`markKey`), where the asker knows: `null`
+			 * comes back when the page's copy of the case has another mark
+			 * under that id (it predates a renumbering), and the asker loads
+			 * the case again.
+			 */
+			mark?: string;
 			candidate?: number;
 	  }
 	/**
@@ -104,6 +111,8 @@ export type ContentRequest =
 			type: "element:inspect";
 			caseId: string;
 			annotationId: string;
+			/** As for `case:show`. */
+			mark?: string;
 			/**
 			 * The mark's page, its screenshot's (DEC-038): a mark without an
 			 * element is looked for only there.

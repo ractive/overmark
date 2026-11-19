@@ -321,6 +321,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.findingDeleteArmed = {
 					annotationId: "a1",
+					mark: "",
 					findingId: "f_2",
 					at: 1,
 				};
@@ -370,6 +371,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.findingDeleteArmed = {
 					annotationId: "a2",
+					mark: "",
 					findingId: "f_1",
 					at: 1,
 				};
@@ -390,7 +392,7 @@ describe("a mark's status and actions", () => {
 		const c = twoMarks();
 		render(
 			caseState(c, (s) => {
-				s.markDeleteArmed = { annotationId: "a1", at: 1 };
+				s.markDeleteArmed = { annotationId: "a1", mark: "", at: 1 };
 			}),
 			noActions,
 		);

@@ -530,6 +530,21 @@ export class Reviewer {
 		};
 	}
 
+	/**
+	 * Whether the mark under `annotationId` in the case as loaded here is the
+	 * mark `key` names (`markKey`); a copy from before a renumbering has
+	 * another mark there.
+	 */
+	holds(annotationId: string, key: string): boolean {
+		const c = this.#case;
+		const entry = this.#entries.find((e) => e.annotation.id === annotationId);
+		return (
+			c !== undefined &&
+			entry !== undefined &&
+			markKey(c, entry.annotation) === key
+		);
+	}
+
 	/** Scroll to an annotation's element (or another candidate) and focus it. */
 	show(annotationId: string, candidate?: number): AnnotationMatch | undefined {
 		const entry = this.#entries.find((e) => e.annotation.id === annotationId);
