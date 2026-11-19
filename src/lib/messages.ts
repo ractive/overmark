@@ -73,6 +73,13 @@ export type ContentRequest =
 	 * candidates chosen (`LoadResult`, or `null` where another case is loaded).
 	 */
 	| { type: "case:update"; case: Case }
+	/**
+	 * What the loaded case's marks are at on the page as it is now
+	 * (`LoadResult`, or `null` where another case is loaded): after the address
+	 * changed within the page (a single-page app's next route), the marks not
+	 * there before are looked for first.
+	 */
+	| { type: "case:matches"; caseId: string }
 	/** Remove the marks (`OverlayState`): only that case's, where it is named. */
 	| { type: "case:clear"; caseId?: string }
 	/**
@@ -191,6 +198,13 @@ export interface AnnotationMatch {
 	candidates: CandidateInfo[];
 	/** Only part of the page was searched (very many elements, or out of time). */
 	truncated?: boolean;
+	/**
+	 * The element was found on another page of the case than the mark's own
+	 * (DEC-038): a header every page has, or something that only looks like
+	 * it. Never sure: drawn dashed, and not counted among the page's marks
+	 * found.
+	 */
+	otherPage?: true;
 }
 
 /** A load stopped by a clear or by another case's load: nothing to say. */

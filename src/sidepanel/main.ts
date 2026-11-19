@@ -61,7 +61,13 @@ import {
 	type SavedFile,
 	saveFile,
 } from "./download.ts";
-import { type Drawn, followStep, isFound, newsLetsIn } from "./follow.ts";
+import {
+	type Drawn,
+	followStep,
+	isFound,
+	movedOn,
+	newsLetsIn,
+} from "./follow.ts";
 import { isUntouched, mayHold, newCase, type TabAnswer } from "./fresh.ts";
 import { CaseHints } from "./hints.ts";
 import { markAsked } from "./picked.ts";
@@ -349,6 +355,54 @@ async function followPage(caseId: string, tabId: number): Promise<boolean> {
 	return false;
 }
 
+/** How long after a route change the page is asked once more: its content may come late. */
+const ROUTE_SETTLE_MS = 1800;
+
+/**
+ * The tab went on to another page with the case still drawn on it (a
+ * single-page app's next route): the page looks again for the marks it did
+ * not have, and says what it found there. Once more a moment later
+ * (`again`), for content that comes after the address.
+ */
+async function readMatches(
+	c: Case,
+	tabId: number,
+	hint: ReturnType<typeof followHint>,
+	again: boolean,
+): Promise<void> {
+	const result = (await chrome.tabs
+		.sendMessage(tabId, { type: "case:matches", caseId: c.id })
+		.catch(() => null)) as LoadResult | null;
+	if (
+		result === null ||
+		!showing(c.id) ||
+		state.loaded?.tabId !== tabId ||
+		state.loaded.caseId !== c.id
+	)
+		return;
+	update((s) => {
+		s.loaded = {
+			caseId: c.id,
+			tabId,
+			matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+			url: result.url,
+			settling: again,
+		};
+	});
+	hint({ kind: "found" });
+	if (!again) return;
+	setTimeout(() => {
+		// Still that page of that case on that tab: what it has now.
+		if (
+			state.loaded?.tabId === tabId &&
+			state.loaded.caseId === c.id &&
+			state.loaded.url === result.url &&
+			state.current?.id === c.id
+		)
+			void readMatches(state.current, tabId, hint, false);
+	}, ROUTE_SETTLE_MS);
+}
+
 /**
  * The page shows the case already (the panel opened it from there): what it
  * found, without a draw again, which would drop the candidates chosen.
@@ -485,6 +539,12 @@ async function follow(): Promise<void> {
 	// A case without marks (just created, DEC-026) has nothing to draw: its
 	// first mark draws it (refreshCase).
 	if (front === undefined || c.annotations.length === 0) return;
+	// The page went on to its next route with the case drawn on it: what was
+	// found is read again, for the page it shows now (DEC-038's review).
+	if (movedOn(state.loaded, c.id, front, pageCase)) {
+		await readMatches(c, front.id, hint, true);
+		return;
+	}
 	if (front.id !== followed) {
 		// What the hints said was about the tab before (opening the case
 		// cleared them already).

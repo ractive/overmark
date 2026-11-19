@@ -52,7 +52,7 @@ import {
 	renderCloudSection,
 } from "./cloud-view.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
-import { foundLine, isFound, matchesHere, noneFound } from "./follow.ts";
+import { foundLine, isFound, noneHere } from "./follow.ts";
 import { type Size, sameSize } from "./size.ts";
 import type { AiCall, AiProblem, Exported, PanelState } from "./state.ts";
 import {
@@ -636,13 +636,18 @@ function renderHome(state: PanelState, actions: Actions): void {
 /** The colour of the mark on the page: the shown candidate decides (review.ts). */
 function colourOf(m: AnnotationMatch): "found" | "unsure" | "lost" {
 	if (m.status === "lost") return "lost";
-	const sure = m.status !== "ambiguous" && m.candidates[m.current]?.found;
+	// On a page that is not the mark's own it may be a look-alike (DEC-038).
+	const sure =
+		m.status !== "ambiguous" &&
+		m.otherPage !== true &&
+		m.candidates[m.current]?.found;
 	return sure ? "found" : "unsure";
 }
 
 /** Where the mark is on the tab in front, in words: the number's colour says it too, but not to everyone. */
 function matchWord(m: AnnotationMatch | undefined): string | undefined {
 	if (m === undefined || m.status === "no-element") return undefined;
+	if (m.otherPage === true && m.status !== "lost") return "Also on this page?";
 	return colourOf(m) === "unsure" ? "Unsure" : matchText(m);
 }
 
@@ -658,6 +663,9 @@ const PILL: Record<MarkStatus, string | undefined> = {
 function matchText(m: AnnotationMatch): string {
 	if (m.current > 0)
 		return `Candidate ${m.current + 1} of ${m.candidates.length} (${percent(m.score)})`;
+	// Found, but on a page that is not the mark's own (DEC-038).
+	if (m.otherPage === true && (m.status === "found" || m.status === "probable"))
+		return `Also on this page? (${percent(m.score)})`;
 	switch (m.status) {
 		case "found":
 			return `Found here (${percent(m.score)})`;
@@ -1948,7 +1956,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	const none =
 		here !== undefined &&
 		!here.settling &&
-		noneFound(matchesHere(c, [...here.matches.values()], here.url));
+		noneHere(c, [...here.matches.values()], here.url);
 	const looking =
 		state.drawing !== undefined &&
 		state.drawing === state.tab?.id &&

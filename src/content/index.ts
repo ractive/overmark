@@ -257,6 +257,11 @@ function start(): void {
 							),
 					);
 					return true; // answers asynchronously
+				case "case:matches":
+					reviewer
+						.matches(message.caseId)
+						.then(sendResponse, () => sendResponse(null));
+					return true; // answers asynchronously
 				case "case:update":
 					reviewer.update(message.case).then(
 						(result) => {

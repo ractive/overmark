@@ -1496,6 +1496,29 @@ was a finding, checked here before it was fixed):
   after the screenshot was made.
 - **Counting the marks of every page is one pass** (`marksByPage`), not one scan of the
   screenshots per mark and page: a second per render at the format's limits before.
+- **A single-page app's next route.** The case stays drawn when the address changes
+  within the page (as before: a draw again would drop the candidates chosen), but the
+  page in front is another one now. The content script notices (its tick compares
+  `pageKey(location.href)`), looks again for the marks that were not there, a few a
+  tick and twice more for content that comes after the address, and judges anew which
+  mark is on its own page. The panel, when the tab's address is another page than the
+  one its numbers are about, asks the page for the matches again (`case:matches`) and
+  once more a moment later; "found on …", "on another page" and the page list then say
+  the same thing. An AI app's `highlight` and `get_mark_element` ask about one mark and
+  get it looked for at once.
+- **A mark found on another page of the case than its own is never sure.** A flow's
+  pages share look-alikes (the same "Continue" button on the cart and the payment
+  page). Such a find is drawn dashed, the row says "Also on this page?", it is not
+  among the page's marks found ("1 of 2 marks found on …. 1 of the case's other pages
+  may be here too (dashed)."), and it does not make up for the page's own marks when
+  none of those is found. `highlight` and `get_mark_element` say the mark's page and
+  `onThisPage` (`markPage` in `get_mark_element`, where `page` has always been the
+  page's size), and `otherPageNote` when the element was read on another page of the
+  case. **Narrower than the review proposed, on purpose:** on a page that is none of
+  the case's, every mark is looked for and counted as before. A case is loaded there
+  by a click, to compare another version of its page under another path (the
+  extension's own end-to-end fixture does exactly that, `/v1` to `/v2`); calling every
+  find there unsure would make the dash say nothing.
 
 Not done: a toolbar that comes back by itself after a navigation while marks are being
 added. The panel keeps the case open and "Add marks" is one click; whether the toolbar

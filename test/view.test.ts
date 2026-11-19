@@ -1724,6 +1724,42 @@ describe("a case of several pages (DEC-038)", () => {
 		expect(el("none-found").textContent).toContain(
 			"It is probably for other pages: shop.example/cart, shop.example/checkout/pay.",
 		);
+
+		// The payment page's mark found on the cart all the same (a
+		// look-alike, or a header both have): unsure, and not counted.
+		render(
+			on(cart, [
+				match(1, "found"),
+				match(2, "found"),
+				{ ...match(3, "found"), otherPage: true },
+			]),
+			noActions,
+		);
+		expect(word(3)).toBe("Also on this page?");
+		expect(
+			el("case-view")
+				.querySelector('[data-annotation="a3"]')
+				?.getAttribute("data-colour"),
+		).toBe("unsure");
+		expect(el("case-hint").textContent).toBe(
+			"2 of 2 marks found on localhost:3000/cart. 1 of the case's other pages may be here too (dashed).",
+		);
+
+		// The tab went on within the page (a single-page app): what the panel
+		// has is about the page before until it is read again, and then says
+		// the new page's numbers, not the old ones.
+		const pay = "http://localhost:3000/checkout/pay";
+		const moved = on(pay, [
+			match(1, "lost"),
+			match(2, "lost"),
+			match(3, "found"),
+		]);
+		render(moved, noActions);
+		expect(el("case-hint").textContent).toBe(
+			"1 of 1 marks found on localhost:3000/checkout/pay. 2 more are on other pages of the case.",
+		);
+		expect(word(3)).toContain("Found here");
+		expect(word(1)).toBe("On another page");
 	});
 });
 

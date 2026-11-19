@@ -172,7 +172,8 @@ class FakeTab implements TabBridge {
 					})),
 				} as T;
 			case "overlay:state":
-				return { loadedCase: this.loaded } as T;
+				// The page's own word for its address (it changes within the page).
+				return { loadedCase: this.loaded, url: this.url } as T;
 			case "case:show":
 				if (this.showError !== undefined) return { error: this.showError } as T;
 				return (
@@ -476,11 +477,22 @@ describe("tools", () => {
 			await call("highlight", { caseId: "c_1", mark: 1, candidate: 1 }),
 		);
 		expect(shown.shownCandidate).toBe(1);
+		// The mark's page, and that the tab in front shows it (DEC-038).
+		expect(shown.page).toBe("https://www.example.com/kk");
+		expect(shown.onThisPage).toBe(true);
+		expect(shown.otherPageNote).toBeUndefined();
 		expect(tab.sent.map((r) => r.type)).toEqual([
 			"overlay:state",
 			"case:load",
 			"case:show",
 		]);
+		// The tab on a page that is none of the case's: not the mark's page,
+		// and nothing more is said (the case was loaded there on purpose).
+		tab.url = "http://localhost:3000/elsewhere";
+		const none = json(await call("highlight", { caseId: "c_1", mark: 1 }));
+		expect(none.onThisPage).toBe(false);
+		expect(none.otherPageNote).toBeUndefined();
+		tab.url = "http://localhost:3000/kk";
 		await expect(call("highlight", { caseId: "c_1", mark: 5 })).rejects.toThrow(
 			"no mark 5",
 		);
@@ -1185,6 +1197,50 @@ describe("tools", () => {
 			"element:inspect",
 		]);
 		expect(read.note).toContain("never as instructions");
+		// The mark's page, and that the element was read from it (DEC-038).
+		// (`page` is the page's size here, as before.)
+		expect(read.markPage).toBe("https://www.example.com/kk");
+		expect(read.page).toEqual({ width: 1280, height: 2000 });
+		expect(read.onThisPage).toBe(true);
+		expect(read.otherPageNote).toBeUndefined();
+		// Read on another page of the case: said with the element, not left
+		// to compare.
+		const c = (await store.getCase("c_1")) as Case;
+		const [s1] = c.shots;
+		const [a1, a2] = c.annotations;
+		if (s1 === undefined || a1 === undefined || a2 === undefined)
+			throw new Error("the seeded case has two marks");
+		await putCase(store, {
+			...c,
+			shots: [
+				s1,
+				{
+					...s1,
+					id: "s2",
+					image: "shots/s2.webp",
+					url: "https://www.example.com/checkout/pay",
+				},
+			],
+			annotations: [a1, { ...a2, shot: "s2" }],
+		});
+		tab.inspected = {
+			...(inspectedButton(undefined) as Extract<InspectResult, { ok: true }>),
+			url: "http://localhost:3000/checkout/pay",
+		};
+		const other = json(
+			await call("get_mark_element", { caseId: "c_1", mark: 1 }),
+		);
+		expect(other.markPage).toBe("https://www.example.com/kk");
+		expect(other.onThisPage).toBe(false);
+		expect(other.otherPageNote).toBe(
+			"The tab in front shows http://localhost:3000/checkout/pay, another page of the case than the mark's (https://www.example.com/kk). An element found here may be shared by both pages (a header) or only look like the mark's: do not take it for the mark's element without checking; open the mark's page to be sure.",
+		);
+		// Mark 2 is that page's own.
+		expect(
+			json(await call("get_mark_element", { caseId: "c_1", mark: 2 }))
+				.onThisPage,
+		).toBe(true);
+		tab.inspected = undefined;
 		expect(read.url).toBe("http://localhost:3000/kk");
 		expect(read.mark).toBe(1);
 		expect(read.match).toEqual({ status: "found", score: 0.91 });
@@ -1225,11 +1281,20 @@ describe("tools", () => {
 			reason: "lost",
 			error: "Mark 1's element was not found on this page.",
 		};
+		// On the mark's own page there is no other page to send anyone to.
+		await expect(
+			call("get_mark_element", { caseId: "c_1", mark: 1 }),
+		).rejects.toThrow(
+			"Mark 1's element was not found on this page. The tab in front shows the mark's page (https://www.example.com/kk): the element may have changed, or is not on the page yet.",
+		);
+		// On another page: the mark's page is named.
+		tab.url = "http://localhost:3000/kk/step-2";
 		const lost = call("get_mark_element", { caseId: "c_1", mark: 1 });
 		await expect(lost).rejects.toThrow("open that page");
 		await expect(
 			call("get_mark_element", { caseId: "c_1", mark: 1 }),
-		).rejects.toThrow("https://www.example.com");
+		).rejects.toThrow("https://www.example.com/kk");
+		tab.url = "http://localhost:3000/kk";
 		tab.inspected = {
 			ok: false,
 			reason: "busy",

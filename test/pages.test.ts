@@ -36,7 +36,14 @@ import {
 } from "../src/lib/save.ts";
 import { MemoryStore } from "../src/lib/store.ts";
 import { shortUrl } from "../src/sidepanel/dom.ts";
-import { foundLine, matchesHere, noneFound } from "../src/sidepanel/follow.ts";
+import {
+	findsOn,
+	foundLine,
+	isUnsure,
+	matchesHere,
+	movedOn,
+	noneHere,
+} from "../src/sidepanel/follow.ts";
 import { newCase } from "../src/sidepanel/fresh.ts";
 import { validateCase as validateCase030 } from "./case-0-3-0.ts";
 import { putCase, sampleCase } from "./fixtures.ts";
@@ -711,26 +718,33 @@ describe("what a draw found, judged for the page in front", () => {
 		);
 	});
 
-	test("a mark of another page that is here all the same (a shared header) counts", () => {
+	test("a mark of another page found here all the same (a shared header, or a look-alike) is never sure and never counted", () => {
 		const c = flow();
-		const all = [match(1, "found"), match(2, "no-element"), match(3, "found")];
-		expect(
-			matchesHere(c, all, "http://localhost:3000/cart").map((m) => m.number),
-		).toEqual([1, 2, 3]);
+		const other: AnnotationMatch = { ...match(3, "found"), otherPage: true };
+		const all = [match(1, "found"), match(2, "no-element"), other];
+		const url = "http://localhost:3000/cart";
+		expect(matchesHere(c, all, url).map((m) => m.number)).toEqual([1, 2]);
+		expect(findsOn(c, all, url)).toMatchObject({ also: 1, elsewhere: 0 });
+		expect(isUnsure(other)).toBe(true);
+		expect(foundLine(c, loaded(url, all))).toBe(
+			"1 of 2 marks found on localhost:3000/cart. Dashed: unsure. 1 of the case's other pages may be here too (dashed).",
+		);
+		// The page's own mark lost, only the other page's look-alike there:
+		// none of this page's marks was found, whatever else is drawn.
+		const only = [match(1, "lost"), match(2, "no-element"), other];
+		expect(noneHere(c, only, url)).toBe(true);
 	});
 
 	test("none found is said of the page's own marks", () => {
 		const c = flow();
 		// On the payment page its mark is lost: none found there.
 		const pay = [match(1, "lost"), match(2, "no-element"), match(3, "lost")];
-		expect(
-			noneFound(matchesHere(c, pay, "http://localhost:3000/checkout/pay")),
-		).toBe(true);
+		expect(noneHere(c, pay, "http://localhost:3000/checkout/pay")).toBe(true);
 		// Its mark is found: the cart's lost marks say nothing against the page.
 		const found = [match(1, "lost"), match(2, "no-element"), match(3, "found")];
-		expect(
-			noneFound(matchesHere(c, found, "http://localhost:3000/checkout/pay")),
-		).toBe(false);
+		expect(noneHere(c, found, "http://localhost:3000/checkout/pay")).toBe(
+			false,
+		);
 		expect(
 			foundLine(c, loaded("http://localhost:3000/checkout/pay", found)),
 		).toBe(
@@ -738,12 +752,35 @@ describe("what a draw found, judged for the page in front", () => {
 		);
 	});
 
-	test("on a page that is none of the case's, every mark is looked for", () => {
+	test("on a page that is none of the case's, every mark is looked for and counted, as in a case of one page", () => {
 		const c = flow();
-		const all = [match(1, "lost"), match(2, "no-element"), match(3, "lost")];
 		const url = "http://localhost:3000/account";
+		const all = [match(1, "lost"), match(2, "no-element"), match(3, "lost")];
 		expect(matchesHere(c, all, url)).toHaveLength(3);
-		expect(noneFound(matchesHere(c, all, url))).toBe(true);
+		expect(noneHere(c, all, url)).toBe(true);
+		// The case loaded on another version of its page: what is found counts.
+		const found = [match(1, "found"), match(2, "no-element"), match(3, "lost")];
+		expect(noneHere(c, found, url)).toBe(false);
+		expect(foundLine(c, loaded(url, found))).toBe(
+			"1 of 3 marks found on localhost:3000/account.",
+		);
+	});
+
+	test("the tab went on to another page with the case drawn on it: what was found is read again", () => {
+		const drawn = { caseId: "c_flow", tabId: 7, url: CART };
+		const tab = (url: string) => ({ id: 7, url });
+		// The next route of a single-page app: another page, the case still there.
+		expect(movedOn(drawn, "c_flow", tab(PAY), "c_flow")).toBe(true);
+		// The same page (a query, a plain fragment, another environment's slash).
+		expect(movedOn(drawn, "c_flow", tab(`${CART}/?step=2#top`), "c_flow")).toBe(
+			false,
+		);
+		// Another tab, another case on the page, nothing drawn, no address yet.
+		expect(movedOn(drawn, "c_flow", { id: 8, url: PAY }, "c_flow")).toBe(false);
+		expect(movedOn(drawn, "c_flow", tab(PAY), "c_other")).toBe(false);
+		expect(movedOn(drawn, "c_flow", tab(PAY), undefined)).toBe(false);
+		expect(movedOn(undefined, "c_flow", tab(PAY), "c_flow")).toBe(false);
+		expect(movedOn(drawn, "c_flow", tab(""), "c_flow")).toBe(false);
 	});
 });
 
