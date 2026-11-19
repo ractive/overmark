@@ -1840,9 +1840,46 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   id the team names, and marks that are back after a time without syncing, are told in
   the Account section in plain text, do not make the state "problem", and so give no
   reason to look at the server more often. A problem is something that did not go.
-- **A cursor of 0 is none:** the whole state is asked for. (The server answered
-  `since=0` as the whole state, which names no deletes; it answers it as any revision
-  now, and the server in memory does the same.)
+- **A cursor of 0 is a revision like any other.** (For a few commits it was read as
+  "none", because the server answered `since=0` as the whole state, which names no
+  deletes. The server answers it properly now, and the special case made an empty team
+  read whole and say "syncing" at every run.)
+
+**After the re-check of both reviews** (2026-11-19):
+
+- **A delete is on record in the case store, written with the delete itself**
+  (`CaseStore.deletedCases`), in place of a message to the worker and a note in the
+  book: the note waited behind a run under way, and a note that was not written undid
+  the delete without a word. Every delete path records it without knowing of the sync;
+  the panel's Delete and `delete_case` return at once; there is no time limit. The
+  engine sends `case.delete` for a synced case that is gone and has a record; a book
+  taken up again honours only a delete made since. A record leaves when it was taken
+  up, when no book here could need it, or after 30 days; a case stored again under the
+  id takes it away. The records are kept in the `images` object store under a key no
+  case's images can have (`!deleted/<id>`), not in a store of their own: a new store
+  needs a new version of the database, which an older build can no longer open, so a
+  rolled-back release, or the main branch on a profile this branch has used, would
+  find no cases at all.
+- **A join nobody was told about stops when it would replace text.** A case that is to
+  be the team's and that the team turns out to have (the server answers `duplicate`,
+  or the fetch brings it) is joined at once when no mark both have says something
+  else here. When one does, the case goes back to the question, which then says the
+  count; "Sync them" after that joins.
+- **A mark is held to by its screenshot's time and its drawing wherever its id is held
+  across a wait:** the panel's form and its "Really delete?", the popover on the page
+  (it follows its mark to its new number, and its requests name the mark), an AI
+  app's change the user was asked about (refused when the number is another mark's by
+  the time they answer), and `highlight` and `get_mark_element` (the page answers
+  "not loaded as you have it" and the case is loaded again). When the id is another
+  mark's and more than one mark has that key, nothing is changed and that is said.
+- **A screenshot's time is compared as it is sent, as an instant;** every id that
+  stands for another mark of the server's than before is announced, not only new ones,
+  and after a stop the book is made true to the case with `relink`.
+- **A renewal of the tokens gives up when a sign-in or a sign-out happened while it
+  waited** (a generation in `Session`), throws its answer away and ends that answer's
+  grant; a sign-in is "finishing" from its answer to the written account; the
+  discovery document, the token endpoint's answer and an error's body are read up to a
+  megabyte; a case too large to read by itself waits with its own back-off.
 
 ## DEC-040: The API's types are generated, with TypeScript 5 for the generator alone
 

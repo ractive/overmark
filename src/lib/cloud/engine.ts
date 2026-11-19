@@ -442,9 +442,17 @@ export class CloudSync {
 			...rest,
 			mode: "synced",
 			teamId,
+			// Told what it replaces (the count was on the screen), and shared.
 			...(theirs === undefined
 				? {}
-				: { reread: { why: "join" as const, tries: 0, after: 0 } }),
+				: {
+						reread: {
+							why: "join" as const,
+							tries: 0,
+							after: 0,
+							told: true as const,
+						},
+					}),
 		};
 	}
 
@@ -904,6 +912,15 @@ export class CloudSync {
 				continue;
 			}
 			const { shots, marks, ...row } = detail;
+			// A join nobody was told about (the server answered "duplicate"
+			// to the new case): where a mark both have says something else
+			// here, the team's text is not put in its place without a word.
+			if (
+				mark.why === "join" &&
+				!mark.told &&
+				(await this.#asksFirst(book, marks ?? []))
+			)
+				continue;
 			try {
 				// A book taken up again: what was deleted here while it did not
 				// sync is forgotten, so that what the team still has of it
@@ -961,6 +978,31 @@ export class CloudSync {
 			}
 		}
 		if (changed.length > 0) this.#deps.onChange?.(changed);
+	}
+
+	/**
+	 * A case here is about to be joined with the team's, and the user was
+	 * not told: when marks both have say something else here, the join
+	 * stops. The case goes back to the question (it is "on this device
+	 * only" until answered), which says the count as it does for a case
+	 * that was kept back. Whether it stopped.
+	 */
+	async #asksFirst(
+		book: CaseBook,
+		marks: readonly WireMark[],
+	): Promise<boolean> {
+		const c = await this.#deps.store.getCase(book.caseId);
+		if (c === undefined) return false;
+		const theirs = Object.fromEntries(marks.map((m) => [m.id, theirMark(m)]));
+		if (differing(c, theirs) === 0) return false;
+		const { reread: _r, idle: _i, ...rest } = book;
+		await this.#books.put({
+			...rest,
+			mode: "undecided",
+			theirs,
+			title: c.title,
+		});
+		return true;
 	}
 
 	/**
@@ -1793,6 +1835,19 @@ export class CloudSync {
 		// an id is no secret (it is in every export, and every AI app and
 		// server the case was shared with has it). Nothing is merged, nothing
 		// is sent; it is said, and sharing the case joins the two.
+		// The same for a case that is to be the team's and has no record
+		// there yet (imported, or made, with the id of a case the team has),
+		// when the fetch brings the team's copy: joined at once when nothing
+		// differs, asked first when the join would replace text here.
+		if (
+			given !== undefined &&
+			given.mode === "synced" &&
+			given.shadow === undefined &&
+			!given.reread?.told &&
+			came.case !== undefined &&
+			(await this.#asksFirst(given, came.marks))
+		)
+			return { changed: false, incomplete: undefined };
 		if (given !== undefined && given.mode !== "synced") {
 			const kept = await store.getCase(caseId);
 			if (kept !== undefined) {

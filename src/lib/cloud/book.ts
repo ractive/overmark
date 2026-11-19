@@ -209,6 +209,12 @@ export interface Reread {
 	text?: string;
 	/** `resumed`: since when (ms). A delete of the user's after that is one for the team. */
 	since?: number;
+	/**
+	 * `join`: the user was told what the join replaces (how many marks get
+	 * the team's text) and said yes. Without it a join that would replace
+	 * text stops and asks first.
+	 */
+	told?: true;
 }
 
 /** How long after a read of a case failed the next one waits: a case that can never be stored is not fetched at every run. */

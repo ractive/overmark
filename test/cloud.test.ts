@@ -1260,9 +1260,16 @@ describe("a case the team already has (review B, sync 2 and 3)", () => {
 		};
 		dana.api.calls.length = 0;
 		await dana.engine.request();
-		// The case alone; then a read of the case; then only what the team lacks.
-		expect(sent[0]?.type).toBe("case.create");
+		// The case alone; then a read of the case. Mark 2 says something
+		// else here, and nobody was told: nothing more is sent, and it is asked.
+		expect(sent.map((op) => op.type)).toEqual(["case.create"]);
 		expect(dana.api.calls).toContain("GET case c_file");
+		expect(status(dana)?.joins).toEqual({ cases: 1, marks: 1 });
+		expect((await dana.store.getCase("c_file"))?.annotations[1]?.comment).toBe(
+			"Dana's words",
+		);
+		// Yes: then only what the team lacks goes.
+		await dana.engine.decide(true);
 		expect(
 			sent.filter((op) => op.type === "mark.create").map((op) => op.type),
 		).toHaveLength(1);
@@ -1338,6 +1345,79 @@ describe("a case the team already has (review B, sync 2 and 3)", () => {
 			(await dana.store.getCase("c_file"))?.annotations.map((a) => a.comment),
 		).toEqual(["One", "Two", "Dana's own third"]);
 		expect(status(dana)?.problems).toEqual([]);
+	});
+
+	test("a join nobody was told about does not replace text: it stops and asks with the count; with nothing to replace it goes through", async () => {
+		await tessShares();
+		await fromFile("c_file");
+		await change(dana, "c_file", (c, now) =>
+			withComment(c, "a1", "Dana's newer words", now),
+		);
+		await addMark(dana, "c_file", "Dana's own third");
+		// The first fetch fails, so the question has no count; she says yes.
+		const changes = dana.api.changes.bind(dana.api);
+		dana.api.changes = async () => {
+			throw new ApiFailure("offline", "gone");
+		};
+		await signIn(dana);
+		expect(status(dana)?.undecided).toBe(1);
+		expect(status(dana)?.joins).toBeUndefined();
+		dana.api.changes = changes;
+		await dana.engine.decide(true);
+		await dana.engine.request();
+		// The team has the case, and mark 1 says something else here: not
+		// replaced, not sent; asked again, now with what it would replace.
+		expect(
+			(await dana.store.getCase("c_file"))?.annotations.map((a) => a.comment),
+		).toEqual(["Dana's newer words", "Two", "Dana's own third"]);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+		]);
+		expect(dana.kv.data.get(KEYS.modes)).toEqual({ c_file: "undecided" });
+		expect(status(dana)?.undecided).toBe(1);
+		expect(status(dana)?.joins).toEqual({ cases: 1, marks: 1 });
+		// Told, and yes: the team's text on mark 1, her mark sent.
+		await dana.engine.decide(true);
+		await sync(dana, tess);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+			[3, "Dana's own third"],
+		]);
+		expect(
+			(await dana.store.getCase("c_file"))?.annotations.map((a) => a.comment),
+		).toEqual(["One", "Two", "Dana's own third"]);
+		expect(status(dana)?.state).toBe("synced");
+	});
+
+	test("the same for a file imported on a synced device: other words on a mark the team has are asked about, not replaced", async () => {
+		await signIn(dana);
+		await tessShares();
+		await fromFile("c_file");
+		await change(dana, "c_file", (c, now) =>
+			withComment(c, "a2", "Dana's words in the file", now),
+		);
+		await dana.engine.request();
+		expect(
+			(await dana.store.getCase("c_file"))?.annotations.map((a) => a.comment),
+		).toEqual(["One", "Dana's words in the file"]);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+		]);
+		expect(status(dana)?.joins).toEqual({ cases: 1, marks: 1 });
+		// "Keep it on this device": hers stay hers, and it is a note.
+		await dana.engine.decide(false);
+		await dana.engine.request();
+		expect(dana.kv.data.get(KEYS.modes)).toEqual({ c_file: "local" });
+		expect(status(dana)?.notes?.[0]?.text).toContain(
+			"where both differ the team's text is kept: 1 mark",
+		);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+		]);
 	});
 
 	test("this device's own new case whose answer was lost, and the record of the request too: the server's empty case is found, and everything here is sent once", async () => {
