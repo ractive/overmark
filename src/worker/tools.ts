@@ -290,6 +290,15 @@ function reopensView(reopens: readonly Reopen[] | undefined, compact: boolean) {
 	};
 }
 
+/** A case's pages as `list_cases` names them: the first few, and how many. */
+function listPages(c: Case) {
+	const pages = casePages(c);
+	return {
+		pages: pages.slice(0, LIST_PAGES).map((p) => cut(plainUrl(p.url), 300)),
+		pageCount: pages.length,
+	};
+}
+
 /** The case's pages (DEC-038), each with how many of the marks are on it. */
 function pagesView(c: Case) {
 	const counts = marksByPage(c);
@@ -344,7 +353,9 @@ function caseView(
 			image: s.image,
 			scrollY: s.scrollY,
 			url: plainUrl(shotUrl(c, s)),
-			viewport: s.viewport,
+			// Each mark's page says where it was made; the window of every
+			// screenshot is left out of a large case.
+			...(compact ? {} : { viewport: s.viewport }),
 		})),
 		marks: [...c.annotations]
 			.sort((a, b) => a.number - b.number)
@@ -521,15 +532,27 @@ function fittingList<T>(
 	room: number,
 	wrap: (items: T[]) => unknown,
 ): { block: Content; left: number } {
-	let count = items.length;
-	let block = text(wrap(items.slice(0, count)));
+	let fit = [...items];
+	let count = fit.length;
+	let block = text(wrap(fit));
+	if (sizeOf(block) > room) {
+		// An entry too large by itself is left out, and the rest go on: one
+		// huge case (an imported file can be made so) must not hide the others.
+		const half = room / 2;
+		fit = fit.filter((item) => sizeOf(text(wrap([item]))) <= half);
+		count = fit.length;
+		block = text(wrap(fit));
+	}
 	while (count > 0 && sizeOf(block) > room) {
 		const shrink = Math.min(0.9, room / sizeOf(block));
 		count = Math.floor(count * shrink);
-		block = text(wrap(items.slice(0, count)));
+		block = text(wrap(fit.slice(0, count)));
 	}
 	return { block, left: items.length - count };
 }
+
+/** How many of a case's pages `list_cases` names; get_case has them all. */
+export const LIST_PAGES = 5;
 
 export function createTools(deps: ToolDeps): Tool[] {
 	const { store, images } = deps;
@@ -643,7 +666,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		name: "list_cases",
 		title: "List cases",
 		description:
-			"List the saved cases: id, title, pages (url is the first), its marks by status (open, toVerify: fixed and waiting to be verified, verified, closed: won't fix or can't reproduce), the start of the summary for the developer, last change. Newest first.",
+			"List the saved cases: id, title, its first pages and how many it has (url is the first; get_case lists them all), its marks by status (open, toVerify: fixed and waiting to be verified, verified, closed: won't fix or can't reproduce), the start of the summary for the developer, last change. Newest first.",
 		inputSchema: {
 			type: "object",
 			properties: {},
@@ -656,8 +679,9 @@ export function createTools(deps: ToolDeps): Tool[] {
 				title: c.title,
 				...imported(c),
 				url: plainUrl(c.page.url),
-				// All its pages, the first one (`url`) first (DEC-038).
-				pages: casePages(c).map((p) => plainUrl(p.url)),
+				// Its pages, the first one (`url`) first (DEC-038): the first few,
+				// each cut, and how many there are; get_case has them all.
+				...listPages(c),
 				marks: caseCounts(c),
 				summary: c.verdict === null ? null : cut(c.verdict, LIST_SUMMARY),
 				updatedAt: c.updatedAt,
@@ -669,7 +693,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 					...(left > 0
 						? [
 								text(
-									`${left} older cases are left out to stay under the size limit.`,
+									`${left} cases are left out to stay under the size limit: the oldest, and any whose entry alone is too large; get_case reads a case by its id.`,
 								),
 							]
 						: []),

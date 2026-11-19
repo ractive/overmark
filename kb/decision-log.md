@@ -1496,6 +1496,12 @@ was a finding, checked here before it was fixed):
   after the screenshot was made.
 - **Counting the marks of every page is one pass** (`marksByPage`), not one scan of the
   screenshots per mark and page: a second per render at the format's limits before.
+- **`list_cases` names a case's first five pages and says how many it has**
+  (`pages`, each address cut to 300 characters, and `pageCount`); `get_case` has them
+  all. An entry too large by itself is left out of a list that does not fit and the
+  other entries stay, where before nothing was left once the first entry alone was too
+  large (an imported case of 200 long addresses emptied `list_cases`). The compact
+  `get_case` leaves out each screenshot's `viewport`.
 - **A single-page app's next route.** The case stays drawn when the address changes
   within the page (as before: a draw again would drop the candidates chosen), but the
   page in front is another one now. The content script notices (its tick compares

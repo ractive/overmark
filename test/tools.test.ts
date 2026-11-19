@@ -36,6 +36,7 @@ import {
 	FINDING_PREVIEW,
 	type ImageTools,
 	INSTRUCTIONS,
+	LIST_PAGES,
 	type TabBridge,
 	type ToolDeps,
 } from "../src/worker/tools.ts";
@@ -329,6 +330,7 @@ describe("tools", () => {
 				title: "Button contrast",
 				url: "https://www.example.com/kk",
 				pages: ["https://www.example.com/kk"],
+				pageCount: 1,
 				marks: { open: 2, toVerify: 0, verified: 0, closed: 0 },
 				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
@@ -359,6 +361,7 @@ describe("tools", () => {
 				title: "Your cart",
 				url: "https://www.example.com/kk",
 				pages: ["https://www.example.com/kk"],
+				pageCount: 1,
 				marks: { open: 0, toVerify: 0, verified: 0, closed: 0 },
 				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
@@ -409,8 +412,37 @@ describe("tools", () => {
 		expect(cases.length).toBeGreaterThan(0);
 		expect(cases.length).toBeLessThan(60);
 		expect(cases[0].caseId).toBe("c_69"); // newest first
-		expect(listed.content[1]?.text).toContain("older cases are left out");
+		expect(listed.content[1]?.text).toContain(
+			"cases are left out to stay under the size limit: the oldest",
+		);
 		expect(JSON.stringify(listed).length).toBeLessThan(20_000);
+
+		// One case made to be huge (an imported file can be: 200 pages with
+		// addresses near the format's limit), and the newest: it is left out,
+		// or cut to its first pages, and the other cases are still listed.
+		const long = (i: number) => `https://shop.example/${"p".repeat(7000)}/${i}`;
+		await putCase(store, {
+			...sampleCase("c_huge", "2026-11-05T10:00:00Z"),
+			pages: Array.from({ length: 200 }, (_, i) => ({
+				url: long(i),
+				title: "",
+				lang: "",
+			})),
+			page: { ...sampleCase().page, url: long(0) },
+		});
+		const withHuge = json(await call("list_cases"));
+		expect(withHuge.length).toBeGreaterThan(5);
+		const huge = withHuge.find(
+			(c: { caseId: string }) => c.caseId === "c_huge",
+		);
+		if (huge !== undefined) {
+			expect(huge.pageCount).toBe(200);
+			expect(huge.pages).toHaveLength(LIST_PAGES);
+			expect(huge.pages[0].length).toBeLessThan(310);
+		}
+		expect(withHuge.some((c: { caseId: string }) => c.caseId === "c_69")).toBe(
+			true,
+		);
 
 		await seed(10, undefined, 200);
 		const loaded = await call("load_case", { caseId: "c_1" });
