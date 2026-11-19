@@ -181,12 +181,6 @@ export interface CaseBook {
 		marks: Record<string, string>;
 		shots: Record<string, string>;
 	};
-	/**
-	 * The user (or an AI app for them) deleted the case, and when (ms): only
-	 * then is it deleted for the team. A case that is merely not in the
-	 * store (a lost database) is read from the server again.
-	 */
-	deleted?: number;
 }
 
 /** A mark of the team's, as much as tells whether a mark here is it and says the same. */
@@ -213,6 +207,8 @@ export interface Reread {
 	after: number;
 	/** What is wrong, said in the status until the read works. */
 	text?: string;
+	/** `resumed`: since when (ms). A delete of the user's after that is one for the team. */
+	since?: number;
 }
 
 /** How long after a read of a case failed the next one waits: a case that can never be stored is not fetched at every run. */

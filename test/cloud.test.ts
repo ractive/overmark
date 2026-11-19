@@ -75,6 +75,8 @@ function restarted(d: Device<FakeApi>): Device<FakeApi> {
 	for (const [key, value] of d.kv.data) again.kv.data.set(key, value);
 	for (const [key, value] of d.store.cases) again.store.cases.set(key, value);
 	for (const [key, value] of d.store.images) again.store.images.set(key, value);
+	for (const [key, value] of d.store.deleted)
+		again.store.deleted.set(key, value);
 	again.clock.now = d.clock.now;
 	return again;
 }
@@ -1602,27 +1604,110 @@ describe("a delete for the team is the user's delete (review B, sync 6)", () => 
 		expect(await tess.store.listCases()).toHaveLength(5);
 		expect(Object.values(await images(tess, "c_3"))).not.toContain("MISSING");
 		expect(status(tess)?.state).toBe("synced");
+		// Said once, as a note: nothing went wrong that the user could mend.
+		expect(status(tess)?.notes?.map((n) => n.text)).toContain(
+			"“Your cart” was no longer on this device and was read from the team again.",
+		);
+		await tess.engine.request();
+		expect(status(tess)?.notes).toBeUndefined();
 		await dana.engine.request();
 		expect(await dana.store.listCases()).toHaveLength(5);
 	});
 
-	test("the user's delete, said first, deletes for the team; one that did not happen after all deletes nothing", async () => {
+	test("the user's delete is on record in the store, with the delete itself: it waits for no run, needs no message, and has no time limit", async () => {
 		await shared();
-		// Announced, and then the case stays (the delete failed).
-		await tess.engine.deleting("c_flow");
-		await sync(tess, dana);
-		expect(server.caseOf("c_flow")).toBeDefined();
-		// Much later the case is lost: not a delete, the note is long stale.
-		tess.clock.now = new Date(tess.clock.now.getTime() + 120_000);
-		await tess.engine.request();
-		tess.store.cases.clear();
-		await sync(tess, dana);
-		expect(server.caseOf("c_flow")).toBeDefined();
-		expect(await tess.store.getCase("c_flow")).toBeDefined();
-		// The real thing.
+		await startCase(tess, "c_slow");
+		await addMark(tess, "c_slow", "Takes long to send");
+		// A run is under way and stuck in an upload.
+		const put = tess.api.putBlob.bind(tess.api);
+		let release: () => void = () => undefined;
+		const held = new Promise<void>((done) => {
+			release = done;
+		});
+		let reached = false;
+		tess.api.putBlob = async (team, sha, image) => {
+			reached = true;
+			await held;
+			return put(team, sha, image);
+		};
+		const running = tess.engine.request();
+		await until(() => reached);
+		// The user deletes a case meanwhile: done at once, whatever the engine does.
+		const started = performance.now();
+		await tess.store.deleteCase("c_flow");
+		expect(performance.now() - started).toBeLessThan(100);
+		expect(await tess.store.getCase("c_flow")).toBeUndefined();
+		expect((await tess.store.deletedCases()).map((r) => r.id)).toEqual([
+			"c_flow",
+		]);
+		// Hours later the run ends, and a new worker takes it up: deleted
+		// for the team, because the user deleted it.
+		tess.clock.now = new Date(tess.clock.now.getTime() + 5 * 3600_000);
+		release();
+		await running;
+		tess.api.putBlob = put;
+		await sync(restarted(tess), dana);
+		expect(server.caseOf("c_flow")).toBeUndefined();
+		expect(await dana.store.getCase("c_flow")).toBeUndefined();
+	});
+
+	test("a record is taken up once and leaves; one nobody needs leaves too", async () => {
+		await shared();
 		await removeCase(tess, "c_flow");
 		await sync(tess, dana);
 		expect(server.caseOf("c_flow")).toBeUndefined();
+		expect(await tess.store.deletedCases()).toEqual([]);
+		// A case that never synced, deleted: no book could need its record.
+		await startCase(tess, "c_empty");
+		await tess.store.deleteCase("c_empty");
+		expect(await tess.store.deletedCases()).toHaveLength(1);
+		await tess.engine.request();
+		expect(await tess.store.deletedCases()).toEqual([]);
+	});
+
+	test("deleted while signed out, back at the sign-in, and then lost: the old delete is not a delete for the team", async () => {
+		await shared();
+		await tess.engine.signOut();
+		await tess.store.deleteCase("c_flow");
+		await signIn(tess);
+		await sync(tess, dana);
+		// Back (DEC-041), and its record went with the case's return.
+		expect(await tess.store.getCase("c_flow")).toBeDefined();
+		expect(await tess.store.deletedCases()).toEqual([]);
+		// Now the database is lost.
+		tess.store.cases.clear();
+		tess.store.images.clear();
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeDefined();
+		expect(await tess.store.getCase("c_flow")).toBeDefined();
+		// And a delete while signed in is one again.
+		await removeCase(tess, "c_flow");
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeUndefined();
+	});
+
+	test("a delete of a case that waits to be read again goes at once, not when that read is due", async () => {
+		await shared();
+		await addMark(dana, "c_flow", "Dana's third");
+		await dana.engine.request();
+		// Tess's device cannot store the change: the case waits to be read.
+		const update = tess.store.updateCase.bind(tess.store);
+		let failed = 0;
+		tess.store.updateCase = async (id, how) => {
+			if (failed++ === 0) throw new Error("no room");
+			return update(id, how);
+		};
+		await tess.engine.request();
+		tess.store.updateCase = update;
+		expect(book(tess, "c_flow")?.reread?.why).toBe("failed");
+		// She deletes it. The next run sends the delete, long before the read.
+		await removeCase(tess, "c_flow");
+		tess.api.calls.length = 0;
+		await tess.engine.request();
+		expect(tess.api.calls).not.toContain("GET case c_flow");
+		expect(server.caseOf("c_flow")).toBeUndefined();
+		expect(status(tess)?.problems).toEqual([]);
+		await dana.engine.request();
 		expect(await dana.store.getCase("c_flow")).toBeUndefined();
 	});
 });

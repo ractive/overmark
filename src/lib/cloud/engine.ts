@@ -166,15 +166,15 @@ const permissionsKey = (team: Team): string =>
 
 /** A book of a case that is on this device only from now on: nothing waits for the server any more. */
 function local(book: CaseBook): CaseBook {
-	const { reread: _r, idle: _i, deleted: _d, ...rest } = book;
+	const { reread: _r, idle: _i, ...rest } = book;
 	return { ...rest, mode: "local" };
 }
 
 /** A case that has to be read from the server before anything of it is sent. */
 const blocks = (mark: Reread): boolean => mark.why !== "failed";
 
-/** How long a delete's note waits for the case to leave the store before it is taken for one that did not happen. */
-const DELETING_MS = 60_000;
+/** How long a delete stays on record when nobody has taken it up. */
+const DELETED_KEPT_MS = 30 * 24 * 3600_000;
 
 /** The most rejected changes kept per case. */
 const MAX_REJECTED = 50;
@@ -342,7 +342,12 @@ export class CloudSync {
 					changed.push({
 						...book,
 						mode: "synced",
-						reread: { why: "resumed", tries: 0, after: 0 },
+						reread: {
+							why: "resumed",
+							tries: 0,
+							after: 0,
+							since: this.#now().getTime(),
+						},
 					});
 				else await this.#books.remove(book.caseId);
 			} else if (theirs && !resume) changed.push(book);
@@ -457,20 +462,6 @@ export class CloudSync {
 			);
 			await this.#books.publishModes();
 		}).then(() => this.#then());
-	}
-
-	/**
-	 * The user is about to delete this case (the panel, or an AI app's tool,
-	 * says so before it does): a synced case is then deleted for the team.
-	 * Without this, a case that is not in the store is taken for lost and
-	 * read from the server again.
-	 */
-	deleting(caseId: string): Promise<void> {
-		return this.#exclusive(async () => {
-			const book = await this.#books.get(caseId);
-			if (book === undefined || book.mode !== "synced") return;
-			await this.#books.put({ ...book, deleted: this.#now().getTime() });
-		});
 	}
 
 	/** "Sync now": also what the server refused before is tried again. */
@@ -789,12 +780,6 @@ export class CloudSync {
 				await this.#books.put(book);
 			}
 			if (book.mode !== "synced" || book.teamId !== team.id) continue;
-			// The delete that was announced did not happen: the note goes.
-			if (book.deleted !== undefined && now - book.deleted > DELETING_MS) {
-				const { deleted: _d, ...kept } = book;
-				book = kept;
-				await this.#books.put(book);
-			}
 			if (book.reread !== undefined) {
 				more ||= book.reread.after <= now;
 				// To be read from the server first: nothing of it is sent before.
@@ -818,34 +803,65 @@ export class CloudSync {
 			more = (await this.#pushCase(api, team, c, book)) || more;
 			if (--left > 0) await this.#progress(left);
 		}
+		// Deleted for the team only when the user deleted it: the store keeps
+		// a record of every delete, written with the delete itself, so the
+		// panel and an AI app's tool need not know of the sync and wait for
+		// nothing. A case that is merely not in the store (its database was
+		// lost, or made anew) has none, and is read from the server again: a
+		// lost database must not empty the team.
+		const records = new Map(
+			(await this.#deps.store.deletedCases()).map((r) => [r.id, r.at]),
+		);
+		const settled: string[] = [];
 		for (const book of gone) {
+			const at = records.get(book.caseId);
+			const theTeams =
+				book.mode === "synced" &&
+				book.teamId === team.id &&
+				book.shadow !== undefined;
+			// A book taken up again honours only a delete made since: what was
+			// deleted while it did not sync comes back (DEC-041).
+			const honoured =
+				at !== undefined &&
+				(book.reread?.why !== "resumed" || at > (book.reread.since ?? 0));
+			if (theTeams && honoured) {
+				// At once, also for a case that waits to be read again.
+				await this.#deleteCase(api, team, book);
+				settled.push(book.caseId);
+				continue;
+			}
 			if (book.reread !== undefined) {
 				// Not here, and to be read: the read brings it.
 				more ||= book.reread.after <= now;
 				continue;
 			}
-			if (
-				book.mode !== "synced" ||
-				book.teamId !== team.id ||
-				book.shadow === undefined
-			) {
+			if (!theTeams) {
 				await this.#books.remove(book.caseId);
 				continue;
 			}
-			// Deleted for the team only when the user deleted it (the panel
-			// and an AI app's tool say so first). A case that is merely not
-			// in the store (its database was lost, or made anew) is read from
-			// the server again: a lost database must not empty the team.
-			if (book.deleted !== undefined) await this.#deleteCase(api, team, book);
-			else {
-				await this.#books.put({
-					...emptyBook(book.caseId, "synced", team.id),
-					...(book.title === undefined ? {} : { title: book.title }),
-					reread: { why: "missing", tries: 0, after: 0 },
-				});
-				more = true;
-			}
+			await this.#books.put({
+				...emptyBook(book.caseId, "synced", team.id),
+				...(book.title === undefined ? {} : { title: book.title }),
+				reread: { why: "missing", tries: 0, after: 0 },
+			});
+			more = true;
 		}
+		// A record leaves when it was taken up, when this server has no book
+		// that could need it, or after thirty days. (Not because the case
+		// was here when this pass began: the store takes a record away
+		// itself when a case is stored under its id, so one that is there
+		// is of a case deleted since, and the next pass takes it up.)
+		for (const [id, at] of records) {
+			const book = books.get(id);
+			if (
+				book === undefined ||
+				book.mode !== "synced" ||
+				book.shadow === undefined ||
+				now - at > DELETED_KEPT_MS
+			)
+				settled.push(id);
+		}
+		if (settled.length > 0) await this.#deps.store.forgetDeleted(settled);
 		return more;
 	}
 
@@ -917,6 +933,14 @@ export class CloudSync {
 						caseId: book.caseId,
 						title: row.title,
 						text: `${back === 1 ? "1 mark" : `${back} marks`} deleted while not syncing ${back === 1 ? "is" : "are"} back: the team still has ${back === 1 ? "it" : "them"}.`,
+					});
+				// Not deleted by anyone, and not here: said once, so a case
+				// that is back is no surprise.
+				if (mark.why === "missing" && applied.changed)
+					this.#notes.push({
+						caseId: book.caseId,
+						title: row.title,
+						text: `“${row.title}” was no longer on this device and was read from the team again.`,
 					});
 				if (applied.incomplete !== undefined) {
 					await this.#readLater(book.caseId, "failed", applied.incomplete);
@@ -1614,7 +1638,8 @@ export class CloudSync {
 				const book = books.get(id);
 				if (book?.mode === "synced" && book.teamId === team.id) {
 					this.#stored++;
-					await this.#deps.store.deleteCase(id);
+					// Gone because the team deleted it: no delete of the user's.
+					await this.#deps.store.deleteCase(id, true);
 					await this.#books.remove(id);
 					books.delete(id);
 					changed.add(id);

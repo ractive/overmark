@@ -1799,11 +1799,9 @@ const actions: Actions = {
 		void (async () => {
 			// The toolbar adding to it goes first, with the marks not in it yet.
 			await endToolbars(c.id, { discard: true });
-			// The sync is told first: it deletes a case for the team only on
-			// the user's word, never because the case is not in the store.
-			await chrome.runtime
-				.sendMessage({ type: "cloud:deleting", caseId: c.id })
-				.catch(() => undefined);
+			// The store records the delete with it: the sync deletes a case
+			// for the team only by that record, never because the case is
+			// not there, and nothing here waits for the sync.
 			await store.deleteCase(c.id);
 			closeCase();
 			void clearDeleted(c.id);

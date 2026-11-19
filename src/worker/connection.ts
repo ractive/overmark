@@ -83,8 +83,6 @@ export interface ConnectionDeps {
 	changed?: (caseId: string) => void;
 	/** Who is signed in to sitegloss.dev here, by id (DEC-039); none: nobody. */
 	me?: () => Promise<string | undefined>;
-	/** Said before an AI app's tool deletes a case: the sync deletes it for the team. */
-	deleting?: (caseId: string) => Promise<void>;
 	/** The team a case syncs with, by name; none: it is on this device only. */
 	team?: (caseId: string) => Promise<string | undefined>;
 	/** The settings database: `openKv()` unless given (a memory one in tests). */
@@ -409,7 +407,6 @@ export class Connection {
 			blurForms: () => this.#settings.blurForms,
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
 			...(this.#deps.me ? { me: this.#deps.me } : {}),
-			...(this.#deps.deleting ? { deleting: this.#deps.deleting } : {}),
 		});
 		// AI apps through the relay only: no WebMCP (off anyway, and a worker
 		// has no document) and no served port. `tools.ts` refuses other

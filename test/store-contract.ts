@@ -56,6 +56,38 @@ export const storeContract: Record<
 	string,
 	(store: CaseStore) => Promise<void>
 > = {
+	"a delete is on record, written with it; a case stored again under the id takes the record away":
+		async (store) => {
+			await putCase(store, sampleCase("c_1"));
+			await putCase(store, sampleCase("c_2"));
+			await putCase(store, sampleCase("c_3"));
+			await store.putImage("c_1", "shots/s1.webp", image("one"));
+			same(await store.deletedCases(), []);
+			const before = Date.now();
+			await store.deleteCase("c_1");
+			same(await store.deleteCaseIf("c_2", () => true), true);
+			same(await store.deleteCaseIf("c_3", () => false), false);
+			// Gone because it was deleted elsewhere: no record.
+			await store.deleteCase("c_3", true);
+			const records = await store.deletedCases();
+			same(records.map((r) => r.id).sort(), ["c_1", "c_2"]);
+			same(
+				records.every((r) => r.at >= before && r.at <= Date.now()),
+				true,
+			);
+			// The records are no images, and no case's.
+			same(await store.getImage("c_1", "shots/s1.webp"), undefined);
+			same(await store.sweepPending(Date.now() + 1000), 0);
+			same(await store.listCases(), []);
+			// Stored again (an import, the team's copy): not deleted any more.
+			await putCase(store, sampleCase("c_1"));
+			await store.replaceCase(sampleCase("c_2"), new Map());
+			same(await store.deletedCases(), []);
+			await store.deleteCase("c_1");
+			await store.forgetDeleted(["c_1", "c_nothing"]);
+			same(await store.deletedCases(), []);
+		},
+
 	"lists newest first and returns copies": async (store) => {
 		await putCase(store, sampleCase("c_1", "2026-11-04T10:00:00Z"));
 		await putCase(store, sampleCase("c_2", "2026-11-04T11:00:00Z"));

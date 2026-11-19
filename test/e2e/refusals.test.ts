@@ -159,10 +159,8 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 			{ type: "cloud:server", server: "https://evil.example" },
 			{ type: "cloud:decide", share: true },
 			{ type: "cloud:share", caseId: "c_1" },
-			// A page must not end somebody's sign-in, nor say a case is being
-			// deleted (which would delete it for the team once it is gone).
+			// A page must not end somebody's sign-in.
 			{ type: "cloud:abandon", url: "https://app.sitegloss.dev/?state=x" },
-			{ type: "cloud:deleting", caseId: "c_1" },
 			{ type: "cloud:finish", redirect: "https://x.chromiumapp.org/?code=c" },
 			{ type: "cloud:team", teamId: "t" },
 			{ type: "cloud:run", retry: true },
@@ -177,9 +175,6 @@ describe.skipIf(browserBinary === undefined)("the worker refuses", () => {
 				type: "cloud:abandon",
 				url: "https://app.sitegloss.dev/?state=x",
 			}),
-		).toEqual({ ok: true });
-		expect(
-			await fromExtension({ type: "cloud:deleting", caseId: "c_1" }),
 		).toEqual({ ok: true });
 		// Nothing a content script asked for happened: the server is still the service.
 		const chosen = await serviceWorker.eval<unknown>(

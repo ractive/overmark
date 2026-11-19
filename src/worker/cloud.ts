@@ -180,11 +180,6 @@ export class Cloud {
 		return (await readAccount((await this.current()).kv))?.user.id;
 	}
 
-	/** The user is about to delete this case: a synced one is deleted for the team. */
-	async deleting(caseId: string): Promise<void> {
-		await (await this.current()).engine.deleting(caseId);
-	}
-
 	/** The team a case syncs with, by name; none: it is on this device only. */
 	async teamOf(caseId: string): Promise<string | undefined> {
 		const { kv } = await this.current();
@@ -446,9 +441,6 @@ export class Cloud {
 			case "cloud:share":
 				await engine.share(request.caseId);
 				this.#deps.news();
-				return { ok: true };
-			case "cloud:deleting":
-				await engine.deleting(request.caseId);
 				return { ok: true };
 			case "cloud:run": {
 				// The events stream says where the team is: nothing to fetch when

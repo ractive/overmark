@@ -23,12 +23,37 @@ export const PENDING_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
 const isPendingKey = (key: string) => key.includes("/pending/");
 
+/**
+ * The record of a deleted case is kept beside its images' keys, under a key
+ * no case's images can have ("!" is in no case id): in the store every
+ * delete already writes in the same transaction, and without a new version
+ * of the database (which an older build could not open any more).
+ */
+const DELETED = "!deleted/";
+const deletedKey = (caseId: string) => `${DELETED}${caseId}`;
+
+/** A case deleted here by the user (or an AI app for them), and when (ms). */
+export interface DeletedCase {
+	id: string;
+	at: number;
+}
+
 export interface CaseStore {
 	/** All cases, newest change first. */
 	listCases(): Promise<Case[]>;
 	getCase(id: string): Promise<Case | undefined>;
-	/** Deletes the case and its images. */
-	deleteCase(id: string): Promise<void>;
+	/**
+	 * Deletes the case and its images, and records the delete in the same
+	 * transaction (`deletedCases`): whoever syncs cases elsewhere tells by it
+	 * a case the user deleted from one that is merely not here (a lost
+	 * database), without the deleter knowing of any sync. `quiet`: no
+	 * record (the case goes because it was deleted elsewhere).
+	 */
+	deleteCase(id: string, quiet?: boolean): Promise<void>;
+	/** The deletes on record; a case stored again under its id takes its record away. */
+	deletedCases(): Promise<DeletedCase[]>;
+	/** Take records away: nobody needs them any more. */
+	forgetDeleted(ids: readonly string[]): Promise<void>;
 	/**
 	 * Deletes the case and its images only if `when` holds for it as it is
 	 * stored, in one transaction: a writer between a read and the delete (an
@@ -81,6 +106,8 @@ const byUpdate = (a: Case, b: Case) => b.updatedAt.localeCompare(a.updatedAt);
 export class MemoryStore implements CaseStore {
 	readonly cases = new Map<string, Case>();
 	readonly images = new Map<string, StoredImage>();
+	/** The deletes on record: case id to when. */
+	readonly deleted = new Map<string, number>();
 
 	async listCases(): Promise<Case[]> {
 		return [...this.cases.values()]
@@ -93,10 +120,19 @@ export class MemoryStore implements CaseStore {
 		return found === undefined ? undefined : structuredClone(found);
 	}
 
-	async deleteCase(id: string): Promise<void> {
-		this.cases.delete(id);
+	async deleteCase(id: string, quiet = false): Promise<void> {
+		const had = this.cases.delete(id);
 		for (const key of [...this.images.keys()])
 			if (key.startsWith(`${id}/`)) this.images.delete(key);
+		if (had && !quiet) this.deleted.set(id, Date.now());
+	}
+
+	async deletedCases(): Promise<DeletedCase[]> {
+		return [...this.deleted].map(([id, at]) => ({ id, at }));
+	}
+
+	async forgetDeleted(ids: readonly string[]): Promise<void> {
+		for (const id of ids) this.deleted.delete(id);
 	}
 
 	async deleteCaseIf(id: string, when: (c: Case) => boolean): Promise<boolean> {
@@ -129,6 +165,7 @@ export class MemoryStore implements CaseStore {
 		checkId(id, value);
 		const copy = structuredClone({ value, images }); // a failure changes nothing
 		this.cases.set(id, copy.value);
+		this.deleted.delete(id);
 		for (const path of deleteImages ?? [])
 			this.images.delete(imageKey(id, path));
 		for (const [path, image] of copy.images ?? [])
@@ -156,7 +193,8 @@ export class MemoryStore implements CaseStore {
 		images: ReadonlyMap<string, StoredImage>,
 	): Promise<void> {
 		const copy = structuredClone({ value, images }); // a failure changes nothing
-		await this.deleteCase(value.id);
+		await this.deleteCase(value.id, true);
+		this.deleted.delete(value.id);
 		for (const [path, image] of copy.images)
 			this.images.set(imageKey(value.id, path), image);
 		this.cases.set(value.id, copy.value);
@@ -215,11 +253,36 @@ export class IdbStore implements CaseStore {
 		)) as Case | undefined;
 	}
 
-	async deleteCase(id: string): Promise<void> {
+	async deleteCase(id: string, quiet = false): Promise<void> {
 		const db = await this.#open();
 		const tx = db.transaction(["cases", "images"], "readwrite");
 		tx.objectStore("cases").delete(id);
-		tx.objectStore("images").delete(prefixRange(id));
+		const images = tx.objectStore("images");
+		images.delete(prefixRange(id));
+		// In this transaction: the delete and its record, or neither.
+		if (!quiet) images.put({ deletedAt: Date.now() }, deletedKey(id));
+		await done(tx);
+	}
+
+	async deletedCases(): Promise<DeletedCase[]> {
+		const db = await this.#open();
+		const store = db.transaction("images").objectStore("images");
+		const range = IDBKeyRange.bound(DELETED, `${DELETED}\uffff`);
+		const [keys, values] = await Promise.all([
+			request(store.getAllKeys(range)),
+			request(store.getAll(range)),
+		]);
+		return (keys as string[]).map((key, i) => ({
+			id: key.slice(DELETED.length),
+			at: Number((values[i] as { deletedAt?: unknown })?.deletedAt) || 0,
+		}));
+	}
+
+	async forgetDeleted(ids: readonly string[]): Promise<void> {
+		if (ids.length === 0) return;
+		const db = await this.#open();
+		const tx = db.transaction("images", "readwrite");
+		for (const id of ids) tx.objectStore("images").delete(deletedKey(id));
 		await done(tx);
 	}
 
@@ -235,7 +298,9 @@ export class IdbStore implements CaseStore {
 				const found = read.result as Case | undefined;
 				if (found === undefined || !when(found)) return;
 				cases.delete(id);
-				tx.objectStore("images").delete(prefixRange(id));
+				const images = tx.objectStore("images");
+				images.delete(prefixRange(id));
+				images.put({ deletedAt: Date.now() }, deletedKey(id));
 				deleted = true;
 			} catch (error) {
 				failure = error;
@@ -289,6 +354,8 @@ export class IdbStore implements CaseStore {
 				checkId(id, value);
 				cases.put(value);
 				const store = tx.objectStore("images");
+				// It is here (again): no delete of it is on record.
+				store.delete(deletedKey(id));
 				for (const path of deleteImages ?? []) store.delete(imageKey(id, path));
 				for (const [path, image] of images ?? [])
 					store.put(image, imageKey(id, path));
@@ -350,6 +417,7 @@ export class IdbStore implements CaseStore {
 		try {
 			const store = tx.objectStore("images");
 			store.delete(prefixRange(value.id));
+			store.delete(deletedKey(value.id));
 			for (const [path, image] of images)
 				store.put(image, imageKey(value.id, path));
 			tx.objectStore("cases").put(value);

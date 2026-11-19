@@ -341,12 +341,6 @@ export type CloudRequest =
 	/** Share one case kept on this device with the team. */
 	| { type: "cloud:share"; caseId: string }
 	/**
-	 * The user is about to delete this case: sent before the case leaves the
-	 * store. Only then is a synced case deleted for the team; one that is
-	 * merely gone from the store is read from the server again.
-	 */
-	| { type: "cloud:deleting"; caseId: string }
-	/**
 	 * Sync now. `cursor`: the team is at this revision (the events stream
 	 * said so), nothing to do when this device is too. `retry`: also what the
 	 * server refused before.
@@ -373,7 +367,6 @@ const CLOUD_REQUESTS: ReadonlySet<string> = new Set<CloudRequest["type"]>([
 	"cloud:team",
 	"cloud:decide",
 	"cloud:share",
-	"cloud:deleting",
 	"cloud:run",
 	"cloud:token",
 	"cloud:server",
