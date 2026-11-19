@@ -639,6 +639,11 @@ export const samePage = (a: string, b: string): boolean =>
  * so what is opened on one mark is held to this, not to the id.
  */
 export function markKey(c: Case, a: Annotation): string {
+	return markKeys(c).get(a.id) ?? drawnKey(c, a);
+}
+
+/** A mark's screenshot time and drawing, as a key. */
+function drawnKey(c: Case, a: Annotation): string {
 	const shot = c.shots.find((s) => s.id === a.shot);
 	return JSON.stringify([
 		shot?.capturedAt ?? "",
@@ -649,22 +654,62 @@ export function markKey(c: Case, a: Annotation): string {
 }
 
 /**
+ * Every mark's `markKey`, by id. Twins (the same drawing on the same
+ * screenshot: the same element marked twice) are told apart by nothing but
+ * their ids, so their key also names the ids all of them have now: once a
+ * renumbering moves any of them, a key held from before names no mark, and
+ * `markFor` refuses instead of taking a twin for the mark meant.
+ */
+function markKeys(c: Case): Map<string, string> {
+	const drawn = new Map<string, string[]>();
+	const of = new Map<string, string>();
+	for (const a of c.annotations) {
+		const key = drawnKey(c, a);
+		of.set(a.id, key);
+		drawn.set(key, [...(drawn.get(key) ?? []), a.id]);
+	}
+	const keys = new Map<string, string>();
+	for (const [id, key] of of) {
+		const twins = drawn.get(key) ?? [];
+		keys.set(
+			id,
+			twins.length > 1
+				? JSON.stringify([...(JSON.parse(key) as unknown[]), [...twins].sort()])
+				: key,
+		);
+	}
+	return keys;
+}
+
+/**
  * The mark of `c` that something opened on the mark `id` with the key `key`
  * is about now (`markKey`): the mark under that id while it is still that
  * mark; else the one mark with that key (it has another number now). None:
- * it is not in the case any more. `"ambiguous"`: the id is another mark's
- * and more than one mark has the key (the same element marked twice on one
- * screenshot), so nothing says which is meant, and nothing may be changed.
+ * it is not in the case any more. `"ambiguous"`: the key names no mark, or
+ * more than one, and a mark with its screenshot and drawing is there (twins
+ * whose ids moved, or a twin made since): nothing says which is meant,
+ * whatever the ids say, and nothing may be changed.
  */
 export function markFor(
 	c: Case,
 	id: string,
 	key: string,
 ): Annotation | "ambiguous" | undefined {
+	const keys = markKeys(c);
 	const under = c.annotations.find((a) => a.id === id);
-	if (under !== undefined && markKey(c, under) === key) return under;
-	const same = c.annotations.filter((a) => markKey(c, a) === key);
-	return same.length > 1 ? "ambiguous" : same[0];
+	if (under !== undefined && keys.get(under.id) === key) return under;
+	const same = c.annotations.filter((a) => keys.get(a.id) === key);
+	if (same.length === 1) return same[0];
+	if (same.length > 1) return "ambiguous";
+	let drawn: string;
+	try {
+		drawn = JSON.stringify((JSON.parse(key) as unknown[]).slice(0, 4));
+	} catch {
+		return undefined;
+	}
+	return c.annotations.some((a) => drawnKey(c, a) === drawn)
+		? "ambiguous"
+		: undefined;
 }
 
 /** What is said when a change cannot be held to its mark. */

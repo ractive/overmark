@@ -36,6 +36,7 @@ import {
 } from "../src/lib/cloud/book.ts";
 import { undoAdd } from "../src/lib/save.ts";
 import type { StoredImage } from "../src/lib/store.ts";
+import { markAsked } from "../src/sidepanel/picked.ts";
 import { editAfter, heldAfter, type MarkEdit } from "../src/sidepanel/state.ts";
 import type { FakeApi } from "./cloud-fake.ts";
 import { FakeServer, requestProblem, TEAM } from "./cloud-fake.ts";
@@ -590,17 +591,17 @@ describe("a form open on a mark that takes another number (review B, sync 8)", (
 		const gone = withoutAnnotation(after, "a4", after.updatedAt).value;
 		expect(editAfter(edit, gone)).toBeUndefined();
 		expect(markFor(gone, "a3", edit.mark)).toBeUndefined();
-		// Two marks that nothing tells apart (the same element marked twice
-		// on one screenshot): the one under the form's id while it is that
-		// mark; once the id is another mark's, neither, and nothing is changed.
+		// A mark that nothing tells apart from the form's mark (the same
+		// element marked twice on one screenshot) came since: neither is the
+		// form's mark, whatever the ids say, and nothing is changed.
 		const twin = {
 			...(after.annotations[3] as Annotation),
 			id: "a5",
 			number: 5,
 		};
 		const twins = { ...after, annotations: [...after.annotations, twin] };
-		expect(markFor(twins, "a4", edit.mark)).toMatchObject({ id: "a4" });
-		expect(markFor(twins, "a5", edit.mark)).toMatchObject({ id: "a5" });
+		expect(markFor(twins, "a4", edit.mark)).toBe("ambiguous");
+		expect(markFor(twins, "a5", edit.mark)).toBe("ambiguous");
 		expect(markFor(twins, "a3", edit.mark)).toBe("ambiguous");
 		expect(editAfter(edit, twins)).toBeUndefined();
 		// A delete asked once ("Really delete?") follows its mark the same
@@ -611,6 +612,77 @@ describe("a form open on a mark that takes another number (review B, sync 8)", (
 		expect(heldAfter(armed, before)).toBe(armed);
 		// Unchanged: the same form.
 		expect(editAfter(edit, before)).toBe(edit);
+	});
+
+	test("twins (the same element marked twice on one screenshot): held to their ids while those stay; once a renumbering moves them, every change is refused", async () => {
+		await shared();
+		await addMark(tess, "c_flow", "Tess's third");
+		const one = (await tess.store.getCase("c_flow")) as Case;
+		const third = one.annotations.find((a) => a.id === "a3") as Annotation;
+		// Before: M = a3, T = a4, the same drawing on the same screenshot.
+		const before: Case = {
+			...one,
+			annotations: [
+				...one.annotations.filter((a) => a.id !== "a3"),
+				{ ...third, comment: "M" },
+				{ ...third, id: "a4", number: 4, comment: "T" },
+			],
+		};
+		const t = before.annotations[3] as Annotation;
+		const key = markKey(before, t);
+		// Nothing moved: each twin is its own, and can be changed.
+		expect(markFor(before, "a4", key)).toMatchObject({ comment: "T" });
+		expect(
+			markFor(
+				before,
+				"a3",
+				markKey(before, before.annotations[2] as Annotation),
+			),
+		).toMatchObject({ comment: "M" });
+		// A teammate's mark takes 3: M is a4, T is a5. What was opened on T
+		// (a4) must not land on M, which has T's id and drawing now.
+		const dana3 = {
+			...(one.annotations[0] as Annotation),
+			id: "a3",
+			number: 3,
+			comment: "Dana's",
+		};
+		const after: Case = {
+			...one,
+			annotations: [
+				...one.annotations.filter((a) => a.id !== "a3"),
+				dana3,
+				{ ...third, id: "a4", number: 4, comment: "M" },
+				{ ...third, id: "a5", number: 5, comment: "T" },
+			],
+		};
+		expect(markFor(after, "a4", key)).toBe("ambiguous");
+		// The popover's page and the panel answer by it.
+		expect(
+			markAsked(
+				{
+					open: after,
+					loaded: { caseId: "c_flow", tabId: 1 },
+					front: undefined,
+				},
+				{ caseId: "c_flow", annotationId: "a4", mark: key },
+				1,
+			),
+		).toBe("changed");
+		// The panel's form and a "Really delete?" let go.
+		const edit: MarkEdit = {
+			annotationId: "a4",
+			mark: key,
+			mode: "comment",
+			kind: "fixed",
+			text: "Typed for T",
+		};
+		expect(editAfter(edit, after)).toBeUndefined();
+		expect(heldAfter({ annotationId: "a4", mark: key, at: 1 }, after)).toBe(
+			undefined,
+		);
+		// A confirmed AI call held to T's key finds none at mark 4.
+		expect(markKey(after, after.annotations[3] as Annotation)).not.toBe(key);
 	});
 });
 
@@ -1391,6 +1463,41 @@ describe("a case the team already has (review B, sync 2 and 3)", () => {
 		expect(status(dana)?.state).toBe("synced");
 	});
 
+	test("a join the user was told about stays one when its read fails: not asked a second time", async () => {
+		await tessShares();
+		await fromFile("c_file");
+		await change(dana, "c_file", (c, now) =>
+			withComment(c, "a1", "Dana's newer words", now),
+		);
+		await addMark(dana, "c_file", "Dana's own third");
+		await signIn(dana);
+		expect(status(dana)?.joins).toEqual({ cases: 1, marks: 1 });
+		// "Sync them", told what it replaces; the first read is too large.
+		const getCase = dana.api.getCase.bind(dana.api);
+		let tooLarge = 1;
+		dana.api.getCase = async (team, caseId) => {
+			if (tooLarge-- > 0)
+				throw new ApiFailure("server", "Too large.", 200, TOO_LARGE);
+			return getCase(team, caseId);
+		};
+		await dana.engine.decide(true);
+		await dana.engine.request();
+		expect(book(dana, "c_file")?.reread).toMatchObject({
+			why: "join",
+			told: true,
+		});
+		// The read works later: joined, and nobody is asked again.
+		dana.clock.now = new Date(dana.clock.now.getTime() + 24 * 3600_000);
+		await sync(dana, tess);
+		expect(dana.kv.data.get(KEYS.modes)).toEqual({ c_file: "synced" });
+		expect(status(dana)?.undecided).toBe(0);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+			[3, "Dana's own third"],
+		]);
+	});
+
 	test("the same for a file imported on a synced device: other words on a mark the team has are asked about, not replaced", async () => {
 		await signIn(dana);
 		await tessShares();
@@ -1809,6 +1916,59 @@ describe("a delete for the team is the user's delete (review B, sync 6)", () => 
 		expect(status(tess)?.problems).toEqual([]);
 		await dana.engine.request();
 		expect(await dana.store.getCase("c_flow")).toBeUndefined();
+	});
+
+	test("deleted while the sign-in had run out (the panel said “from this browser”): no delete for the team, the case is back after the sign-in", async () => {
+		await shared();
+		tess.api.unauthorized = true;
+		await tess.engine.request();
+		expect(((await tess.engine.account()) as Account).expired).toBe(true);
+		await removeCase(tess, "c_flow");
+		// An hour later she signs in again.
+		tess.clock.now = new Date(tess.clock.now.getTime() + 3600_000);
+		tess.api.unauthorized = false;
+		await signIn(tess);
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeDefined();
+		expect(await dana.store.getCase("c_flow")).toBeDefined();
+		expect(await tess.store.getCase("c_flow")).toBeDefined();
+		expect(await tess.store.deletedCases()).toEqual([]);
+	});
+
+	test("deleted while the sign-in was live, and it ran out before the delete went: the delete goes after the sign-in", async () => {
+		await shared();
+		await removeCase(tess, "c_flow");
+		// The run that would send it finds the sign-in gone.
+		tess.api.unauthorized = true;
+		await tess.engine.request();
+		expect(((await tess.engine.account()) as Account).expired).toBe(true);
+		expect(server.caseOf("c_flow")).toBeDefined();
+		tess.api.unauthorized = false;
+		await signIn(tess);
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeUndefined();
+		expect(await dana.store.getCase("c_flow")).toBeUndefined();
+	});
+
+	test("deleted while its first push is under way: the delete is not forgotten, and goes for the team", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_new");
+		await addMark(tess, "c_new", "Made and gone");
+		// The user deletes it right after the server took the new case.
+		const ops = tess.api.ops.bind(tess.api);
+		tess.api.ops = async (team, list, ...rest) => {
+			const answer = await ops(team, list, ...rest);
+			if (list.some((op) => op.type === "case.create"))
+				await removeCase(tess, "c_new");
+			return answer;
+		};
+		await tess.engine.request();
+		tess.api.ops = ops;
+		await sync(tess, dana);
+		expect(await tess.store.getCase("c_new")).toBeUndefined();
+		expect(server.caseOf("c_new")).toBeUndefined();
+		expect(await dana.store.getCase("c_new")).toBeUndefined();
 	});
 });
 

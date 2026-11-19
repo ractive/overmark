@@ -280,6 +280,17 @@ export class CloudSync {
 				before.server === server &&
 				before.user.id === me.user.id;
 			if (!same) await this.#detachAll();
+			// After a sign-in that ran out: a delete made since was made under a
+			// button that said "from this browser", and is no delete for the
+			// team. The case is read back, as after a sign-out (DEC-041).
+			else if (before.expired) {
+				const live = new Set(before.liveDeletes ?? []);
+				await this.#deps.store.forgetDeleted(
+					(await this.#deps.store.deletedCases())
+						.map((r) => r.id)
+						.filter((id) => !live.has(id)),
+				);
+			}
 			const teams = me.teams ?? [];
 			const kept = same ? before.teamId : undefined;
 			const account: Account = {
@@ -371,7 +382,7 @@ export class CloudSync {
 		await this.#deps.store.forgetDeleted(
 			changed.filter((b) => b.reread?.why === "resumed").map((b) => b.caseId),
 		);
-		const { expired: _e, ...rest } = account;
+		const { expired: _e, liveDeletes: _l, ...rest } = account;
 		await kv.set({ [KEYS.account]: { ...rest, teamId } });
 	}
 
@@ -690,8 +701,18 @@ export class CloudSync {
 			}
 			if (error.kind === "unauthorized") {
 				const now = await this.account();
-				if (now !== undefined)
-					await kv.set({ [KEYS.account]: { ...now, expired: true } });
+				if (now !== undefined) {
+					// The deletes made while the sign-in was live: from now on the
+					// panel says "from this browser", and a delete is not the
+					// team's (DEC-041). Unknown: none counts as live.
+					const live = await this.#deps.store
+						.deletedCases()
+						.then((all) => all.map((r) => r.id))
+						.catch(() => []);
+					await kv.set({
+						[KEYS.account]: { ...now, expired: true, liveDeletes: live },
+					});
+				}
 				await this.#say(
 					await this.#status("signed-out", {
 						text: "The sign-in ran out. Sign in again to go on syncing; nothing is lost meanwhile.",
@@ -858,9 +879,10 @@ export class CloudSync {
 		// that could need it, or after thirty days. (Not because the case
 		// was here when this pass began: the store takes a record away
 		// itself when a case is stored under its id, so one that is there
-		// is of a case deleted since, and the next pass takes it up.)
+		// is of a case deleted since, and the next pass takes it up.) The book
+		// as it is now: a case's first push in this pass gives it a shadow.
 		for (const [id, at] of records) {
-			const book = books.get(id);
+			const book = await this.#books.get(id);
 			if (
 				book === undefined ||
 				book.mode !== "synced" ||
@@ -1074,14 +1096,15 @@ export class CloudSync {
 			tries === 0
 				? 0
 				: (REREAD_WAIT_MS[Math.min(tries, REREAD_WAIT_MS.length) - 1] ?? 0);
+		// What must be read before anything is sent stays that.
+		const still =
+			book.reread !== undefined && blocks(book.reread) ? book.reread.why : why;
 		await this.#books.put({
 			...book,
 			reread: {
-				// What must be read before anything is sent stays that.
-				why:
-					book.reread !== undefined && blocks(book.reread)
-						? book.reread.why
-						: why,
+				why: still,
+				// A join the user was told about stays one: not asked again.
+				...(still === "join" && book.reread?.told ? { told: true } : {}),
 				tries,
 				after: this.#now().getTime() + wait,
 				...(wrong === undefined

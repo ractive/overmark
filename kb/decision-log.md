@@ -1872,8 +1872,13 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   (it follows its mark to its new number, and its requests name the mark), an AI
   app's change the user was asked about (refused when the number is another mark's by
   the time they answer), and `highlight` and `get_mark_element` (the page answers
-  "not loaded as you have it" and the case is loaded again). When the id is another
-  mark's and more than one mark has that key, nothing is changed and that is said.
+  "not loaded as you have it" and the case is loaded again). Twins (the same element
+  marked twice on one screenshot) have nothing else that tells them apart, so their
+  key also names the ids all twins had when it was taken: while those ids stay, each
+  twin is its own and can be changed; once a renumbering moves any (or a twin is made
+  meanwhile), the key names no mark, and nothing is changed and that is said. (Asked
+  for: "ambiguous whatever the ids say" for twins; that would refuse every change and
+  delete of either twin for good, also in the panel.)
 - **A screenshot's time is compared as it is sent, as an instant;** every id that
   stands for another mark of the server's than before is announced, not only new ones,
   and after a stop the book is made true to the case with `relink`.
@@ -1939,7 +1944,11 @@ Both addresses of the second are known, in one module with the first
 - **A case deleted while signed out is not deleted for the team by signing in.** The
   book of such a case is dropped at the sign-in and the team's copy comes back with
   the next read: with several servers, deleting a case while with another one is
-  ordinary, and nobody was told it would delete anything elsewhere.
+  ordinary, and nobody was told it would delete anything elsewhere. The same for a
+  case deleted while the sign-in had run out: the panel says "from this browser"
+  then, so the engine notes which deletes were on record when it ran out
+  (`Account.liveDeletes`) and forgets every later one at the next sign-in; the case
+  comes back. Only a delete made with a live sign-in, of a synced case, is sent.
 - **Where a server signs people in is what it says itself.** The authorization, token
   and revocation addresses are read from the server's discovery document
   (`<origin>/.well-known/oauth-authorization-server/api/auth`, RFC 8414) at each

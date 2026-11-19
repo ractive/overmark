@@ -59,6 +59,12 @@ export interface Account {
 	 * kept (the books, the queue) goes on then.
 	 */
 	expired?: true;
+	/**
+	 * With `expired`: the cases whose delete was on record when it ran out,
+	 * made while the sign-in was live. A delete made later is not the
+	 * team's: it is forgotten at the next sign-in (DEC-041).
+	 */
+	liveDeletes?: string[];
 }
 
 /**

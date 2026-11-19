@@ -774,12 +774,19 @@ async function refreshCase(): Promise<void> {
 		c.annotations.length > 0;
 	update((s) => {
 		s.current = c;
+		// What can no longer be told from another mark is let go, and said.
+		const lost = [s.markEdit, s.markDeleteArmed, s.findingDeleteArmed].some(
+			(held) =>
+				held !== undefined &&
+				markFor(c, held.annotationId, held.mark) === "ambiguous",
+		);
 		// An open form stays on its mark, whatever the mark's id is now; so
 		// does a delete asked once (its second click must not find another
 		// mark under the id).
 		s.markEdit = editAfter(s.markEdit, c);
 		s.markDeleteArmed = heldAfter(s.markDeleteArmed, c);
 		s.findingDeleteArmed = heldAfter(s.findingDeleteArmed, c);
+		if (lost) s.caseHint = MARK_CHANGED;
 	});
 	// Just opened, or its first mark is in: its marks go to the tab in front
 	// (DEC-022, DEC-026).
