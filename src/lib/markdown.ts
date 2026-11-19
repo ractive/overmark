@@ -16,8 +16,9 @@ import {
 	isSafeId,
 	isWebPage,
 	markStatus,
-	marksOnPage,
+	marksByPage,
 	markUrl,
+	pageKey,
 	RESOLUTION_LABEL,
 	type Resolution,
 	type ShapeKind,
@@ -221,6 +222,7 @@ const marksCount = (n: number) => `${n} mark${n === 1 ? "" : "s"}`;
 export function caseMarkdown(c: Case): string {
 	const v = c.page.viewport;
 	const pages = casePages(c);
+	const counts = marksByPage(c);
 	// A case of one page reads as before; one of several lists them (DEC-038).
 	const several = pages.length > 1;
 	const out = [
@@ -231,7 +233,7 @@ export function caseMarkdown(c: Case): string {
 					`- Pages (${pages.length}):`,
 					...pages.map(
 						(p) =>
-							`  - ${address(p.url)}${p.title ? `, ${inline(p.title)}` : ""} (${marksCount(marksOnPage(c, p.url))})`,
+							`  - ${address(p.url)}${p.title ? `, ${inline(p.title)}` : ""} (${marksCount(counts.get(pageKey(p.url)) ?? 0)})`,
 					),
 				]
 			: [`- Page: ${address(c.page.url)}`]),

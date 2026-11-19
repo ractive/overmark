@@ -11,15 +11,18 @@ import {
 	casePages,
 	isPageOf,
 	MAX_PAGES,
+	marksByPage,
 	marksOnPage,
 	markUrl,
 	pageAt,
+	pageKey,
 	pendingImage,
 	type Shot,
 	samePage,
 	validateCase,
 	viewportAt,
 	withoutAnnotation,
+	withPagesAgreed,
 	withPagesOfShots,
 } from "../src/lib/case.ts";
 import { exportCase, readExport, storeImport } from "../src/lib/export.ts";
@@ -32,9 +35,12 @@ import {
 	undoAdd,
 } from "../src/lib/save.ts";
 import { MemoryStore } from "../src/lib/store.ts";
+import { shortUrl } from "../src/sidepanel/dom.ts";
 import { foundLine, matchesHere, noneFound } from "../src/sidepanel/follow.ts";
 import { newCase } from "../src/sidepanel/fresh.ts";
+import { validateCase as validateCase030 } from "./case-0-3-0.ts";
 import { putCase, sampleCase } from "./fixtures.ts";
+import vectors from "./page-key.json" with { type: "json" };
 
 const CART = "https://shop.example/cart";
 const PAY = "https://shop.example/checkout/pay";
@@ -131,6 +137,12 @@ describe("the pages of a case", () => {
 		]);
 	});
 
+	test("which page an address is: the server's rule, held to the server's own vectors", () => {
+		// test/page-key.json is sitegloss.dev's packages/api/vectors/page-key.json.
+		expect(vectors.vectors.length).toBeGreaterThan(25);
+		for (const { url, key } of vectors.vectors) expect(pageKey(url)).toBe(key);
+	});
+
 	test("the same page: the same path, in whatever environment; two sites' home pages are two", () => {
 		expect(samePage(CART, `${CART}/`)).toBe(true);
 		expect(samePage(CART, "https://shop.example/cart#top")).toBe(true);
@@ -143,9 +155,81 @@ describe("the pages of a case", () => {
 		expect(samePage("https://shop.example/", "https://shop.example")).toBe(
 			true,
 		);
+		// A hash route at the root is a page of its own, in any environment,
+		// and a slash at its end says nothing.
+		expect(
+			samePage(
+				"https://app.example.com/#/cart",
+				"http://localhost:5173/#/cart/",
+			),
+		).toBe(true);
+		expect(
+			samePage("https://app.example.com/#/cart", "https://app.example.com/"),
+		).toBe(false);
+		expect(
+			samePage("https://x.example/demo/", "https://x.example/demo/#/"),
+		).toBe(true);
+		// Symmetric, also for an odd path.
+		for (const [a, b] of [
+			["https://a.example//", "https://b.example/"],
+			["https://a.example/#/", "https://b.example/"],
+			[CART, "http://localhost:3000/cart/"],
+		] as const)
+			expect(samePage(a, b)).toBe(samePage(b, a));
 		// What is no address at all (a file's) is itself only.
 		expect(samePage("somewhere", "somewhere")).toBe(true);
 		expect(samePage("somewhere", "elsewhere")).toBe(false);
+	});
+
+	test("every question about a page gives the same answer: the list, the page in front, the counts, the window", () => {
+		// A home page and a hash route at the root, made on production.
+		const home = "https://app.example.com/";
+		const route = "https://app.example.com/#/cart";
+		const c: Case = {
+			...flow(),
+			page: { ...flow().page, url: home },
+			pages: [
+				{ url: home, title: "Home", lang: "en" },
+				{ url: route, title: "Cart", lang: "en" },
+			],
+			shots: [shot("s1", home), shot("s2", route, 390)],
+		};
+		// The route on localhost is that page; localhost's home page is not
+		// production's (the origin is all a home page has).
+		for (const [url, page] of [
+			["http://localhost:5173/#/cart", route],
+			["http://localhost:5173/#/cart/?step=2", route],
+			[home, home],
+			["http://localhost:5173/", undefined],
+			["http://localhost:5173/#/pay", undefined],
+		] as const) {
+			expect(pageAt(c, url)?.url).toBe(page as string);
+			expect(isPageOf(c, url)).toBe(page !== undefined);
+			expect(marksOnPage(c, url)).toBe(
+				page === route ? 1 : page === home ? 2 : 0,
+			);
+			expect(viewportAt(c, url).width).toBe(page === route ? 390 : 1280);
+		}
+		expect([...marksByPage(c)]).toEqual([
+			[pageKey(home), 2],
+			[pageKey(route), 1],
+		]);
+	});
+
+	test("a page's short name keeps the hash route, which is what tells such pages apart", () => {
+		expect(shortUrl("https://x.example/demo/#/book")).toBe(
+			"x.example/demo/#/book",
+		);
+		expect(shortUrl("https://x.example/demo/#/pay?step=2")).toBe(
+			"x.example/demo/#/pay",
+		);
+		expect(shortUrl("https://app.example.com/#/cart")).toBe(
+			"app.example.com/#/cart",
+		);
+		expect(shortUrl("https://www.example.com/kk#top")).toBe(
+			"www.example.com/kk",
+		);
+		expect(shortUrl("https://www.example.com/")).toBe("www.example.com");
 	});
 
 	test("a case is this page's for any of its pages, in whatever environment", () => {
@@ -192,16 +276,22 @@ describe("the pages of a case", () => {
 		).toThrow(`more than ${MAX_PAGES} items`);
 	});
 
-	test("a build before the list reads a new file: what it does not know is left out, not refused", () => {
-		// `validateCase` builds its result from the fields it knows, so the
-		// older build's reading of a new export is the case without `pages`
-		// (and with every screenshot's address, which it knew). Here: a field
-		// this build does not know either.
-		const later = { ...flow(), somethingNew: { a: 1 }, format: "sitegloss/1" };
-		const read = validateCase(later) as unknown as Record<string, unknown>;
-		expect(read["somethingNew"]).toBeUndefined();
+	test("0.3.0, the build before the list, reads a new file: its own code, on a case of several pages", () => {
+		// test/case-0-3-0.ts is 0.3.0's case module as shipped. It builds its
+		// result from the fields it knows: the list is left out, not refused,
+		// and every screenshot keeps its address, which 0.3.0 knew.
+		const file = JSON.parse(JSON.stringify(flow()));
+		const read = validateCase030(file) as unknown as Record<string, unknown>;
+		expect(read["pages"]).toBeUndefined();
 		expect(read["page"]).toEqual(flow().page);
 		expect((read["shots"] as Shot[]).map((s) => s.url)).toEqual([CART, PAY]);
+		expect(read["annotations"]).toHaveLength(3);
+		// And back: this build reads what 0.3.0 stored, the pages from the
+		// screenshots, the first with its title, the others without.
+		expect(casePages(validateCase(read))).toEqual([
+			{ url: CART, title: "Your cart", lang: "en" },
+			{ url: PAY, title: "", lang: "" },
+		]);
 	});
 
 	test("deleting a page's last mark takes the page off the list; the first page follows the first one left", () => {
@@ -214,11 +304,14 @@ describe("the pages of a case", () => {
 		expect(casePages(rest).map((p) => p.url)).toEqual([CART, PAY]);
 		rest = withoutAnnotation(rest, "a2", NOW).value;
 		expect(rest.pages).toEqual([{ url: PAY, title: "Payment", lang: "en" }]);
+		// The first page is the payment page now, window and all: it was made
+		// at 390, not at the 1280 of the cart that left.
 		expect(rest.page).toEqual({
 			...c.page,
 			url: PAY,
 			title: "Payment",
 			lang: "en",
+			viewport: { width: 390, height: 800, dpr: 2 },
 		});
 		expect(() => validateCase(rest)).not.toThrow();
 		// The last mark of all: the case stays its page's.
@@ -651,5 +744,222 @@ describe("what a draw found, judged for the page in front", () => {
 		const url = "http://localhost:3000/account";
 		expect(matchesHere(c, all, url)).toHaveLength(3);
 		expect(noneFound(matchesHere(c, all, url))).toBe(true);
+	});
+});
+
+describe("page, the list and the screenshots agree (review of DEC-038)", () => {
+	const HOME = "https://shop.example/home";
+
+	test("a file whose page is not in its list: made to agree on import, so no mark is hidden and none moves", async () => {
+		// A foreign or hand-made file: `page` is on no list, and one
+		// screenshot names no page (0.3.0 wrote those for an AI app's marks).
+		const odd: Case = {
+			...flow(),
+			page: { ...flow().page, url: HOME, title: "Home" },
+			pages: [
+				{ url: CART, title: "Your cart", lang: "en" },
+				{ url: `${CART}/`, title: "again", lang: "en" },
+				{ url: PAY, title: "Payment", lang: "en" },
+			],
+			shots: [shot("s1"), shot("s2", CART), shot("s3", PAY)],
+			annotations: [mark(1, "s1"), mark(2, "s2"), mark(3, "s3")],
+		};
+		expect(() => validateCase(odd)).not.toThrow();
+		const agreed = withPagesAgreed(odd);
+		expect(agreed.pages).toEqual([
+			{ url: HOME, title: "Home", lang: "en" },
+			{ url: CART, title: "Your cart", lang: "en" },
+			{ url: PAY, title: "Payment", lang: "en" },
+		]);
+		expect(agreed.shots.map((s) => s.url)).toEqual([HOME, CART, PAY]);
+		// Every mark is on a listed page.
+		expect(casePages(agreed).map((p) => marksOnPage(agreed, p.url))).toEqual([
+			1, 1, 1,
+		]);
+		// The cart's mark goes: mark 1 stays where it was.
+		const rest = withoutAnnotation(agreed, "a2", NOW).value;
+		expect(markUrl(rest, rest.annotations[0] as Annotation)).toBe(HOME);
+		expect(rest.page.url).toBe(HOME);
+
+		// `page` listed, but not first: it is the first.
+		const second = withPagesAgreed({
+			...flow(),
+			page: { ...flow().page, url: PAY },
+		});
+		expect(second.pages?.map((p) => p.url)).toEqual([PAY, CART]);
+		expect(second.pages?.[0]?.title).toBe("Payment");
+		// A case from before the list stays without one.
+		const old = withPagesAgreed({
+			...sampleCase("c_old"),
+			shots: [shot("s1")],
+		});
+		expect(old.pages).toBeUndefined();
+		expect(old.shots[0]?.url).toBe(old.page.url);
+
+		// Through the import itself.
+		const store = new MemoryStore();
+		const webp = new Uint8Array(30);
+		webp.set(new TextEncoder().encode("RIFF\x00\x00\x00\x00WEBPVP8X"), 0);
+		webp[16] = 10;
+		webp[24] = 9;
+		webp[27] = 9;
+		const source = new MemoryStore();
+		await putCase(source, odd);
+		for (const path of [
+			...odd.shots.map((x) => x.image),
+			...odd.annotations.map((x) => x.crop),
+		])
+			await source.putImage(odd.id, path, {
+				blob: new Blob([webp], { type: "image/webp" }),
+				width: 10,
+				height: 10,
+			});
+		const zip = await exportCase(source, odd);
+		const imported = await storeImport(store, await readExport(zip));
+		expect(imported.pages?.map((p) => p.url)).toEqual([HOME, CART, PAY]);
+		expect(imported.shots.every((s) => s.url !== undefined)).toBe(true);
+	});
+
+	test("without that, a screenshot that names no page does not move when the first page leaves", () => {
+		const c: Case = {
+			...flow(),
+			shots: [shot("s1"), shot("s2", PAY, 390), shot("s3", CART)],
+			annotations: [mark(1, "s1"), mark(2, "s2"), mark(3, "s3")],
+			pages: [
+				{ url: PAY, title: "Payment", lang: "en" },
+				{ url: CART, title: "Your cart", lang: "en" },
+			],
+		};
+		// `page` (the cart) is not first in the list; a delete rewrites it.
+		const rest = withoutAnnotation(c, "a3", NOW).value;
+		expect(rest.page.url).toBe(PAY);
+		// Mark 1's screenshot was the cart's and says so now.
+		expect(markUrl(rest, rest.annotations[0] as Annotation)).toBe(CART);
+	});
+
+	test("a hash route at the root and the home page, made on production and marked on localhost: one page each", async () => {
+		for (const [made, local] of [
+			["https://app.example.com/#/cart", "http://localhost:5173/#/cart"],
+			["https://x.example/demo/#/book", "http://localhost:5173/demo/#/book/"],
+			[CART, "http://localhost:3000/cart/"],
+		] as const) {
+			const store = new MemoryStore();
+			await putCase(store, newCase("c_1", pageInfo(made, "Made here"), NOW));
+			await add(store, "c_1", 1, made, "Made here");
+			const c = await add(store, "c_1", 2, local, "Local");
+			expect(c.pages).toEqual([{ url: made, title: "Made here", lang: "en" }]);
+			expect(marksOnPage(c, local)).toBe(2);
+			expect(pageAt(c, local)?.url).toBe(made);
+		}
+		// Two sites' home pages are two pages, and each tab finds its own.
+		const store = new MemoryStore();
+		await putCase(
+			store,
+			newCase("c_1", pageInfo("https://www.example.com/", "Home"), NOW),
+		);
+		await add(store, "c_1", 1, "https://www.example.com/", "Home");
+		const c = await add(
+			store,
+			"c_1",
+			2,
+			"http://localhost:3000/",
+			"Local home",
+		);
+		expect(c.pages?.map((p) => p.url)).toEqual([
+			"https://www.example.com/",
+			"http://localhost:3000/",
+		]);
+		expect(pageAt(c, "http://localhost:3000/")?.url).toBe(
+			"http://localhost:3000/",
+		);
+	});
+
+	test("the page after the most a case holds is refused in the words of the other limits, before anything is stored", async () => {
+		const store = new MemoryStore();
+		const full: Case = {
+			...flow(),
+			id: "c_full",
+			title: "A long flow",
+			pages: Array.from({ length: MAX_PAGES }, (_, i) => ({
+				url: `https://shop.example/step/${i}`,
+				title: "",
+				lang: "",
+			})),
+			page: { ...flow().page, url: "https://shop.example/step/0" },
+			shots: Array.from({ length: MAX_PAGES }, (_, i) =>
+				shot(`s${i + 1}`, `https://shop.example/step/${i}`),
+			),
+			annotations: Array.from({ length: MAX_PAGES }, (_, i) =>
+				mark(i + 1, `s${i + 1}`),
+			),
+		};
+		await putCase(store, full);
+		await expect(
+			add(
+				store,
+				"c_full",
+				MAX_PAGES + 1,
+				"https://shop.example/one-more",
+				"More",
+			),
+		).rejects.toThrow(
+			`“A long flow” holds marks on ${MAX_PAGES} pages, the most a case can; start a new case for marks on further pages.`,
+		);
+		// A further mark on a page it has is taken.
+		const c = await add(
+			store,
+			"c_full",
+			MAX_PAGES + 1,
+			"http://localhost:3000/step/7/",
+			"Step 7",
+		);
+		expect(c.pages).toHaveLength(MAX_PAGES);
+		expect(c.annotations).toHaveLength(MAX_PAGES + 1);
+	});
+
+	test("a case from before the list whose first page kept no mark: the next mark's list has no page without a screenshot", async () => {
+		const store = new MemoryStore();
+		// As 0.3.0 left it: the first page stays when its last mark goes.
+		const old: Case = {
+			...sampleCase("c_old"),
+			page: { ...flow().page, url: CART },
+			shots: [shot("s1", PAY, 390)],
+			annotations: [mark(1, "s1")],
+			lastNumber: 2,
+		};
+		expect(old.pages).toBeUndefined();
+		await putCase(store, old);
+		const c = await add(store, "c_old", 3, "https://shop.example/done", "Done");
+		expect(c.pages).toEqual([
+			{ url: PAY, title: "", lang: "" },
+			{ url: "https://shop.example/done", title: "Done", lang: "en" },
+		]);
+		// `page` is the first page left, with its window.
+		expect(c.page.url).toBe(PAY);
+		expect(c.page.viewport.width).toBe(390);
+		expect(casePages(c).every((p) => marksOnPage(c, p.url) > 0)).toBe(true);
+	});
+
+	test("counting the marks of every page is one pass, also at the format's limits", () => {
+		const big: Case = {
+			...flow(),
+			pages: undefined as never,
+			shots: Array.from({ length: 1000 }, (_, i) =>
+				shot(`s${i + 1}`, `https://shop.example/p/${i % 200}`),
+			),
+			annotations: Array.from({ length: 1000 }, (_, i) =>
+				mark(i + 1, `s${i + 1}`),
+			),
+		};
+		delete (big as { pages?: unknown }).pages;
+		const started = performance.now();
+		for (let i = 0; i < 20; i++) {
+			const counts = marksByPage(big);
+			expect(casePages(big).map((p) => counts.get(pageKey(p.url)))).toContain(
+				5,
+			);
+		}
+		// 20 sweeps took 10 s before (516 ms each); a generous bound.
+		expect(performance.now() - started).toBeLessThan(2000);
 	});
 });

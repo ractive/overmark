@@ -19,9 +19,11 @@ import {
 	casePages,
 	cropImage,
 	MAX_ANNOTATIONS,
+	MAX_PAGES,
 	MAX_SHOTS,
 	nextNumbers,
 	type PageInfo,
+	pageKey,
 	pendingImage,
 	plainUrl,
 	type Rect,
@@ -241,34 +243,39 @@ export async function saveCase(
 		// In the order of their numbers, whatever order they went in: a mark
 		// added again with "Add mark N" can come after a later one (DEC-014).
 		annotations.sort((a, b) => a.number - b.number);
-		const value = validateCase({
-			format: CASE_FORMAT,
-			id: request.caseId,
-			title: current?.title ?? (request.title.trim() || "Untitled case"),
-			createdAt: current?.createdAt ?? stamp,
-			updatedAt: stamp,
-			page: started ? current.page : here,
-			pages:
-				pages.length > 0
-					? pages
-					: [{ url: here.url, title: here.title, lang: here.lang }],
-			shots,
-			annotations,
-			verdict: current?.verdict ?? null,
-			link: current?.link,
-			importedAt: current?.importedAt,
-			// The highest number used, the new marks' too: a case's format
-			// refuses a lastNumber below a mark's (it was kept as it was, so
-			// a mark added after a delete or an Undo could not be stored).
-			...(current?.lastNumber === undefined
-				? {}
-				: {
-						lastNumber: Math.max(
-							current.lastNumber,
-							...annotations.map((a) => a.number),
-						),
-					}),
-		});
+		// The list is the pages the screenshots are of (`withPagesOfShots`): a
+		// page that kept no mark (the first page of a case from before the
+		// list stays when its last mark goes) is not written into it now.
+		const value = withPagesOfShots(
+			validateCase({
+				format: CASE_FORMAT,
+				id: request.caseId,
+				title: current?.title ?? (request.title.trim() || "Untitled case"),
+				createdAt: current?.createdAt ?? stamp,
+				updatedAt: stamp,
+				page: started ? current.page : here,
+				pages:
+					pages.length > 0
+						? pages
+						: [{ url: here.url, title: here.title, lang: here.lang }],
+				shots,
+				annotations,
+				verdict: current?.verdict ?? null,
+				link: current?.link,
+				importedAt: current?.importedAt,
+				// The highest number used, the new marks' too: a case's format
+				// refuses a lastNumber below a mark's (it was kept as it was, so
+				// a mark added after a delete or an Undo could not be stored).
+				...(current?.lastNumber === undefined
+					? {}
+					: {
+							lastNumber: Math.max(
+								current.lastNumber,
+								...annotations.map((a) => a.number),
+							),
+						}),
+			}),
+		);
 		return { value, images };
 	});
 	if (!request.keepPending)
@@ -387,6 +394,15 @@ function checkRoom(c: Case, request: SaveRequest): void {
 	if (full !== undefined)
 		throw new SaveError(
 			`“${c.title}” holds ${full}, the most a case can; start a new case for further marks.`,
+		);
+	// The pages too (DEC-038): said here, before anything is stored, and not
+	// by the format's check after it.
+	const pages = new Set(casePages(c).map((p) => pageKey(p.url)));
+	for (const shot of request.shots)
+		pages.add(pageKey(plainUrl(shot.url ?? request.page.url)));
+	if (pages.size > MAX_PAGES)
+		throw new SaveError(
+			`“${c.title}” holds marks on ${MAX_PAGES} pages, the most a case can; start a new case for marks on further pages.`,
 		);
 }
 

@@ -5,7 +5,7 @@
  * page. Pure: main.ts carries the steps out.
  */
 
-import { type Case, markUrl, pageAt, samePath } from "../lib/case.ts";
+import { type Case, markUrl, pageAt, samePage } from "../lib/case.ts";
 import type { AnnotationMatch } from "../lib/messages.ts";
 import { shortUrl } from "./dom.ts";
 import type { Loaded } from "./state.ts";
@@ -142,7 +142,7 @@ export function dashDrawn(
 		const a = c.annotations.find((x) => x.id === m.annotationId);
 		if (a === undefined || a.shape.kind === "note") return false;
 		if (m.status !== "no-element") return true;
-		return samePath(markUrl(c, a), url);
+		return samePage(markUrl(c, a), url);
 	});
 }
 
@@ -162,7 +162,7 @@ export function matchesHere(
 	return matches.filter((m) => {
 		if (isFound(m)) return true;
 		const a = c.annotations.find((x) => x.id === m.annotationId);
-		return a === undefined || samePath(markUrl(c, a), url);
+		return a === undefined || samePage(markUrl(c, a), url);
 	});
 }
 

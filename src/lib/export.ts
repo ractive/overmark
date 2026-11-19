@@ -12,6 +12,7 @@ import {
 	newId,
 	plainUrl,
 	validateCase,
+	withPagesAgreed,
 } from "./case.ts";
 import { caseMarkdown } from "./markdown.ts";
 import type { CaseStore, StoredImage } from "./store.ts";
@@ -429,7 +430,9 @@ export async function storeImport(
 ): Promise<Case> {
 	const images =
 		parsed.images instanceof Map ? parsed.images : await parsed.images();
-	const c: Case = {
+	// `page`, the list and the screenshots are made to agree (DEC-038):
+	// nothing in a file says they do.
+	const c: Case = withPagesAgreed({
 		...parsed.case,
 		...(options.copy
 			? {
@@ -470,7 +473,7 @@ export async function storeImport(
 					}),
 		})),
 		importedAt: (options.now ?? new Date()).toISOString(),
-	};
+	});
 	await store.replaceCase(c, images);
 	return c;
 }

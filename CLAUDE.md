@@ -135,6 +135,9 @@ with `kb/design/overview.md` and `kb/iterations/`.
   the icons; `bun test/e2e/pilot.ts <url>` measures matching on a real page;
   `bun scripts/api-types.ts` writes `src/lib/cloud/api.gen.ts` from the committed
   OpenAPI document (DEC-040).
+- Which page an address is: `pageKey` in `src/lib/case.ts`, and nothing else (DEC-038).
+  It is the server's function; `test/page-key.json` is a copy of the server's
+  `packages/api/vectors/page-key.json` and is copied again when that changes.
 - Commands: `bun run verify` (Biome CI, type check, tests) before every commit;
   `bun run fix` to format; `bun run build`, `bun run zip`.
 - Firefox: `bun scripts/build.ts --firefox` (`--test`, `--store --zip`) builds it from the

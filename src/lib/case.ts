@@ -470,7 +470,8 @@ export function imageScale(
  * (DEC-009). A hash route (`#/path`, `#!/path`) names the page, so it stays,
  * up to the first character that starts parameters.
  */
-const hashRoute = (hash: string) => /^#!?\/[^?#&=]*/.exec(hash)?.[0] ?? "";
+export const hashRoute = (hash: string) =>
+	/^#!?\/[^?#&=]*/.exec(hash)?.[0] ?? "";
 
 export function plainUrl(href: string): string {
 	try {
@@ -595,31 +596,41 @@ export function shapeOnBox(shape: Shape, from: Rect, to: Rect): Shape {
 }
 
 /**
- * The same page, whatever the origin: a case from prod "belongs" to localhost
- * too. A hash route names a page; a plain `#section` does not.
+ * Which page an address is (DEC-038). A case lists each page once, and a page
+ * is its path in whatever environment: a case made on production is looked at
+ * on staging and fixed on localhost, and a mark added there is on the same
+ * page, not on a second one. So the key leaves the origin out, except for a
+ * home page, where the origin is all there is to tell two sites apart.
+ *
+ * The key is the path without the slashes at its end, and the hash route
+ * (`#/book`, `#!/book`) written as `#/book`, also without slashes at its end.
+ * A query and a plain fragment (`#section`) name no page. What is no web
+ * address is its own key.
+ *
+ * This is the server's function (sitegloss.dev, `packages/api/src/v1/page.ts`)
+ * and has to stay it: `test/page-key.json` holds the server's vectors, and
+ * everything here that asks "the same page?" asks this.
  */
-export function samePath(a: string, b: string): boolean {
-	const page = (href: string) => {
-		const { pathname, hash } = new URL(href);
-		return `${pathname.replace(/\/+$/, "") || "/"}${hashRoute(hash)}`;
-	};
+export function pageKey(address: string): string {
+	let url: URL;
 	try {
-		return page(a) === page(b);
+		url = new URL(address);
 	} catch {
-		return false;
+		return address;
 	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return address;
+	const path = url.pathname.replace(/\/+$/, "");
+	const route = (/^#!?(\/[^?#&=]*)/.exec(url.hash)?.[1] ?? "").replace(
+		/\/+$/,
+		"",
+	);
+	if (path === "" && route === "") return `${url.origin}/`;
+	return route === "" ? path : `${path}#${route}`;
 }
 
-/**
- * One page in a case's list (DEC-038): the same path, whatever the origin,
- * as everywhere (`samePath`: a mark added on localhost to a case from
- * production is on the same page, not on a second one). Two sites' home
- * pages are two pages (`isPageUrl`). What is no address (a file's) is itself
- * only.
- */
-export function samePage(a: string, b: string): boolean {
-	return isPageUrl(a, b) || a === b;
-}
+/** Whether two addresses are the same page of a case (`pageKey`). */
+export const samePage = (a: string, b: string): boolean =>
+	pageKey(a) === pageKey(b);
 
 /** The address of the page a screenshot was taken on. */
 export const shotUrl = (c: Case, shot: Shot | undefined): string =>
@@ -637,12 +648,16 @@ export function markUrl(c: Case, a: Annotation): string {
  * The case's pages, the first one first (DEC-038): the stored list, or for a
  * case from before the list the first page; and every page a screenshot was
  * taken on that is not among them, without a title. A page is there once
- * (`samePage`).
+ * (`pageKey`).
  */
 export function casePages(c: Case): CasePage[] {
 	const pages: CasePage[] = [];
+	const seen = new Set<string>();
 	const add = (page: CasePage) => {
-		if (!pages.some((p) => samePage(p.url, page.url))) pages.push(page);
+		const key = pageKey(page.url);
+		if (seen.has(key)) return;
+		seen.add(key);
+		pages.push(page);
 	};
 	for (const page of c.pages ?? []) add(page);
 	if (c.pages === undefined || c.pages.length === 0)
@@ -652,39 +667,90 @@ export function casePages(c: Case): CasePage[] {
 	return pages.slice(0, MAX_PAGES);
 }
 
-/** How many of the case's marks are on the page `url` (`samePage`). */
+/**
+ * How many marks each page of the case has, by the page's key: one pass over
+ * the screenshots and one over the marks, for a list of pages with counts.
+ */
+export function marksByPage(c: Case): Map<string, number> {
+	const first = pageKey(c.page.url);
+	const pageOf = new Map(
+		c.shots.map((s) => [s.id, s.url === undefined ? first : pageKey(s.url)]),
+	);
+	const counts = new Map<string, number>();
+	for (const a of c.annotations) {
+		const key = pageOf.get(a.shot) ?? first;
+		counts.set(key, (counts.get(key) ?? 0) + 1);
+	}
+	return counts;
+}
+
+/** How many of the case's marks are on the page `url`. */
 export function marksOnPage(c: Case, url: string): number {
-	return c.annotations.filter((a) => samePage(markUrl(c, a), url)).length;
+	return marksByPage(c).get(pageKey(url)) ?? 0;
 }
 
 /**
- * The page of the case that the address `url` shows, whatever the origin
- * (`samePath`: the case's page in another environment is the same page).
+ * The page of the case that the address `url` shows, whatever the origin: the
+ * case's page in another environment is the same page.
  */
 export function pageAt(c: Case, url: string): CasePage | undefined {
-	return casePages(c).find((p) => samePath(p.url, url));
+	const key = pageKey(url);
+	return casePages(c).find((p) => pageKey(p.url) === key);
 }
 
 /**
  * The case with its list of pages as its screenshots have them: a page no
- * screenshot is of any more goes, and `page` follows the first one left. A
- * case without screenshots keeps the pages it was started on; one stored
- * before the list (DEC-038) stays without it.
+ * screenshot is of any more goes, and `page` follows the first one left,
+ * with the window that page's first screenshot was taken in. A case without
+ * screenshots keeps the pages it was started on; one stored before the list
+ * (DEC-038) stays without it.
  */
 export function withPagesOfShots(c: Case): Case {
 	if (c.pages === undefined || c.shots.length === 0) return c;
-	const pages = casePages(c).filter((p) =>
-		c.shots.some((s) => samePage(shotUrl(c, s), p.url)),
-	);
+	const taken = new Set(c.shots.map((s) => pageKey(shotUrl(c, s))));
+	const pages = casePages(c).filter((p) => taken.has(pageKey(p.url)));
 	const first = pages[0];
 	if (first === undefined) return c;
+	if (samePage(first.url, c.page.url)) return { ...c, pages };
+	// A screenshot that names no page is of the page that leaves: it says so
+	// before `page` becomes another one, or it would move with it.
+	const shots = c.shots.map((s) =>
+		s.url === undefined ? { ...s, url: c.page.url } : s,
+	);
+	const shot = shots.find((s) => samePage(s.url ?? "", first.url));
 	return {
 		...c,
+		shots,
 		pages,
-		page: samePage(first.url, c.page.url)
-			? c.page
-			: { ...c.page, url: first.url, title: first.title, lang: first.lang },
+		page: {
+			...c.page,
+			url: first.url,
+			title: first.title,
+			lang: first.lang,
+			...(shot === undefined ? {} : { viewport: shot.viewport }),
+		},
 	};
+}
+
+/**
+ * A case as it comes in from elsewhere (a file, the team), with `page`, the
+ * list and the screenshots agreeing (DEC-038): every screenshot names its
+ * page (one that did not is of `page`), `page` is the first of the list, and
+ * a page is there once. Nothing checks this in a file, and what follows
+ * (counts per page, "Open the page", a delete) relies on it.
+ */
+export function withPagesAgreed(c: Case): Case {
+	const shots = c.shots.some((s) => s.url === undefined)
+		? c.shots.map((s) => (s.url === undefined ? { ...s, url: c.page.url } : s))
+		: c.shots;
+	if (c.pages === undefined) return shots === c.shots ? c : { ...c, shots };
+	const own = c.pages.find((p) => samePage(p.url, c.page.url)) ?? {
+		url: c.page.url,
+		title: c.page.title,
+		lang: c.page.lang,
+	};
+	const pages = casePages({ ...c, shots: [], pages: [own, ...c.pages] });
+	return { ...c, shots, pages };
 }
 
 /**
@@ -692,20 +758,20 @@ export function withPagesOfShots(c: Case): Case {
  * first screenshot, else of the case's first page (DEC-038).
  */
 export function viewportAt(c: Case, url: string | undefined): Viewport {
-	const page = url ? pageAt(c, url) : undefined;
+	const key = url ? pageKey(url) : undefined;
 	const shot =
-		page === undefined
+		key === undefined
 			? undefined
-			: c.shots.find((s) => samePage(shotUrl(c, s), page.url));
+			: c.shots.find((s) => pageKey(shotUrl(c, s)) === key);
 	return shot?.viewport ?? c.page.viewport;
 }
 
 /**
  * The case is for `url`, sure enough to load it without a click: one of its
- * pages (every site's home page has the same path).
+ * pages. A home page is one site's only (`pageKey`).
  */
 export function isPageOf(c: Case, url: string): boolean {
-	return casePages(c).some((p) => isPageUrl(p.url, url));
+	return pageAt(c, url) !== undefined;
 }
 
 /** A web page's address, one a click may open (an imported case's is anyone's). */
@@ -713,17 +779,6 @@ export function isWebPage(url: string): boolean {
 	try {
 		const { protocol } = new URL(url);
 		return protocol === "https:" || protocol === "http:";
-	} catch {
-		return false;
-	}
-}
-
-/** `isPageOf` for a case's page address. */
-export function isPageUrl(caseUrl: string, url: string): boolean {
-	if (!samePath(caseUrl, url)) return false;
-	try {
-		const { origin, pathname } = new URL(url);
-		return pathname !== "/" || origin === new URL(caseUrl).origin;
 	} catch {
 		return false;
 	}

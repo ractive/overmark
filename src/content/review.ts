@@ -28,7 +28,7 @@ import {
 	type ResolveChoice,
 	type Shape,
 	STATUS_LABEL,
-	samePath,
+	samePage,
 	shapeBounds,
 	shapeOnBox,
 	translateShape,
@@ -898,7 +898,7 @@ export class Reviewer {
 	#whereItWas(annotation: Annotation): ReviewItem | undefined {
 		// Only on its own page: a case spans pages (DEC-038).
 		const url = this.#case ? markUrl(this.#case, annotation) : "";
-		if (!samePath(url, location.href)) return undefined;
+		if (!samePage(url, location.href)) return undefined;
 		const win = this.overlay.doc.defaultView;
 		return {
 			number: annotation.number,

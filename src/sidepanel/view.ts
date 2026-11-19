@@ -29,9 +29,10 @@ import {
 	MAX_VERDICT,
 	type MarkStatus,
 	markStatus,
-	marksOnPage,
+	marksByPage,
 	markUrl,
 	pageAt,
+	pageKey,
 	RESOLUTION_LABEL,
 	RESOLVE_CHOICES,
 	type Resolution,
@@ -39,7 +40,6 @@ import {
 	STATUS_GROUPS,
 	type StatusGroup,
 	samePage,
-	samePath,
 	type UserRef,
 	viewportAt,
 } from "../lib/case.ts";
@@ -1835,8 +1835,11 @@ function renderPages(
 	actions: Actions,
 ): void {
 	const here = tabUrl ? pageAt(c, tabUrl) : undefined;
+	// Counted once for all the pages, not once per page.
+	const counts = marksByPage(c);
+	const marksOn = (url: string) => counts.get(pageKey(url)) ?? 0;
 	const key = JSON.stringify([
-		pages.map((page) => [page.url, page.title, marksOnPage(c, page.url)]),
+		pages.map((page) => [page.url, page.title, marksOn(page.url)]),
 		here?.url ?? null,
 	]);
 	if (key === p.pagesKey) return;
@@ -1844,7 +1847,7 @@ function renderPages(
 	p.pages.hidden = pages.length === 0;
 	p.pages.replaceChildren(
 		...pages.map((page) => {
-			const marks = marksOnPage(c, page.url);
+			const marks = marksOn(page.url);
 			const front = here !== undefined && samePage(here.url, page.url);
 			return h(
 				"li",
@@ -2074,7 +2077,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 				onCasePage &&
 				match !== undefined &&
 				!isFound(match) &&
-				!samePath(markUrl(c, a), loaded?.url ?? "");
+				!samePage(markUrl(c, a), loaded?.url ?? "");
 			return markItem(c, a, {
 				crop: images?.urls.get(a.crop),
 				match: elsewhere ? undefined : match,

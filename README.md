@@ -118,6 +118,10 @@ user agent. What differs from Chrome and Edge:
    opens the case the page shows. A case can span several pages: go on to the next page
    of what you are testing, click "Add marks" again, and the marks you draw there go into
    the same case, which lists its pages with their marks and opens each with a click.
+   A page is its path (and its hash route, `#/cart`), in whatever environment; a site's
+   home page is that site's only. Pages that differ only in their query
+   (`?route=cart`, `?id=2`) are one page to Sitegloss, which keeps no query: such a
+   case has one page.
 4. On the same page in another environment (say `localhost:3000`), click the case in the side panel:
    its marks are drawn on the tab in front, whatever page that is. While the case is open
    they follow the tab in front: another tab, a reload or a navigation draws them there

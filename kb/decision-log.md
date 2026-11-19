@@ -1423,9 +1423,10 @@ change.
   "Add marks" starts it again on the new page), and saving the mark records the page. The
   first mark's page is still the case's first page (a case started on one page and first
   marked on another is that one's).
-- **A page is its path, in whatever environment,** as everywhere in Sitegloss (DEC-001,
-  `samePath`): a mark added on `localhost:3000/cart` to a case from `www.example.com/cart`
-  is on the same page, not on a second one. Two sites' home pages are two pages.
+- **A page is its path, in whatever environment,** as everywhere in Sitegloss (DEC-001):
+  a mark added on `localhost:3000/cart` to a case from `www.example.com/cart` is on the
+  same page, not on a second one. Two sites' home pages are two pages. One function
+  says which page an address is (`pageKey`, see "After the review" below).
 - **Pages of another site are allowed.** A flow crosses from a shop to its payment
   provider. Nothing in the code needs one origin: a mark belongs to a screenshot, a
   screenshot has an address, and Sitegloss asks for each site as it always did (the
@@ -1452,6 +1453,49 @@ change.
   `viewport`, and each mark's `page`; `load_case` says each mark's `page` and
   `onThisPage`. `case.md` lists the pages, and says each mark's and each screenshot's page
   where the case has several; a case of one page gives the same file as before.
+
+**After the review of this decision's commit** (2026-11-19, the same day; each point
+was a finding, checked here before it was fixed):
+
+- **One rule for "the same page", and it is the server's.** Four rules had grown
+  (`samePath`, `samePage`, `isPageUrl`, an exact comparison) and disagreed for a home
+  page and for a hash route at `/`. Now `pageKey(url)` alone decides, for the list, the
+  counts, "This page", what a draw found, `onThisPage` and the content script: the path
+  without the slashes at its end, plus the hash route written `#/…` without the slashes
+  at its end; the origin only when both are empty (a home page). It is the function of
+  sitegloss.dev (`packages/api/src/v1/page.ts`), and `test/page-key.json` is a copy of
+  the server's vectors that it has to pass. So a hash route at `/`
+  (`app.example.com/#/cart`) is a page of its own in any environment, a slash at the end
+  of a hash route says nothing, and `/demo/` and `/demo/#/` are one page. The price: a
+  site's home page on localhost is not its home page on production, anywhere; before,
+  a mark drawn on no element showed on any home page once the case was opened there.
+- **Pages told apart only by their query are one page.** The query is cut from every
+  address that is kept (DEC-009: it carries tokens and personal data), so
+  `index.php?route=cart` and `index.php?route=checkout`, or `/product?id=1` and
+  `?id=2`, are one page: such a case never gets a second page, and a box drawn on no
+  element shows on all of them. Known and accepted; the README says so.
+- **A page's short name keeps its hash route** (`x.example/demo/#/book`), which is all
+  that tells a hash-routed app's pages apart in the panel and in an AI app's question.
+- **When `page` follows the first page left, it takes that page's window** (its first
+  screenshot's), not the window of the page that left. A screenshot that named no page
+  is given the leaving page's address first, so it does not move with `page`.
+- **`page`, the list and the screenshots are made to agree where a case comes in** (an
+  import, and the sync): every screenshot names its page (one that did not is of
+  `page`), `page` is the first of the list (put there when missing), a page is there
+  once. A file can say otherwise and `validateCase` checks shapes only.
+- **The list of a started case is built from its screenshots at every save,** so the
+  first page of a case from before the list, kept when its last mark went, is not
+  written into the list with 0 marks.
+- **A round trip through 0.3.0 loses the titles and languages of all pages but the
+  first.** 0.3.0 drops `pages` when it stores the case; the pages come back from the
+  screenshots, in the screenshots' order, without titles. Accepted: the addresses, the
+  marks and their pages are whole. `test/case-0-3-0.ts` is 0.3.0's own case module, and
+  a test reads a new file with it.
+- **The 201st page is refused before anything is stored,** in the words of the other
+  limits ("holds marks on 200 pages, the most a case can"), not by the format's check
+  after the screenshot was made.
+- **Counting the marks of every page is one pass** (`marksByPage`), not one scan of the
+  screenshots per mark and page: a second per render at the format's limits before.
 
 Not done: a toolbar that comes back by itself after a navigation while marks are being
 added. The panel keeps the case open and "Add marks" is one click; whether the toolbar

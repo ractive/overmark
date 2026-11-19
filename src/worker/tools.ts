@@ -33,10 +33,11 @@ import {
 	MAX_VERDICT,
 	type MarkStatus,
 	markStatus,
-	marksOnPage,
+	marksByPage,
 	markUrl,
 	newId,
 	nextNumbers,
+	pageKey,
 	pendingImage,
 	plainUrl,
 	RESOLUTION_LABEL,
@@ -45,7 +46,7 @@ import {
 	resolutionStatus,
 	type Shot,
 	STATUS_LABEL,
-	samePath,
+	samePage,
 	shotUrl,
 	textLength,
 	withFinding,
@@ -290,11 +291,12 @@ function reopensView(reopens: readonly Reopen[] | undefined, compact: boolean) {
 
 /** The case's pages (DEC-038), each with how many of the marks are on it. */
 function pagesView(c: Case) {
+	const counts = marksByPage(c);
 	return casePages(c).map((p) => ({
 		url: plainUrl(p.url),
 		title: p.title,
 		lang: p.lang,
-		marks: marksOnPage(c, p.url),
+		marks: counts.get(pageKey(p.url)) ?? 0,
 	}));
 }
 
@@ -778,7 +780,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 						return {
 							...matchView(m),
 							page: plainUrl(page),
-							onThisPage: samePath(page, result.url),
+							onThisPage: samePage(page, result.url),
 						};
 					}),
 					budget() - 200,
