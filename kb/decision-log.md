@@ -1803,9 +1803,9 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   it meanwhile and the team still has comes back, and that is said once ("2 marks
   deleted while not syncing are back: the team still has them"). Edits and new marks
   made meanwhile are sent as before. The reasoning is DEC-041's for a whole case.
-- **A delete for the team is the user's delete.** The panel and an AI app's tool tell
-  the sync before they delete a case (`cloud:deleting`, `CaseBook.deleted`), and only
-  such a case becomes a `case.delete`. A synced case that is merely not in the store
+- **A delete for the team is the user's delete.** Only a case with a record of its
+  delete becomes a `case.delete` (first a message to the worker and a note in the
+  book; since the re-check the store's own record, see below). A synced case that is merely not in the store
   (its database lost, or made anew) is read from the server again; before, a lost
   database deleted every synced case for the team. Marks have no such record.
 - **What never changes of a mark is compared as it goes to the server and comes back**

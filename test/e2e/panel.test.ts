@@ -217,6 +217,11 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await enter();
 			await h.control.waitFor(`!${id("home")}.hidden`);
 			expect(await storedCase("c_keys")).toBeUndefined();
+			// The delete is on record, written with it (DEC-039): by this
+			// the sync deletes the case for a team, and by nothing else.
+			expect(
+				(await h.control.eval<{ deleted: string[] }>(READ_DB)).deleted,
+			).toEqual(["c_keys"]);
 		},
 	);
 

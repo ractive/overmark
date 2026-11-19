@@ -142,7 +142,9 @@ Delete a case in the side panel; its screenshots go with it. Removing the extens
 deletes everything it stored in the browser. Files it wrote (exports, synced files)
 stay until you delete them. A case your team has at sitegloss.dev is deleted there too
 when you delete it while signed in; what is at the service otherwise stays until it is
-deleted there.
+deleted there. So that a deleted case can be told from one the browser lost, the id of
+a deleted case and the time stay in the browser until the delete has reached the team,
+at most 30 days.
 
 ## Contact
 

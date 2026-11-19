@@ -24,10 +24,16 @@ export const READ_DB = `new Promise((resolve, reject) => {
 		const cases = tx.objectStore("cases").getAll();
 		const images = tx.objectStore("images").getAll();
 		const keys = tx.objectStore("images").getAllKeys();
-		tx.oncomplete = () => resolve({
-			cases: cases.result,
-			images: keys.result.map((key, i) => ({ key, size: images.result[i].blob.size, type: images.result[i].blob.type })),
-		});
+		// Beside the images the store keeps the record of each deleted case
+		// ("!deleted/<id>"): no image, and listed by itself.
+		tx.oncomplete = () => {
+			const all = keys.result.map((key, i) => ({ key, value: images.result[i] }));
+			resolve({
+				cases: cases.result,
+				images: all.filter((e) => !e.key.startsWith("!")).map((e) => ({ key: e.key, size: e.value.blob.size, type: e.value.blob.type })),
+				deleted: all.filter((e) => e.key.startsWith("!deleted/")).map((e) => e.key.slice(9)),
+			});
+		};
 	};
 })`;
 
