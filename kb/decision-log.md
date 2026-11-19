@@ -1773,9 +1773,44 @@ with the reviewer's proof before it was fixed; the proofs are tests now):
   both differ the team's text is kept: 2 marks"). The count is made from the team's
   marks as last seen (`CaseBook.theirs`).
 - **A case can be marked to be read again** (`CaseBook.reread`: a join, a change that
-  could not be stored, a case missing here, a book taken up again). Nothing of such a
-  case is sent before it was read; a read that fails waits 1, 5, 30 minutes and then 6
-  hours, and what is wrong stays on the screen until it works.
+  could not be stored, a case missing here, a book taken up again). Of a join, a
+  missing case and a book taken up again nothing is sent before the read; a read that
+  fails waits 1, 5, 30 minutes and then 6 hours, and what is wrong stays on the screen
+  until it works. "Sync now" reads them at once.
+- **A case that fails to apply is not passed by.** The cursor goes on (one case must
+  not hold the others), and the case gets that mark; before, the change never arrived
+  and nothing said so after the next run. An image the server cannot give, or that is
+  not the image named, is that case's matter in the same way: the case is stored
+  without the marks that need it, the run goes on, the cursor is written, and the case
+  is read again later. (The decision was to skip the whole case; it is stored without
+  those marks instead, so one lost image does not keep a case of fifty marks away.)
+- **Ids written down before their case is stored are checkable** (`announced`: each
+  with its mark's drawing, its screenshot's time). The order stays "ids first, then the
+  case", which closes the stop between the case and the book; a stop before the case,
+  or a failed write of the case, is closed by taking the ids back (on failure) and by
+  taking an announced id only for the mark it was meant for (after a stop). Before, a
+  mark the user made under such an id was taken for the teammate's.
+- **What an id here stands for is checked before anything is derived** (`relink`): a
+  screenshot is the server's only when it was taken at the same time (`capturedAt` is
+  kept in the shadow: `s<n>` is given again after an Undo or a delete), a mark only
+  with the same drawing on the same screenshot. A mark without an id is put together
+  with a mark of the server's that no mark stands for when it has the same number, or
+  when that mark's id here is gone or was shown to be another mark's (a renumbering
+  whose bookkeeping was not written; the decision asked for "the same number" alone,
+  which would undo what `relink` is for).
+- **A book taken up again derives no delete from its old shadow** (signed out and in,
+  another team or server and back): the case is read whole first, what was deleted of
+  it meanwhile and the team still has comes back, and that is said once ("2 marks
+  deleted while not syncing are back: the team still has them"). Edits and new marks
+  made meanwhile are sent as before. The reasoning is DEC-041's for a whole case.
+- **A delete for the team is the user's delete.** The panel and an AI app's tool tell
+  the sync before they delete a case (`cloud:deleting`, `CaseBook.deleted`), and only
+  such a case becomes a `case.delete`. A synced case that is merely not in the store
+  (its database lost, or made anew) is read from the server again; before, a lost
+  database deleted every synced case for the team. Marks have no such record.
+- **A cursor of 0 is none:** the whole state is asked for. (The server answered
+  `since=0` as the whole state, which names no deletes; it answers it as any revision
+  now, and the server in memory does the same.)
 
 ## DEC-040: The API's types are generated, with TypeScript 5 for the generator alone
 

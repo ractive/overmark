@@ -14,7 +14,13 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { withTitle } from "../../../src/lib/case.ts";
-import { addMark, change, signIn, startCase } from "../../cloud-helpers.ts";
+import {
+	addMark,
+	change,
+	removeCase,
+	signIn,
+	startCase,
+} from "../../cloud-helpers.ts";
 import { PASSWORD, real, SERVER } from "../../cloud-real.ts";
 import {
 	backgroundLog,
@@ -154,7 +160,7 @@ describe.skipIf(SERVER === undefined || !firefoxReady)(
 			console.log(
 				`Firefox: a teammate's case showed in the open panel after ${Date.now() - sent} ms`,
 			);
-			await dana.device.store.deleteCase(caseId);
+			await removeCase(dana.device, caseId);
 			await dana.device.engine.request();
 			await h.rdp.waitFor(
 				panel,

@@ -453,6 +453,7 @@ const ready = Connection.start({
 	// in a case synced with a team (DEC-039).
 	me: () => cloud.me().catch(() => undefined),
 	team: (caseId) => cloud.teamOf(caseId).catch(() => undefined),
+	deleting: (caseId) => cloud.deleting(caseId),
 });
 ready.catch((error: unknown) =>
 	console.error("Sitegloss: AI connection", error),

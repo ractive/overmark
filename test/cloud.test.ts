@@ -43,6 +43,7 @@ import {
 	keys,
 	look,
 	PAY,
+	removeCase,
 	signIn,
 	startCase,
 	status,
@@ -61,6 +62,12 @@ beforeEach(() => {
 	tess = device("tess", server.api(TESS));
 	dana = device("dana", server.api(DANA));
 });
+
+/** Wait until something is so (a run under way reaches a point). */
+async function until(is: () => boolean): Promise<void> {
+	for (let i = 0; i < 400 && !is(); i++) await Bun.sleep(5);
+	if (!is()) throw new Error("it never came to that");
+}
 
 const book = (d: Device, caseId: string) =>
 	d.kv.data.get(`case:${caseId}`) as CaseBook | undefined;
@@ -679,6 +686,309 @@ describe("a case the team already has (review B, sync 2 and 3)", () => {
 	});
 });
 
+describe("a change of the team's that cannot be stored (review B, sync 1)", () => {
+	const numbered = async (d: Device) =>
+		look(await d.store.getCase("c_flow"))?.marks.map((m) => [
+			m.number,
+			m.comment,
+		]);
+	/** The next write of a case here fails, once: no room, a closed database. */
+	function failOnce(d: Device): () => void {
+		const update = d.store.updateCase.bind(d.store);
+		let failed = 0;
+		d.store.updateCase = async (id, how) => {
+			if (failed++ === 0) throw new DOMException("quota", "QuotaExceededError");
+			return update(id, how);
+		};
+		return () => {
+			d.store.updateCase = update;
+		};
+	}
+
+	test("the cursor goes on, the case does not: it is marked to be read again, the problem stays, and a minute later it arrives", async () => {
+		await shared();
+		await change(dana, "c_flow", (c, now) =>
+			withComment(c, "a1", "Dana's words", now),
+		);
+		await addMark(dana, "c_flow", "Dana's third");
+		await dana.engine.request();
+		const restore = failOnce(tess);
+		await tess.engine.request();
+		restore();
+		expect(tess.kv.data.get(KEYS.cursor)).toBe(server.seq);
+		const said = [
+			{
+				caseId: "c_flow",
+				title: "Your cart",
+				text: "What the team changed could not be stored here: quota It is read again later.",
+			},
+		];
+		expect(status(tess)?.state).toBe("problem");
+		expect(status(tess)?.problems).toEqual(said);
+		// The ids written down for the marks that were not stored are taken back.
+		expect(Object.keys(book(tess, "c_flow")?.marks ?? {})).toEqual([
+			"a1",
+			"a2",
+		]);
+		expect(book(tess, "c_flow")?.announced).toBeUndefined();
+		// Run after run it stays said, and nothing is fetched for it yet.
+		tess.api.calls.length = 0;
+		for (let i = 0; i < 3; i++) await tess.engine.request();
+		expect(status(tess)?.problems).toEqual(said);
+		expect(tess.api.calls.filter((c) => c.startsWith("GET case"))).toEqual([]);
+		// A minute later the case is read by itself, and all of it is here.
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		await tess.engine.request();
+		expect(tess.api.calls).toContain("GET case c_flow");
+		expect(await numbered(tess)).toEqual([
+			[1, "Dana's words"],
+			[2, "Pay button too pale"],
+			[3, "Dana's third"],
+		]);
+		expect(status(tess)?.state).toBe("synced");
+		expect(status(tess)?.problems).toEqual([]);
+		expect(book(tess, "c_flow")?.reread).toBeUndefined();
+	});
+
+	test("a mark made here meanwhile under the number the team's mark has is not taken for the team's", async () => {
+		await shared();
+		await addMark(dana, "c_flow", "Dana's third");
+		await dana.engine.request();
+		const restore = failOnce(tess);
+		await tess.engine.request();
+		restore();
+		// Tess's own next mark gets the id here that Dana's would have had.
+		const own = await addMark(tess, "c_flow", "Tess's own third");
+		const theirs = server
+			.marksOf("c_flow")
+			.find((m) => m.comment === "Dana's third");
+		expect(own.id).toBe("a3");
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		await sync(tess, dana);
+		await sync(tess, dana);
+		// Both marks are there, each its own, on every device and at the server.
+		const all = server
+			.marksOf("c_flow")
+			.map((m) => [m.comment, m.createdBy?.name]);
+		expect(all).toContainEqual(["Dana's third", "Dana Developer"]);
+		expect(all).toContainEqual(["Tess's own third", "Tess Tester"]);
+		expect(all).toHaveLength(4);
+		expect(
+			server.marksOf("c_flow").find((m) => m.id === theirs?.id)?.comment,
+		).toBe("Dana's third");
+		expect(look(await tess.store.getCase("c_flow"))).toEqual(
+			look(await dana.store.getCase("c_flow")),
+		);
+		expect(await images(tess, "c_flow")).toEqual(await images(dana, "c_flow"));
+		expect(status(tess)?.state).toBe("synced");
+	});
+
+	test("the worker stops between the ids and the case: a mark made here under such an id is not the team's", async () => {
+		await shared();
+		await addMark(dana, "c_flow", "Dana's third");
+		await dana.engine.request();
+		// Tess's worker writes the ids down and is stopped before the case.
+		const update = tess.store.updateCase.bind(tess.store);
+		tess.store.updateCase = () => new Promise(() => undefined);
+		void tess.engine.request();
+		await until(() => book(tess, "c_flow")?.announced !== undefined);
+		const stopped = structuredClone(book(tess, "c_flow")) as CaseBook;
+		expect(Object.keys(stopped.announced?.marks ?? {})).toEqual(["a3"]);
+		// A new worker, with the book as the stopped one left it.
+		const again = device("tess", server.api(TESS));
+		for (const [key, value] of tess.kv.data) again.kv.data.set(key, value);
+		again.kv.data.set("case:c_flow", stopped);
+		for (const [key, value] of tess.store.cases)
+			again.store.cases.set(key, value);
+		for (const [key, value] of tess.store.images)
+			again.store.images.set(key, value);
+		tess.store.updateCase = update;
+		const own = await addMark(again, "c_flow", "Tess's own");
+		expect(own.id).toBe("a3");
+		await sync(again, dana);
+		await sync(again, dana);
+		const all = server
+			.marksOf("c_flow")
+			.map((m) => [m.comment, m.createdBy?.name]);
+		expect(all).toContainEqual(["Dana's third", "Dana Developer"]);
+		expect(all).toContainEqual(["Tess's own", "Tess Tester"]);
+		expect(all).toHaveLength(4);
+		expect(look(await again.store.getCase("c_flow"))).toEqual(
+			look(await dana.store.getCase("c_flow")),
+		);
+	});
+
+	test("an image the server cannot give is that case's matter: the other cases arrive, the cursor is written, the membership is not doubted", async () => {
+		await shared();
+		await startCase(tess, "c_a");
+		await addMark(tess, "c_a", "A");
+		await tess.engine.request();
+		// The server lost the image of that case's screenshot.
+		const sha = server.shotsOf("c_a")[0]?.image.sha256 as string;
+		server.blobs.delete(sha);
+		await change(tess, "c_flow", (c, now) =>
+			withComment(c, "a1", "Tess's newer words", now),
+		);
+		await tess.engine.request();
+		const checked = (dana.kv.data.get(KEYS.account) as Account).checkedAt;
+		await dana.engine.request();
+		expect(dana.kv.data.get(KEYS.cursor)).toBe(server.seq);
+		expect(look(await dana.store.getCase("c_flow"))?.marks[0]?.comment).toBe(
+			"Tess's newer words",
+		);
+		expect(status(dana)?.state).toBe("problem");
+		expect(status(dana)?.text).toBeUndefined();
+		expect(status(dana)?.problems.map((p) => [p.caseId, p.text])).toEqual([
+			[
+				"c_a",
+				"A mark of the team is not shown here: an image the server sent is not the image named (missing, not a WebP image, too large, or other content). It is read again later.",
+			],
+		]);
+		expect((dana.kv.data.get(KEYS.account) as Account).checkedAt).toBe(checked);
+	});
+});
+
+describe("a book taken up again (review B, sync 4)", () => {
+	test("a mark deleted while signed out is not deleted for the team: it is back, and that is said once", async () => {
+		await shared();
+		await tess.engine.signOut();
+		expect(tess.kv.data.get(KEYS.modes)).toEqual({ c_flow: "local" });
+		// While not syncing: one mark deleted, one edited, one added.
+		await change(tess, "c_flow", (c, now) => withoutAnnotation(c, "a2", now));
+		await change(tess, "c_flow", (c, now) =>
+			withComment(c, "a1", "Edited while signed out", now),
+		);
+		await addMark(tess, "c_flow", "Added while signed out");
+		const sent: Op[] = [];
+		const ops = tess.api.ops.bind(tess.api);
+		tess.api.ops = async (team, list) => {
+			sent.push(...list);
+			return ops(team, list);
+		};
+		await signIn(tess);
+		expect(status(tess)?.problems).toEqual([
+			{
+				caseId: "c_flow",
+				title: "Your cart",
+				text: "1 mark deleted while not syncing is back: the team still has it.",
+			},
+		]);
+		await sync(tess, dana);
+		// No delete was sent; the edit and the new mark were.
+		expect(sent.filter((op) => op.type.endsWith(".delete"))).toEqual([]);
+		expect(server.marksOf("c_flow").map((m) => m.comment)).toEqual([
+			"Edited while signed out",
+			"Pay button too pale",
+			"Added while signed out",
+		]);
+		expect(look(await tess.store.getCase("c_flow"))).toEqual(
+			look(await dana.store.getCase("c_flow")),
+		);
+		// Said once: the next run has nothing to say.
+		expect(status(tess)?.problems).toEqual([]);
+		expect(status(tess)?.state).toBe("synced");
+		// From here on a delete is a delete again.
+		await change(tess, "c_flow", (c, now) => withoutAnnotation(c, "a2", now));
+		await sync(tess, dana);
+		expect(server.marksOf("c_flow").map((m) => m.comment)).toEqual([
+			"Edited while signed out",
+			"Added while signed out",
+		]);
+	});
+
+	test("the whole case deleted while signed out comes back too", async () => {
+		await shared();
+		await tess.engine.signOut();
+		await tess.store.deleteCase("c_flow");
+		await signIn(tess);
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeDefined();
+		expect((await tess.store.getCase("c_flow"))?.annotations).toHaveLength(2);
+	});
+});
+
+describe("a delete for the team is the user's delete (review B, sync 6)", () => {
+	test("the cases' database is lost and the sync's is not: nothing is deleted for the team, and the cases are read again", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		for (let n = 0; n < 5; n++) {
+			await startCase(tess, `c_${n}`);
+			await addMark(tess, `c_${n}`, "A mark");
+		}
+		await sync(tess, dana);
+		// The database of the cases is empty (made anew after a corruption).
+		tess.store.cases.clear();
+		tess.store.images.clear();
+		tess.api.calls.length = 0;
+		await tess.engine.request();
+		expect(posts(tess)).toEqual([]);
+		expect([...server.cases.values()].filter((r) => !r.deleted)).toHaveLength(
+			5,
+		);
+		expect(await tess.store.listCases()).toHaveLength(5);
+		expect(Object.values(await images(tess, "c_3"))).not.toContain("MISSING");
+		expect(status(tess)?.state).toBe("synced");
+		await dana.engine.request();
+		expect(await dana.store.listCases()).toHaveLength(5);
+	});
+
+	test("the user's delete, said first, deletes for the team; one that did not happen after all deletes nothing", async () => {
+		await shared();
+		// Announced, and then the case stays (the delete failed).
+		await tess.engine.deleting("c_flow");
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeDefined();
+		// Much later the case is lost: not a delete, the note is long stale.
+		tess.clock.now = new Date(tess.clock.now.getTime() + 120_000);
+		await tess.engine.request();
+		tess.store.cases.clear();
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeDefined();
+		expect(await tess.store.getCase("c_flow")).toBeDefined();
+		// The real thing.
+		await removeCase(tess, "c_flow");
+		await sync(tess, dana);
+		expect(server.caseOf("c_flow")).toBeUndefined();
+		expect(await dana.store.getCase("c_flow")).toBeUndefined();
+	});
+});
+
+describe("a cursor of nothing read yet (review B, sync 7)", () => {
+	test("a first sync of an empty team, then a teammate's delete: it is told", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_zero");
+		await addMark(tess, "c_zero", "One");
+		await addMark(tess, "c_zero", "Two");
+		// Tess's run fetches (nothing: the cursor is 0) and then sends them.
+		await tess.engine.request();
+		expect(tess.kv.data.get(KEYS.cursor)).toBe(0);
+		expect(server.marksOf("c_zero")).toHaveLength(2);
+		await dana.engine.request();
+		await change(dana, "c_zero", (c, now) => withoutAnnotation(c, "a2", now));
+		await dana.engine.request();
+		await sync(tess, dana);
+		expect(
+			look(await tess.store.getCase("c_zero"))?.marks.map((m) => m.comment),
+		).toEqual(["One"]);
+		// And the whole case deleted in that window.
+		await removeCase(dana, "c_zero");
+		await sync(dana, tess);
+		expect(await tess.store.getCase("c_zero")).toBeUndefined();
+	});
+
+	test("the server in memory answers since=0 as the real one does: as any revision, with what was deleted", async () => {
+		await shared();
+		await change(tess, "c_flow", (c, now) => withoutAnnotation(c, "a2", now));
+		await tess.engine.request();
+		const from0 = server.changes(0);
+		expect(from0.removed?.map((r) => r.type).sort()).toEqual(["mark", "shot"]);
+		expect(from0.marks?.map((m) => m.comment)).toEqual(["Total is cut off"]);
+		// Without a revision: the whole state, which names no deletes.
+		expect(server.changes(undefined).removed).toEqual([]);
+	});
+});
+
 describe("the pages of a synced case are the server's (DEC-039)", () => {
 	const LOCAL_PAY = "http://localhost:3000/checkout/pay/";
 
@@ -798,7 +1108,7 @@ describe("deleting", () => {
 
 	test("a case deleted on one device is deleted for the team, and goes on the other", async () => {
 		await shared();
-		await tess.store.deleteCase("c_flow");
+		await removeCase(tess, "c_flow");
 		await tess.engine.request();
 		expect(server.caseOf("c_flow")).toBeUndefined();
 		expect(book(tess, "c_flow")).toBeUndefined();
@@ -817,7 +1127,7 @@ describe("deleting", () => {
 			withComment(c, "a1", "Too late", now),
 		);
 		await tess.engine.request();
-		await dana.store.deleteCase("c_flow");
+		await removeCase(dana, "c_flow");
 		await dana.engine.request();
 		tess.api.offline = false;
 		await tess.engine.request();
@@ -833,7 +1143,7 @@ describe("deleting", () => {
 			(p) => p !== "case:delete",
 		);
 		await dana.engine.retry();
-		await dana.store.deleteCase("c_flow");
+		await removeCase(dana, "c_flow");
 		await dana.engine.request();
 		expect(server.caseOf("c_flow")).toBeDefined();
 		expect(look(await dana.store.getCase("c_flow"))).toEqual(
@@ -934,7 +1244,7 @@ describe("what the server does not take", () => {
 
 describe("an image from the server is taken only when it is the image named (review B, 2)", () => {
 	const TEXT =
-		"A mark of the team is not shown here: an image the server sent is not the image named (missing, not a WebP image, too large, or other content).";
+		"A mark of the team is not shown here: an image the server sent is not the image named (missing, not a WebP image, too large, or other content). It is read again later.";
 
 	for (const [what, answer] of [
 		[
@@ -991,13 +1301,29 @@ describe("an image from the server is taken only when it is the image named (rev
 			]);
 			// Nothing of it went back to the server, and nothing was deleted there.
 			expect(server.marksOf("c_flow")).toHaveLength(3);
-			// The image is right again: "Sync now" reads the team's state anew.
+			// It stays said, run after run, and the image is not asked for at
+			// every one of them: the case is read again a minute later.
+			dana.api.calls.length = 0;
+			await dana.engine.request();
+			await dana.engine.request();
+			expect(status(dana)?.problems).toEqual([
+				{ caseId: "c_flow", title: "Your cart", text: TEXT },
+			]);
+			expect(dana.api.calls.filter((c) => c.startsWith("GET blob"))).toEqual(
+				[],
+			);
+			// The image is right again, and the minute is over: the case is
+			// read by itself, and the mark is here.
 			dana.api.getBlob = get;
-			await dana.engine.retry();
+			dana.clock.now = new Date(dana.clock.now.getTime() + 61_000);
+			dana.api.calls.length = 0;
+			await dana.engine.request();
+			expect(dana.api.calls).toContain("GET case c_flow");
 			expect(look(await dana.store.getCase("c_flow"))).toEqual(
 				look(await tess.store.getCase("c_flow")),
 			);
 			expect(status(dana)?.state).toBe("synced");
+			expect(status(dana)?.problems).toEqual([]);
 		});
 
 	test("a bad screenshot leaves out the marks on it, and only those", async () => {

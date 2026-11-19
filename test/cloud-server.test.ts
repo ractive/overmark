@@ -36,6 +36,7 @@ import {
 	images,
 	look,
 	PAY,
+	removeCase,
 	signIn,
 	startCase,
 	status,
@@ -206,7 +207,7 @@ serverTest("against a real server", () => {
 		expect(status(tess.device)?.problems).toEqual([]);
 
 		// Deleted on one device: deleted for the team, and gone on the other.
-		await tess.device.store.deleteCase(id);
+		await removeCase(tess.device, id);
 		await tess.device.engine.request();
 		await dana.device.engine.request();
 		expect(await dana.device.store.getCase(id)).toBeUndefined();

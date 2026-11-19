@@ -628,7 +628,10 @@ export class FakeServer {
 		const head = this.seq;
 		const reset = since !== undefined && since > head;
 		const from = reset || since === undefined ? 0 : since;
-		const whole = from === 0;
+		// Only a request that names no revision gets the whole state (which
+		// names no deletes); `since=0` is a revision like any other, as at
+		// the server since its fix.
+		const whole = reset || since === undefined;
 		const revs = [
 			...this.cases.values(),
 			...this.shots.values(),

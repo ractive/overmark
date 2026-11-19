@@ -64,14 +64,17 @@ import {
 	applyOp,
 	deriveOps,
 	differing,
+	fixedOf,
 	type Incoming,
 	type Merged,
 	mergeCase,
 	NeedsImage,
 	opKey,
+	relink,
 	renumber,
 	reverse,
 	same,
+	settleAnnounced,
 	theirMark,
 } from "./wire.ts";
 
@@ -154,6 +157,12 @@ function whyOf(code: string, message: string): string {
 
 const sentence = (op: Op, code: string, message: string) =>
 	`${whatOf(op)}: ${whyOf(code, message)}.`;
+
+/** A case that has to be read from the server before anything of it is sent. */
+const blocks = (mark: Reread): boolean => mark.why !== "failed";
+
+/** How long a delete's note waits for the case to leave the store before it is taken for one that did not happen. */
+const DELETING_MS = 60_000;
 
 /** The most rejected changes kept per case. */
 const MAX_REJECTED = 50;
@@ -299,7 +308,15 @@ export class CloudSync {
 				book.teamId === teamId &&
 				book.shadow !== undefined
 			) {
-				if (here.has(book.caseId)) changed.push({ ...book, mode: "synced" });
+				// What was deleted of it meanwhile is not deleted for the team
+				// either: the case is read whole first, and marks the team
+				// still has come back (`#reread`, "resumed").
+				if (here.has(book.caseId))
+					changed.push({
+						...book,
+						mode: "synced",
+						reread: { why: "resumed", tries: 0, after: 0 },
+					});
 				else await this.#books.remove(book.caseId);
 			} else if (theirs && !resume) changed.push(book);
 		}
@@ -417,6 +434,20 @@ export class CloudSync {
 		}).then(() => this.#then());
 	}
 
+	/**
+	 * The user is about to delete this case (the panel, or an AI app's tool,
+	 * says so before it does): a synced case is then deleted for the team.
+	 * Without this, a case that is not in the store is taken for lost and
+	 * read from the server again.
+	 */
+	deleting(caseId: string): Promise<void> {
+		return this.#exclusive(async () => {
+			const book = await this.#books.get(caseId);
+			if (book === undefined || book.mode !== "synced") return;
+			await this.#books.put({ ...book, deleted: this.#now().getTime() });
+		});
+	}
+
 	/** "Sync now": also what the server refused before is tried again. */
 	retry(): Promise<void> {
 		return this.#exclusive(async () => {
@@ -424,22 +455,22 @@ export class CloudSync {
 				(b) =>
 					b.rejected !== undefined ||
 					b.cleanAt !== undefined ||
-					b.sent !== undefined,
+					b.sent !== undefined ||
+					b.reread !== undefined,
 			);
 			await this.#books.put(
 				...books.map((b) => {
 					const { rejected: _r, cleanAt: _c, sent: _s, ...rest } = b;
-					return rest;
+					// And a case waiting to be read again is read now.
+					return rest.reread === undefined
+						? rest
+						: { ...rest, reread: { ...rest.reread, after: 0 } };
 				}),
 			);
 			const account = await this.account();
 			if (account !== undefined)
 				await this.#deps.kv.set({
 					[KEYS.account]: { ...account, checkedAt: 0 },
-					// And the team's whole state is read again: what was left
-					// out before (an image that was not the one named) may be
-					// there now.
-					[KEYS.whole]: true,
 				});
 		}).then(() => this.#then());
 	}
@@ -699,10 +730,16 @@ export class CloudSync {
 				await this.#books.put(book);
 			}
 			if (book.mode !== "synced" || book.teamId !== team.id) continue;
-			// To be read from the server first: nothing of it is sent before.
+			// The delete that was announced did not happen: the note goes.
+			if (book.deleted !== undefined && now - book.deleted > DELETING_MS) {
+				const { deleted: _d, ...kept } = book;
+				book = kept;
+				await this.#books.put(book);
+			}
 			if (book.reread !== undefined) {
 				more ||= book.reread.after <= now;
-				continue;
+				// To be read from the server first: nothing of it is sent before.
+				if (blocks(book.reread)) continue;
 			}
 			if (book.cleanAt === c.updatedAt) continue;
 			// A case without marks is not sent until it has one (as the folder sync).
@@ -721,13 +758,32 @@ export class CloudSync {
 			if (--left > 0) await this.#say(await this.#status("syncing", { left }));
 		}
 		for (const book of gone) {
+			if (book.reread !== undefined) {
+				// Not here, and to be read: the read brings it.
+				more ||= book.reread.after <= now;
+				continue;
+			}
 			if (
-				book.mode === "synced" &&
-				book.teamId === team.id &&
-				book.shadow !== undefined
-			)
-				await this.#deleteCase(api, team, book);
-			else await this.#books.remove(book.caseId);
+				book.mode !== "synced" ||
+				book.teamId !== team.id ||
+				book.shadow === undefined
+			) {
+				await this.#books.remove(book.caseId);
+				continue;
+			}
+			// Deleted for the team only when the user deleted it (the panel
+			// and an AI app's tool say so first). A case that is merely not
+			// in the store (its database was lost, or made anew) is read from
+			// the server again: a lost database must not empty the team.
+			if (book.deleted !== undefined) await this.#deleteCase(api, team, book);
+			else {
+				await this.#books.put({
+					...emptyBook(book.caseId, "synced", team.id),
+					...(book.title === undefined ? {} : { title: book.title }),
+					reread: { why: "missing", tries: 0, after: 0 },
+				});
+				more = true;
+			}
 		}
 		return more;
 	}
@@ -757,23 +813,39 @@ export class CloudSync {
 			}
 			const { shots, marks, ...row } = detail;
 			try {
-				if (
-					await this.#applyCase(
-						api,
-						team,
-						book.caseId,
-						{
-							case: row,
-							shots: shots ?? [],
-							marks: marks ?? [],
-							removedMarks: [],
-							removedShots: [],
-						},
-						true,
-						false,
-					)
-				)
-					changed.push(book.caseId);
+				// A book taken up again: what was deleted here while it did not
+				// sync is forgotten, so that what the team still has of it
+				// comes back with this read instead of being deleted there.
+				const forgotten =
+					mark.why === "resumed"
+						? await this.#forgetDeletes(book)
+						: new Set<string>();
+				const applied = await this.#applyCase(
+					api,
+					team,
+					book.caseId,
+					{
+						case: row,
+						shots: shots ?? [],
+						marks: marks ?? [],
+						removedMarks: [],
+						removedShots: [],
+					},
+					true,
+					false,
+				);
+				if (applied.changed) changed.push(book.caseId);
+				const back = (marks ?? []).filter((m) => forgotten.has(m.id)).length;
+				if (back > 0)
+					this.#problems.push({
+						caseId: book.caseId,
+						title: row.title,
+						text: `${back === 1 ? "1 mark" : `${back} marks`} deleted while not syncing ${back === 1 ? "is" : "are"} back: the team still has ${back === 1 ? "it" : "them"}.`,
+					});
+				if (applied.incomplete !== undefined) {
+					await this.#readLater(book.caseId, "failed", applied.incomplete);
+					continue;
+				}
 				const after = await this.#books.get(book.caseId);
 				if (after?.reread !== undefined) {
 					const { reread: _r, ...read } = after;
@@ -781,10 +853,48 @@ export class CloudSync {
 				}
 			} catch (error) {
 				if (error instanceof ApiFailure) throw error;
-				await this.#readLater(book.caseId, mark.why, describe(error));
+				await this.#readLater(
+					book.caseId,
+					mark.why,
+					`What the team has of this case could not be stored here: ${describe(error)}`,
+				);
 			}
 		}
 		if (changed.length > 0) this.#deps.onChange?.(changed);
+	}
+
+	/**
+	 * Of a book taken up again: the marks and screenshots it knows and the
+	 * case here no longer has are forgotten (their ids at the server are in
+	 * the answer), so nothing is derived from their absence.
+	 */
+	async #forgetDeletes(book: CaseBook): Promise<Set<string>> {
+		const forgotten = new Set<string>();
+		const c = await this.#deps.store.getCase(book.caseId);
+		if (c === undefined || book.shadow === undefined) return forgotten;
+		const next = structuredClone(book);
+		// First what the ids here stand for now (a screenshot's id is given
+		// again after a delete).
+		relink(c, next);
+		const shadow = next.shadow as NonNullable<CaseBook["shadow"]>;
+		const marks = new Set(c.annotations.map((a) => a.id));
+		const shots = new Set(c.shots.map((s) => s.id));
+		for (const [id, wire] of Object.entries(next.marks))
+			if (!marks.has(id)) delete next.marks[id];
+			else forgotten.delete(wire);
+		const stood = new Set(Object.values(next.marks));
+		for (const wire of Object.keys(shadow.marks))
+			if (!stood.has(wire)) {
+				forgotten.add(wire);
+				delete shadow.marks[wire];
+			}
+		for (const [id] of Object.entries(next.shots))
+			if (!shots.has(id)) delete next.shots[id];
+		const kept = new Set(Object.values(next.shots));
+		for (const wire of Object.keys(shadow.shots))
+			if (!kept.has(wire)) delete shadow.shots[wire];
+		if (!same(next, book)) await this.#books.put(next);
+		return forgotten;
 	}
 
 	/** A case that was to be read again is not at the server (any more). */
@@ -807,8 +917,8 @@ export class CloudSync {
 	}
 
 	/**
-	 * Mark a case to be read from the server again, whole: now (a join), or
-	 * after a wait that grows with each read that failed.
+	 * Mark a case to be read from the server again, whole: now, or, with
+	 * something that went `wrong`, after a wait that grows with each time.
 	 */
 	async #readLater(
 		caseId: string,
@@ -825,14 +935,16 @@ export class CloudSync {
 		await this.#books.put({
 			...book,
 			reread: {
-				why,
+				// What must be read before anything is sent stays that.
+				why:
+					book.reread !== undefined && blocks(book.reread)
+						? book.reread.why
+						: why,
 				tries,
 				after: this.#now().getTime() + wait,
 				...(wrong === undefined
 					? {}
-					: {
-							text: `What the team changed could not be stored here: ${wrong} It is read again later; until then nothing of this case is sent.`,
-						}),
+					: { text: `${wrong} It is read again later.` }),
 			},
 		});
 	}
@@ -1264,7 +1376,10 @@ export class CloudSync {
 		const kv = this.#deps.kv;
 		const stored = (await kv.get(KEYS.cursor)) as number | undefined;
 		const again = (await kv.get(KEYS.whole)) === true;
-		let since = again || typeof stored !== "number" ? undefined : stored;
+		// A cursor of 0 is none: nothing was read yet, so the team's whole
+		// state is asked for (and a whole state names no deletes).
+		let since =
+			again || typeof stored !== "number" || stored === 0 ? undefined : stored;
 		let whole = since === undefined;
 		let reset = false;
 		let cases = new Map<string, WireCase>();
@@ -1362,15 +1477,31 @@ export class CloudSync {
 		}
 		for (const [caseId, incoming] of groups) {
 			try {
-				if (await this.#applyCase(api, team, caseId, incoming, whole, reset))
-					changed.add(caseId);
+				const applied = await this.#applyCase(
+					api,
+					team,
+					caseId,
+					incoming,
+					whole,
+					reset,
+				);
+				if (applied.changed) changed.add(caseId);
+				if (applied.incomplete !== undefined)
+					await this.#readLater(caseId, "failed", applied.incomplete);
 			} catch (error) {
 				if (error instanceof ApiFailure) throw error;
-				this.#problems.push({
+				// The cursor goes on, the case does not: it is marked to be read
+				// again by itself, and that stays said until it is stored.
+				if ((await this.#books.get(caseId)) === undefined)
+					await this.#books.put({
+						...emptyBook(caseId, "synced", team.id),
+						...(incoming.case?.title ? { title: incoming.case.title } : {}),
+					});
+				await this.#readLater(
 					caseId,
-					...(incoming.case?.title ? { title: incoming.case.title } : {}),
-					text: `What the team changed could not be stored here: ${describe(error)}`,
-				});
+					"failed",
+					`What the team changed could not be stored here: ${describe(error)}`,
+				);
 			}
 		}
 		if (whole) {
@@ -1466,10 +1597,17 @@ export class CloudSync {
 		came: Incoming,
 		whole: boolean,
 		lost: boolean,
-	): Promise<boolean> {
+	): Promise<{ changed: boolean; incomplete: string | undefined }> {
 		let incoming = came;
 		const store = this.#deps.store;
-		const given = await this.#books.get(caseId);
+		const stored = await this.#books.get(caseId);
+		// Ids written down by a run that stopped before it stored their case
+		// count only for the marks they were meant for.
+		const given =
+			stored?.announced === undefined ? stored : structuredClone(stored);
+		if (given?.announced !== undefined)
+			settleAnnounced(await store.getCase(caseId), given);
+		let incomplete: string | undefined;
 		// A case here that is kept on this device (the user said so, or it is
 		// another server's) is not the team's because the team names its id:
 		// an id is no secret (it is in every export, and every AI app and
@@ -1484,7 +1622,7 @@ export class CloudSync {
 				for (const m of came.marks) theirs[m.id] = theirMark(m);
 				if (!same(theirs, given.theirs))
 					await this.#books.put({ ...given, theirs, title: kept.title });
-				return false;
+				return { changed: false, incomplete: undefined };
 			}
 		}
 		const fetched = new Map<string, StoredImage>();
@@ -1531,12 +1669,8 @@ export class CloudSync {
 				shots: incoming.shots.filter((s) => !without.has(s.id)),
 				marks,
 			};
-			const title = incoming.case?.title ?? given?.title;
-			this.#problems.push({
-				caseId,
-				...(title ? { title } : {}),
-				text: `${left === 1 ? "A mark" : `${left} marks`} of the team ${left === 1 ? "is" : "are"} not shown here: ${refused.size === 1 ? "an image" : "images"} the server sent ${refused.size === 1 ? "is" : "are"} not the image named (missing, not a WebP image, too large, or other content).`,
-			});
+			// Said until a read of the case brings them (it is marked for one).
+			incomplete = `${left === 1 ? "A mark" : `${left} marks`} of the team ${left === 1 ? "is" : "are"} not shown here: ${refused.size === 1 ? "an image" : "images"} the server sent ${refused.size === 1 ? "is" : "are"} not the image named (missing, not a WebP image, too large, or other content).`;
 		}
 		/** Merge with the case as it is; an image it lacks is read and it is tried again. */
 		const attempt = async <T>(work: () => Promise<T>): Promise<T> => {
@@ -1561,7 +1695,11 @@ export class CloudSync {
 			}
 		};
 		// The ids of what is new are written down first: should the worker stop
-		// between the case and the book, the new marks are known as the server's.
+		// between the case and the book, the new marks are known as the
+		// server's. Each with what tells its mark or screenshot from another
+		// (`announced`): should it stop before the case is stored, or the
+		// case's write fail, an id here can come to mean another mark, and
+		// must not make that one the server's.
 		const first = await attempt(async () =>
 			mergeCase(
 				await store.getCase(caseId),
@@ -1572,40 +1710,81 @@ export class CloudSync {
 				options,
 			),
 		);
-		if (first === undefined) return false;
+		if (first === undefined) return { changed: false, incomplete };
 		const known = given ?? emptyBook(caseId, "synced", team.id);
-		if (
-			given === undefined ||
-			Object.keys(first.book.marks).some(
-				(id) => given.marks[id] === undefined,
-			) ||
-			Object.keys(first.book.shots).some((id) => given.shots[id] === undefined)
-		)
+		const newMarks = Object.keys(first.book.marks).filter(
+			(id) => known.marks[id] === undefined,
+		);
+		const newShots = Object.keys(first.book.shots).filter(
+			(id) => known.shots[id] === undefined,
+		);
+		const announce =
+			given === undefined || newMarks.length > 0 || newShots.length > 0;
+		if (announce) {
+			const marks = new Map(first.value.annotations.map((a) => [a.id, a]));
+			const shots = new Map(first.value.shots.map((s) => [s.id, s]));
 			await this.#books.put({
 				...known,
 				marks: { ...first.book.marks },
 				shots: { ...first.book.shots },
+				announced: {
+					marks: Object.fromEntries(
+						newMarks.flatMap((id) => {
+							const a = marks.get(id);
+							return a === undefined ? [] : [[id, fixedOf(a)]];
+						}),
+					),
+					shots: Object.fromEntries(
+						newShots.flatMap((id) => {
+							const s = shots.get(id);
+							return s === undefined ? [] : [[id, s.capturedAt]];
+						}),
+					),
+				},
 			});
+		}
 		let merged: Merged | undefined;
-		await attempt(async () => {
-			merged = undefined;
-			try {
-				await store.updateCase(caseId, (current) => {
-					merged = mergeCase(current, given, incoming, fetched, crops, options);
-					if (merged === undefined || !merged.changed) throw NOTHING;
-					return {
-						value: validateCase(merged.value),
-						images: merged.images as Map<string, StoredImage>,
-						deleteImages: merged.deleteImages,
-					};
-				});
-			} catch (error) {
-				if (error !== NOTHING) throw error;
+		try {
+			await attempt(async () => {
+				merged = undefined;
+				try {
+					await store.updateCase(caseId, (current) => {
+						merged = mergeCase(
+							current,
+							given,
+							incoming,
+							fetched,
+							crops,
+							options,
+						);
+						if (merged === undefined || !merged.changed) throw NOTHING;
+						return {
+							value: validateCase(merged.value),
+							images: merged.images as Map<string, StoredImage>,
+							deleteImages: merged.deleteImages,
+						};
+					});
+				} catch (error) {
+					if (error !== NOTHING) throw error;
+				}
+			});
+		} catch (error) {
+			// The case was not stored: the ids written down for it are taken
+			// back, so the book is as it was.
+			if (announce) {
+				if (stored === undefined) await this.#books.remove(caseId);
+				else await this.#books.put(given ?? stored);
 			}
-		});
+			throw error;
+		}
 		const result = merged as Merged | undefined;
-		if (result === undefined) return false;
-		await this.#books.put(result.book);
-		return result.changed;
+		if (result === undefined) {
+			if (announce && given !== undefined) await this.#books.put(given);
+			else if (announce) await this.#books.remove(caseId);
+			return { changed: false, incomplete };
+		}
+		const { announced: _told, ...settled } = result.book;
+		await this.#books.put(settled);
+		return { changed: result.changed, incomplete };
 	}
 }

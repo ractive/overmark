@@ -276,3 +276,9 @@ export const keys = (d: Device, caseId: string) =>
 
 export const status = (d: Device) =>
 	d.kv.data.get(KEYS.status) as CloudStatus | undefined;
+
+/** Delete a case as the panel and an AI app's tool do: said to the sync first. */
+export async function removeCase(d: Device, caseId: string): Promise<void> {
+	await d.engine.deleting(caseId);
+	await d.store.deleteCase(caseId);
+}

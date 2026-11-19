@@ -103,7 +103,12 @@ export interface ShadowMark {
 export interface Shadow {
 	case: CaseContent;
 	/** By the screenshot's id at the server. */
-	shots: Record<string, { image: ImageRef }>;
+	/**
+	 * `capturedAt`: when it was taken, as sent or received. A screenshot
+	 * here is the server's only when that agrees: its id here (`s<n>`) is
+	 * given again after an Undo or a delete, to another screenshot.
+	 */
+	shots: Record<string, { image: ImageRef; capturedAt?: string }>;
 	/** By the mark's id at the server. */
 	marks: Record<string, ShadowMark>;
 }
@@ -156,6 +161,24 @@ export interface CaseBook {
 	 * taken up again after a time without syncing. Kept across restarts.
 	 */
 	reread?: Reread;
+	/**
+	 * Ids of the server's written down before the case that has their marks
+	 * and screenshots was stored (should the worker stop between the two,
+	 * they are known as the server's), each with what tells whether the
+	 * mark or screenshot now under that id here is the one meant: the
+	 * mark's drawing (`fixedOf`), the screenshot's time. An id here can
+	 * come to mean another mark before the case is stored.
+	 */
+	announced?: {
+		marks: Record<string, string>;
+		shots: Record<string, string>;
+	};
+	/**
+	 * The user (or an AI app for them) deleted the case, and when (ms): only
+	 * then is it deleted for the team. A case that is merely not in the
+	 * store (a lost database) is read from the server again.
+	 */
+	deleted?: number;
 }
 
 /** A mark of the team's, as much as tells whether a mark here is it and says the same. */
@@ -169,6 +192,12 @@ export interface TheirMark {
 
 /** Why a case is read again, and when: a read that fails is tried later and later. */
 export interface Reread {
+	/**
+	 * `join`: with the team's copy. `missing`: not in the store here.
+	 * `resumed`: its book is taken up again after a time without syncing.
+	 * Nothing of these is sent before the read. `failed`: something of the
+	 * team's could not be stored or fetched; what is here is sent as usual.
+	 */
 	why: "join" | "failed" | "missing" | "resumed";
 	/** Reads that failed so far. */
 	tries: number;

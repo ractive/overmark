@@ -15,7 +15,13 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { type Case, withTitle } from "../../src/lib/case.ts";
-import { addMark, change, signIn, startCase } from "../cloud-helpers.ts";
+import {
+	addMark,
+	change,
+	removeCase,
+	signIn,
+	startCase,
+} from "../cloud-helpers.ts";
 import { PASSWORD, real, SERVER } from "../cloud-real.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import { type Db, openCase, panelHome, READ_DB, until } from "./steps.ts";
@@ -221,7 +227,7 @@ describe.skipIf(SERVER === undefined || browserBinary === undefined)(
 			await panel.waitFor(`!${id("home")}.hidden`);
 
 			// Deleted for the team by the teammate: it goes here.
-			await dana.device.store.deleteCase(caseId);
+			await removeCase(dana.device, caseId);
 			await dana.device.engine.request();
 			await panel.waitFor(`!(${row(`${title}, by Tess`)})`, 10_000);
 			await dana.session.end(base);

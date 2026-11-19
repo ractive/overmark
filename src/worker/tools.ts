@@ -116,6 +116,12 @@ export interface ToolDeps {
 	 * when it was written for this person.
 	 */
 	me?: () => Promise<string | undefined>;
+	/**
+	 * Said before a case is deleted (DEC-039): only a delete the sync was
+	 * told of is a delete for the team; a case that is merely gone from the
+	 * store is read from the server again.
+	 */
+	deleting?: (caseId: string) => Promise<void>;
 	/** How long the page may take to answer. */
 	pageTimeoutMs?: number;
 }
@@ -1495,6 +1501,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		},
 		execute: async ({ caseId }) => {
 			const c = await mustGet(caseId);
+			await deps.deleting?.(c.id);
 			await store.deleteCase(c.id);
 			deps.onChange?.(c.id);
 			return { content: [text(`Deleted “${c.title}”.`)] };

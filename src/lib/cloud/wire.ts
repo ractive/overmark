@@ -283,30 +283,88 @@ export function casePatch(
 }
 
 /**
- * A mark here that has no id at the server, though the server has a mark
- * that no mark here stands for, with the same drawing on the same
- * screenshot: the same mark under another number (it was renumbered, and
- * the bookkeeping was not written before the worker stopped, or it was
- * renumbered while the case synced with another server). They are put
- * together again, so the mark is neither deleted nor made a second time.
+ * Ids written down before their case was stored (`CaseBook.announced`) are
+ * taken as the server's only for the mark or screenshot they were meant
+ * for: one that is not here (the case was never stored), or is another one
+ * by now (a mark the user made under that id since), loses the id. The
+ * note itself goes: it is settled.
+ */
+export function settleAnnounced(c: Case | undefined, book: CaseBook): void {
+	const told = book.announced;
+	if (told === undefined) return;
+	const marks = new Map((c?.annotations ?? []).map((a) => [a.id, a]));
+	const shots = new Map((c?.shots ?? []).map((s) => [s.id, s]));
+	for (const [id, fixed] of Object.entries(told.marks)) {
+		const a = marks.get(id);
+		if (a === undefined || fixedOf(a) !== fixed) delete book.marks[id];
+	}
+	for (const [id, capturedAt] of Object.entries(told.shots))
+		if (shots.get(id)?.capturedAt !== capturedAt) delete book.shots[id];
+	delete book.announced;
+}
+
+/** A time as an instant; what is no time is the epoch, as it is sent. */
+const instant = (time: string | undefined): number => {
+	const ms = Date.parse(time ?? "");
+	return Number.isNaN(ms) ? 0 : ms;
+};
+
+/**
+ * The book made true to the case before anything is derived from it. What
+ * an id here stands for can change without the book hearing of it:
+ *
+ * - Ids written down before their case was stored (`settleAnnounced`).
+ * - A screenshot's id here (`s<n>`) is given again after an Undo or a
+ *   delete: a screenshot taken at another time than the server's is not
+ *   the server's.
+ * - A mark's id here (`a<number>`) is another mark's after a renumbering
+ *   this server's book did not hear of (the case synced with another
+ *   server meanwhile, DEC-041): a mark with another drawing, or on another
+ *   screenshot, than the server's mark is not that mark.
+ *
+ * And the other way round: a mark here without an id at the server, when
+ * the server has a mark that no mark here stands for, with the same
+ * drawing on the same screenshot. It is the same mark when it has the same
+ * number, or when the server's mark has lost its mark here: the id it was
+ * known under is gone (the mark was renumbered and the bookkeeping not
+ * written before the worker stopped), or was shown to be another mark's.
+ * They are put together again, so the mark is neither deleted nor made a
+ * second time.
  */
 export function relink(c: Case, book: CaseBook): void {
+	settleAnnounced(c, book);
 	const shadow = book.shadow;
 	if (shadow === undefined) return;
+	for (const s of c.shots) {
+		const wire = book.shots[s.id];
+		const before = wire === undefined ? undefined : shadow.shots[wire];
+		if (
+			before?.capturedAt !== undefined &&
+			instant(before.capturedAt) !== instant(s.capturedAt)
+		)
+			delete book.shots[s.id];
+	}
 	const here = new Set(c.annotations.map((a) => a.id));
 	for (const id of Object.keys(book.marks))
 		if (!here.has(id) && shadow.marks[book.marks[id] as string] === undefined)
 			delete book.marks[id];
-	// A mark here that stands for a mark of the server's with another drawing
-	// does not stand for it: its id here was another mark's (the marks took
-	// other numbers while the case synced with another server, DEC-041, and
-	// this server's book did not hear of it). The server's mark is then one
-	// that no mark stands for, and finds its own again below.
+	/**
+	 * Marks of the server's whose mark here turned out to be another one, or
+	 * is under its old id no more (renumbered, the book not written).
+	 */
+	const freed = new Set<string>(
+		Object.entries(book.marks)
+			.filter(([id]) => !here.has(id))
+			.map(([, wire]) => wire),
+	);
 	for (const a of c.annotations) {
 		const wire = book.marks[a.id];
 		const before = wire === undefined ? undefined : shadow.marks[wire];
-		if (before !== undefined && before.fixed !== fixedOf(a))
+		if (wire === undefined || before === undefined) continue;
+		if (before.fixed !== fixedOf(a) || before.shotId !== book.shots[a.shot]) {
 			delete book.marks[a.id];
+			freed.add(wire);
+		}
 	}
 	const stood = new Set(
 		Object.entries(book.marks)
@@ -318,8 +376,12 @@ export function relink(c: Case, book: CaseBook): void {
 	for (const a of c.annotations) {
 		if (book.marks[a.id] !== undefined) continue;
 		const shot = book.shots[a.shot];
+		if (shot === undefined) continue;
 		const at = orphans.findIndex(
-			([, mark]) => mark.shotId === shot && mark.fixed === fixedOf(a),
+			([wire, mark]) =>
+				mark.shotId === shot &&
+				mark.fixed === fixedOf(a) &&
+				(mark.number === a.number || freed.has(wire)),
 		);
 		if (at < 0) continue;
 		const [wire] = orphans.splice(at, 1)[0] as [string, ShadowMark];
@@ -473,7 +535,10 @@ export function applyOp(book: CaseBook, op: Op, number?: number): void {
 			};
 			return;
 		case "shot.create":
-			shadow.shots[op.shot.id] = { image: op.shot.image };
+			shadow.shots[op.shot.id] = {
+				image: op.shot.image,
+				capturedAt: op.shot.capturedAt,
+			};
 			return;
 		case "mark.create": {
 			const n = number ?? op.mark.number;
@@ -1078,7 +1143,7 @@ export function mergeCase(
 		if (removedShots.has(w.id)) continue;
 		const known = shotHere.get(w.id);
 		const had = given?.shadow?.shots[w.id] !== undefined;
-		shadow.shots[w.id] = { image: w.image };
+		shadow.shots[w.id] = { image: w.image, capturedAt: w.capturedAt };
 		if (known !== undefined && c.shots.some((s) => s.id === known)) continue;
 		// Its last mark was deleted here, and the delete is not sent yet.
 		if (had) continue;
@@ -1344,7 +1409,7 @@ function adopt(
 		const here = shotOf.get(w.id);
 		if (here === undefined) continue;
 		next.shots[here] = w.id;
-		shadow.shots[w.id] = { image: w.image };
+		shadow.shots[w.id] = { image: w.image, capturedAt: w.capturedAt };
 	}
 	if (book.title !== undefined) next.title = book.title;
 	return next;
