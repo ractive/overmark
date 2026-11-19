@@ -18,7 +18,7 @@ import {
 	withTitle,
 	withVerified,
 } from "../src/lib/case.ts";
-import { ApiFailure, type Op } from "../src/lib/cloud/api.ts";
+import { ApiFailure, type Op, TOO_LARGE } from "../src/lib/cloud/api.ts";
 import {
 	type Account,
 	type CaseBook,
@@ -749,6 +749,96 @@ describe("what the server does not take", () => {
 		expect(server.marksOf("c_blob").map((m) => m.comment)).toEqual(["One"]);
 		expect(server.blobs.size).toBe(2);
 		expect(status(tess)?.state).toBe("synced");
+	});
+});
+
+describe("an image from the server is taken only when it is the image named (review B, 2)", () => {
+	const TEXT =
+		"A mark of the team is not shown here: an image the server sent is not the image named (missing, not a WebP image, too large, or other content).";
+
+	for (const [what, answer] of [
+		[
+			"other content under the name asked for (a redirect's target, say)",
+			async () => new Blob(["ROUTER ADMIN PAGE"], { type: "image/webp" }),
+		],
+		[
+			"the right bytes, said to be something else than a WebP image",
+			async (right: Blob) =>
+				new Blob([await right.arrayBuffer()], { type: "text/html" }),
+		],
+		[
+			"an image the server does not have",
+			async () => {
+				throw new ApiFailure("refused", "No such image.", 404, "not_found");
+			},
+		],
+		[
+			"an answer larger than an image may be",
+			async () => {
+				throw new ApiFailure("server", "Too large.", 200, TOO_LARGE);
+			},
+		],
+	] as const)
+		test(`${what}: not stored, said, and the rest of the run goes on`, async () => {
+			await shared();
+			await addMark(tess, "c_flow", "Its crop goes wrong on the way");
+			await startCase(tess, "c_next");
+			await addMark(tess, "c_next", "A case after it");
+			await tess.engine.request();
+			const bad = server
+				.marksOf("c_flow")
+				.find((m) => m.comment === "Its crop goes wrong on the way");
+			const sha = bad?.crop.sha256 as string;
+			const get = dana.api.getBlob.bind(dana.api);
+			dana.api.getBlob = async (team, asked) =>
+				asked === sha ? answer(await get(team, asked)) : get(team, asked);
+			await dana.engine.request();
+			// The mark with the bad image is not here; everything else is.
+			const there = (await dana.store.getCase("c_flow")) as Case;
+			expect(there.annotations.map((a) => a.comment)).toEqual([
+				"Total is cut off",
+				"Pay button too pale",
+			]);
+			expect(Object.values(await images(dana, "c_flow"))).not.toContain(
+				"MISSING",
+			);
+			expect(
+				(await dana.store.getCase("c_next"))?.annotations.map((a) => a.comment),
+			).toEqual(["A case after it"]);
+			expect(status(dana)?.state).toBe("problem");
+			expect(status(dana)?.problems).toEqual([
+				{ caseId: "c_flow", title: "Your cart", text: TEXT },
+			]);
+			// Nothing of it went back to the server, and nothing was deleted there.
+			expect(server.marksOf("c_flow")).toHaveLength(3);
+			// The image is right again: "Sync now" reads the team's state anew.
+			dana.api.getBlob = get;
+			await dana.engine.retry();
+			expect(look(await dana.store.getCase("c_flow"))).toEqual(
+				look(await tess.store.getCase("c_flow")),
+			);
+			expect(status(dana)?.state).toBe("synced");
+		});
+
+	test("a bad screenshot leaves out the marks on it, and only those", async () => {
+		await shared();
+		await addMark(tess, "c_flow", "On a new screenshot", {
+			url: "https://shop.example/done",
+		});
+		await tess.engine.request();
+		const shot = server
+			.shotsOf("c_flow")
+			.find((s) => s.url === "https://shop.example/done");
+		const get = dana.api.getBlob.bind(dana.api);
+		dana.api.getBlob = async (team, asked) =>
+			asked === shot?.image.sha256
+				? new Blob(["<html>"], { type: "text/html" })
+				: get(team, asked);
+		await dana.engine.request();
+		const there = (await dana.store.getCase("c_flow")) as Case;
+		expect(there.annotations).toHaveLength(2);
+		expect(there.shots).toHaveLength(2);
+		expect(status(dana)?.problems.map((p) => p.text)).toEqual([TEXT]);
 	});
 });
 

@@ -29,14 +29,17 @@ import {
 	ApiFailure,
 	type Changes,
 	type ImageRef,
+	MAX_IMAGE_BYTES,
 	MAX_OPS,
 	MAX_OPS_BYTES,
 	type Me,
 	type Op,
 	type OpResult,
 	type OpType,
+	SMALL_PAGE,
 	sha256Of,
 	type Team,
+	TOO_LARGE,
 	type WireCase,
 	type WireMark,
 	type WireShot,
@@ -413,6 +416,10 @@ export class CloudSync {
 			if (account !== undefined)
 				await this.#deps.kv.set({
 					[KEYS.account]: { ...account, checkedAt: 0 },
+					// And the team's whole state is read again: what was left
+					// out before (an image that was not the one named) may be
+					// there now.
+					[KEYS.whole]: true,
 				});
 		}).then(() => this.#then());
 	}
@@ -1074,8 +1081,23 @@ export class CloudSync {
 		let shots = new Map<string, WireShot>();
 		let marks = new Map<string, WireMark>();
 		let removed = new Map<string, { type: string; caseId?: string }>();
-		for (let page = 0; page < 10_000; page++) {
-			const changes: Changes = await api.changes(team.id, since);
+		// Things an answer: the server's own number, and fewer once an answer
+		// was larger than one may be.
+		let limit: number | undefined;
+		for (let page = 0; page < 100_000; page++) {
+			let changes: Changes;
+			try {
+				changes = await api.changes(team.id, since, limit);
+			} catch (error) {
+				if (
+					!(error instanceof ApiFailure) ||
+					error.code !== TOO_LARGE ||
+					limit !== undefined
+				)
+					throw error;
+				limit = SMALL_PAGE;
+				continue;
+			}
 			if (changes.reset) {
 				// The server's history is another one: this is its whole state.
 				whole = true;
@@ -1197,19 +1219,49 @@ export class CloudSync {
 		if (changed.size > 0) this.#deps.onChange?.([...changed]);
 	}
 
-	/** Fetch images of the team, a few at a time. */
+	/**
+	 * Fetch images of the team, a few at a time. An image is taken only when
+	 * it is the one asked for: its SHA-256 is the name it was asked by, it is
+	 * a WebP, and it is no larger than the API holds. Anything else (also an
+	 * image the server does not have) is not stored; its SHA-256 is in the
+	 * answer, for the caller to leave out what needs it and to say so.
+	 */
 	async #fetch(
 		api: Api,
 		team: Team,
 		refs: readonly ImageRef[],
 		into: Map<string, StoredImage>,
-	): Promise<void> {
+	): Promise<Set<string>> {
+		const refused = new Set<string>();
 		const todo = refs.filter((r) => !into.has(r.sha256));
 		let next = 0;
 		const work = async () => {
 			for (let ref = todo[next++]; ref !== undefined; ref = todo[next++]) {
-				if (into.has(ref.sha256)) continue;
-				const blob = await api.getBlob(team.id, ref.sha256);
+				if (into.has(ref.sha256) || refused.has(ref.sha256)) continue;
+				let blob: Blob;
+				try {
+					blob = await api.getBlob(team.id, ref.sha256);
+				} catch (error) {
+					// Not there, or larger than an image may be: this image's
+					// matter. Anything else is the run's (no network, no access).
+					if (
+						error instanceof ApiFailure &&
+						(error.code === TOO_LARGE ||
+							(error.kind === "refused" && error.status === 404))
+					) {
+						refused.add(ref.sha256);
+						continue;
+					}
+					throw error;
+				}
+				if (
+					blob.size > MAX_IMAGE_BYTES ||
+					blob.type !== "image/webp" ||
+					(await this.#hash(blob)) !== ref.sha256
+				) {
+					refused.add(ref.sha256);
+					continue;
+				}
 				into.set(ref.sha256, {
 					blob,
 					width: ref.width,
@@ -1219,6 +1271,7 @@ export class CloudSync {
 			}
 		};
 		await Promise.all(Array.from({ length: FETCHES }, work));
+		return refused;
 	}
 
 	/** Bring one case here up to what came; whether the case here changed. */
@@ -1226,10 +1279,11 @@ export class CloudSync {
 		api: Api,
 		team: Team,
 		caseId: string,
-		incoming: Incoming,
+		came: Incoming,
 		whole: boolean,
 		lost: boolean,
 	): Promise<boolean> {
+		let incoming = came;
 		const store = this.#deps.store;
 		const given = await this.#books.get(caseId);
 		// A case here that is kept on this device (the user said so, or it is
@@ -1256,7 +1310,7 @@ export class CloudSync {
 		// The images of what is new, before the store is touched.
 		const knownShots = new Set(Object.values(given?.shots ?? {}));
 		const knownMarks = new Set(Object.values(given?.marks ?? {}));
-		await this.#fetch(
+		const refused = await this.#fetch(
 			api,
 			team,
 			[
@@ -1269,6 +1323,33 @@ export class CloudSync {
 			],
 			fetched,
 		);
+		// A new mark or screenshot whose image was not the image named is
+		// left out (with the marks on such a screenshot), and that is said;
+		// the rest of the case, and of the run, goes on.
+		if (refused.size > 0) {
+			const without = new Set(
+				incoming.shots
+					.filter((s) => !knownShots.has(s.id) && refused.has(s.image.sha256))
+					.map((s) => s.id),
+			);
+			const marks = incoming.marks.filter(
+				(m) =>
+					knownMarks.has(m.id) ||
+					(!refused.has(m.crop.sha256) && !without.has(m.shotId)),
+			);
+			const left = incoming.marks.length - marks.length;
+			incoming = {
+				...incoming,
+				shots: incoming.shots.filter((s) => !without.has(s.id)),
+				marks,
+			};
+			const title = incoming.case?.title ?? given?.title;
+			this.#problems.push({
+				caseId,
+				...(title ? { title } : {}),
+				text: `${left === 1 ? "A mark" : `${left} marks`} of the team ${left === 1 ? "is" : "are"} not shown here: ${refused.size === 1 ? "an image" : "images"} the server sent ${refused.size === 1 ? "is" : "are"} not the image named (missing, not a WebP image, too large, or other content).`,
+			});
+		}
 		/** Merge with the case as it is; an image it lacks is read and it is tried again. */
 		const attempt = async <T>(work: () => Promise<T>): Promise<T> => {
 			for (let i = 0; ; i++) {
@@ -1276,9 +1357,13 @@ export class CloudSync {
 					return await work();
 				} catch (error) {
 					if (!(error instanceof NeedsImage) || i > 2000) throw error;
-					if (error.remote !== undefined)
-						await this.#fetch(api, team, [error.remote], fetched);
-					else if (error.local !== undefined) {
+					if (error.remote !== undefined) {
+						const no = await this.#fetch(api, team, [error.remote], fetched);
+						if (no.size > 0)
+							throw new Error(
+								"an image the server sent is not the image named",
+							);
+					} else if (error.local !== undefined) {
 						const image = await store.getImage(caseId, error.local);
 						if (image === undefined)
 							throw new Error(`the image ${error.local} is missing`);

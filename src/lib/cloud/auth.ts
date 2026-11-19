@@ -54,6 +54,8 @@ export async function discover(
 	try {
 		response = await fetcher(discoveryUrl(server), {
 			credentials: "omit",
+			// The chosen server answers, nobody it points at.
+			redirect: "error",
 			cache: "no-store",
 		});
 	} catch (error) {
@@ -249,6 +251,8 @@ async function tokenRequest(
 			// from the extension's origin is refused there (and rightly: the
 			// extension is its tokens, not the user's session).
 			credentials: "omit",
+			// The chosen server answers, nobody it points at.
+			redirect: "error",
 			headers: { "content-type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({
 				...fields,
@@ -333,6 +337,8 @@ export async function revokeTokens(
 		const response = await fetcher(endpoints.revoke, {
 			method: "POST",
 			credentials: "omit",
+			// The chosen server answers, nobody it points at.
+			redirect: "error",
 			headers: { "content-type": "application/x-www-form-urlencoded" },
 			body: new URLSearchParams({
 				token: tokens.refresh,

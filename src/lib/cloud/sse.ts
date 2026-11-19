@@ -140,6 +140,8 @@ export async function listen(options: ListenOptions): Promise<void> {
 				},
 				cache: "no-store",
 				credentials: "omit",
+				// The chosen server answers, nobody it points at.
+				redirect: "error",
 				signal: quiet.signal,
 			});
 			if (response.status === 401 && !fresh) {

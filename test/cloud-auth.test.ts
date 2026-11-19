@@ -5,7 +5,12 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { ApiFailure, httpApi } from "../src/lib/cloud/api.ts";
+import {
+	ApiFailure,
+	httpApi,
+	MAX_IMAGE_BYTES,
+	TOO_LARGE,
+} from "../src/lib/cloud/api.ts";
 import {
 	AuthError,
 	beginSignIn,
@@ -18,6 +23,8 @@ import {
 	exchangeCode,
 	OfflineError,
 	type PendingSignIn,
+	refreshTokens,
+	revokeTokens,
 	Session,
 	TOKENS_KEY,
 	type Tokens,
@@ -202,7 +209,7 @@ describe("where a server signs people in", () => {
 		expect(state.discoveries).toBe(1);
 	});
 
-	test("an address elsewhere is refused: the password and the tokens go to the chosen server only", async () => {
+	test("a document that names addresses elsewhere is refused", async () => {
 		const elsewhere = doc({
 			issuer: `${SERVER}/api/auth`,
 			authorization_endpoint: "https://evil.example/authorize",
@@ -644,5 +651,182 @@ describe("the events stream", () => {
 		expect(waits).toEqual([
 			2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000,
 		]);
+	});
+});
+
+describe("the chosen server answers, nobody it points at (review B, 2)", () => {
+	type Served = ReturnType<typeof Bun.serve>;
+	const up: Served[] = [];
+	const serve = (
+		answer: (request: Request) => Response | Promise<Response>,
+	) => {
+		const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: answer });
+		up.push(s);
+		return { origin: `http://127.0.0.1:${s.port}` };
+	};
+	const real = (input: string, init?: RequestInit) => fetch(input, init);
+
+	test("a redirect is never followed: the tokens, the code and the API's token go to the chosen server only, and no other site's content comes back", async () => {
+		try {
+			// Somewhere else: it would get what is sent on, and answer in the
+			// chosen server's stead.
+			const got: string[] = [];
+			const elsewhere = serve(async (request) => {
+				got.push(
+					`${request.method} ${new URL(request.url).pathname} ${await request.text()} ${request.headers.get("authorization") ?? ""}`,
+				);
+				return new URL(request.url).pathname.includes("/blobs/")
+					? new Response("ROUTER ADMIN PAGE", {
+							headers: { "content-type": "image/webp" },
+						})
+					: Response.json({
+							access_token: "theirs",
+							refresh_token: "theirs",
+							expires_in: 3600,
+							user: { id: "u", name: "n", email: "e" },
+							teams: [],
+						});
+			});
+			let asked = 0;
+			const chosen = serve((request) => {
+				asked++;
+				const { pathname, search } = new URL(request.url);
+				return new Response(null, {
+					status: 307,
+					headers: { location: `${elsewhere.origin}${pathname}${search}` },
+				});
+			});
+			const endpoints: Endpoints = {
+				authorize: `${chosen.origin}/api/auth/oauth2/authorize`,
+				token: `${chosen.origin}/api/auth/oauth2/token`,
+				revoke: `${chosen.origin}/api/auth/oauth2/revoke`,
+			};
+			const tokens: Tokens = {
+				access: "ACCESS",
+				refresh: "REFRESH",
+				expiresAt: 0,
+			};
+			// Discovery, the code, a refresh, the revoke.
+			await expect(discover(real, chosen.origin)).rejects.toBeInstanceOf(
+				OfflineError,
+			);
+			await expect(
+				exchangeCode(
+					real,
+					{ ...pending(), server: chosen.origin, token: endpoints.token },
+					"the-code",
+					2000,
+				),
+			).rejects.toBeInstanceOf(OfflineError);
+			await expect(
+				refreshTokens(real, chosen.origin, endpoints, tokens, 1000),
+			).rejects.toBeInstanceOf(OfflineError);
+			expect(await revokeTokens(real, endpoints, tokens)).toBe(false);
+			// The API: a call, and an image.
+			const api = httpApi({
+				server: chosen.origin,
+				token: async () => "ACCESS",
+				fetch: real,
+			});
+			await expect(api.me()).rejects.toMatchObject({ kind: "offline" });
+			await expect(api.getBlob("t", "a".repeat(64))).rejects.toMatchObject({
+				kind: "offline",
+			});
+			// The events stream: tried, never read.
+			const end = new AbortController();
+			const heard: number[] = [];
+			await listen({
+				url: `${chosen.origin}/api/v1/teams/t/events`,
+				token: async () => "ACCESS",
+				onChange: (cursor) => heard.push(cursor),
+				signal: end.signal,
+				fetch: real,
+				sleep: async () => end.abort(),
+			});
+			expect(heard).toEqual([]);
+			// The chosen server was asked each time; nobody else ever was.
+			expect(asked).toBe(7);
+			expect(got).toEqual([]);
+		} finally {
+			for (const s of up.splice(0)) s.stop(true);
+		}
+	});
+
+	test("every request says so, and none carries the browser's cookies", async () => {
+		const sent: RequestInit[] = [];
+		const spy = async (_input: string, init?: RequestInit) => {
+			sent.push(init ?? {});
+			return Response.json({});
+		};
+		await discover(spy, SERVER).catch(() => undefined);
+		await exchangeCode(spy, pending(), "the-code", 2000).catch(() => undefined);
+		await refreshTokens(
+			spy,
+			SERVER,
+			ENDPOINTS,
+			{ access: "a", refresh: "r", expiresAt: 0 },
+			1000,
+		).catch(() => undefined);
+		await revokeTokens(spy, ENDPOINTS, {
+			access: "a",
+			refresh: "r",
+			expiresAt: 0,
+		});
+		await httpApi({ server: SERVER, token: async () => "a", fetch: spy }).me();
+		const end = new AbortController();
+		await listen({
+			url: `${SERVER}/api/v1/teams/t/events`,
+			token: async () => "a",
+			onChange: () => undefined,
+			signal: end.signal,
+			fetch: spy,
+			sleep: async () => end.abort(),
+		});
+		expect(sent).toHaveLength(6);
+		expect(sent.map((init) => init.redirect)).toEqual(Array(6).fill("error"));
+		expect(sent.map((init) => init.credentials)).toEqual(Array(6).fill("omit"));
+	});
+
+	test("an image is read with its type and up to the API's limit; a larger one is given up, not held", async () => {
+		const sha = "a".repeat(64);
+		const api = (answer: Response) =>
+			httpApi({
+				server: SERVER,
+				token: async () => "a",
+				fetch: async () => answer,
+			});
+		const image = await api(
+			new Response(new Blob(["abc"]), {
+				headers: { "content-type": "image/webp; charset=binary" },
+			}),
+		).getBlob("t", sha);
+		expect(image.type).toBe("image/webp");
+		expect((await api(new Response("<html>")).getBlob("t", sha)).type).not.toBe(
+			"image/webp",
+		);
+		// Said to be too large: not read at all.
+		let read = 0;
+		const endless = () =>
+			new ReadableStream<Uint8Array>({
+				pull(controller) {
+					read++;
+					controller.enqueue(new Uint8Array(1024 * 1024));
+				},
+			});
+		await expect(
+			api(
+				new Response(endless(), {
+					headers: { "content-length": String(MAX_IMAGE_BYTES + 1) },
+				}),
+			).getBlob("t", sha),
+		).rejects.toMatchObject({ code: TOO_LARGE });
+		expect(read).toBeLessThan(3);
+		// Not said, and it goes on and on: given up at the limit.
+		read = 0;
+		await expect(
+			api(new Response(endless())).getBlob("t", sha),
+		).rejects.toMatchObject({ code: TOO_LARGE });
+		expect(read).toBeGreaterThan(29);
+		expect(read).toBeLessThan(35);
 	});
 });

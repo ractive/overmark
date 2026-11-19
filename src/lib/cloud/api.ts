@@ -36,6 +36,24 @@ export type Team = Schemas["TeamMembership"];
 export const MAX_OPS = 100;
 export const MAX_OPS_BYTES = 2_000_000;
 
+/** The largest image the API holds (its `LIMITS.imageBytes`): a larger answer is not one. */
+export const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+
+/**
+ * The largest JSON answer that is read. A page of `changes` is the largest
+ * honest one: 500 things by default, each a few to some tens of kilobytes
+ * (a mark with its element's details), so some megabytes; a mark at every
+ * limit at once (comment, notes, 20 findings, 20 reopens, in four-byte
+ * characters) is about 2.5 MB. 64 MiB holds a default page of marks of 128 KB
+ * each. A page over it is asked for again in pages of `SMALL_PAGE` things,
+ * which fits also when every thing is at every limit (20 × 2.5 MB).
+ */
+export const MAX_JSON_BYTES = 64 * 1024 * 1024;
+export const SMALL_PAGE = 20;
+
+/** What an answer larger than it may be is refused with (`ApiFailure.code`). */
+export const TOO_LARGE = "answer_too_large";
+
 /** What a call to the server came to when it did not answer with what was asked. */
 export class ApiFailure extends Error {
 	override name = "ApiFailure";
@@ -57,8 +75,15 @@ export class ApiFailure extends Error {
 /** The calls the extension makes. The engine gets this; tests give it a fake. */
 export interface Api {
 	me(): Promise<Me>;
-	/** Everything after `since`; without it, the whole state. */
-	changes(teamId: string, since: number | undefined): Promise<Changes>;
+	/**
+	 * Everything after `since`; without it, the whole state. `limit`: at most
+	 * so many things in this answer (the server's own number without it).
+	 */
+	changes(
+		teamId: string,
+		since: number | undefined,
+		limit?: number,
+	): Promise<Changes>;
 	ops(teamId: string, ops: readonly Op[]): Promise<OpsResponse>;
 	hasBlob(teamId: string, sha256: string): Promise<boolean>;
 	putBlob(teamId: string, sha256: string, image: Blob): Promise<void>;
@@ -133,6 +158,9 @@ export function httpApi(options: HttpApiOptions): Api {
 			return await fetcher(`${options.server}${path}`, {
 				...init,
 				cache: "no-store",
+				// The chosen server answers, nobody it points at: a redirect
+				// would carry the token, or bring back another site's content.
+				redirect: "error",
 				// The token says who is calling; the browser's cookies for the
 				// server (the user's session there) stay out of it.
 				credentials: "omit",
@@ -159,8 +187,9 @@ export function httpApi(options: HttpApiOptions): Api {
 	}
 
 	const json = async <T>(response: Response): Promise<T> => {
+		const bytes = await bodyOf(response, MAX_JSON_BYTES);
 		try {
-			return (await response.json()) as T;
+			return JSON.parse(new TextDecoder().decode(bytes)) as T;
 		} catch {
 			throw new ApiFailure("server", "The server's answer could not be read.");
 		}
@@ -168,12 +197,13 @@ export function httpApi(options: HttpApiOptions): Api {
 
 	return {
 		me: async () => json<Me>(await call("/api/v1/me")),
-		changes: async (teamId, since) =>
-			json<Changes>(
-				await call(
-					`${team(teamId)}/changes${since === undefined ? "" : `?since=${since}`}`,
-				),
-			),
+		changes: async (teamId, since, limit) => {
+			const query = new URLSearchParams();
+			if (since !== undefined) query.set("since", String(since));
+			if (limit !== undefined) query.set("limit", String(limit));
+			const asked = query.size > 0 ? `?${query}` : "";
+			return json<Changes>(await call(`${team(teamId)}/changes${asked}`));
+		},
 		ops: async (teamId, ops) =>
 			json<OpsResponse>(
 				await call(`${team(teamId)}/ops`, {
@@ -192,9 +222,64 @@ export function httpApi(options: HttpApiOptions): Api {
 				body: image,
 			});
 		},
-		getBlob: async (teamId, sha256) =>
-			(await call(`${team(teamId)}/blobs/${sha256}`)).blob(),
+		async getBlob(teamId, sha256) {
+			const response = await call(`${team(teamId)}/blobs/${sha256}`);
+			const type = (response.headers.get("content-type") ?? "")
+				.split(";")[0]
+				?.trim()
+				.toLowerCase();
+			const bytes = await bodyOf(response, MAX_IMAGE_BYTES);
+			return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: type ?? "" });
+		},
 	};
+}
+
+/**
+ * An answer's body, read up to `max` bytes: one that says it is longer, or
+ * turns out to be, is given up (`TOO_LARGE`), not held in memory.
+ */
+async function bodyOf(response: Response, max: number): Promise<Uint8Array> {
+	const tooLarge = () =>
+		new ApiFailure(
+			"server",
+			"The server's answer is larger than an answer may be.",
+			response.status,
+			TOO_LARGE,
+		);
+	const declared = Number(response.headers.get("content-length") ?? "");
+	const reader = response.body?.getReader();
+	if (Number.isFinite(declared) && declared > max) {
+		await reader?.cancel().catch(() => undefined);
+		throw tooLarge();
+	}
+	if (reader === undefined) return new Uint8Array(0);
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	try {
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			size += value.byteLength;
+			if (size > max) {
+				await reader.cancel().catch(() => undefined);
+				throw tooLarge();
+			}
+			chunks.push(value);
+		}
+	} catch (error) {
+		if (error instanceof ApiFailure) throw error;
+		throw new ApiFailure(
+			"offline",
+			`The server's answer broke off${error instanceof Error && error.message ? ` (${error.message})` : ""}.`,
+		);
+	}
+	const bytes = new Uint8Array(size);
+	let at = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, at);
+		at += chunk.byteLength;
+	}
+	return bytes;
 }
 
 /** The SHA-256 of an image's bytes, in lowercase hex: its name at the server. */
