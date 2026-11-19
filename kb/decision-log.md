@@ -1752,6 +1752,31 @@ is in DEC-041):
   not the service ("… with “Acme” on sync.example.org?"): the team's name is that
   server's word.
 
+**After the review of the sync engine** (2026-11-19; fifteen findings, each confirmed
+with the reviewer's proof before it was fixed; the proofs are tests now):
+
+- **A case with no record at the server is never sent blind.** The run is: what waits
+  in the queue; the changes of cases the server is known to have; the fetch; then the
+  cases without a record, each as `case.create` alone. `duplicate` to that means the
+  team has a case of that id (the same file on two devices, or this device's own case
+  from a request whose answer was lost): nothing else is sent, the case is read from
+  the server by itself (`GET …/cases/{id}`) and the two are joined, and only then what
+  the team lacks is sent. Before, every mark was made a second time for the whole
+  team.
+- **Joining a case with the team's** (an import the team already has, "Share with
+  team", "Sync them"): marks and screenshots the team has and this device lacks are
+  added here, marks only here are sent, and for a mark both have (the same number and
+  drawing) with other words the team's are kept (point 9 above: the server's copy
+  counts). Nothing is replaced without the user having been told: a case kept back
+  that the team has is said in the Account section, and the question about the cases
+  that were here says it too, with the count ("The team already has this case; where
+  both differ the team's text is kept: 2 marks"). The count is made from the team's
+  marks as last seen (`CaseBook.theirs`).
+- **A case can be marked to be read again** (`CaseBook.reread`: a join, a change that
+  could not be stored, a case missing here, a book taken up again). Nothing of such a
+  case is sent before it was read; a read that fails waits 1, 5, 30 minutes and then 6
+  hours, and what is wrong stays on the screen until it works.
+
 ## DEC-040: The API's types are generated, with TypeScript 5 for the generator alone
 
 2026-11-19, with DEC-039. `src/lib/cloud/api.gen.ts` is generated from a copy of the

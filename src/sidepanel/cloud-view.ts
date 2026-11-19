@@ -412,6 +412,13 @@ export function bannerOf(
 	const server = cloud.account?.server ?? cloud.server;
 	const where =
 		serverKind(server) === "production" ? "" : ` on ${hostOf(server)}`;
+	// Cases the team already has under the same id are joined with the
+	// team's: said before the click, with what it replaces here (DEC-039).
+	const joins = cloud.status?.joins;
+	const joined =
+		joins === undefined || joins.cases === 0
+			? ""
+			: ` The team already has ${n === 1 ? "this case" : `${joins.cases} of them`}${joins.marks === 0 ? "." : `; where both differ the team's text is kept: ${joins.marks === 1 ? "1 mark" : `${joins.marks} marks`}.`}`;
 	if (team !== undefined && n > 0)
 		return {
 			kind: "undecided",
@@ -419,7 +426,7 @@ export function bannerOf(
 				n === 1
 					? "1 case is on this device only."
 					: `${n} cases are on this device only.`,
-			text: `Sync ${n === 1 ? "it" : "them"} with “${team.name}”${where}? Its members will see ${n === 1 ? "it" : "them"}, with ${n === 1 ? "its" : "their"} marks, screenshots and the addresses of the pages marked.`,
+			text: `Sync ${n === 1 ? "it" : "them"} with “${team.name}”${where}? Its members will see ${n === 1 ? "it" : "them"}, with ${n === 1 ? "its" : "their"} marks, screenshots and the addresses of the pages marked.${joined}`,
 		};
 	return undefined;
 }

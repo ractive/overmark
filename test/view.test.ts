@@ -2014,6 +2014,43 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		expect(button("cloud-keep-them", "cloud-banner")?.textContent).toBe(
 			"Keep them on this device",
 		);
+		// Cases the team already has: the question says what the click replaces.
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				problems: [],
+				undecided: 2,
+				joins: { cases: 1, marks: 3 },
+			},
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"addresses of the pages marked. The team already has 1 of them; where both differ the team's text is kept: 3 marks.",
+		);
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				problems: [],
+				undecided: 1,
+				joins: { cases: 1, marks: 1 },
+			},
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"The team already has this case; where both differ the team's text is kept: 1 mark.",
+		);
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				problems: [],
+				undecided: 1,
+				joins: { cases: 1, marks: 0 },
+			},
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"pages marked. The team already has this case.",
+		);
 		// On a server that is not the service the question names the server:
 		// a team's name is that server's word, and the click sends cases.
 		for (const [server, host] of [

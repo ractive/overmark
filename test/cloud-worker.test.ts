@@ -552,7 +552,7 @@ describe("each server is kept apart (DEC-041)", () => {
 			{
 				caseId: "c_prod",
 				title: "Your cart",
-				text: "“Your cart” is on this device only, and the team has a case with the same id. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two.",
+				text: "“Your cart” is on this device only, and the team already has this case. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two: marks only here are sent, the team's other marks come here.",
 			},
 		]);
 
@@ -688,7 +688,7 @@ describe("a case kept on this device stays there, whoever names its id (review B
 		]);
 		expect(status()?.state).toBe("problem");
 		expect(status()?.problems.map((p) => p.text)).toEqual([
-			"“Your cart” is on this device only, and the team has a case with the same id. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two.",
+			"“Your cart” is on this device only, and the team already has this case. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two: marks only here are sent, the team's other marks come here.",
 		]);
 		// It stays said, and stays so, run after run and over a worker's restart.
 		cloud = worker();

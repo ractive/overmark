@@ -738,6 +738,16 @@ export class FakeServer {
 				);
 				return server.changes(since, limit);
 			},
+			async getCase(_team, caseId) {
+				reach(`GET case ${caseId}`);
+				const row = server.cases.get(caseId);
+				if (row === undefined || row.deleted) return undefined;
+				return structuredClone({
+					...row.value,
+					shots: server.shotsOf(caseId),
+					marks: server.marksOf(caseId),
+				});
+			},
 			async ops(_team, ops) {
 				reach(`POST ops ${ops.length}`);
 				const answer = server.applyOps(
@@ -879,6 +889,15 @@ export function fakeHttp(
 		const api = server.api(user);
 		api.permissions = state.permissions;
 		if (url.pathname === "/api/v1/me") return Response.json(await api.me());
+		const one = /^\/api\/v1\/teams\/([^/]+)\/cases\/([^/]+)$/.exec(
+			url.pathname,
+		);
+		if (one !== null && one[1] === TEAM) {
+			const detail = await api.getCase(TEAM, decodeURIComponent(one[2] ?? ""));
+			return detail === undefined
+				? no(404, "not_found", "No such case.")
+				: Response.json(detail);
+		}
 		const route =
 			/^\/api\/v1\/teams\/([^/]+)\/(changes|ops|blobs)(?:\/([0-9a-f]+))?$/.exec(
 				url.pathname,

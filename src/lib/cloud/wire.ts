@@ -59,6 +59,7 @@ import type {
 	MarkContent,
 	Shadow,
 	ShadowMark,
+	TheirMark,
 } from "./book.ts";
 
 // --- comparing -------------------------------------------------------------------
@@ -725,6 +726,50 @@ export function caseContentIn(w: WireCase): CaseContent {
 				: null,
 		lastNumber: Number.isInteger(w.lastNumber) ? w.lastNumber : 0,
 	};
+}
+
+/** A number of what a mark says: its comment, how it was settled, its findings. */
+export const saidOf = (m: MarkContent): string =>
+	hashText(
+		canonical([
+			m.comment,
+			m.resolution?.kind ?? null,
+			m.resolution?.note ?? "",
+			m.findings.map((f) => f.text),
+			m.reopens.length,
+		]),
+	);
+
+/** A mark of the team's, as a book keeps it of a case that is not the team's here. */
+export function theirMark(w: WireMark): TheirMark {
+	return {
+		number: w.number,
+		fixed: fixedOf({ shape: shapeIn(w.shape), element: elementIn(w.element) }),
+		said: saidOf(contentIn(w)),
+	};
+}
+
+/**
+ * How many marks of the case here the team has too (the same number and
+ * drawing) and says something else of: joining the two cases keeps the
+ * team's words for those.
+ */
+export function differing(
+	c: Case,
+	theirs: Readonly<Record<string, TheirMark>>,
+): number {
+	const here = new Map(c.annotations.map((a) => [a.number, a]));
+	let n = 0;
+	for (const mark of Object.values(theirs)) {
+		const a = here.get(mark.number);
+		if (
+			a !== undefined &&
+			fixedOf(a) === mark.fixed &&
+			saidOf(markContent(a)) !== mark.said
+		)
+			n++;
+	}
+	return n;
 }
 
 /** What came from the server about one case since the last time. */

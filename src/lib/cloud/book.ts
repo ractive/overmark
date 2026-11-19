@@ -144,10 +144,44 @@ export interface CaseBook {
 	 * The team has a case with this id, and the case here is kept on this
 	 * device (or is another server's): nothing of either was taken or sent.
 	 * Said in the status; sharing the case joins the two (the team's copy is
-	 * read first, then what it lacks is sent).
+	 * read first, then what it lacks is sent). The team's marks as last seen,
+	 * by their id there: enough to say how many marks here the team has with
+	 * other words, which the join replaces.
 	 */
-	theirs?: true;
+	theirs?: Record<string, TheirMark>;
+	/**
+	 * The case has to be read from the server, whole, before anything of it
+	 * is sent: it is joined with the team's copy, a change of the team's
+	 * could not be stored, it is not in the store here, or its book was
+	 * taken up again after a time without syncing. Kept across restarts.
+	 */
+	reread?: Reread;
 }
+
+/** A mark of the team's, as much as tells whether a mark here is it and says the same. */
+export interface TheirMark {
+	number: number;
+	/** `fixedOf` its drawing. */
+	fixed: string;
+	/** A number of what it says (`saidOf`). */
+	said: string;
+}
+
+/** Why a case is read again, and when: a read that fails is tried later and later. */
+export interface Reread {
+	why: "join" | "failed" | "missing" | "resumed";
+	/** Reads that failed so far. */
+	tries: number;
+	/** Not before this (ms since the epoch). */
+	after: number;
+	/** What is wrong, said in the status until the read works. */
+	text?: string;
+}
+
+/** How long after a read of a case failed the next one waits: a case that can never be stored is not fetched at every run. */
+export const REREAD_WAIT_MS: readonly number[] = [
+	60_000, 300_000, 1_800_000, 21_600_000,
+];
 
 /** How often the very same changes are sent in a row before the sync stops sending them. */
 export const MAX_SAME_SENDS = 3;
@@ -188,6 +222,12 @@ export interface CloudStatus {
 	problems: { caseId?: string; title?: string; text: string }[];
 	/** Cases that were here before the team was chosen and wait for an answer. */
 	undecided: number;
+	/**
+	 * Of the cases not decided about yet: how many the team already has
+	 * (under the same id), and how many of their marks say something else
+	 * there, which "Sync them" replaces with the team's.
+	 */
+	joins?: { cases: number; marks: number };
 }
 
 export const OFF: CloudStatus = { state: "off", problems: [], undecided: 0 };

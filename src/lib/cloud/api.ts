@@ -28,6 +28,8 @@ export type OpOf<T extends OpType> = Extract<Op, { type: T }>;
 export type OpResult = Schemas["OpResult"];
 export type OpsResponse = Schemas["OpsResponse"];
 export type Changes = Schemas["Changes"];
+/** One case with its screenshots and marks: the whole of it, as the server has it. */
+export type CaseDetail = Schemas["CaseDetail"];
 export type Removed = Schemas["Removed"];
 export type Me = Schemas["Me"];
 export type Team = Schemas["TeamMembership"];
@@ -88,6 +90,8 @@ export interface Api {
 		since: number | undefined,
 		limit?: number,
 	): Promise<Changes>;
+	/** One case, whole, as the server has it now; none: the team has no such case. */
+	getCase(teamId: string, caseId: string): Promise<CaseDetail | undefined>;
 	ops(teamId: string, ops: readonly Op[]): Promise<OpsResponse>;
 	hasBlob(teamId: string, sha256: string): Promise<boolean>;
 	putBlob(teamId: string, sha256: string, image: Blob): Promise<void>;
@@ -207,6 +211,14 @@ export function httpApi(options: HttpApiOptions): Api {
 			if (limit !== undefined) query.set("limit", String(limit));
 			const asked = query.size > 0 ? `?${query}` : "";
 			return json<Changes>(await call(`${team(teamId)}/changes${asked}`));
+		},
+		async getCase(teamId, caseId) {
+			const response = await call(
+				`${team(teamId)}/cases/${encodeURIComponent(caseId)}`,
+				{},
+				[404],
+			);
+			return response.status === 404 ? undefined : json<CaseDetail>(response);
 		},
 		ops: async (teamId, ops) =>
 			json<OpsResponse>(

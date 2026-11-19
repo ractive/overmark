@@ -30,6 +30,7 @@ import {
 	KEYS,
 	type Queue,
 } from "../src/lib/cloud/book.ts";
+import type { StoredImage } from "../src/lib/store.ts";
 import type { FakeApi } from "./cloud-fake.ts";
 import { FakeServer, TEAM } from "./cloud-fake.ts";
 import {
@@ -392,14 +393,31 @@ describe("changes that wait", () => {
 		await startCase(tess, "c_lost");
 		await addMark(tess, "c_lost", "One");
 		await addMark(tess, "c_lost", "Two");
+		// The new case goes alone, and its answer is lost.
 		tess.api.loseReplies = 1;
 		await tess.engine.request();
+		expect(status(tess)?.state).toBe("offline");
+		expect(server.cases.has("c_lost")).toBe(true);
+		const first = (tess.kv.data.get(KEYS.queue) as Queue).ops.map(
+			(op) => op.opId,
+		);
+		expect(first).toHaveLength(1);
+		// Then its screenshots and marks, whose answer is lost too.
+		tess.api.loseReplies = 0;
+		const ops = tess.api.ops.bind(tess.api);
+		let requests = 0;
+		tess.api.ops = async (team, list) => {
+			if (++requests === 2) tess.api.loseReplies = 1;
+			return ops(team, list);
+		};
+		await tess.engine.request();
+		tess.api.ops = ops;
 		expect(status(tess)?.state).toBe("offline");
 		// Applied at the server, not known here: written down, to go again.
 		expect(server.marksOf("c_lost")).toHaveLength(2);
 		const queue = tess.kv.data.get(KEYS.queue) as Queue;
-		const ids = queue.ops.map((op) => op.opId);
-		expect(ids.length).toBeGreaterThan(0);
+		const ids = [...first, ...queue.ops.map((op) => op.opId)];
+		expect(ids.length).toBeGreaterThan(3);
 		tess.api.calls.length = 0;
 		await tess.engine.request();
 		expect(status(tess)?.state).toBe("synced");
@@ -501,6 +519,163 @@ describe("mark numbers", () => {
 		expect(next.number).toBe(4);
 		await sync(tess, dana);
 		expect(server.marksOf("c_flow").map((m) => m.number)).toEqual([1, 2, 4]);
+	});
+});
+
+describe("a case the team already has (review B, sync 2 and 3)", () => {
+	/** Dana gets Tess's case as a file: the same id, the same marks, the same images. */
+	async function fromFile(id: string): Promise<void> {
+		const copy = (await tess.store.getCase(id)) as Case;
+		const files = new Map<string, StoredImage>();
+		for (const path of [
+			...copy.shots.map((s) => s.image),
+			...copy.annotations.map((a) => a.crop),
+		]) {
+			const image = await tess.store.getImage(id, path);
+			if (image !== undefined) files.set(path, image);
+		}
+		await dana.store.replaceCase(structuredClone(copy), files);
+	}
+	const numbered = (id: string) =>
+		server.marksOf(id).map((m) => [m.number, m.comment]);
+	async function tessShares(): Promise<void> {
+		await signIn(tess);
+		await startCase(tess, "c_file");
+		await addMark(tess, "c_file", "One", { element: true });
+		await addMark(tess, "c_file", "Two");
+		await tess.engine.request();
+	}
+
+	test("imported on a synced device before it fetched: the fetch comes first, the marks are the same marks, none is made twice", async () => {
+		await signIn(dana);
+		await tessShares();
+		await fromFile("c_file");
+		await sync(dana, tess);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+		]);
+		expect(look(await dana.store.getCase("c_file"))).toEqual(
+			look(await tess.store.getCase("c_file")),
+		);
+		expect(status(dana)?.state).toBe("synced");
+	});
+
+	test("the fetch did not bring it (it was read before): the case goes alone, the server says it has it, nothing else is sent, and the two are joined", async () => {
+		await signIn(dana);
+		await tessShares();
+		// Dana's device has read past the case, and does not have it (it was
+		// deleted here unsent, say; here: the book is simply gone).
+		await dana.engine.request();
+		await dana.store.deleteCase("c_file");
+		await dana.kv.remove("case:c_file");
+		await fromFile("c_file");
+		// Her own words on mark 2, and a mark only she has.
+		await change(dana, "c_file", (c, now) =>
+			withComment(c, "a2", "Dana's words", now),
+		);
+		await addMark(dana, "c_file", "Only Dana's", { url: PAY });
+		const sent: Op[] = [];
+		const ops = dana.api.ops.bind(dana.api);
+		dana.api.ops = async (team, list) => {
+			sent.push(...list);
+			return ops(team, list);
+		};
+		dana.api.calls.length = 0;
+		await dana.engine.request();
+		// The case alone; then a read of the case; then only what the team lacks.
+		expect(sent[0]?.type).toBe("case.create");
+		expect(dana.api.calls).toContain("GET case c_file");
+		expect(
+			sent.filter((op) => op.type === "mark.create").map((op) => op.type),
+		).toHaveLength(1);
+		await sync(dana, tess);
+		// The team's two marks once, the team's words where both had some, and
+		// Dana's own mark as a new one.
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+			[3, "Only Dana's"],
+		]);
+		expect(look(await dana.store.getCase("c_file"))).toEqual(
+			look(await tess.store.getCase("c_file")),
+		);
+		expect(status(dana)?.state).toBe("synced");
+	});
+
+	test("not asked about yet, and the first fetch fails: “Sync them” sends nothing twice", async () => {
+		await tessShares();
+		await fromFile("c_file");
+		const changes = dana.api.changes.bind(dana.api);
+		dana.api.changes = async () => {
+			throw new ApiFailure("offline", "gone");
+		};
+		await signIn(dana);
+		expect(status(dana)?.state).toBe("offline");
+		expect(status(dana)?.undecided).toBe(1);
+		dana.api.changes = changes;
+		await dana.engine.decide(true);
+		await sync(dana, tess);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+		]);
+	});
+
+	test("kept back, with other words on a mark the team has too: the question says how many marks the team's text replaces, and sharing does that and nothing else", async () => {
+		await tessShares();
+		await fromFile("c_file");
+		await change(dana, "c_file", (c, now) =>
+			withComment(c, "a1", "Dana's newer words", now),
+		);
+		await addMark(dana, "c_file", "Dana's own third");
+		await signIn(dana);
+		// Before any answer: nothing taken, nothing sent, and the banner's
+		// question can say what "Sync them" would replace.
+		expect(tess.kv.data.get(KEYS.modes)).toEqual({ c_file: "synced" });
+		expect(dana.kv.data.get(KEYS.modes)).toEqual({ c_file: "undecided" });
+		expect(status(dana)?.joins).toEqual({ cases: 1, marks: 1 });
+		expect(
+			(await dana.store.getCase("c_file"))?.annotations.map((a) => a.comment),
+		).toEqual(["Dana's newer words", "Two", "Dana's own third"]);
+		expect(numbered("c_file")).toHaveLength(2);
+		// "Keep them on this device": still nothing, and it stays said.
+		await dana.engine.decide(false);
+		await dana.engine.request();
+		expect(numbered("c_file")).toHaveLength(2);
+		expect(status(dana)?.joins).toBeUndefined();
+		expect(status(dana)?.problems.map((p) => p.text)).toEqual([
+			"“Your cart” is on this device only, and the team already has this case. Nothing of it was sent, and the team's was not taken. “Share with team” on the case joins the two: marks only here are sent, the team's other marks come here, and where both differ the team's text is kept: 1 mark.",
+		]);
+		// Shared, having been told: the team's text on mark 1, her mark sent.
+		await dana.engine.share("c_file");
+		await sync(dana, tess);
+		expect(numbered("c_file")).toEqual([
+			[1, "One"],
+			[2, "Two"],
+			[3, "Dana's own third"],
+		]);
+		expect(
+			(await dana.store.getCase("c_file"))?.annotations.map((a) => a.comment),
+		).toEqual(["One", "Two", "Dana's own third"]);
+		expect(status(dana)?.problems).toEqual([]);
+	});
+
+	test("this device's own new case whose answer was lost, and the record of the request too: the server's empty case is found, and everything here is sent once", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_mine");
+		await addMark(tess, "c_mine", "One");
+		tess.api.loseReplies = 1;
+		await tess.engine.request();
+		expect(server.cases.has("c_mine")).toBe(true);
+		// The queue is lost with the answer (the browser's storage was reset
+		// to before it, say): the same case is made under a new request.
+		await tess.kv.remove(KEYS.queue);
+		await sync(tess, dana);
+		expect(numbered("c_mine")).toEqual([[1, "One"]]);
+		expect(status(tess)?.state).toBe("synced");
+		expect((await dana.store.getCase("c_mine"))?.annotations).toHaveLength(1);
 	});
 });
 
@@ -1114,6 +1289,9 @@ describe("the worker stopped in the middle", () => {
 		await signIn(tess);
 		await startCase(tess, "c_stop");
 		await addMark(tess, "c_stop", "One");
+		await tess.engine.request();
+		await addMark(tess, "c_stop", "Two", { url: PAY });
+		const before = new Set(server.applied.keys());
 		// The run stops after writing the operations down: no request is made.
 		const ops = tess.api.ops.bind(tess.api);
 		tess.api.ops = async () => {
@@ -1123,16 +1301,16 @@ describe("the worker stopped in the middle", () => {
 		expect(status(tess)?.state).toBe("problem");
 		const queue = tess.kv.data.get(KEYS.queue) as Queue;
 		expect(queue.ops.map((op: Op) => op.type)).toEqual([
-			"case.create",
+			"case.patch",
 			"shot.create",
 			"mark.create",
 		]);
 		tess.api.ops = ops;
 		await tess.engine.request();
-		expect([...server.applied.keys()].sort()).toEqual(
-			queue.ops.map((op: Op) => op.opId).sort(),
-		);
-		expect(server.marksOf("c_stop")).toHaveLength(1);
+		expect(
+			[...server.applied.keys()].filter((id) => !before.has(id)).sort(),
+		).toEqual(queue.ops.map((op: Op) => op.opId).sort());
+		expect(server.marksOf("c_stop")).toHaveLength(2);
 		expect(tess.kv.data.get(KEYS.queue)).toBeUndefined();
 	});
 
