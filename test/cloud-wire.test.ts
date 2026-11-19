@@ -1,0 +1,512 @@
+/**
+ * The sync's pure parts (DEC-039): what counts as a change, the operations
+ * a difference becomes, and how a case here and the server's copy of it are
+ * brought together.
+ */
+
+import { describe, expect, test } from "bun:test";
+import type { Annotation, Case } from "../src/lib/case.ts";
+import type { Op, WireMark, WireShot } from "../src/lib/cloud/api.ts";
+import { type CaseBook, emptyBook } from "../src/lib/cloud/book.ts";
+import {
+	applyOp,
+	canonical,
+	caseContent,
+	contentIn,
+	deriveOps,
+	fixedOf,
+	isClean,
+	markContent,
+	markPatch,
+	mergeCase,
+	mergeContent,
+	NeedsImage,
+	opKey,
+	relink,
+	renumber,
+	same,
+} from "../src/lib/cloud/wire.ts";
+import { sampleCase } from "./fixtures.ts";
+
+const NOW = "2026-11-19T12:00:00.000Z";
+
+const mark = (n: number, shot = "s1"): Annotation => ({
+	id: `a${n}`,
+	number: n,
+	shot,
+	comment: `comment ${n}`,
+	author: "user",
+	shape: { kind: "box", rect: { x: n, y: 2, width: 30, height: 40 } },
+	crop: `crops/a${n}.webp`,
+	element: null,
+});
+
+function local(marks: Annotation[] = [mark(1), mark(2)]): Case {
+	return {
+		...sampleCase("c_1", "2026-11-19T10:00:00.000Z"),
+		pages: [{ url: "https://www.example.com/kk", title: "KK", lang: "de" }],
+		shots: [
+			{
+				id: "s1",
+				image: "shots/s1.webp",
+				scrollX: 0,
+				scrollY: 0,
+				viewport: { width: 1280, height: 800, dpr: 2 },
+				capturedAt: "2026-11-19T09:00:00.000Z",
+				url: "https://www.example.com/kk",
+			},
+		],
+		annotations: marks,
+	};
+}
+
+const ref = (path: string) => ({
+	sha256: path.padEnd(64, "0").slice(0, 64),
+	width: 10,
+	height: 10,
+	bytes: 30,
+});
+
+let ids = 0;
+const newId = (prefix: string) => `${prefix}_${++ids}`;
+
+/** The case sent whole: the book as it is once the server took every operation. */
+function synced(c: Case): { book: CaseBook; ops: Op[] } {
+	const book = emptyBook(c.id, "synced", "team_1");
+	const { ops } = deriveOps(c, book, ref, newId);
+	for (const op of ops) applyOp(book, op);
+	return { book, ops };
+}
+
+describe("what counts as the same", () => {
+	test("the order of the keys does not, nor what is undefined, nor who the server says did it", () => {
+		expect(
+			same(
+				{ kind: "fixed", at: "t", note: undefined },
+				{ at: "t", kind: "fixed", user: { id: "u", name: "Tess" } },
+			),
+		).toBe(true);
+		expect(same({ kind: "fixed", at: "t" }, { kind: "wontfix", at: "t" })).toBe(
+			false,
+		);
+		// For "is the stored case another one now", who did it counts.
+		expect(canonical({ user: { id: "u" } }, true)).toContain("user");
+	});
+
+	test("the same change again has the same key, whatever its id", () => {
+		const a: Op = {
+			opId: "o_1",
+			type: "mark.patch",
+			markId: "m_1",
+			comment: "x",
+		};
+		const b: Op = {
+			opId: "o_2",
+			type: "mark.patch",
+			markId: "m_1",
+			comment: "x",
+		};
+		const c: Op = {
+			opId: "o_3",
+			type: "mark.patch",
+			markId: "m_1",
+			comment: "y",
+		};
+		expect(opKey(a)).toBe(opKey(b));
+		expect(opKey(a)).not.toBe(opKey(c));
+	});
+});
+
+describe("the operations a case becomes", () => {
+	test("a new case: itself, its screenshots, then its marks by number", () => {
+		const c = local();
+		const book = emptyBook(c.id, "synced", "team_1");
+		const { ops, missing } = deriveOps(c, book, ref, newId);
+		expect(missing).toEqual([]);
+		expect(ops.map((op) => op.type)).toEqual([
+			"case.create",
+			"shot.create",
+			"mark.create",
+			"mark.create",
+		]);
+		const created = ops[0] as Extract<Op, { type: "case.create" }>;
+		expect(created.case).toMatchObject({
+			id: "c_1",
+			title: "Button contrast",
+			pages: [{ url: "https://www.example.com/kk", title: "KK", lang: "de" }],
+			client: { viewport: { width: 1280, height: 800, dpr: 2 } },
+			lastNumber: 2,
+		});
+		const shot = ops[1] as Extract<Op, { type: "shot.create" }>;
+		expect(shot.shot.url).toBe("https://www.example.com/kk");
+		expect(shot.shot.id).toBe(book.shots["s1"] as string);
+		const first = ops[2] as Extract<Op, { type: "mark.create" }>;
+		expect(first.mark.number).toBe(1);
+		expect(first.mark.shotId).toBe(shot.shot.id);
+		expect(first.mark.id).toBe(book.marks["a1"] as string);
+		// Ids at the server are not the positions here.
+		expect(first.mark.id).not.toBe("a1");
+		expect(first.mark.crop).toEqual(ref("crops/a1.webp"));
+	});
+
+	test("once the server has it, nothing; then only what changed", () => {
+		const c = local();
+		const { book } = synced(c);
+		expect(isClean(c, book)).toBe(true);
+		expect(deriveOps(c, book, ref, newId).ops).toEqual([]);
+		const changed: Case = {
+			...c,
+			title: "Another title",
+			verdict: "Fix the contrast",
+			annotations: [
+				{
+					...mark(1),
+					comment: "Edited",
+					resolution: { kind: "fixed", at: NOW },
+					findings: [
+						{
+							id: "f_1",
+							text: "Found",
+							app: { id: "https://claude.ai/oauth", host: "claude.ai" },
+							at: NOW,
+						},
+					],
+				},
+				mark(2),
+			],
+		};
+		expect(isClean(changed, book)).toBe(false);
+		const { ops } = deriveOps(changed, book, ref, newId);
+		expect(ops).toEqual([
+			{
+				opId: expect.any(String),
+				type: "case.patch",
+				caseId: "c_1",
+				title: "Another title",
+				summary: "Fix the contrast",
+			},
+			{
+				opId: expect.any(String),
+				type: "mark.patch",
+				markId: book.marks["a1"] as string,
+				comment: "Edited",
+				author: "user",
+				state: { resolution: { kind: "fixed", at: NOW }, reopens: [] },
+				findings: {
+					upsert: [
+						{
+							id: "f_1",
+							text: "Found",
+							app: { id: "https://claude.ai/oauth", host: "claude.ai" },
+							at: NOW,
+						},
+					],
+				},
+			},
+		]);
+		for (const op of ops) applyOp(book, op);
+		expect(isClean(changed, book)).toBe(true);
+	});
+
+	test("a mark deleted here is deleted there, a finding too; a screenshot the server drops itself", () => {
+		const c = local([
+			{
+				...mark(1),
+				findings: [
+					{
+						id: "f_1",
+						text: "Found",
+						app: { id: "https://claude.ai/oauth", host: "claude.ai" },
+						at: NOW,
+					},
+				],
+			},
+			mark(2),
+		]);
+		const { book } = synced(c);
+		const wire = book.marks["a2"] as string;
+		const { ops } = deriveOps(
+			{ ...c, annotations: [mark(1)] },
+			book,
+			ref,
+			newId,
+		);
+		expect(ops).toEqual([
+			{ opId: expect.any(String), type: "mark.delete", markId: wire },
+			{
+				opId: expect.any(String),
+				type: "mark.patch",
+				markId: book.marks["a1"] as string,
+				findings: { remove: ["f_1"] },
+			},
+		]);
+	});
+
+	test("an image that is not here: its mark is left out and named, the rest goes", () => {
+		const c = local();
+		const book = emptyBook(c.id, "synced", "team_1");
+		const { ops, missing } = deriveOps(
+			c,
+			book,
+			(path) => (path === "crops/a2.webp" ? undefined : ref(path)),
+			newId,
+		);
+		expect(missing).toEqual(["crops/a2.webp"]);
+		expect(ops.map((op) => op.type)).toEqual([
+			"case.create",
+			"shot.create",
+			"mark.create",
+		]);
+	});
+
+	test("a mark renumbered here whose book was not written is put together with the server's again", () => {
+		const c = local();
+		const { book } = synced(c);
+		const wire = book.marks["a2"] as string;
+		// The case says a5 now; the book still says a2.
+		const moved: Case = {
+			...c,
+			annotations: [
+				mark(1),
+				{ ...mark(2), id: "a5", number: 5, crop: "crops/a5.webp" },
+			],
+		};
+		relink(moved, book);
+		expect(book.marks).toEqual({ a1: book.marks["a1"] as string, a5: wire });
+		// No mark is deleted or made again: only the case's highest number is told.
+		expect(deriveOps(moved, book, ref, newId).ops).toEqual([
+			{
+				opId: expect.any(String),
+				type: "case.patch",
+				caseId: "c_1",
+				lastNumber: 5,
+			},
+		]);
+	});
+});
+
+describe("a mark here and the server's word on it", () => {
+	const base = markContent(mark(1));
+
+	test("what was not changed here becomes the server's; what was stays", () => {
+		const mine = { ...base, comment: "Mine" };
+		const theirs = {
+			...base,
+			resolution: { kind: "fixed" as const, at: NOW },
+		};
+		expect(mergeContent(mine, base, theirs)).toEqual({
+			...base,
+			comment: "Mine",
+			resolution: { kind: "fixed", at: NOW },
+		});
+		// Both changed the comment: this device's stays, and is sent next.
+		expect(
+			mergeContent(mine, base, { ...base, comment: "Theirs" }).comment,
+		).toBe("Mine");
+		// Nothing to tell a change here by: the server's copy counts.
+		expect(mergeContent(mine, undefined, theirs)).toEqual(theirs);
+	});
+
+	test("findings are merged one by one", () => {
+		const f = (id: string, text: string) => ({
+			id,
+			text,
+			app: { id: "https://claude.ai/oauth", host: "claude.ai" },
+			at: NOW,
+		});
+		const before = { ...base, findings: [f("f_1", "one"), f("f_2", "two")] };
+		const mine = {
+			...base,
+			findings: [f("f_1", "one, edited here"), f("f_3", "new here")],
+		};
+		const theirs = {
+			...base,
+			findings: [f("f_1", "one"), f("f_2", "two"), f("f_4", "new there")],
+		};
+		expect(
+			mergeContent(mine, before, theirs).findings.map((x) => [x.id, x.text]),
+		).toEqual([
+			["f_1", "one, edited here"],
+			// f_2 was deleted here: it stays away.
+			["f_4", "new there"],
+			["f_3", "new here"],
+		]);
+		expect(markPatch(mine, before)?.findings).toEqual({
+			upsert: [f("f_1", "one, edited here"), f("f_3", "new here")],
+			remove: ["f_2"],
+		});
+	});
+
+	test("what comes in is kept as a case here keeps it, to the letter", () => {
+		const long = "x".repeat(3000);
+		const wire = {
+			comment: "c",
+			author: "user",
+			resolution: null,
+			reopens: [
+				{
+					at: NOW,
+					was: {
+						kind: "fixed",
+						at: NOW,
+						note: long,
+						app: { id: "a", host: "h", verified: true },
+						somethingNew: 1,
+					},
+				},
+			],
+			findings: [],
+		} as unknown as WireMark;
+		const content = contentIn(wire);
+		// As `validateCase` cuts a reopen's ended note: no difference to send.
+		expect(content.reopens[0]?.was.note).toHaveLength(2000);
+		expect(content.reopens[0]?.was.app).toEqual({ id: "a", host: "h" });
+		expect(JSON.stringify(content)).not.toContain("somethingNew");
+	});
+});
+
+describe("numbers", () => {
+	test("a mark takes another number: its id, its crop and the book follow; who held it moves on", () => {
+		const c: Case = { ...local([mark(1), mark(2), mark(3)]), lastNumber: 3 };
+		const { book } = synced(c);
+		const wires = { ...book.marks };
+		const out = {
+			images: new Map<string, unknown>(),
+			deleteImages: new Set<string>(),
+		};
+		const crops = new Map<string, unknown>([
+			["crops/a2.webp", "crop two"],
+			["crops/a3.webp", "crop three"],
+		]);
+		// The server says the mark here called 2 is 3.
+		const next = renumber(c, book, new Map([["a2", 3]]), crops, out);
+		expect(
+			next.annotations.map((a) => [a.id, a.number, a.crop, a.comment]),
+		).toEqual([
+			["a1", 1, "crops/a1.webp", "comment 1"],
+			["a3", 3, "crops/a3.webp", "comment 2"],
+			["a4", 4, "crops/a4.webp", "comment 3"],
+		]);
+		expect(Object.fromEntries(out.images)).toEqual({
+			"crops/a3.webp": "crop two",
+			"crops/a4.webp": "crop three",
+		});
+		// a3's path is written anew, not deleted.
+		expect([...out.deleteImages]).toEqual(["crops/a2.webp"]);
+		expect(book.marks).toEqual({
+			a1: wires["a1"] as string,
+			a3: wires["a2"] as string,
+			a4: wires["a3"] as string,
+		});
+		expect(next.lastNumber).toBe(4);
+	});
+
+	test("a crop that has to move and was not read is asked for", () => {
+		const c = local();
+		const { book } = synced(c);
+		expect(() =>
+			renumber(c, book, new Map([["a2", 7]]), new Map(), {
+				images: new Map(),
+				deleteImages: new Set(),
+			}),
+		).toThrow(NeedsImage);
+	});
+});
+
+describe("a case that is here and at the server, with no record of what the server had", () => {
+	const wireShot: WireShot = {
+		id: "sh_1",
+		caseId: "c_1",
+		url: "https://www.example.com/kk",
+		image: ref("server shot"),
+		scrollX: 0,
+		scrollY: 0,
+		viewport: { width: 1280, height: 800, dpr: 2 },
+		capturedAt: "2026-11-19T09:00:00.000Z",
+		rev: 1,
+	};
+	const wireMark = (n: number, comment: string): WireMark => ({
+		id: `m_${n}`,
+		caseId: "c_1",
+		number: n,
+		shotId: "sh_1",
+		comment,
+		author: "user",
+		shape: mark(n).shape,
+		crop: ref(`server crop ${n}`),
+		element: null,
+		resolution: null,
+		reopens: [],
+		findings: [],
+		status: "open",
+		createdBy: { id: "u_tess", name: "Tess Tester" },
+		createdAt: NOW,
+		updatedAt: NOW,
+		rev: 1,
+	});
+
+	test("the same marks are the same marks, the server's copy counts, and a mark only here is sent", () => {
+		// It came in from a file: marks 1 and 2 as the team has them, 3 added here.
+		const c = local([
+			{ ...mark(1), comment: "As the file said" },
+			mark(2),
+			mark(3),
+		]);
+		const merged = mergeCase(
+			c,
+			emptyBook("c_1", "local"),
+			{
+				case: {
+					id: "c_1",
+					teamId: "team_1",
+					title: "The team's title",
+					link: null,
+					summary: null,
+					pages: [
+						{ url: "https://www.example.com/kk", title: "KK", lang: "de" },
+					],
+					client: {},
+					lastNumber: 2,
+					importedAt: null,
+					createdBy: null,
+					createdAt: NOW,
+					updatedAt: NOW,
+					rev: 1,
+				},
+				shots: [wireShot],
+				marks: [wireMark(1, "As the team has it"), wireMark(2, "comment 2")],
+				removedMarks: [],
+				removedShots: [],
+			},
+			new Map(),
+			new Map(),
+			{ teamId: "team_1", whole: true, now: NOW },
+		);
+		expect(merged?.value.title).toBe("The team's title");
+		expect(merged?.value.annotations.map((a) => a.comment)).toEqual([
+			"As the team has it",
+			"comment 2",
+			"comment 3",
+		]);
+		const book = merged?.book as CaseBook;
+		expect(book.mode).toBe("synced");
+		expect(book.marks).toEqual({ a1: "m_1", a2: "m_2" });
+		expect(book.shots).toEqual({ s1: "sh_1" });
+		// No image was needed: nothing new came.
+		expect(merged?.images.size).toBe(0);
+		const { ops } = deriveOps(merged?.value as Case, book, ref, newId);
+		expect(ops.map((op) => op.type)).toEqual(["case.patch", "mark.create"]);
+		expect(fixedOf(mark(3))).not.toBe(fixedOf(mark(2)));
+	});
+
+	test("the case's content as the server has it is what is compared next", () => {
+		const c = local();
+		expect(caseContent(c)).toEqual({
+			title: "Button contrast",
+			link: null,
+			summary: null,
+			pages: [{ url: "https://www.example.com/kk", title: "KK", lang: "de" }],
+			lastNumber: 2,
+		});
+	});
+});

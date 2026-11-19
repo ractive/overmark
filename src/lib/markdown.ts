@@ -24,6 +24,7 @@ import {
 	STATUS_LABEL,
 	shotImage,
 	shotUrl,
+	type UserRef,
 } from "./case.ts";
 import { summarize } from "./element.ts";
 
@@ -100,12 +101,21 @@ function image(alt: string, path: string, own: string | undefined): string {
 /** An AI app's finding: who wrote it and when, then its text as a block. */
 function finding(f: Finding): string {
 	const when = `${inline(f.at)}${f.editedAt ? `, edited ${inline(f.editedAt)}` : ""}`;
-	return `By ${inline(appLabel(f.app))}${f.imported ? " (as the file says)" : ""}, ${when}:\n\n${block(f.text)}\n`;
+	return `By ${inline(appLabel(f.app))}${f.user ? ` for ${inline(f.user.name)}` : ""}${f.imported ? " (as the file says)" : ""}, ${when}:\n\n${block(f.text)}\n`;
 }
 
-/** ` by Claude (claude.ai)` for what an AI app did; nothing for the panel. */
-const by = (app: FindingApp | undefined) =>
-	app ? ` by ${inline(appLabel(app))}` : "";
+/**
+ * ` by Claude (claude.ai)` for what an AI app did; in a case synced with a
+ * team also the person (` by Dana`, ` by Claude (claude.ai) for Dana`,
+ * DEC-039); nothing for what was done in the panel of a case that never
+ * synced.
+ */
+const by = (app: FindingApp | undefined, user?: UserRef) =>
+	app
+		? ` by ${inline(appLabel(app))}${user ? ` for ${inline(user.name)}` : ""}`
+		: user
+			? ` by ${inline(user.name)}`
+			: "";
 
 /** What came in from a file is what the file says. */
 const fromFile = (imported: boolean | undefined) =>
@@ -126,22 +136,22 @@ function status(a: Annotation): string[] {
 	if (r?.verified)
 		lines.push(
 			"- Status: Verified",
-			`- Fixed: ${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)}`,
+			`- Fixed: ${inline(r.at)}${r.app || r.user ? `,${by(r.app, r.user)}` : ""}${fromFile(r.imported)}`,
 		);
 	else {
 		const when = r
-			? ` (${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)})`
+			? ` (${inline(r.at)}${r.app || r.user ? `,${by(r.app, r.user)}` : ""}${fromFile(r.imported)})`
 			: "";
 		lines.push(`- Status: ${STATUS_LABEL[markStatus(a)]}${when}`);
 	}
 	if (r?.note) lines.push(`- Note: ${inline(r.note)}`);
 	if (r?.verified)
 		lines.push(
-			`- Verified: ${inline(r.verified.at)}${r.verified.app ? `,${by(r.verified.app)}` : ""}${fromFile(r.verified.imported)}`,
+			`- Verified: ${inline(r.verified.at)}${r.verified.app || r.verified.user ? `,${by(r.verified.app, r.verified.user)}` : ""}${fromFile(r.verified.imported)}`,
 		);
 	for (const reopen of a.reopens ?? []) {
 		lines.push(
-			`- Reopened ${inline(reopen.at)}${by(reopen.app)}${fromFile(reopen.imported)}, was ${was(reopen.was)}${reopen.note ? ":" : ""}`,
+			`- Reopened ${inline(reopen.at)}${by(reopen.app, reopen.user)}${fromFile(reopen.imported)}, was ${was(reopen.was)}${reopen.note ? ":" : ""}`,
 		);
 		if (reopen.note)
 			lines.push(
@@ -173,6 +183,7 @@ function annotation(a: Annotation, page: string | undefined): string {
 		"",
 	];
 	lines.push(a.comment ? block(a.comment) : "_No comment._", "");
+	if (a.createdBy) lines.push(`- Added by: ${inline(a.createdBy.name)}`);
 	lines.push(...status(a));
 	if (page !== undefined) lines.push(`- Page: ${address(page)}`);
 	if (a.element) {

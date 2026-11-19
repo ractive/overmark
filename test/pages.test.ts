@@ -511,6 +511,75 @@ describe("a case of several pages in a file", () => {
 	});
 });
 
+describe("who did something, in a case synced with a team (DEC-039)", () => {
+	const app = {
+		id: "https://claude.ai/oauth",
+		name: "Claude",
+		host: "claude.ai",
+	};
+	const dana = { id: "u_dana", name: "Dana *Developer*" };
+	const tess = { id: "u_tess", name: "Tess Tester" };
+	const c: Case = {
+		...flow(),
+		annotations: [
+			{
+				...mark(1, "s1"),
+				createdBy: tess,
+				resolution: {
+					kind: "fixed",
+					at: "2026-11-19T10:00:00.000Z",
+					app,
+					user: dana,
+					verified: { at: "2026-11-19T11:00:00.000Z", user: tess },
+				},
+				reopens: [
+					{
+						at: "2026-11-19T09:30:00.000Z",
+						user: tess,
+						note: "Still cut off",
+						was: { kind: "fixed", at: "2026-11-19T09:00:00.000Z", user: dana },
+					},
+				],
+				findings: [
+					{
+						id: "f_1",
+						text: "The total wraps",
+						app,
+						at: "2026-11-19T09:10:00.000Z",
+						user: dana,
+					},
+				],
+			},
+		],
+	};
+
+	test("the format keeps it through a file, and a build before it leaves it out without refusing", () => {
+		const read = validateCase(JSON.parse(JSON.stringify(c)));
+		expect(read.annotations[0]).toEqual(c.annotations[0] as Annotation);
+		expect(() =>
+			validateCase({
+				...c,
+				annotations: [{ ...c.annotations[0], createdBy: { id: 1 } }],
+			}),
+		).toThrow("case.annotations[0].createdBy.id: must be a string");
+	});
+
+	test("case.md says it, as text", () => {
+		const md = caseMarkdown(c);
+		expect(md).toContain("- Added by: Tess Tester");
+		expect(md).toContain(
+			"- Fixed: 2026-11-19T10:00:00.000Z, by Claude (claude.ai) for Dana \\*Developer\\*",
+		);
+		expect(md).toContain(
+			"- Verified: 2026-11-19T11:00:00.000Z, by Tess Tester",
+		);
+		expect(md).toContain(
+			"- Reopened 2026-11-19T09:30:00.000Z by Tess Tester, was Fixed:",
+		);
+		expect(md).toContain("By Claude (claude.ai) for Dana \\*Developer\\*, ");
+	});
+});
+
 describe("what a draw found, judged for the page in front", () => {
 	const match = (
 		n: number,

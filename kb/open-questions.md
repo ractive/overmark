@@ -75,3 +75,31 @@ timestamp: 2026-11-04T17:00:00+01:00
    (`--randomize`), and an export test's sizes leave about 470 bytes of margin for a
    longer `case.md` preamble.
 10. **Dependabot's Biome 2.6.6** pull request fails CI and was not looked at.
+10. **Team sync (DEC-039): known limits, and what is the owner's to decide.**
+    (a) A mark that takes another number from the server (two people added a mark at
+    once) keeps the old number on its pin in the screenshot and in its crop: the image
+    is not painted again. The list, the page and the AI tools show the new number.
+    Painting it again would need the screenshot without marks, which is not kept.
+    (b) Ids are global at the server: a case that synced with one team cannot be shared
+    with another, and a case the team deleted cannot be shared again from a device that
+    kept it. The server says "The case's id is taken", and the panel shows that.
+    Export and "Keep both" on import make a copy with a new id. Giving such a case a
+    new id on "Share with team" would be the fix here.
+    (c) Signing out ends the refresh token at the server; the access token is a signed
+    one and holds until it runs out (an hour). It is wiped from the browser at once.
+    (d) Refresh tokens rotate, and the plan says that a used one, used again, ends the
+    grant. A refresh whose answer is lost (the worker stopped between the request and
+    the write) would then leave the browser with a used refresh token, and the user
+    would have to sign in again; nothing would be lost. The local server of 2026-11-19
+    took a used refresh token a second time, so this did not happen there: whichever
+    is meant, a short grace period for the previous token is what the extension needs.
+    (e) A page whose last mark is deleted in the web app stays in the case's list of
+    pages with 0 marks until a mark is deleted in an extension (which tidies the list).
+    (f) The toolbar icon's badge says nothing about the team sync (a sign-in that ran
+    out, changes the server refused); the panel's banner and Account section do.
+    (g) Mark-level actions are not switched off by permission in the panel (only
+    sharing a case and deleting a synced one are): with today's roles everyone may do
+    them. A change the role does not allow is not sent, stays here and is said.
+    (h) To decide: whether the Account section belongs on Home (where it is, under the
+    files) or in Settings; and whether "Sync" for the folder should be renamed now that
+    there are two.

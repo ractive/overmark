@@ -152,6 +152,18 @@ export interface Annotation {
 	reopens?: Reopen[];
 	/** What AI apps found about the mark, oldest first; none: no findings. */
 	findings?: Finding[];
+	/** Who made it, in a case synced with a team (DEC-039). */
+	createdBy?: UserRef;
+}
+
+/**
+ * A person, as sitegloss.dev names who did something (DEC-039): there only
+ * on what went through a team's sync, where the server wrote it down from
+ * the login. Nothing here sets it.
+ */
+export interface UserRef {
+	id: string;
+	name: string;
 }
 
 /** The AI app that wrote a finding, as the relay named it then. */
@@ -178,6 +190,8 @@ export interface Finding {
 	editedAt?: string;
 	/** Came in from a file: no app's own, whichever app it names. */
 	imported?: true;
+	/** Whose AI app wrote it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 /** An AI app as the panel and the questions name it: its name beside its host. */
@@ -185,9 +199,22 @@ export function appLabel(app: FindingApp): string {
 	return app.name ? `${app.name} (${app.host})` : app.host;
 }
 
-/** A finding the AI app `clientId` wrote here, not one from a file. */
-export function isOwnFinding(f: Finding, clientId: string): boolean {
-	return f.imported !== true && f.app.id === clientId;
+/**
+ * A finding the AI app `clientId` wrote here, not one from a file. In a case
+ * synced with a team a finding says whose app wrote it: the same app
+ * connected to a teammate's browser is another one's, so only a finding of
+ * the person signed in here (`me`) is this app's own.
+ */
+export function isOwnFinding(
+	f: Finding,
+	clientId: string,
+	me?: string,
+): boolean {
+	return (
+		f.imported !== true &&
+		f.app.id === clientId &&
+		(f.user === undefined || f.user.id === me)
+	);
 }
 
 /** What became of a mark: fixed, or left as it is and why. */
@@ -215,6 +242,8 @@ export interface Resolution {
 	verified?: Verification;
 	/** Came in from a file: who set it and when is what the file says. */
 	imported?: true;
+	/** Who set it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 export interface Verification {
@@ -223,6 +252,8 @@ export interface Verification {
 	app?: FindingApp;
 	/** Came in from a file. */
 	imported?: true;
+	/** Who verified it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 /** A settled mark opened again, and the resolution that ended (DEC-023). */
@@ -236,6 +267,8 @@ export interface Reopen {
 	was: Resolution;
 	/** Came in from a file. */
 	imported?: true;
+	/** Who reopened it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 /** The most reopens a mark keeps; the oldest goes when there are more. */
@@ -938,6 +971,7 @@ export function validateCase(value: unknown): Case {
 				: { resolution: resolution(a["resolution"], `${p}.resolution`) }),
 			...reopensOf(a["reopens"], `${p}.reopens`),
 			...findingsOf(a["findings"], `${p}.findings`),
+			...createdByOf(a["createdBy"], `${p}.createdBy`),
 		};
 	});
 	const verdict = o["verdict"];
@@ -1019,6 +1053,7 @@ function resolution(value: unknown, path: string): Resolution {
 			? {}
 			: { verified: verification(verified, `${path}.verified`) }),
 		...importedOf(o["imported"], `${path}.imported`),
+		...userOf(o["user"], `${path}.user`),
 	};
 }
 
@@ -1028,7 +1063,31 @@ function verification(value: unknown, path: string): Verification {
 		at: str(o["at"], `${path}.at`, 64),
 		...appOf(o["app"], `${path}.app`),
 		...importedOf(o["imported"], `${path}.imported`),
+		...userOf(o["user"], `${path}.user`),
 	};
+}
+
+/**
+ * Who did something, as a team's sync wrote it down (DEC-039), or nobody: an
+ * addition a build before it leaves out, as every field it does not know.
+ */
+function person(value: unknown, path: string): UserRef | undefined {
+	if (value === undefined || value === null) return undefined;
+	const user = obj(value, path);
+	return {
+		id: str(user["id"], `${path}.id`, 64),
+		name: str(user["name"], `${path}.name`, 200),
+	};
+}
+
+function userOf(value: unknown, path: string): { user?: UserRef } {
+	const user = person(value, path);
+	return user === undefined ? {} : { user };
+}
+
+function createdByOf(value: unknown, path: string): { createdBy?: UserRef } {
+	const createdBy = person(value, path);
+	return createdBy === undefined ? {} : { createdBy };
 }
 
 /** `imported: true`, or nothing; anything else is refused. */
@@ -1087,6 +1146,7 @@ function reopensOf(value: unknown, path: string): { reopens?: Reopen[] } {
 			...appOf(r["app"], `${p}.app`),
 			was: cutWas(resolution(r["was"], `${p}.was`)),
 			...importedOf(r["imported"], `${p}.imported`),
+			...userOf(r["user"], `${p}.user`),
 		};
 	});
 	return reopens.length > 0 ? { reopens } : {};
@@ -1116,6 +1176,7 @@ function findingsOf(value: unknown, path: string): { findings?: Finding[] } {
 				? {}
 				: { editedAt: str(editedAt, `${p}.editedAt`, 64) }),
 			...(imported === true ? { imported: true } : {}),
+			...userOf(f["user"], `${p}.user`),
 		};
 	});
 	return findings.length > 0 ? { findings } : {};

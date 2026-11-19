@@ -1,0 +1,2209 @@
+{
+	"openapi": "3.1.0",
+	"info": {
+		"title": "sitegloss.dev API",
+		"version": "1.0.0",
+		"description": "Cases, marks and screenshots of a team, and the operations that change them. Version 1 only grows: fields and paths are added, never removed or changed. Ignore what you do not know."
+	},
+	"servers": [
+		{
+			"url": "https://app.sitegloss.dev"
+		}
+	],
+	"paths": {
+		"/api/v1/me": {
+			"get": {
+				"operationId": "getMe",
+				"summary": "The caller, their teams and what they may do in each",
+				"security": [
+					{
+						"oauth": ["cases:read"]
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The caller.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Me"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/teams/{teamId}/cases": {
+			"get": {
+				"operationId": "listCases",
+				"summary": "The team's cases, newest change first",
+				"security": [
+					{
+						"oauth": ["cases:read"]
+					}
+				],
+				"parameters": [
+					{
+						"name": "teamId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The cases.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/CaseList"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "The token's scope or the caller's role does not allow it.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such team, case or image, or not one of the caller's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/teams/{teamId}/cases/{caseId}": {
+			"get": {
+				"operationId": "getCase",
+				"summary": "One case with its screenshots and marks",
+				"security": [
+					{
+						"oauth": ["cases:read"]
+					}
+				],
+				"parameters": [
+					{
+						"name": "teamId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "caseId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The case.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/CaseDetail"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "The token's scope or the caller's role does not allow it.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such team, case or image, or not one of the caller's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/teams/{teamId}/ops": {
+			"post": {
+				"operationId": "applyOps",
+				"summary": "Apply changes",
+				"description": "Up to 200 operations, applied in order. Each gets its own result: one refused operation does not stop the others. An operation whose opId was applied before is not applied again. An image an operation names must have been uploaded first.",
+				"security": [
+					{
+						"oauth": ["cases:write"]
+					}
+				],
+				"parameters": [
+					{
+						"name": "teamId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/OpsRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "The results.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/OpsResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "The request is not valid.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "The token's scope or the caller's role does not allow it.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such team, case or image, or not one of the caller's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/teams/{teamId}/changes": {
+			"get": {
+				"operationId": "getChanges",
+				"summary": "What changed after a revision",
+				"description": "Without since: the team's whole state. Ask again with the returned cursor while more is true.",
+				"security": [
+					{
+						"oauth": ["cases:read"]
+					}
+				],
+				"parameters": [
+					{
+						"name": "teamId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "since",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 0
+						}
+					},
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 2000
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The changes.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Changes"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "The token's scope or the caller's role does not allow it.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such team, case or image, or not one of the caller's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/teams/{teamId}/events": {
+			"get": {
+				"operationId": "streamEvents",
+				"summary": "A stream that says when something changed",
+				"description": "Server-sent events. `change` events carry a ChangeEvent as JSON: fetch the changes after your cursor. Comment lines keep the connection open. Reconnect when it ends.",
+				"security": [
+					{
+						"oauth": ["cases:read"]
+					}
+				],
+				"parameters": [
+					{
+						"name": "teamId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The stream.",
+						"content": {
+							"text/event-stream": {
+								"schema": {
+									"type": "string"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "The token's scope or the caller's role does not allow it.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such team, case or image, or not one of the caller's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/v1/teams/{teamId}/blobs/{sha256}": {
+			"parameters": [
+				{
+					"name": "teamId",
+					"in": "path",
+					"required": true,
+					"schema": {
+						"type": "string"
+					}
+				},
+				{
+					"name": "sha256",
+					"in": "path",
+					"required": true,
+					"schema": {
+						"type": "string",
+						"pattern": "^[0-9a-f]{64}$"
+					}
+				}
+			],
+			"get": {
+				"operationId": "getBlob",
+				"summary": "An image",
+				"security": [
+					{
+						"oauth": ["cases:read"]
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "The image.",
+						"content": {
+							"image/webp": {
+								"schema": {
+									"type": "string",
+									"format": "binary"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "The token's scope or the caller's role does not allow it.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such team, case or image, or not one of the caller's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			},
+			"head": {
+				"operationId": "hasBlob",
+				"summary": "Whether the team has this image",
+				"security": [
+					{
+						"oauth": ["cases:read"]
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "It has."
+					},
+					"404": {
+						"description": "It has not."
+					}
+				}
+			},
+			"put": {
+				"operationId": "putBlob",
+				"summary": "Upload an image",
+				"description": "A WebP image of at most 31457280 bytes whose SHA-256 is the path's. Uploading one the team has is fine.",
+				"security": [
+					{
+						"oauth": ["cases:write"]
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"image/webp": {
+							"schema": {
+								"type": "string",
+								"format": "binary"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Stored.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/BlobInfo"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Not a WebP image, or its hash is not the path's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "No valid access token.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"403": {
+						"description": "The token's scope or the caller's role does not allow it.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"404": {
+						"description": "No such team, case or image, or not one of the caller's.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					},
+					"413": {
+						"description": "Too large.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiError"
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"ApiError": {
+				"type": "object",
+				"properties": {
+					"error": {
+						"type": "object",
+						"properties": {
+							"code": {
+								"type": "string"
+							},
+							"message": {
+								"type": "string"
+							}
+						},
+						"required": ["code", "message"]
+					}
+				},
+				"required": ["error"]
+			},
+			"AppRef": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string",
+						"maxLength": 2048
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 200
+					},
+					"host": {
+						"type": "string",
+						"maxLength": 255
+					},
+					"verified": {
+						"type": "boolean",
+						"const": true
+					}
+				},
+				"required": ["id", "host"],
+				"description": "An AI app: its client id, the name it declares, and a host: of its id when that is an address, else of where its sign-in returns to."
+			},
+			"BlobInfo": {
+				"type": "object",
+				"properties": {
+					"sha256": {
+						"type": "string"
+					},
+					"bytes": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"width": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"height": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": ["sha256", "bytes", "width", "height"]
+			},
+			"Case": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"teamId": {
+						"type": "string"
+					},
+					"title": {
+						"type": "string",
+						"maxLength": 500
+					},
+					"link": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 2048
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"summary": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 50000
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"pages": {
+						"maxItems": 200,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Page"
+						}
+					},
+					"client": {
+						"$ref": "#/components/schemas/ClientInfo"
+					},
+					"lastNumber": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 99999
+					},
+					"importedAt": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Timestamp"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"createdBy": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/UserRef"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"createdAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"updatedAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": [
+					"id",
+					"teamId",
+					"title",
+					"link",
+					"summary",
+					"pages",
+					"client",
+					"lastNumber",
+					"importedAt",
+					"createdBy",
+					"createdAt",
+					"updatedAt",
+					"rev"
+				],
+				"description": "A case: marks on one or more pages of a site."
+			},
+			"CaseCounts": {
+				"type": "object",
+				"properties": {
+					"open": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"toVerify": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"verified": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"closed": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": ["open", "toVerify", "verified", "closed"],
+				"description": "A case's marks by status group."
+			},
+			"CaseDetail": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"teamId": {
+						"type": "string"
+					},
+					"title": {
+						"type": "string",
+						"maxLength": 500
+					},
+					"link": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 2048
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"summary": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 50000
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"pages": {
+						"maxItems": 200,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Page"
+						}
+					},
+					"client": {
+						"$ref": "#/components/schemas/ClientInfo"
+					},
+					"lastNumber": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 99999
+					},
+					"importedAt": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Timestamp"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"createdBy": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/UserRef"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"createdAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"updatedAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"shots": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Shot"
+						}
+					},
+					"marks": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Mark"
+						}
+					}
+				},
+				"required": [
+					"id",
+					"teamId",
+					"title",
+					"link",
+					"summary",
+					"pages",
+					"client",
+					"lastNumber",
+					"importedAt",
+					"createdBy",
+					"createdAt",
+					"updatedAt",
+					"rev",
+					"shots",
+					"marks"
+				]
+			},
+			"CaseList": {
+				"type": "object",
+				"properties": {
+					"cases": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/CaseSummary"
+						}
+					}
+				},
+				"required": ["cases"]
+			},
+			"CaseSummary": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"teamId": {
+						"type": "string"
+					},
+					"title": {
+						"type": "string",
+						"maxLength": 500
+					},
+					"link": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 2048
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"summary": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 50000
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"pages": {
+						"maxItems": 200,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Page"
+						}
+					},
+					"client": {
+						"$ref": "#/components/schemas/ClientInfo"
+					},
+					"lastNumber": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 99999
+					},
+					"importedAt": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Timestamp"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"createdBy": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/UserRef"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"createdAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"updatedAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"counts": {
+						"$ref": "#/components/schemas/CaseCounts"
+					}
+				},
+				"required": [
+					"id",
+					"teamId",
+					"title",
+					"link",
+					"summary",
+					"pages",
+					"client",
+					"lastNumber",
+					"importedAt",
+					"createdBy",
+					"createdAt",
+					"updatedAt",
+					"rev",
+					"counts"
+				]
+			},
+			"ChangeEvent": {
+				"type": "object",
+				"properties": {
+					"cursor": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": ["cursor"]
+			},
+			"Changes": {
+				"type": "object",
+				"properties": {
+					"cursor": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"more": {
+						"type": "boolean"
+					},
+					"reset": {
+						"type": "boolean"
+					},
+					"cases": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Case"
+						}
+					},
+					"shots": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Shot"
+						}
+					},
+					"marks": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Mark"
+						}
+					},
+					"removed": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Removed"
+						}
+					}
+				},
+				"required": [
+					"cursor",
+					"more",
+					"reset",
+					"cases",
+					"shots",
+					"marks",
+					"removed"
+				],
+				"description": "Everything that changed in a team after a revision."
+			},
+			"ClientInfo": {
+				"type": "object",
+				"properties": {
+					"viewport": {
+						"$ref": "#/components/schemas/Viewport"
+					},
+					"userAgent": {
+						"type": "string",
+						"maxLength": 1000
+					},
+					"lang": {
+						"type": "string",
+						"maxLength": 35
+					}
+				},
+				"description": "The browser the case was started in."
+			},
+			"ElementDetails": {
+				"type": "object",
+				"properties": {
+					"tag": {
+						"type": "string",
+						"maxLength": 100
+					},
+					"id": {
+						"type": "string",
+						"maxLength": 500
+					},
+					"testId": {
+						"type": "string",
+						"maxLength": 500
+					},
+					"role": {
+						"type": "string",
+						"maxLength": 200
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"text": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"classes": {
+						"maxItems": 200,
+						"type": "array",
+						"items": {
+							"type": "string",
+							"maxLength": 500
+						}
+					},
+					"attributes": {
+						"type": "object",
+						"propertyNames": {
+							"type": "string",
+							"maxLength": 100
+						},
+						"additionalProperties": {
+							"type": "string",
+							"maxLength": 8000
+						}
+					},
+					"heading": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"landmark": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"ancestors": {
+						"maxItems": 100,
+						"type": "array",
+						"items": {
+							"type": "string",
+							"maxLength": 2000
+						}
+					},
+					"rect": {
+						"$ref": "#/components/schemas/Rect"
+					},
+					"page": {
+						"type": "object",
+						"properties": {
+							"width": {
+								"type": "number"
+							},
+							"height": {
+								"type": "number"
+							}
+						},
+						"required": ["width", "height"]
+					},
+					"selector": {
+						"type": "string",
+						"maxLength": 8000
+					}
+				},
+				"required": [
+					"tag",
+					"classes",
+					"attributes",
+					"ancestors",
+					"rect",
+					"page",
+					"selector"
+				],
+				"description": "What is recorded about a mark's element."
+			},
+			"Finding": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"text": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 5000
+					},
+					"app": {
+						"$ref": "#/components/schemas/AppRef"
+					},
+					"at": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"editedAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"imported": {
+						"type": "boolean",
+						"const": true
+					},
+					"user": {
+						"$ref": "#/components/schemas/UserRef"
+					}
+				},
+				"required": ["id", "text", "app", "at"],
+				"description": "What an AI app found out about a mark."
+			},
+			"Id": {
+				"type": "string",
+				"pattern": "^[A-Za-z0-9_-]{1,64}$",
+				"description": "An id: letters, digits, _ and -, at most 64."
+			},
+			"ImageRef": {
+				"type": "object",
+				"properties": {
+					"sha256": {
+						"type": "string",
+						"pattern": "^[0-9a-f]{64}$"
+					},
+					"width": {
+						"type": "integer",
+						"exclusiveMinimum": 0,
+						"maximum": 16384
+					},
+					"height": {
+						"type": "integer",
+						"exclusiveMinimum": 0,
+						"maximum": 16384
+					},
+					"bytes": {
+						"type": "integer",
+						"exclusiveMinimum": 0,
+						"maximum": 31457280
+					}
+				},
+				"required": ["sha256", "width", "height", "bytes"],
+				"description": "A WebP image, named by the SHA-256 of its bytes."
+			},
+			"Mark": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"caseId": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"number": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 99999
+					},
+					"shotId": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"comment": {
+						"type": "string",
+						"maxLength": 20000
+					},
+					"author": {
+						"type": "string",
+						"enum": ["user", "ai"]
+					},
+					"shape": {
+						"$ref": "#/components/schemas/Shape"
+					},
+					"crop": {
+						"$ref": "#/components/schemas/ImageRef"
+					},
+					"element": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/ElementDetails"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"resolution": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Resolution"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"reopens": {
+						"maxItems": 20,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Reopen"
+						}
+					},
+					"findings": {
+						"maxItems": 20,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Finding"
+						}
+					},
+					"status": {
+						"$ref": "#/components/schemas/MarkStatus"
+					},
+					"createdBy": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/UserRef"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"createdAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"updatedAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": [
+					"id",
+					"caseId",
+					"number",
+					"shotId",
+					"comment",
+					"author",
+					"shape",
+					"crop",
+					"element",
+					"resolution",
+					"reopens",
+					"findings",
+					"status",
+					"createdBy",
+					"createdAt",
+					"updatedAt",
+					"rev"
+				],
+				"description": "One mark of a case."
+			},
+			"MarkStatus": {
+				"type": "string",
+				"enum": ["open", "fixed", "verified", "wontfix", "cantreproduce"],
+				"description": "Derived from the resolution, never stored."
+			},
+			"Me": {
+				"type": "object",
+				"properties": {
+					"user": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string"
+							},
+							"name": {
+								"type": "string"
+							},
+							"email": {
+								"type": "string"
+							},
+							"image": {
+								"type": ["string", "null"]
+							}
+						},
+						"required": ["id", "name", "email", "image"]
+					},
+					"teams": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/TeamMembership"
+						}
+					}
+				},
+				"required": ["user", "teams"]
+			},
+			"Op": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "case.create"
+							},
+							"case": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"$ref": "#/components/schemas/Id"
+									},
+									"title": {
+										"type": "string",
+										"maxLength": 500
+									},
+									"link": {
+										"anyOf": [
+											{
+												"type": "string",
+												"maxLength": 2048
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"summary": {
+										"anyOf": [
+											{
+												"type": "string",
+												"maxLength": 50000
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"pages": {
+										"maxItems": 200,
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/Page"
+										}
+									},
+									"client": {
+										"$ref": "#/components/schemas/ClientInfo"
+									},
+									"lastNumber": {
+										"type": "integer",
+										"minimum": 0,
+										"maximum": 99999
+									},
+									"createdAt": {
+										"$ref": "#/components/schemas/Timestamp"
+									},
+									"importedAt": {
+										"anyOf": [
+											{
+												"$ref": "#/components/schemas/Timestamp"
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								},
+								"required": ["id", "title"]
+							}
+						},
+						"required": ["opId", "type", "case"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "case.patch"
+							},
+							"caseId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"title": {
+								"type": "string",
+								"maxLength": 500
+							},
+							"link": {
+								"anyOf": [
+									{
+										"type": "string",
+										"maxLength": 2048
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"summary": {
+								"anyOf": [
+									{
+										"type": "string",
+										"maxLength": 50000
+									},
+									{
+										"type": "null"
+									}
+								]
+							},
+							"pages": {
+								"maxItems": 200,
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/Page"
+								}
+							},
+							"lastNumber": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 99999
+							}
+						},
+						"required": ["opId", "type", "caseId"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "case.delete"
+							},
+							"caseId": {
+								"$ref": "#/components/schemas/Id"
+							}
+						},
+						"required": ["opId", "type", "caseId"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "shot.create"
+							},
+							"caseId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"shot": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"$ref": "#/components/schemas/Id"
+									},
+									"url": {
+										"type": "string",
+										"maxLength": 8000
+									},
+									"image": {
+										"$ref": "#/components/schemas/ImageRef"
+									},
+									"scrollX": {
+										"type": "number"
+									},
+									"scrollY": {
+										"type": "number"
+									},
+									"viewport": {
+										"$ref": "#/components/schemas/Viewport"
+									},
+									"capturedAt": {
+										"$ref": "#/components/schemas/Timestamp"
+									}
+								},
+								"required": [
+									"id",
+									"url",
+									"image",
+									"scrollX",
+									"scrollY",
+									"viewport",
+									"capturedAt"
+								]
+							}
+						},
+						"required": ["opId", "type", "caseId", "shot"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "shot.delete"
+							},
+							"shotId": {
+								"$ref": "#/components/schemas/Id"
+							}
+						},
+						"required": ["opId", "type", "shotId"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "mark.create"
+							},
+							"caseId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"mark": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"$ref": "#/components/schemas/Id"
+									},
+									"number": {
+										"type": "integer",
+										"minimum": 1,
+										"maximum": 99999
+									},
+									"shotId": {
+										"$ref": "#/components/schemas/Id"
+									},
+									"comment": {
+										"type": "string",
+										"maxLength": 20000
+									},
+									"author": {
+										"type": "string",
+										"enum": ["user", "ai"]
+									},
+									"shape": {
+										"$ref": "#/components/schemas/Shape"
+									},
+									"crop": {
+										"$ref": "#/components/schemas/ImageRef"
+									},
+									"element": {
+										"anyOf": [
+											{
+												"$ref": "#/components/schemas/ElementDetails"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"resolution": {
+										"anyOf": [
+											{
+												"$ref": "#/components/schemas/Resolution"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"reopens": {
+										"maxItems": 20,
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/Reopen"
+										}
+									},
+									"findings": {
+										"maxItems": 20,
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/Finding"
+										}
+									},
+									"createdAt": {
+										"$ref": "#/components/schemas/Timestamp"
+									}
+								},
+								"required": [
+									"id",
+									"number",
+									"shotId",
+									"comment",
+									"shape",
+									"crop",
+									"element"
+								]
+							}
+						},
+						"required": ["opId", "type", "caseId", "mark"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "mark.patch"
+							},
+							"markId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"comment": {
+								"type": "string",
+								"maxLength": 20000
+							},
+							"author": {
+								"type": "string",
+								"enum": ["user", "ai"]
+							},
+							"state": {
+								"type": "object",
+								"properties": {
+									"resolution": {
+										"anyOf": [
+											{
+												"$ref": "#/components/schemas/Resolution"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"reopens": {
+										"maxItems": 20,
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/Reopen"
+										}
+									}
+								},
+								"required": ["resolution", "reopens"]
+							},
+							"findings": {
+								"type": "object",
+								"properties": {
+									"upsert": {
+										"maxItems": 20,
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/Finding"
+										}
+									},
+									"remove": {
+										"maxItems": 20,
+										"type": "array",
+										"items": {
+											"$ref": "#/components/schemas/Id"
+										}
+									}
+								}
+							}
+						},
+						"required": ["opId", "type", "markId"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "mark.delete"
+							},
+							"markId": {
+								"$ref": "#/components/schemas/Id"
+							}
+						},
+						"required": ["opId", "type", "markId"]
+					}
+				],
+				"description": "One change to a case, a screenshot or a mark."
+			},
+			"OpErrorCode": {
+				"type": "string",
+				"enum": [
+					"forbidden",
+					"not_found",
+					"invalid",
+					"conflict",
+					"blob_missing",
+					"limit"
+				],
+				"description": "Why an operation was refused. A client treats a code it does not know as invalid."
+			},
+			"OpResult": {
+				"type": "object",
+				"properties": {
+					"opId": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"status": {
+						"type": "string",
+						"enum": ["applied", "duplicate", "rejected"]
+					},
+					"error": {
+						"type": "object",
+						"properties": {
+							"code": {
+								"$ref": "#/components/schemas/OpErrorCode"
+							},
+							"message": {
+								"type": "string"
+							}
+						},
+						"required": ["code", "message"]
+					},
+					"number": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": ["opId", "status"]
+			},
+			"OpsRequest": {
+				"type": "object",
+				"properties": {
+					"ops": {
+						"minItems": 1,
+						"maxItems": 200,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/Op"
+						}
+					}
+				},
+				"required": ["ops"]
+			},
+			"OpsResponse": {
+				"type": "object",
+				"properties": {
+					"results": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/OpResult"
+						}
+					},
+					"cursor": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": ["results", "cursor"]
+			},
+			"Page": {
+				"type": "object",
+				"properties": {
+					"url": {
+						"type": "string",
+						"maxLength": 8000
+					},
+					"title": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"lang": {
+						"type": "string",
+						"maxLength": 35
+					}
+				},
+				"required": ["url", "title"],
+				"description": "A page of the case: origin, path and hash route, no query."
+			},
+			"Point": {
+				"type": "object",
+				"properties": {
+					"x": {
+						"type": "number"
+					},
+					"y": {
+						"type": "number"
+					}
+				},
+				"required": ["x", "y"]
+			},
+			"Rect": {
+				"type": "object",
+				"properties": {
+					"x": {
+						"type": "number"
+					},
+					"y": {
+						"type": "number"
+					},
+					"width": {
+						"type": "number"
+					},
+					"height": {
+						"type": "number"
+					}
+				},
+				"required": ["x", "y", "width", "height"]
+			},
+			"Removed": {
+				"type": "object",
+				"properties": {
+					"type": {
+						"type": "string",
+						"enum": ["case", "shot", "mark"]
+					},
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"caseId": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": ["type", "id", "rev"]
+			},
+			"Reopen": {
+				"type": "object",
+				"properties": {
+					"note": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"at": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"app": {
+						"$ref": "#/components/schemas/AppRef"
+					},
+					"was": {
+						"$ref": "#/components/schemas/Resolution"
+					},
+					"imported": {
+						"type": "boolean",
+						"const": true
+					},
+					"user": {
+						"$ref": "#/components/schemas/UserRef"
+					}
+				},
+				"required": ["at", "was"],
+				"description": "One time a settled mark was opened again, with the resolution it ended."
+			},
+			"Resolution": {
+				"type": "object",
+				"properties": {
+					"kind": {
+						"$ref": "#/components/schemas/ResolutionKind"
+					},
+					"note": {
+						"type": "string",
+						"maxLength": 20000
+					},
+					"at": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"app": {
+						"$ref": "#/components/schemas/AppRef"
+					},
+					"verified": {
+						"$ref": "#/components/schemas/Verification"
+					},
+					"imported": {
+						"type": "boolean",
+						"const": true
+					},
+					"user": {
+						"$ref": "#/components/schemas/UserRef"
+					}
+				},
+				"required": ["kind", "at"],
+				"description": "How a mark was settled. verified only with kind fixed."
+			},
+			"ResolutionKind": {
+				"type": "string",
+				"enum": ["fixed", "wontfix", "cantreproduce"]
+			},
+			"Shape": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"const": "element"
+							},
+							"rect": {
+								"$ref": "#/components/schemas/Rect"
+							}
+						},
+						"required": ["kind", "rect"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"const": "box"
+							},
+							"rect": {
+								"$ref": "#/components/schemas/Rect"
+							}
+						},
+						"required": ["kind", "rect"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"const": "arrow"
+							},
+							"from": {
+								"$ref": "#/components/schemas/Point"
+							},
+							"to": {
+								"$ref": "#/components/schemas/Point"
+							}
+						},
+						"required": ["kind", "from", "to"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"const": "pen"
+							},
+							"points": {
+								"maxItems": 5000,
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/Point"
+								}
+							}
+						},
+						"required": ["kind", "points"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": {
+								"type": "string",
+								"const": "note"
+							},
+							"at": {
+								"$ref": "#/components/schemas/Point"
+							}
+						},
+						"required": ["kind", "at"]
+					}
+				],
+				"description": "A mark's drawing, in CSS pixels of its screenshot."
+			},
+			"Shot": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"caseId": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"url": {
+						"type": "string",
+						"maxLength": 8000
+					},
+					"image": {
+						"$ref": "#/components/schemas/ImageRef"
+					},
+					"scrollX": {
+						"type": "number"
+					},
+					"scrollY": {
+						"type": "number"
+					},
+					"viewport": {
+						"$ref": "#/components/schemas/Viewport"
+					},
+					"capturedAt": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": [
+					"id",
+					"caseId",
+					"url",
+					"image",
+					"scrollX",
+					"scrollY",
+					"viewport",
+					"capturedAt",
+					"rev"
+				],
+				"description": "A screenshot of one page of the case. Never changes once created."
+			},
+			"TeamMembership": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"name": {
+						"type": "string"
+					},
+					"slug": {
+						"type": "string"
+					},
+					"role": {
+						"type": "string"
+					},
+					"permissions": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					}
+				},
+				"required": ["id", "name", "slug", "role", "permissions"]
+			},
+			"Timestamp": {
+				"type": "string",
+				"format": "date-time",
+				"pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+				"description": "ISO 8601, UTC."
+			},
+			"UserRef": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 200
+					}
+				},
+				"required": ["id", "name"],
+				"description": "A person. Set by the server from the caller's login, never taken from a client."
+			},
+			"Verification": {
+				"type": "object",
+				"properties": {
+					"at": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"app": {
+						"$ref": "#/components/schemas/AppRef"
+					},
+					"imported": {
+						"type": "boolean",
+						"const": true
+					},
+					"user": {
+						"$ref": "#/components/schemas/UserRef"
+					}
+				},
+				"required": ["at"]
+			},
+			"Viewport": {
+				"type": "object",
+				"properties": {
+					"width": {
+						"type": "number"
+					},
+					"height": {
+						"type": "number"
+					},
+					"dpr": {
+						"type": "number"
+					}
+				},
+				"required": ["width", "height", "dpr"],
+				"description": "The window in CSS pixels; dpr: screenshot pixels per CSS pixel."
+			}
+		},
+		"securitySchemes": {
+			"oauth": {
+				"type": "oauth2",
+				"description": "OAuth 2.1 with PKCE. Ask for the resource `<origin>/api` to get a token for this API. Discovery: `<origin>/.well-known/oauth-authorization-server/api/auth`.",
+				"flows": {
+					"authorizationCode": {
+						"authorizationUrl": "/api/auth/oauth2/authorize",
+						"tokenUrl": "/api/auth/oauth2/token",
+						"refreshUrl": "/api/auth/oauth2/token",
+						"scopes": {
+							"cases:read": "Read the cases of your teams",
+							"cases:write": "Change the cases of your teams"
+						}
+					}
+				}
+			}
+		}
+	}
+}

@@ -1456,3 +1456,160 @@ change.
 Not done: a toolbar that comes back by itself after a navigation while marks are being
 added. The panel keeps the case open and "Add marks" is one click; whether the toolbar
 should follow is the owner's to decide (it touches DEC-023 and DEC-026).
+
+## DEC-039: Sign in to sitegloss.dev, and cases sync with a team both ways
+
+2026-11-19. The owner asked for it with the plan for sitegloss.dev, a service of the
+owner's (accounts, teams, an API for cases): the extension gets an account, and a
+signed-in user's cases sync with their team in both directions. The numbered constraints
+are the plan's, given to this work as decided; what is under "Decided here" is this
+work's and the owner's to change. This amends DEC-001 ("Forwarding cases to a team is
+handled elsewhere") and DEC-007's spirit holds: no new runtime dependency.
+
+**The plan's constraints, as built:**
+
+1. **Local first stays.** Without an account Sitegloss works as before; nothing asks for
+   one. Signed in, every action is still stored in the browser first and sent after. A
+   server that is away or fails never blocks an action and loses no change: what is not
+   sent waits.
+2. **No new runtime dependency.** Plain `fetch`, Web Crypto and
+   `identity.launchWebAuthFlow` (new permission `identity`; the same call in Chrome and
+   Firefox, wrapped in `browser.ts`). The API's types are generated (DEC-040).
+   "Version 1 only grows; ignore what you do not know" holds: an unknown field, error
+   code or kind of removed thing never fails anything.
+3. **Identity of things.** Ids here stay as they are (`a<number>`, `s<n>`): they say
+   where a thing is on this device. At the server a mark and a screenshot have ids of
+   their own (`m_…`, `sh_…`), made once on the device that makes them. Which is which is
+   in the sync's own bookkeeping, a new database `sitegloss-cloud` beside `sitegloss-sync`:
+   the account, the tokens, the team, the team's revision read so far, and per case the
+   two id maps, what the server last had of it (its "shadow") and the operations not
+   confirmed yet. The case format gains only optional provenance: `user { id, name }` on
+   a resolution, a verification, a reopen and a finding, and `createdBy` on a mark, as
+   the server writes them down. Nothing here sets them; they survive files, and builds
+   before this one leave them out.
+4. **Images** go before the operations that name them (`HEAD`, then `PUT` when the team
+   lacks one; named by the SHA-256 of their bytes) and are fetched when a case arrives.
+5. **Changes are found by comparing, not by hooks.** After any change (the worker's own
+   saves, the AI tools, the panel's `cases:changed`) each synced case is compared with its
+   shadow, and the difference becomes operations: `case.create` or `case.patch` (title,
+   link, summary, pages, the highest number used), `shot.create`, `mark.create`,
+   `mark.patch` with only what changed (comment and author; resolution and reopens
+   together; findings added, changed or removed one by one), `mark.delete`, `case.delete`.
+   They are written down with their `opId` before they are sent, so a reply that never
+   came costs nothing. Then the fetch: everything after the revision seen, in pages, and
+   the cursor moves on. Sending comes first, always, and a failed send ends the run, so
+   nothing waits to be sent while a fetch is applied; a change made here during a fetch
+   is kept by merging field by field (what was not changed here since the server last
+   had it becomes the server's; what was changed here stays and is sent next). `reset`
+   means the server's history is another one: its state is taken whole, but nothing is
+   deleted here on its word. What a restored server no longer has (a case, a mark) stays
+   in the browser and is sent again, under the ids it had.
+6. **Mark numbers.** When the server gives a new mark another number than it was sent
+   with, the mark here takes it: its id, its crop's path and the bookkeeping follow, in
+   one store transaction. The same when a mark from the team has a number that a mark
+   here, not sent yet, holds: the unsent one moves. The pin painted into the screenshot
+   (and the crop) keeps the old number: accepted, see the open questions.
+7. **Live.** While the side panel is open it listens to the server's events stream
+   (`fetch` with a streaming body; reconnects after the server's 15 minutes, and after a
+   failure with a wait that doubles up to a minute) and tells the worker of each change;
+   the worker fetches when the stream's revision is ahead of what it has seen. The
+   worker also syncs at its start (not within a minute of the last sync: a worker starts
+   often), when the panel opens, after every send, and on an alarm every 5 minutes. The
+   worker is never kept alive for the stream; while a run is under way it resets the
+   browser's idle timer every 20 seconds, so a long upload is not cut in the middle.
+8. **What syncs.** With a team chosen, cases sync with that team. Cases that were in
+   the browser before are not sent silently: a banner above every view says how many
+   there are and that the team's members will see them, and offers "Sync them" or "Keep
+   them on this device"; a kept case has "Share with team" in its view. A case without
+   marks is not sent until it has one. Deleting a synced case deletes it for the team,
+   and the button and its tooltip say so ("Really delete for the team?"); an AI app's
+   `delete_case` question says so too. A case deleted for the team goes here. Signing
+   out stops the sync, keeps the cases on this device only, ends the grant at the server
+   and wipes the tokens.
+9. **Not an import.** A case that came from the server gets no `importedAt` and no
+   `imported` flags of its own (it carries those the server has, which are true of its
+   texts).
+10. **Permissions and errors.** What the user may do in a team is its `permissions`
+    from `GET /me`, never the role's name: sharing needs `case:create`, deleting a synced
+    case `case:delete` (the Delete button is off without it), and an operation the user
+    may not make is not sent. What the server refuses is said in the Account section, by
+    case, in plain words, and is not sent again while it is the same change; "Sync now"
+    tries again. `blob_missing`: the image is uploaded and the operation sent once more.
+    A 401: one try with new tokens, then "Sign in again", with everything kept.
+11. **The panel.** An Account section on Home: signed out, "Sign in to sync with your
+    team" with one sentence on what leaves the device; signed in, who, the team (a
+    chooser when there are several), the sync's status, "Sync now" and "Sign out". The
+    server's address is a field there, as the relay's (default `https://app.sitegloss.dev`;
+    plain http only on this machine; only while signed out). The folder sync (DEC-021,
+    DEC-025) stays and knows nothing of this.
+12. **Privacy and stores.** `PRIVACY.md` has the fourth way data leaves the computer and
+    what the service keeps; the manifests have `identity`; the listings' changes are in
+    the two operations runbooks, for the owner to enter.
+
+**Decided here:**
+
+- **The service worker syncs and holds the tokens; the panel asks.** One place sends, so
+  two windows' panels never send a change twice; one place refreshes, one refresh at a
+  time, because refresh tokens rotate and a used one ends the grant. The panel's
+  messages (`CloudRequest`) are taken from an extension page only, never from a content
+  script. The browser's sign-in window is opened by the panel, a page that stays open
+  while the user signs in; the PKCE verifier stays in the worker's database.
+- **No cookies, ever.** Every request to the server is sent with `credentials: "omit"`:
+  the token says who calls. After the sign-in window the browser holds the user's
+  session with the server, and the server refuses a request that carries that cookie
+  from the extension's origin (403, "Invalid origin"): found with the real window, where
+  the token exchange failed until the cookies were left out.
+- **The shadow is what the server confirmed, never what is hoped for.** It moves on an
+  operation's confirmation and on a fetch, in the form a case here stores things (what
+  comes in is cut exactly as `validateCase` cuts it), so "changed here" is a plain
+  comparison. Who did something (`user`) is left out of that comparison: only the
+  server says it.
+- **A crash between two writes costs nothing.** Ids for new marks and screenshots are
+  written to the bookkeeping before they are used, in both directions; a mark renumbered
+  in the store but not in the bookkeeping is put together with the server's again by its
+  drawing. Sent twice, a create is the server's "duplicate", by its id.
+- **A refusal is remembered by what was refused** (the operation without its id, hashed):
+  the same change is not sent again, another change to the same mark is. As a last guard,
+  the very same changes found again three times in a row, though the server took them,
+  are not sent a fourth time: the server and this device then disagree on how something
+  is written, and sending it again would never end.
+- **A case that is here and at the server, with no record of what the server had** (it
+  came in from a file exported elsewhere): its marks are matched to the server's by
+  number and drawing, the server's copy counts for those, and a mark only here is sent.
+- **Signing in again goes on where it was.** The bookkeeping of a case stays when the
+  user signs out; the same team later takes it up again, so nothing is sent twice. A
+  case the team deleted meanwhile stays on this device.
+- **A finding is its app's own only for the person it was written for.** With a team,
+  the same AI app is connected to several people's browsers, so `isOwnFinding` also
+  asks whose finding it is: Claude for Dana may not rewrite Claude for Tess's.
+- **Firefox:** the data collection consent (website content, browsing activity) is
+  asked for at "Sign in" as it is at "Turn on AI access", and taking it back signs out.
+  The manifest's declaration is unchanged.
+- **Tests.** The engine is tested against an API in memory that keeps the server's
+  rules (`test/cloud-fake.ts`), also over HTTP for the worker's part. Three suites run
+  against a real server when `SITEGLOSS_SERVER` names one: the engine alone, and the
+  extension in Chromium and in Firefox, where "Sign in" opens the browser's real sign-in
+  window and the test types the demo user's password into the server's page. No test
+  build hook stands in for the window.
+- **No version bump.** The version is set by a release (as 0.3.0 was); this is a
+  feature branch.
+
+**Known limits** are in the open questions (item 10).
+
+## DEC-040: The API's types are generated, with TypeScript 5 for the generator alone
+
+2026-11-19, with DEC-039. `src/lib/cloud/api.gen.ts` is generated from a copy of the
+server's OpenAPI document kept here (`src/lib/cloud/openapi-v1.json`) by
+`bun scripts/api-types.ts`; both files are committed, so a build and CI need neither the
+server's repository nor the network. A test fails when the two disagree.
+
+The generator is `openapi-typescript` (a dev dependency, pinned; nothing of it is in the
+extension). It builds its output with TypeScript's compiler API, which TypeScript 7
+(this repository's, the native compiler) no longer has, so it does not run here as it is
+installed. Bun has no way to give one package another version of a peer dependency, so
+TypeScript 5 is a second dev dependency under the name `typescript-5`
+(`npm:typescript@5.9.3`), and the script bundles the generator with `typescript` pointed
+at it. When `openapi-typescript` runs on TypeScript 7, `typescript-5` and the bundling
+go. The alternative was a generator of our own for the part of OpenAPI the document
+uses; rejected for now because the plan named the tool, and because the document will
+grow.
