@@ -110,7 +110,7 @@
 		"/api/v1/teams/{teamId}/cases/{caseId}": {
 			"get": {
 				"operationId": "getCase",
-				"summary": "One case with its screenshots and marks",
+				"summary": "One case with its screenshots, marks and comments",
 				"security": [
 					{
 						"oauth": ["cases:read"]
@@ -266,7 +266,7 @@
 			"get": {
 				"operationId": "getChanges",
 				"summary": "What changed after a revision",
-				"description": "Without since: the team's whole state. Ask again with the returned cursor while more is true.",
+				"description": "Without since: the team's whole state, without what was deleted. With since, 0 included: what changed after that revision, deletions too. Ask again with the returned cursor while more is true.",
 				"security": [
 					{
 						"oauth": ["cases:read"]
@@ -685,6 +685,9 @@
 							}
 						]
 					},
+					"summaryBy": {
+						"$ref": "#/components/schemas/Stamp"
+					},
 					"pages": {
 						"maxItems": 200,
 						"type": "array",
@@ -704,6 +707,16 @@
 						"anyOf": [
 							{
 								"$ref": "#/components/schemas/Timestamp"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"closed": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Stamp"
 							},
 							{
 								"type": "null"
@@ -742,12 +755,65 @@
 					"client",
 					"lastNumber",
 					"importedAt",
+					"closed",
 					"createdBy",
 					"createdAt",
 					"updatedAt",
 					"rev"
 				],
 				"description": "A case: marks on one or more pages of a site."
+			},
+			"CaseComment": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"caseId": {
+						"$ref": "#/components/schemas/Id"
+					},
+					"markId": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Id"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"text": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 20000
+					},
+					"user": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/UserRef"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"app": {
+						"$ref": "#/components/schemas/AppRef"
+					},
+					"at": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"edited": {
+						"$ref": "#/components/schemas/Stamp"
+					},
+					"rev": {
+						"type": "integer",
+						"minimum": -9007199254740991,
+						"maximum": 9007199254740991
+					}
+				},
+				"required": ["id", "caseId", "markId", "text", "user", "at", "rev"],
+				"description": "One comment in a case's thread: what someone (or an AI app for them) says about the case or one of its marks, beside the summary, which stays the reporter's."
 			},
 			"CaseCounts": {
 				"type": "object",
@@ -811,6 +877,9 @@
 							}
 						]
 					},
+					"summaryBy": {
+						"$ref": "#/components/schemas/Stamp"
+					},
 					"pages": {
 						"maxItems": 200,
 						"type": "array",
@@ -830,6 +899,16 @@
 						"anyOf": [
 							{
 								"$ref": "#/components/schemas/Timestamp"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"closed": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Stamp"
 							},
 							{
 								"type": "null"
@@ -868,6 +947,12 @@
 						"items": {
 							"$ref": "#/components/schemas/Mark"
 						}
+					},
+					"comments": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/CaseComment"
+						}
 					}
 				},
 				"required": [
@@ -880,12 +965,14 @@
 					"client",
 					"lastNumber",
 					"importedAt",
+					"closed",
 					"createdBy",
 					"createdAt",
 					"updatedAt",
 					"rev",
 					"shots",
-					"marks"
+					"marks",
+					"comments"
 				]
 			},
 			"CaseList": {
@@ -935,6 +1022,9 @@
 							}
 						]
 					},
+					"summaryBy": {
+						"$ref": "#/components/schemas/Stamp"
+					},
 					"pages": {
 						"maxItems": 200,
 						"type": "array",
@@ -954,6 +1044,16 @@
 						"anyOf": [
 							{
 								"$ref": "#/components/schemas/Timestamp"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"closed": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Stamp"
 							},
 							{
 								"type": "null"
@@ -995,6 +1095,7 @@
 					"client",
 					"lastNumber",
 					"importedAt",
+					"closed",
 					"createdBy",
 					"createdAt",
 					"updatedAt",
@@ -1045,6 +1146,12 @@
 							"$ref": "#/components/schemas/Mark"
 						}
 					},
+					"comments": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/CaseComment"
+						}
+					},
 					"removed": {
 						"type": "array",
 						"items": {
@@ -1059,6 +1166,7 @@
 					"cases",
 					"shots",
 					"marks",
+					"comments",
 					"removed"
 				],
 				"description": "Everything that changed in a team after a revision."
@@ -1313,6 +1421,12 @@
 							}
 						]
 					},
+					"createdVia": {
+						"$ref": "#/components/schemas/AppRef"
+					},
+					"commentBy": {
+						"$ref": "#/components/schemas/Stamp"
+					},
 					"createdAt": {
 						"$ref": "#/components/schemas/Timestamp"
 					},
@@ -1455,6 +1569,9 @@
 									}
 								},
 								"required": ["id", "title"]
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
 							}
 						},
 						"required": ["opId", "type", "case"]
@@ -1509,6 +1626,9 @@
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 99999
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
 							}
 						},
 						"required": ["opId", "type", "caseId"]
@@ -1698,6 +1818,9 @@
 									"crop",
 									"element"
 								]
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
 							}
 						},
 						"required": ["opId", "type", "caseId", "mark"]
@@ -1764,6 +1887,9 @@
 										}
 									}
 								}
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
 							}
 						},
 						"required": ["opId", "type", "markId"]
@@ -1783,9 +1909,136 @@
 							}
 						},
 						"required": ["opId", "type", "markId"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "case.close"
+							},
+							"caseId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
+							}
+						},
+						"required": ["opId", "type", "caseId"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "case.reopen"
+							},
+							"caseId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
+							}
+						},
+						"required": ["opId", "type", "caseId"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "comment.create"
+							},
+							"caseId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"comment": {
+								"type": "object",
+								"properties": {
+									"id": {
+										"$ref": "#/components/schemas/Id"
+									},
+									"text": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 20000
+									},
+									"markId": {
+										"anyOf": [
+											{
+												"$ref": "#/components/schemas/Id"
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"at": {
+										"$ref": "#/components/schemas/Timestamp"
+									}
+								},
+								"required": ["id", "text"]
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
+							}
+						},
+						"required": ["opId", "type", "caseId", "comment"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "comment.patch"
+							},
+							"commentId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"text": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 20000
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
+							}
+						},
+						"required": ["opId", "type", "commentId", "text"]
+					},
+					{
+						"type": "object",
+						"properties": {
+							"opId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"type": {
+								"type": "string",
+								"const": "comment.delete"
+							},
+							"commentId": {
+								"$ref": "#/components/schemas/Id"
+							},
+							"via": {
+								"$ref": "#/components/schemas/AppRef"
+							}
+						},
+						"required": ["opId", "type", "commentId"]
 					}
 				],
-				"description": "One change to a case, a screenshot or a mark."
+				"description": "One change to a case, a screenshot, a mark or a comment. A server that does not know an operation's type refuses the request; a client sends only the types it knows."
 			},
 			"OpErrorCode": {
 				"type": "string",
@@ -1919,7 +2172,7 @@
 				"properties": {
 					"type": {
 						"type": "string",
-						"enum": ["case", "shot", "mark"]
+						"enum": ["case", "shot", "mark", "comment"]
 					},
 					"id": {
 						"$ref": "#/components/schemas/Id"
@@ -2119,6 +2372,22 @@
 					"rev"
 				],
 				"description": "A screenshot of one page of the case. Never changes once created."
+			},
+			"Stamp": {
+				"type": "object",
+				"properties": {
+					"at": {
+						"$ref": "#/components/schemas/Timestamp"
+					},
+					"user": {
+						"$ref": "#/components/schemas/UserRef"
+					},
+					"app": {
+						"$ref": "#/components/schemas/AppRef"
+					}
+				},
+				"required": ["at"],
+				"description": "Who did something, and when: the person (set by the server from the caller's login, never taken from a client) and the AI app they acted through. Written in words: `Dana via Claude Code`."
 			},
 			"TeamMembership": {
 				"type": "object",

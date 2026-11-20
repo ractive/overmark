@@ -18,6 +18,7 @@ import {
 	type CasePage,
 	casePages,
 	cropImage,
+	type FindingApp,
 	MAX_ANNOTATIONS,
 	MAX_PAGES,
 	MAX_SHOTS,
@@ -133,6 +134,13 @@ export async function saveCase(
 	crop: Crop,
 	now: Date = new Date(),
 	draw?: Draw,
+	/**
+	 * The AI app that adds the marks through this browser's AI connection
+	 * (DEC-046): each new mark is made through it, and what is sent of the
+	 * case names it. Only the worker's own tools give it; a page's draft
+	 * cannot.
+	 */
+	app?: FindingApp,
 ): Promise<Case> {
 	const from = request.imagesFrom ?? request.caseId;
 	// Said plainly before the slow part, rather than by validateCase after it.
@@ -237,6 +245,7 @@ export async function saveCase(
 				crop: cropImage(id),
 				element: draft.element,
 				...(draft.ends === undefined ? {} : { ends: draft.ends }),
+				...(app === undefined ? {} : { createdVia: app }),
 			});
 			const image = crops.get(draft);
 			if (image !== undefined) images.set(cropImage(id), image);
@@ -264,6 +273,15 @@ export async function saveCase(
 				verdict: current?.verdict ?? null,
 				link: current?.link,
 				importedAt: current?.importedAt,
+				// What else the case holds stays (DEC-046): its thread, who wrote
+				// its summary. A new open mark opens a closed case, as the
+				// server does with it.
+				comments: current?.comments,
+				summaryBy: current?.summaryBy,
+				deletedVia: current?.deletedVia,
+				// Made by an app's call: its making names the app (DEC-046).
+				createdVia: current === undefined ? app : current.createdVia,
+				...(app === undefined ? {} : { via: { app, at: stamp } }),
 				// The highest number used, the new marks' too: a case's format
 				// refuses a lastNumber below a mark's (it was kept as it was, so
 				// a mark added after a delete or an Undo could not be stored).

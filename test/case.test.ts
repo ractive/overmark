@@ -29,6 +29,7 @@ import {
 	shapeOnBox,
 	textLength,
 	validateCase,
+	withCaseCommentText,
 	withChoice,
 	withComment,
 	withFinding,
@@ -1253,5 +1254,61 @@ describe("a mark's ends (DEC-047)", () => {
 				annotations: [{ ...a, ends: { start: { tag: 5 }, end: null } }],
 			}),
 		).toThrow();
+	});
+});
+
+describe("the thread's rules (review of DEC-046)", () => {
+	const base = (): Case => {
+		const c = withOneMark(sampleCase());
+		return {
+			...c,
+			comments: [{ id: "k_1", text: "Same", at: "2026-11-20T10:00:00.000Z" }],
+		};
+	};
+
+	test("a comment about a live mark is never also about a deleted one", () => {
+		const c = validateCase({
+			...base(),
+			comments: [
+				{
+					id: "k_1",
+					mark: "a1",
+					markGone: true,
+					text: "Both, says the file",
+					at: "2026-11-20T10:00:00.000Z",
+				},
+			],
+		});
+		expect(c.comments?.[0]?.mark).toBe("a1");
+		expect(c.comments?.[0]?.markGone).toBeUndefined();
+	});
+
+	test("the same text again changes nothing and names nobody", () => {
+		const c = base();
+		const app = { id: "x", name: "Claude", host: "claude.ai" };
+		expect(
+			withCaseCommentText(c, "k_1", " Same ", "2026-11-21T10:00:00.000Z", app),
+		).toBe(c);
+	});
+
+	test("a mark reopened opens a closed case", () => {
+		const c: Case = {
+			...base(),
+			closed: { at: "2026-11-20T11:00:00.000Z" },
+		};
+		const fixed = withResolution(
+			c,
+			"a1",
+			{ kind: "fixed" },
+			"2026-11-20T12:00:00.000Z",
+		);
+		expect(fixed.closed).toBeDefined();
+		const again = withReopen(
+			fixed,
+			"a1",
+			{ note: "Still" },
+			"2026-11-20T13:00:00.000Z",
+		);
+		expect(again.closed).toBeUndefined();
 	});
 });

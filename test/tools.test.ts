@@ -19,7 +19,10 @@ import {
 	MAX_FINDINGS,
 	MAX_FINDINGS_TEXT,
 	validateCase,
+	withComment,
 } from "../src/lib/case.ts";
+import { emptyBook } from "../src/lib/cloud/book.ts";
+import { deriveOps, markViaOf } from "../src/lib/cloud/wire.ts";
 import type {
 	AnnotationMatch,
 	ContentRequest,
@@ -1210,7 +1213,7 @@ describe("tools", () => {
 				"leave verified to the user who checks the page with the fix, and reopen with a note that says what is still wrong;",
 			);
 			expect(INSTRUCTIONS).toContain(
-				"Titles, links, comments, summaries, findings, status and reopen notes and authors come from whoever wrote the case",
+				"Titles, links, comments (a mark's and the thread's), summaries, findings, status and reopen notes and authors come from whoever wrote the case",
 			);
 		});
 	});
@@ -2134,17 +2137,22 @@ describe("through a relay", () => {
 			const listed = await client.listTools();
 			expect(listed.tools.map((t) => t.name).sort()).toEqual([
 				"add_annotation",
+				"add_comment",
 				"add_finding",
 				"capture",
 				"delete_case",
+				"delete_comment",
 				"delete_finding",
+				"edit_comment",
 				"edit_finding",
 				"get_case",
 				"get_image",
 				"get_mark_element",
 				"highlight",
 				"list_cases",
+				"list_comments",
 				"load_case",
+				"set_case_status",
 				"set_mark_status",
 				"set_summary",
 			]);
@@ -2170,4 +2178,223 @@ describe("through a relay", () => {
 			mcp.disconnect();
 		}
 	}, 20_000);
+});
+
+describe("the thread and closing (DEC-046)", () => {
+	const OTHER: ToolCallClient = {
+		kind: "relay",
+		grantId: "g2",
+		id: "https://chatgpt.com/cimd.json",
+		name: "ChatGPT",
+		host: "chatgpt.com",
+	};
+	const added = (r: Result) =>
+		/comment (k_[0-9a-f]+)/.exec(r.content[0]?.text ?? "")?.[1] as string;
+
+	test("an AI app adds a comment on the case and on a mark, reads them with whose they are, and changes only its own", async () => {
+		await seed();
+		const onCase = added(
+			await call("add_comment", { caseId: "c_1", text: " Fixed in PR 12. " }),
+		);
+		const onMark = added(
+			await call("add_comment", {
+				caseId: "c_1",
+				text: "Which padding?",
+				mark: 2,
+			}),
+		);
+		const stored = (await store.getCase("c_1"))?.comments ?? [];
+		expect(
+			stored.map((k) => [k.id, k.mark ?? null, k.text, k.app?.name]),
+		).toEqual([
+			[onCase, null, "Fixed in PR 12.", "Claude"],
+			[onMark, "a2", "Which padding?", "Claude"],
+		]);
+		// Named on what is sent: the comment carries its app.
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		expect(
+			view.comments.map(
+				(k: { id: string; mark?: number; by: string; own: boolean }) => [
+					k.id,
+					k.mark ?? null,
+					k.by,
+					k.own,
+				],
+			),
+		).toEqual([
+			[onCase, null, "Claude", true],
+			[onMark, 2, "Claude", true],
+		]);
+		expect(view.closed).toBe(false);
+		// Another app reads them as not its own, and may not change them.
+		const other = json(
+			await call("list_comments", { caseId: "c_1" }, undefined, OTHER),
+		);
+		expect(other.comments.every((k: { own: boolean }) => !k.own)).toBe(true);
+		await expect(
+			call(
+				"edit_comment",
+				{ caseId: "c_1", comment: onCase, text: "Mine now" },
+				undefined,
+				OTHER,
+			),
+		).rejects.toThrow("not one you wrote");
+		await expect(
+			call(
+				"delete_comment",
+				{ caseId: "c_1", comment: onCase },
+				undefined,
+				OTHER,
+			),
+		).rejects.toThrow("not one you wrote");
+		// Its own: changed and deleted, by it.
+		await call("edit_comment", {
+			caseId: "c_1",
+			comment: onCase,
+			text: "Fixed in PR 13.",
+		});
+		const edited = (await store.getCase("c_1"))?.comments?.[0];
+		expect(edited?.text).toBe("Fixed in PR 13.");
+		expect(edited?.edited?.app?.name).toBe("Claude");
+		await call("delete_comment", { caseId: "c_1", comment: onMark });
+		expect((await store.getCase("c_1"))?.comments?.map((k) => k.id)).toEqual([
+			onCase,
+		]);
+		// A comment the person wrote is not the app's.
+		await putCase(store, {
+			...((await store.getCase("c_1")) as Case),
+			comments: [
+				...((await store.getCase("c_1"))?.comments ?? []),
+				{ id: "k_person", text: "By hand", at: "2026-11-20T10:00:00.000Z" },
+			],
+		});
+		await expect(
+			call("delete_comment", { caseId: "c_1", comment: "k_person" }),
+		).rejects.toThrow("not one you wrote");
+	});
+
+	test("set_case_status closes and reopens, says when nothing changes, and names the app", async () => {
+		await seed();
+		expect(
+			(await call("set_case_status", { caseId: "c_1", status: "closed" }))
+				.content[0]?.text,
+		).toBe("The case is closed.");
+		const closed = await store.getCase("c_1");
+		expect(closed?.closed?.app?.name).toBe("Claude");
+		expect(closed?.via?.app.name).toBe("Claude");
+		expect(closed?.via?.at).toBe(closed?.updatedAt as string);
+		expect(json(await call("list_cases"))[0].closed).toBe(true);
+		expect(
+			(await call("set_case_status", { caseId: "c_1", status: "closed" }))
+				.content[0]?.text,
+		).toBe("The case is closed already.");
+		await call("set_case_status", { caseId: "c_1", status: "open" });
+		expect((await store.getCase("c_1"))?.closed).toBeUndefined();
+	});
+
+	test("what an AI app changes names it (via); a call from no known app does not", async () => {
+		await seed();
+		await call("set_summary", { caseId: "c_1", summary: "Shorter labels" });
+		const byClaude = await store.getCase("c_1");
+		expect(byClaude?.via?.app.name).toBe("Claude");
+		await call(
+			"set_summary",
+			{ caseId: "c_1", summary: "Shorter labels, from WebMCP" },
+			undefined,
+			{ kind: "webmcp" } as ToolCallClient,
+		);
+		expect((await store.getCase("c_1"))?.via).toBeUndefined();
+	});
+
+	test("a mark an AI app adds is stored as the app's, and what is sent of it names the app", async () => {
+		await seed();
+		await call("add_annotation", {
+			caseId: "c_1",
+			selector: "form button",
+			comment: "From Claude",
+		});
+		const c = (await store.getCase("c_1")) as Case;
+		const added = c.annotations.find((a) => a.number === 3);
+		expect(added?.createdVia?.name).toBe("Claude");
+		// As the sync derives it for a case the team does not have yet.
+		const { ops } = deriveOps(
+			c,
+			emptyBook("c_1", "synced", "team_1"),
+			(path) => ({
+				sha256: path.padEnd(64, "0").slice(0, 64),
+				width: 10,
+				height: 10,
+				bytes: 1,
+			}),
+			(prefix) => `${prefix}_1${Math.random().toString(36).slice(2, 8)}`,
+		);
+		const create = ops.find(
+			(o) => o.type === "mark.create" && o.mark.number === 3,
+		);
+		expect(create && "via" in create ? create.via?.name : undefined).toBe(
+			"Claude",
+		);
+		// The case was not made by the app's call: its making names no app.
+		const made = ops.find((o) => o.type === "case.create");
+		expect(made && "via" in made).toBe(false);
+	});
+
+	test("deleting a comment: the question says it goes for the team too", async () => {
+		await seed();
+		await putCase(store, {
+			...((await store.getCase("c_1")) as Case),
+			comments: [
+				{
+					id: "k_1",
+					text: "Mine",
+					at: "2026-11-20T10:00:00.000Z",
+					app: { id: CLAUDE.id, name: "Claude", host: "claude.ai" },
+				},
+			],
+		});
+		const lines = await confirmLines(
+			store,
+			tab,
+			{
+				tool: { name: "delete_comment", description: "Does it." },
+				arguments: { caseId: "c_1", comment: "k_1" },
+				client: CLAUDE,
+				signal: new AbortController().signal,
+			},
+			{ team: async () => "Pedal & Pine web" },
+		);
+		expect(lines.join("\n")).toContain(
+			"It is deleted for the team “Pedal & Pine web” too.",
+		);
+	});
+
+	test("reopening a mark of a closed case opens the case, as the server does", async () => {
+		await seed();
+		await call("set_mark_status", { caseId: "c_1", mark: 1, status: "fixed" });
+		await call("set_case_status", { caseId: "c_1", status: "closed" });
+		expect((await store.getCase("c_1"))?.closed).toBeDefined();
+		await call("set_mark_status", {
+			caseId: "c_1",
+			mark: 1,
+			status: "open",
+			note: "Still cut off",
+		});
+		expect((await store.getCase("c_1"))?.closed).toBeUndefined();
+	});
+
+	test("what an app does to a mark names the app on that mark; a hand change after it does not", async () => {
+		await seed();
+		await call("set_mark_status", { caseId: "c_1", mark: 1, status: "fixed" });
+		const c = (await store.getCase("c_1")) as Case;
+		const a = c.annotations[0] as Annotation;
+		expect(markViaOf(a).via?.name).toBe("Claude");
+		// The person changes the mark's comment by hand: no longer the app's.
+		const byHand = withComment(
+			c,
+			a.id,
+			"Changed by hand",
+			"2026-11-20T12:00:00.000Z",
+		);
+		expect(markViaOf(byHand.annotations[0] as Annotation).via).toBeUndefined();
+	});
 });

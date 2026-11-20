@@ -1390,7 +1390,16 @@ ul.cases .title {
 
 /* Delete this case: alone at the bottom, away from the hand-over. */
 .case-footer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--s3);
 	padding: var(--s4) var(--s4) var(--s5);
+}
+
+/* Close case / Reopen case (DEC-046): on the right, Delete keeps its place. */
+#close-case {
+	margin-left: auto;
 }
 
 /* Its word on the gutter while it is quiet; a button once it is armed. */
@@ -2343,4 +2352,69 @@ button.copy {
 	border: 1px solid var(--rule);
 	border-radius: var(--r-control);
 	background: var(--wash);
+}
+
+/* The case's thread (DEC-046): after the marks, before the screenshots. */
+.thread {
+	padding: var(--s4);
+	border-top: 1px solid var(--rule);
+}
+
+ol.comments {
+	list-style: none;
+	margin: 0 0 var(--s3);
+	padding: 0;
+}
+
+.comment-item {
+	padding: var(--s2) 0;
+	border-bottom: 1px solid var(--rule);
+}
+
+.comment-actions {
+	gap: var(--s4);
+}
+
+.comment-actions button.danger {
+	margin-left: 0;
+}
+
+.comment-text {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.comment-form textarea,
+.comment-item textarea {
+	width: 100%;
+	box-sizing: border-box;
+	field-sizing: content;
+	min-height: calc(2lh + 14px);
+	max-height: calc(10lh + 14px);
+}
+
+.comment-form-row {
+	margin-top: var(--s2);
+}
+
+.comment-form select {
+	min-width: 0;
+	flex: 1;
+	min-height: 32px;
+	padding: 4px var(--s2);
+	border: 1px solid var(--edge);
+	border-radius: var(--r-control);
+	background: var(--sheet);
+	color: var(--ink);
+	font: inherit;
+}
+
+/* Closed cases, filed away under the list, folded (DEC-046). */
+.closed-cases {
+	margin-top: var(--s3);
+}
+
+.closed-cases > summary {
+	cursor: pointer;
+	font-weight: 600;
 }

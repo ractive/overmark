@@ -15,6 +15,7 @@ import {
 import {
 	type Annotation,
 	appLabel,
+	byline,
 	type Case,
 	caseCounts,
 	casePages,
@@ -51,6 +52,7 @@ import {
 	hostOf,
 	renderCloudBanner,
 	renderCloudSection,
+	teamOf,
 } from "./cloud-view.ts";
 import { byId, formatDate, h, isWebPage, shortUrl } from "./dom.ts";
 import { foundLine, isFound, noneHere } from "./follow.ts";
@@ -61,9 +63,16 @@ import {
 	renderSyncSection,
 	type SyncActions,
 } from "./sync-view.ts";
+import {
+	commentCount,
+	renderThread,
+	type ThreadActions,
+} from "./thread-view.ts";
 
 /** What the user can do; main.ts carries it out and updates the state. */
-export interface Actions extends SyncActions, CloudActions {
+export interface Actions extends SyncActions, CloudActions, ThreadActions {
+	/** Close the case (filed away, not frozen) or open it again (DEC-046). */
+	setCaseClosed(caseId: string, closed: boolean): void;
 	/** "New case for this page": a new case, stored at once and opened (DEC-026). */
 	annotate(): void;
 	openCase(id: string): void;
@@ -461,15 +470,25 @@ function renderCases(state: PanelState, actions: Actions): void {
 	const local = (c: Case) => caseSync(state.cloud, c.id).kind === "local";
 	const key = JSON.stringify([
 		url,
-		state.cases.map((c) => [c.id, c.updatedAt, c.importedAt, local(c)]),
+		state.cases.map((c) => [
+			c.id,
+			c.updatedAt,
+			c.importedAt,
+			local(c),
+			c.closed !== undefined,
+		]),
 	]);
 	if (key === casesKey) return;
 	casesKey = key;
+	// Closed cases are filed away under Closed, folded (DEC-046): they leave
+	// the page's cases and the list.
+	const open = state.cases.filter((c) => c.closed === undefined);
+	const closed = state.cases.filter((c) => c.closed !== undefined);
 	// The page's own cases stand under "This page" (the owner): going on with
 	// the case a page has is what is done most, a second case for it rarely.
 	// Any of a case's pages (DEC-038), in whatever environment.
-	const own = state.cases.filter((c) => url && pageAt(c, url) !== undefined);
-	const other = state.cases.filter((c) => !own.includes(c));
+	const own = open.filter((c) => url && pageAt(c, url) !== undefined);
+	const other = open.filter((c) => !own.includes(c));
 	const one = own.length === 1 ? own[0] : undefined;
 	here.hidden = own.length === 0;
 	hereText.textContent =
@@ -506,13 +525,52 @@ function renderCases(state: PanelState, actions: Actions): void {
 					"No cases yet. Start one with “New case for this page”, or import a case someone sent you.",
 				)
 			: other.length === 0
-				? h("p", { class: "empty" }, "No cases for other pages.")
+				? h(
+						"p",
+						{ class: "empty" },
+						open.length === 0 ? "No open cases." : "No cases for other pages.",
+					)
 				: h(
 						"ul",
 						{ class: "cases", "data-group": "other" },
 						...other.map((c) => caseItem(c, actions, local(c))),
 					),
+		...(closed.length === 0 ? [] : [closedGroup(closed, actions, local)]),
 	);
+}
+
+/** Whether the Closed group was unfolded: it stays so across redraws. */
+let closedOpen = false;
+
+/** The closed cases, folded by default (DEC-046). */
+function closedGroup(
+	closed: Case[],
+	actions: Actions,
+	local: (c: Case) => boolean,
+): HTMLElement {
+	const group = h(
+		"details",
+		{
+			class: "closed-cases",
+			id: "closed-cases",
+			...(closedOpen ? { open: true } : {}),
+			ontoggle: (e: Event) => {
+				closedOpen = (e.target as HTMLDetailsElement).open;
+			},
+		},
+		h(
+			"summary",
+			{},
+			"Closed ",
+			h("span", { class: "count" }, String(closed.length)),
+		),
+		h(
+			"ul",
+			{ class: "cases", "data-group": "closed" },
+			...closed.map((c) => caseItem(c, actions, local(c))),
+		),
+	);
+	return group;
 }
 
 function renderImportPrompt(state: PanelState, actions: Actions): void {
@@ -561,7 +619,7 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 					type: "button",
 					"data-action": "import-replace",
 					title:
-						"Put the file's copy in place of the case here, with its marks and screenshots; what only the case here has is lost",
+						"Put the file's copy in place of the case here, with its marks and screenshots; what only the case here has is lost, except its comments, which stay as they are here",
 					onclick: () => actions.importReplace(),
 				},
 				"Replace it",
@@ -845,6 +903,14 @@ interface CaseParts {
 	/** "← All cases" is finishing the marks, or could not (DEC-023). */
 	leaving: HTMLElement;
 	deleteButton: HTMLButtonElement;
+	/** Close case / Reopen case (DEC-046). */
+	closeButton: HTMLButtonElement;
+	/** Who closed it and when, while it is closed. */
+	closedLine: HTMLElement;
+	/** The case's thread (`thread-view.ts`). */
+	thread: HTMLElement;
+	/** Who last changed the summary, in a team (DEC-046). */
+	summaryBy: HTMLElement;
 	/** Where Export saved the file. */
 	saved: HTMLElement;
 	hint: HTMLElement;
@@ -1187,6 +1253,22 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			id: "delete-case",
 			onclick: () => actions.deleteCase(created.current),
 		}),
+		closeButton: h("button", {
+			type: "button",
+			id: "close-case",
+			onclick: () =>
+				actions.setCaseClosed(
+					created.current.id,
+					created.current.closed === undefined,
+				),
+		}),
+		closedLine: h("p", {
+			class: "meta closed-line",
+			id: "case-closed",
+			hidden: true,
+		}),
+		thread: h("section"),
+		summaryBy: h("p", { class: "meta", id: "summary-by", hidden: true }),
 		saved: h("div", { id: "export-saved", hidden: true }),
 		hint: h("p", { class: "hint", id: "case-hint", hidden: true }),
 		verdict,
@@ -1213,6 +1295,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 		{ class: "case-header" },
 		created.titleRow,
 		created.rename,
+		created.closedLine,
 		created.meta,
 		created.pages,
 		created.team,
@@ -1228,7 +1311,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 					type: "button",
 					id: "export-case",
 					title:
-						"Save this case as one .zip file: its marks, comments, AI findings, summary and screenshots, and case.md to read them without Sitegloss. Someone imports it with Import a case…",
+						"Save this case as one .zip file: its marks, comments, AI findings, summary, thread and screenshots, and case.md to read them without Sitegloss. Someone imports it with Import a case…",
 					onclick: () => actions.exportCase(created.current),
 				},
 				"Export",
@@ -1260,13 +1343,20 @@ function createParts(c: Case, actions: Actions): CaseParts {
 				created.saveVerdict,
 			),
 			verdict,
+			created.summaryBy,
 		),
 	);
 	caseView.replaceChildren(
 		header,
 		created.marks,
+		created.thread,
 		created.shots,
-		h("section", { class: "case-footer" }, created.deleteButton),
+		h(
+			"section",
+			{ class: "case-footer" },
+			created.deleteButton,
+			created.closeButton,
+		),
 	);
 	return created;
 }
@@ -1534,14 +1624,16 @@ function resolutionHistory(r: Resolution): HistoryLine[] {
 }
 
 /**
- * ` by Dana`, ` by Claude (claude.ai) for Dana`, ` by Claude (claude.ai)`:
+ * ` by Dana`, ` by Dana via Claude`, ` by Claude (claude.ai)`:
  * who did something, the person as the team's server wrote it down (DEC-039).
  */
 export function byWhom(
 	app: FindingApp | undefined,
 	user: UserRef | undefined,
 ): string {
-	if (app) return ` by ${appLabel(app)}${user ? ` for ${user.name}` : ""}`;
+	// The person, through the app (DEC-046): "by Dana via Claude".
+	if (app && user) return ` by ${byline(user, app)}`;
+	if (app) return ` by ${appLabel(app)}`;
 	return user ? ` by ${user.name}` : "";
 }
 
@@ -1957,6 +2049,15 @@ function renderCase(state: PanelState, actions: Actions): void {
 		state.verdictStatus ?? (draft === undefined ? "" : "Not saved yet");
 	// Only while the text differs from what is stored.
 	p.saveVerdict.hidden = draft === undefined;
+	const summaryWho = c.summaryBy
+		? byline(c.summaryBy.user, c.summaryBy.app)
+		: undefined;
+	setHint(
+		p.summaryBy,
+		c.verdict && c.summaryBy && summaryWho
+			? `Last changed by ${summaryWho}, ${formatDate(c.summaryBy.at)}`
+			: undefined,
+	);
 
 	renderTitle(state, p, c);
 	renderLink(state, p, c);
@@ -2041,6 +2142,36 @@ function renderCase(state: PanelState, actions: Actions): void {
 				? "On this device only. "
 				: "";
 	p.share.hidden = !sync.mayShare;
+	// Closed: filed away, not frozen (DEC-046). Whoever may change the case
+	// may close it; in a team, the role says.
+	const team = teamOf(state.cloud);
+	const mayClose =
+		sync.kind !== "synced" ||
+		(team?.permissions.includes("case:close") ?? true);
+	p.closeButton.textContent = c.closed ? "Reopen case" : "Close case";
+	p.closeButton.disabled = !mayClose;
+	p.closeButton.title = !mayClose
+		? `Your role in “${sync.team}” does not allow closing its cases`
+		: c.closed
+			? "Open the case again: it goes back to the list of open cases"
+			: "Close the case: it is filed away under Closed, and stays readable and changeable. A new open mark opens it again.";
+	setHint(
+		p.closedLine,
+		c.closed
+			? `Closed ${formatDate(c.closed.at)}${byline(c.closed.user, c.closed.app) ? ` by ${byline(c.closed.user, c.closed.app)}` : ""}.`
+			: undefined,
+	);
+	renderThread(
+		p.thread,
+		c,
+		{
+			me: state.cloud.account?.userId,
+			mayComment:
+				sync.kind !== "synced" ||
+				(team?.permissions.includes("comment:create") ?? true),
+		},
+		actions,
+	);
 	const armed = state.deleteArmedAt !== undefined;
 	p.deleteButton.toggleAttribute("data-armed", armed);
 	holdDelete(armed && sync.mayDelete ? p.deleteButton : undefined);
@@ -2372,8 +2503,19 @@ function markItem(c: Case, a: Annotation, x: MarkContext): HTMLElement {
 		x.page !== undefined
 			? h("p", { class: "meta mark-page" }, `On ${shortUrl(x.page)}`)
 			: null,
-		a.createdBy
-			? h("p", { class: "meta mark-by" }, `Added by ${a.createdBy.name}`)
+		byline(a.createdBy, a.createdVia)
+			? h(
+					"p",
+					{ class: "meta mark-by" },
+					`Added by ${byline(a.createdBy, a.createdVia)}`,
+				)
+			: null,
+		a.commentBy && byline(a.commentBy.user, a.commentBy.app)
+			? h(
+					"p",
+					{ class: "meta mark-by" },
+					`Comment by ${byline(a.commentBy.user, a.commentBy.app)}`,
+				)
 			: null,
 		a.element ? h("p", { class: "meta" }, summarize(a.element)) : null,
 		m ? matchView(c.id, a, m, actions) : null,
@@ -2413,6 +2555,8 @@ function markSubline(
 	const last = a.reopens?.at(-1);
 	const where = elsewhere ? "On another page" : matchWord(m);
 	const findings = a.findings?.length ?? 0;
+	// The thread's comments about this mark (DEC-046).
+	const talk = commentCount(c, a.id);
 	const parts = [
 		pill ? h("span", { class: "pill", "data-status": status }, pill) : null,
 		status === "open" && last
@@ -2430,6 +2574,13 @@ function markSubline(
 					"span",
 					{ class: "tag findings-count" },
 					`${findings} AI finding${findings === 1 ? "" : "s"}`,
+				)
+			: null,
+		talk > 0
+			? h(
+					"span",
+					{ class: "tag comments-count" },
+					`${talk} comment${talk === 1 ? "" : "s"}`,
 				)
 			: null,
 		status === "fixed" && buttons
@@ -2481,7 +2632,7 @@ function findingsList(
 						h(
 							"span",
 							{ class: "meta" },
-							`${appLabel(f.app)}${f.user ? ` for ${f.user.name}` : ""}${f.imported ? ", as the file says" : ""}, ${findingTime(f.at, f.editedAt)}`,
+							`${f.user ? byline(f.user, f.app) : appLabel(f.app)}${f.imported ? ", as the file says" : ""}, ${findingTime(f.at, f.editedAt)}`,
 						),
 						h(
 							"button",

@@ -23,6 +23,7 @@
 
 import {
 	type Case,
+	MAX_CASE_COMMENTS,
 	type Rect,
 	newId as randomId,
 	validateCase,
@@ -46,6 +47,7 @@ import {
 	type Team,
 	TOO_LARGE,
 	type WireCase,
+	type WireComment,
 	type WireMark,
 	type WireShot,
 } from "./api.ts";
@@ -68,6 +70,8 @@ import {
 } from "./book.ts";
 import {
 	applyOp,
+	appOut,
+	carryVia,
 	cutKey,
 	deriveOps,
 	differing,
@@ -137,6 +141,13 @@ const PERMISSION: Record<OpType, string> = {
 	"mark.create": "mark:create",
 	"mark.patch": "mark:update",
 	"mark.delete": "mark:delete",
+	// DEC-046: closing, and the thread (another's comment also needs
+	// `comment:moderate`, which the server decides).
+	"case.close": "case:close",
+	"case.reopen": "case:close",
+	"comment.create": "comment:create",
+	"comment.patch": "comment:create",
+	"comment.delete": "comment:create",
 };
 
 /** What an operation was about, for the sentence that says it was not taken. */
@@ -156,6 +167,16 @@ function whatOf(op: Op): string {
 			return "A change to a mark was not taken";
 		case "mark.delete":
 			return "A mark could not be deleted for the team";
+		case "case.close":
+			return "The case could not be closed for the team";
+		case "case.reopen":
+			return "The case could not be opened again for the team";
+		case "comment.create":
+			return "A comment was not taken";
+		case "comment.patch":
+			return "A change to a comment was not taken";
+		case "comment.delete":
+			return "A comment could not be deleted for the team";
 		default:
 			return "A change was not taken";
 	}
@@ -234,6 +255,8 @@ export class CloudSync {
 	readonly #have = new Set<string>();
 	/** How often this engine wrote the cases' store. */
 	#stored = 0;
+	/** Who is signed in, by the server's id: only their own comments are deleted from here. */
+	#me: string | undefined;
 	/** The cases and the books as the run's push read them, and at which writes. */
 	#read:
 		| {
@@ -648,6 +671,14 @@ export class CloudSync {
 			)
 				for (const text of book.idle.texts)
 					problems.push({ caseId: book.caseId, title: kept.title, text });
+			// Comments past the most a case holds: kept here, unsent (DEC-046).
+			const parked = book.parkedComments?.length ?? 0;
+			if (parked > 0 && book.mode === "synced" && kept !== undefined)
+				problems.push({
+					caseId: book.caseId,
+					title: kept.title,
+					text: `${parked === 1 ? "A comment" : `${parked} comments`} written here ${parked === 1 ? "is" : "are"} kept back and not sent: the case holds the most comments it can (${MAX_CASE_COMMENTS.toLocaleString("en-US")}). ${parked === 1 ? "It goes" : "They go"} once comments are deleted.`,
+				});
 			// A case that could not be read or stored: said until it is.
 			if (book.reread?.text !== undefined && book.mode === "synced")
 				problems.push({
@@ -702,6 +733,7 @@ export class CloudSync {
 	async #run(): Promise<void> {
 		const kv = this.#deps.kv;
 		let account = await this.account();
+		this.#me = account?.user.id;
 		// Signed in and in no team (or none chosen): asked now and then whether
 		// that changed; with one team, that team it is.
 		if (
@@ -1030,7 +1062,7 @@ export class CloudSync {
 				await this.#notThere(book, team);
 				continue;
 			}
-			const { shots, marks, ...row } = detail;
+			const { shots, marks, comments, ...row } = detail;
 			// A join nobody was told about (the server answered "duplicate"
 			// to the new case): where a mark both have says something else
 			// here, the team's text is not put in its place without a word.
@@ -1058,6 +1090,9 @@ export class CloudSync {
 						marks: marks ?? [],
 						removedMarks: [],
 						removedShots: [],
+						// The whole thread, in the server's order (a server before
+						// DEC-046 has none to say).
+						...(comments === undefined ? {} : { comments }),
 					},
 					true,
 					false,
@@ -1264,6 +1299,9 @@ export class CloudSync {
 				opId: this.#newId("o"),
 				type: "case.create",
 				case: newCaseOf(c),
+				// Made by an AI app's call through this browser: the app
+				// (DEC-046); shared by hand, nobody's but the person's.
+				...(c.createdVia === undefined ? {} : { via: appOut(c.createdVia) }),
 			};
 			if (
 				may.has(PERMISSION["case.create"]) &&
@@ -1295,6 +1333,7 @@ export class CloudSync {
 			dry,
 			() => placeholder,
 			() => `dry-${n++}`,
+			this.#me,
 		);
 		const heldBefore = new Set((given.rejected ?? []).map((r) => r.key));
 		const shotOf = reverse(dry.shots);
@@ -1372,6 +1411,7 @@ export class CloudSync {
 			book,
 			(path) => refs.get(path) ?? (wanted.has(path) ? undefined : placeholder),
 			this.#newId,
+			this.#me,
 		);
 		// What the server refused before is not sent again as it was.
 		const keys = new Set(ops.map(opKey));
@@ -1660,10 +1700,13 @@ export class CloudSync {
 					const value = renumber(current, next, to, crops, out);
 					if (value === current) throw NOTHING;
 					return {
-						value: validateCase({
-							...value,
-							updatedAt: this.#now().toISOString(),
-						}),
+						// The app's change, if one waits, is still the app's.
+						value: validateCase(
+							carryVia(current, {
+								...value,
+								updatedAt: this.#now().toISOString(),
+							}),
+						),
 						images: out.images as Map<string, StoredImage>,
 						deleteImages: [...out.deleteImages],
 					};
@@ -1720,6 +1763,7 @@ export class CloudSync {
 		let cases = new Map<string, WireCase>();
 		let shots = new Map<string, WireShot>();
 		let marks = new Map<string, WireMark>();
+		let comments = new Map<string, WireComment>();
 		let removed = new Map<string, { type: string; caseId?: string }>();
 		// Things an answer: the server's own number, and fewer once an answer
 		// was larger than one may be.
@@ -1745,6 +1789,7 @@ export class CloudSync {
 				cases = new Map();
 				shots = new Map();
 				marks = new Map();
+				comments = new Map();
 				removed = new Map();
 			}
 			// A later page's word on a thing is the newer one.
@@ -1760,6 +1805,11 @@ export class CloudSync {
 				marks.set(m.id, m);
 				removed.delete(`mark ${m.id}`);
 			}
+			// The thread (DEC-046); a server before it sends none.
+			for (const k of changes.comments ?? []) {
+				comments.set(k.id, k);
+				removed.delete(`comment ${k.id}`);
+			}
 			for (const r of changes.removed ?? []) {
 				removed.set(`${r.type} ${r.id}`, {
 					type: r.type,
@@ -1768,11 +1818,16 @@ export class CloudSync {
 				if (r.type === "case") cases.delete(r.id);
 				if (r.type === "shot") shots.delete(r.id);
 				if (r.type === "mark") marks.delete(r.id);
+				if (r.type === "comment") comments.delete(r.id);
 			}
 			since = changes.cursor;
 			if (!changes.more) break;
 		}
-		if (cases.size + shots.size + marks.size + removed.size === 0 && !whole) {
+		if (
+			cases.size + shots.size + marks.size + comments.size + removed.size ===
+				0 &&
+			!whole
+		) {
 			if (since !== stored) await kv.set({ [KEYS.cursor]: since });
 			return false;
 		}
@@ -1784,7 +1839,13 @@ export class CloudSync {
 		const group = (caseId: string): Incoming => {
 			let g = groups.get(caseId);
 			if (g === undefined) {
-				g = { shots: [], marks: [], removedMarks: [], removedShots: [] };
+				g = {
+					shots: [],
+					marks: [],
+					removedMarks: [],
+					removedShots: [],
+					...(whole ? { comments: [] } : {}),
+				};
 				groups.set(caseId, g);
 			}
 			return g;
@@ -1792,6 +1853,16 @@ export class CloudSync {
 		for (const c of cases.values()) group(c.id).case = c;
 		for (const s of shots.values()) group(s.caseId).shots.push(s);
 		for (const m of marks.values()) group(m.caseId).marks.push(m);
+		for (const k of comments.values()) {
+			const g = group(k.caseId);
+			g.comments = [...(g.comments ?? []), k];
+		}
+		/** A comment's case, by the books (a deleted one comes without it, DEC-046). */
+		const caseOfComment = (id: string): string | undefined => {
+			for (const book of books.values())
+				if (book.shadow?.comments?.[id] !== undefined) return book.caseId;
+			return undefined;
+		};
 		for (const [key, r] of removed) {
 			const id = key.slice(key.indexOf(" ") + 1);
 			if (r.type === "case") {
@@ -1805,6 +1876,14 @@ export class CloudSync {
 					await this.#books.remove(id);
 					books.delete(id);
 					changed.add(id);
+				}
+			} else if (r.type === "comment") {
+				// No case named (DEC-046): found by the comment's id, where a
+				// book knows it; one no book knows was never here.
+				const caseId = r.caseId ?? caseOfComment(id);
+				if (caseId !== undefined) {
+					const g = group(caseId);
+					g.removedComments = [...(g.removedComments ?? []), id];
 				}
 			} else if (r.caseId !== undefined) {
 				// A kind of thing this build does not know is left alone.
@@ -1987,6 +2066,7 @@ export class CloudSync {
 			whole,
 			lost,
 			now: this.#now().toISOString(),
+			...(this.#me === undefined ? {} : { me: this.#me }),
 		};
 		// The images of what is new, before the store is touched.
 		const knownShots = new Set(Object.values(given?.shots ?? {}));

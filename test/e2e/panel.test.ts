@@ -293,7 +293,11 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					10_000,
 				);
 				// The first click arms it (where the button is then does not
-				// matter); the second goes to the spot it was armed at.
+				// matter); the second goes to the spot it was armed at, which a
+				// hand sees: below the case's thread, it is scrolled to first.
+				await panel.eval(
+					`${id("delete-case")}.scrollIntoView({ block: "center" })`,
+				);
 				await panel.eval(`${id("delete-case")}.click()`);
 				await panel.waitFor(
 					`${id("delete-case")}.hasAttribute("data-armed")`,

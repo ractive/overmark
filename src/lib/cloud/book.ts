@@ -12,6 +12,7 @@
  * is which here.
  */
 
+import type { CaseComment } from "../case.ts";
 import type { Kv } from "../kv.ts";
 import type {
 	ImageRef,
@@ -117,6 +118,17 @@ export interface Shadow {
 	shots: Record<string, { image: ImageRef; capturedAt?: string }>;
 	/** By the mark's id at the server. */
 	marks: Record<string, ShadowMark>;
+	/** Closed at the server (DEC-046); none: open, or a build before it. */
+	closed?: boolean;
+	/** The thread at the server, by the comment's id (the same here). */
+	comments?: Record<string, ShadowComment>;
+}
+
+/** A comment as the server last had it. */
+export interface ShadowComment {
+	text: string;
+	/** Who wrote it, by the server's word: only one's own is deleted from here. */
+	userId?: string;
 }
 
 /** A change the server did not take: not sent again while it is the same. */
@@ -130,6 +142,11 @@ export interface Rejected {
 /** The bookkeeping of one case. */
 export interface CaseBook {
 	caseId: string;
+	/**
+	 * Comments written here that would take the case past the most it holds
+	 * (DEC-046): kept, unsent, and said; back in the case when there is room.
+	 */
+	parkedComments?: CaseComment[];
 	mode: SyncMode;
 	/** The team it is synced with, or was. */
 	teamId?: string;

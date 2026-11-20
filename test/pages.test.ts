@@ -668,7 +668,7 @@ describe("who did something, in a case synced with a team (DEC-039)", () => {
 		const md = caseMarkdown(c);
 		expect(md).toContain("- Added by: Tess Tester");
 		expect(md).toContain(
-			"- Fixed: 2026-11-19T10:00:00.000Z, by Claude (claude.ai) for Dana \\*Developer\\*",
+			"- Fixed: 2026-11-19T10:00:00.000Z, by Dana \\*Developer\\* via Claude (claude.ai)",
 		);
 		expect(md).toContain(
 			"- Verified: 2026-11-19T11:00:00.000Z, by Tess Tester",
@@ -676,7 +676,7 @@ describe("who did something, in a case synced with a team (DEC-039)", () => {
 		expect(md).toContain(
 			"- Reopened 2026-11-19T09:30:00.000Z by Tess Tester, was Fixed:",
 		);
-		expect(md).toContain("By Claude (claude.ai) for Dana \\*Developer\\*, ");
+		expect(md).toContain("By Dana \\*Developer\\* via Claude (claude.ai), ");
 	});
 });
 

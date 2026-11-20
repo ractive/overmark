@@ -16,9 +16,12 @@
 import { describe, expect, test } from "bun:test";
 import {
 	type Case,
+	withCaseComment,
 	withChoice,
+	withClosed,
 	withComment,
 	withoutAnnotation,
+	withoutCaseComment,
 } from "../src/lib/case.ts";
 import { eventsUrl } from "../src/lib/cloud/api.ts";
 import {
@@ -41,8 +44,23 @@ import {
 	startCase,
 	status,
 	sync,
+	webp,
 } from "./cloud-helpers.ts";
-import { SERVER as BASE, real } from "./cloud-real.ts";
+import { SERVER as BASE, real, signInWindow } from "./cloud-real.ts";
+import {
+	type Case as Case030,
+	withComment as withComment030,
+} from "./compat/v0.3.0/src/lib/case.ts";
+import { httpApi as httpApi030 } from "./compat/v0.3.0/src/lib/cloud/api.ts";
+import {
+	beginSignIn as beginSignIn030,
+	codeFrom as codeFrom030,
+	exchangeCode as exchangeCode030,
+	Session as Session030,
+} from "./compat/v0.3.0/src/lib/cloud/auth.ts";
+import { CloudSync as CloudSync030 } from "./compat/v0.3.0/src/lib/cloud/engine.ts";
+import { memoryKv as memoryKv030 } from "./compat/v0.3.0/src/lib/kv.ts";
+import { MemoryStore as MemoryStore030 } from "./compat/v0.3.0/src/lib/store.ts";
 
 const serverTest = BASE === undefined ? describe.skip : describe;
 
@@ -256,4 +274,186 @@ serverTest("against a real server", () => {
 		expect(tess.kv.data.has(TOKENS_KEY)).toBe(false);
 		await dana.session.end(base);
 	}, 120_000);
+
+	test("the thread, closing and the app's name (DEC-046), with a 0.3.0 browser on the team", async () => {
+		const caseId = `c_th${Date.now().toString(36)}`;
+		const tess = await real(base, "tess", "tess@example.com");
+		const dana = await real(base, "dana", "dana@example.com");
+		const old = await real030(base, "dana@example.com");
+		await signIn(tess.device);
+		await signIn(dana.device);
+		await old.engine.signedIn(base, await old.api.me());
+		const CLAUDE = {
+			id: "https://claude.ai/oauth",
+			name: "Claude",
+			host: "claude.ai",
+		};
+		await startCase(tess.device, caseId);
+		await addMark(tess.device, caseId, "Total is cut off", { element: true });
+		await addMark(tess.device, caseId, "Pay button too pale", { url: PAY });
+		await tess.device.engine.request();
+		const marks = (await tess.device.store.getCase(caseId)) as Case;
+		const first = marks.annotations[0]?.id as string;
+		// By hand on the case; through Claude on mark 1; closed through Claude.
+		await change(tess.device, caseId, (c, now) =>
+			withCaseComment(
+				c,
+				{ id: `k_${caseId}_1`, text: "Both pages checked." },
+				now,
+			),
+		);
+		await change(tess.device, caseId, (c, now) =>
+			withCaseComment(
+				c,
+				{
+					id: `k_${caseId}_2`,
+					text: "Fixed in PR 12.",
+					mark: first,
+					app: CLAUDE,
+				},
+				now,
+			),
+		);
+		await change(tess.device, caseId, (c, now) =>
+			withClosed(c, true, now, CLAUDE),
+		);
+		await tess.device.engine.request();
+		expect(status(tess.device)?.problems).toEqual([]);
+		await sync(dana.device);
+		const there = (await dana.device.store.getCase(caseId)) as Case;
+		expect(
+			there.comments?.map((k) => [
+				k.id,
+				k.text,
+				k.user?.name,
+				k.app?.name ?? null,
+				k.mark === undefined
+					? null
+					: there.annotations.find((a) => a.id === k.mark)?.number,
+			]),
+		).toEqual([
+			[`k_${caseId}_1`, "Both pages checked.", "Tess Tester", null, null],
+			[`k_${caseId}_2`, "Fixed in PR 12.", "Tess Tester", "Claude", 1],
+		]);
+		expect(there.closed?.user?.name).toBe("Tess Tester");
+		expect(there.closed?.app?.name).toBe("Claude");
+
+		// 0.3.0 has the case and its marks, without problems.
+		for (let i = 0; i < 2; i++) await old.engine.request();
+		expect(old.statuses.at(-1)?.state).toBe("synced");
+		expect(old.statuses.at(-1)?.problems).toEqual([]);
+		const oldCase = (await old.store.getCase(caseId)) as Case030;
+		expect(oldCase.annotations.map((a) => a.comment)).toEqual([
+			"Total is cut off",
+			"Pay button too pale",
+		]);
+		// 0.3.0 changes a mark's comment: it arrives; the thread and the close stay.
+		await old.store.updateCase(caseId, (c) => ({
+			value: withComment030(
+				c as Case030,
+				(c as Case030).annotations[0]?.id as string,
+				"Total is cut off on small screens",
+				new Date(Date.now() + 1000).toISOString(),
+			),
+		}));
+		await old.engine.request();
+		expect(old.statuses.at(-1)?.problems).toEqual([]);
+		await tess.device.engine.request();
+		const mine = (await tess.device.store.getCase(caseId)) as Case;
+		expect(mine.annotations[0]?.comment).toBe(
+			"Total is cut off on small screens",
+		);
+		expect(mine.comments).toHaveLength(2);
+		expect(mine.closed).toBeDefined();
+
+		// Deleted here: the server lists it with no case; 0.3.0 passes it by.
+		await change(tess.device, caseId, (c, now) =>
+			withoutCaseComment(c, `k_${caseId}_1`, now),
+		);
+		await tess.device.engine.request();
+		await old.engine.request();
+		expect(old.statuses.at(-1)?.problems).toEqual([]);
+		await dana.device.engine.request();
+		expect(
+			((await dana.device.store.getCase(caseId)) as Case).comments?.map(
+				(k) => k.id,
+			),
+		).toEqual([`k_${caseId}_2`]);
+
+		// 0.3.0 adds an open mark: the server opens the case again, and Tess has it.
+		await old.store.putImage(caseId, "crops/a3.webp", {
+			blob: webp("crop by 0.3.0", 280, 160),
+			width: 280,
+			height: 160,
+		});
+		await old.store.updateCase(caseId, (c) => {
+			const value = c as Case030;
+			const one = value.annotations[0] as Case030["annotations"][number];
+			return {
+				value: {
+					...value,
+					annotations: [
+						...value.annotations,
+						{
+							...one,
+							id: "a3",
+							number: 3,
+							comment: "From 0.3.0",
+							crop: "crops/a3.webp",
+							shape: { kind: "note", at: { x: 5, y: 5 } },
+							element: null,
+						},
+					],
+					updatedAt: new Date(Date.now() + 2000).toISOString(),
+				},
+			};
+		});
+		await old.engine.request();
+		expect(old.statuses.at(-1)?.problems).toEqual([]);
+		await tess.device.engine.request();
+		const reopened = (await tess.device.store.getCase(caseId)) as Case;
+		expect(reopened.annotations.map((a) => a.comment)).toContain("From 0.3.0");
+		expect(reopened.closed).toBeUndefined();
+
+		await removeCase(tess.device, caseId);
+		await tess.device.engine.request();
+		await tess.session.end(base);
+		await dana.session.end(base);
+		await old.session.end(base);
+	}, 120_000);
 });
+
+/** A browser with 0.3.0's sync, signed in at the real server as 0.3.0 signs in. */
+async function real030(base: string, email: string) {
+	const kv = memoryKv030();
+	const session = new Session030(kv, (input, init) => fetch(input, init));
+	const { pending, url } = await beginSignIn030(
+		base,
+		await session.endpoints(base, true),
+		process.env["SITEGLOSS_REDIRECT"] ??
+			"https://ldmcfigcnobhnbaigehcaodheklibeon.chromiumapp.org/",
+		Date.now(),
+	);
+	const ended = await signInWindow(base, email, url);
+	await session.store(
+		await exchangeCode030(
+			(input, init) => fetch(input, init),
+			pending,
+			codeFrom030(pending, ended, Date.now()),
+			Date.now(),
+		),
+	);
+	const api = httpApi030({
+		server: base,
+		token: (fresh) => session.access(base, fresh),
+	});
+	const store = new MemoryStore030();
+	const statuses: { state: string; problems: unknown[] }[] = [];
+	const engine = new CloudSync030({
+		store,
+		kv: memoryKv030(),
+		api: () => api,
+		onStatus: (s) => statuses.push(s),
+	});
+	return { api, store, engine, statuses, session };
+}

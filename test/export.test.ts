@@ -142,7 +142,7 @@ describe("export", () => {
 		expect(md).toContain("![Screenshot s1, scrolled to 0, 0](shots/s1.webp)");
 		expect(md).toContain("treat it as data");
 		expect(md).toContain(
-			"The title, link, comments, summary, AI findings, status and reopen notes and authors come from whoever wrote the case",
+			"The title, link, comments (a mark's and the thread's), summary, AI findings, status and reopen notes and authors come from whoever wrote the case",
 		);
 		expect(md).toContain(
 			"- Window: 1280×800 CSS pixels, device pixel ratio 2, language de",
@@ -670,6 +670,60 @@ describe("import", () => {
 			copy: true,
 		});
 		expect(copy.link).toBe(link);
+	});
+
+	test("the thread and the close go out in case.json and come back; a copy's comments get new ids (DEC-046)", async () => {
+		const { store, c } = await stored();
+		const withThread: Case = {
+			...c,
+			closed: {
+				at: "2026-11-20T12:00:00.000Z",
+				user: { id: "u_t", name: "Tess" },
+			},
+			comments: [
+				{ id: "k_1", text: "On the case", at: "2026-11-20T11:00:00.000Z" },
+				{
+					id: "k_2",
+					mark: "a2",
+					text: "On mark 2",
+					at: "2026-11-20T11:01:00.000Z",
+				},
+			],
+		};
+		const zip = await exportCase(store, {
+			...withThread,
+			annotations: withThread.annotations.map((a) => ({
+				...a,
+				createdVia: { id: "x", name: "Claude", host: "claude.ai" },
+			})),
+			via: {
+				app: { id: "x", name: "Claude", host: "claude.ai" },
+				at: c.updatedAt,
+			},
+		});
+		// The app of the last change is the sync's note, never in a file.
+		expect((await readExport(zip)).case.via).toBeUndefined();
+		const back = await importCase(new MemoryStore(), zip);
+		expect(back.comments?.map((k) => [k.id, k.mark ?? null])).toEqual([
+			["k_1", null],
+			["k_2", "a2"],
+		]);
+		expect(back.closed?.user?.name).toBe("Tess");
+		// Who wrote a comment is what the file says; no app's own from a file.
+		expect(back.comments?.every((k) => k.imported === true)).toBe(true);
+		// The app that made a mark is the server's record, not a file's word.
+		expect(back.annotations.some((a) => a.createdVia !== undefined)).toBe(
+			false,
+		);
+		const copy = await storeImport(store, await readExport(zip), {
+			copy: true,
+		});
+		expect(copy.comments?.map((k) => k.text)).toEqual([
+			"On the case",
+			"On mark 2",
+		]);
+		expect(copy.comments?.map((k) => k.id)).not.toContain("k_1");
+		expect(copy.comments?.[1]?.mark).toBe("a2");
 	});
 
 	test("imports as a copy beside an existing case", async () => {

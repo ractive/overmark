@@ -471,6 +471,7 @@ describe("a case that is here and at the server, with no record of what the serv
 					client: {},
 					lastNumber: 2,
 					importedAt: null,
+					closed: null,
 					createdBy: null,
 					createdAt: NOW,
 					updatedAt: NOW,

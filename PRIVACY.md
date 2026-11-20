@@ -12,7 +12,8 @@ send to sitegloss.dev when you sign in there.
 Sitegloss stores in your browser, on your computer:
 
 - the case's title, your comments, the summary for the developer, a link you attach,
-  and a connected AI app's findings;
+  a connected AI app's findings, the case's thread of comments and whether the case is
+  closed;
 - the address, title and language of each page you mark, the window size, and the
   browser's user agent. An address is kept without its query string or fragment (only a
   fragment that is a route of the page stays);
@@ -69,10 +70,16 @@ Only in four cases, all started by you:
    Sitegloss's developer, and fetches your team's: titles, links, summaries, the
    addresses, titles and languages of the pages, the window size and the browser's user
    agent, the marks with their comments, statuses, notes, element details and AI
-   findings, and the screenshots and crops. The members of the team you choose can see
+   findings, the case's thread of comments and whether it is closed, and the
+   screenshots and crops. The members of the team you choose can see
    and change them, in the extension and on the website; the service keeps them until
    they are deleted, with who made or changed what, and under
    [its own privacy policy](https://sitegloss.dev/privacy/).
+
+   When a connected AI app changes a case through Sitegloss (a comment, a mark, a
+   status, a finding, the summary, closing), Sitegloss also sends the app's name, the
+   address it gave for itself and its host (for example "Claude", `claude.ai`), so that
+   your team sees "Dana via Claude". What you do by hand is sent without one.
 
    The address of every page you marked in a case is part of that: the site, the path
    and a hash route (`#/cart`), without the query (`?…`), which Sitegloss never keeps.
