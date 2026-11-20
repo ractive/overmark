@@ -231,6 +231,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a1",
+					mark: "",
 					mode: "resolve",
 					kind: "fixed",
 					text: "",
@@ -264,6 +265,7 @@ describe("a mark's status and actions", () => {
 			caseState({ ...c, updatedAt }, (s) => {
 				s.markEdit = {
 					annotationId: "a1",
+					mark: "",
 					mode: "comment",
 					kind: "fixed",
 					text: "x",
@@ -319,6 +321,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.findingDeleteArmed = {
 					annotationId: "a1",
+					mark: "",
 					findingId: "f_2",
 					at: 1,
 				};
@@ -368,6 +371,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.findingDeleteArmed = {
 					annotationId: "a2",
+					mark: "",
 					findingId: "f_1",
 					at: 1,
 				};
@@ -388,7 +392,7 @@ describe("a mark's status and actions", () => {
 		const c = twoMarks();
 		render(
 			caseState(c, (s) => {
-				s.markDeleteArmed = { annotationId: "a1", at: 1 };
+				s.markDeleteArmed = { annotationId: "a1", mark: "", at: 1 };
 			}),
 			noActions,
 		);
@@ -513,6 +517,7 @@ describe("a mark's status and actions", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a2",
+					mark: "",
 					mode: "comment",
 					kind: "fixed",
 					text: "",
@@ -1002,6 +1007,7 @@ describe("Verify (DEC-023)", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a1",
+					mark: "",
 					mode: "resolve",
 					kind: "fixed",
 					text: "",
@@ -1048,6 +1054,7 @@ describe("Verify (DEC-023)", () => {
 			caseState(c, (s) => {
 				s.markEdit = {
 					annotationId: "a2",
+					mark: "",
 					mode: "reopen",
 					kind: "fixed",
 					text: "",
@@ -1522,6 +1529,765 @@ describe("the case's page and size", () => {
 	});
 });
 
+describe("a case of several pages (DEC-038)", () => {
+	const CART = "https://shop.example/cart";
+	const PAY = "https://shop.example/checkout/pay";
+	const shot = (id: string, url: string, width: number) => ({
+		id,
+		image: `shots/${id}.webp`,
+		scrollX: 0,
+		scrollY: 0,
+		viewport: { width, height: 800, dpr: 2 },
+		capturedAt: "2026-11-19T09:00:00.000Z",
+		url,
+	});
+	const mark = (n: number, shotId: string): Annotation => ({
+		id: `a${n}`,
+		number: n,
+		shot: shotId,
+		comment: `comment ${n}`,
+		author: "user",
+		shape: { kind: "box", rect: { x: 1, y: 2, width: 30, height: 40 } },
+		crop: `crops/a${n}.webp`,
+		element: {
+			tag: "button",
+			classes: [],
+			attributes: {},
+			ancestors: [],
+			rect: { x: 1, y: 2, width: 30, height: 40 },
+			page: { width: 1280, height: 2000 },
+			selector: "button",
+		},
+	});
+	const flow = (id: string): Case => ({
+		...sampleCase(id),
+		title: "Checkout flow",
+		page: { ...sampleCase(id).page, url: CART, title: "Your cart" },
+		pages: [
+			{ url: CART, title: "Your cart", lang: "en" },
+			{ url: PAY, title: "Payment", lang: "en" },
+		],
+		shots: [shot("s1", CART, 1280), shot("s2", PAY, 390)],
+		annotations: [mark(1, "s1"), mark(2, "s1"), mark(3, "s2")],
+	});
+	const match = (
+		n: number,
+		status: AnnotationMatch["status"],
+	): AnnotationMatch => ({
+		annotationId: `a${n}`,
+		number: n,
+		status,
+		score: status === "found" ? 0.9 : 0,
+		current: 0,
+		candidates:
+			status === "found"
+				? [
+						{
+							score: 0.9,
+							summary: "button",
+							selector: "button",
+							visible: true,
+							found: true,
+						},
+					]
+				: [],
+	});
+	const pages = () =>
+		[...el("case-pages").querySelectorAll("li")].map((li) => li.textContent);
+
+	test("Home: a case is this page's for any of its pages, and its row says how many it has", () => {
+		const state = initialState();
+		state.tab = {
+			id: 1,
+			url: "http://localhost:3000/checkout/pay?step=2",
+			title: "",
+			size: undefined,
+		};
+		state.cases = [flow("c_flow"), sampleCase("c_other")];
+		render(state, noActions);
+		expect(el("here").hidden).toBe(false);
+		const row = el("here-cases").querySelector('[data-case="c_flow"]');
+		expect(row?.textContent).toContain("shop.example/cart and 1 more page");
+		expect(
+			window.document.querySelector(
+				'ul.cases[data-group="other"] [data-case="c_other"]',
+			)?.textContent,
+		).toContain("www.example.com/kk");
+		expect(
+			window.document.querySelector(
+				'ul.cases[data-group="other"] [data-case="c_flow"]',
+			),
+		).toBeNull();
+	});
+
+	test("the header lists the pages with their marks, says which the tab shows, and opens each", () => {
+		const c = flow("c_pages");
+		const opened: (string | undefined)[] = [];
+		render(
+			caseState(c, (s) => {
+				s.tab = {
+					id: 1,
+					url: "http://localhost:3000/checkout/pay",
+					title: "",
+					size: undefined,
+				};
+			}),
+			actionsWith({ openPage: (_c, url) => void opened.push(url) }),
+		);
+		expect(el("case-pages").hidden).toBe(false);
+		expect(pages()).toEqual([
+			"shop.example/cart · 2 marks",
+			"shop.example/checkout/pay · 1 mark · this tab",
+		]);
+		// The one link of a case of one page gives way to the list.
+		expect(el("open-page").hidden).toBe(true);
+		expect(el("case-view").querySelector(".case-meta")?.textContent).toContain(
+			"2 pages",
+		);
+		const links = el("case-pages").querySelectorAll("button");
+		(links[1] as unknown as HTMLButtonElement).click();
+		(links[0] as unknown as HTMLButtonElement).click();
+		expect(opened).toEqual([PAY, CART]);
+	});
+
+	test("a case of one page has no list: its address is the link, as before", () => {
+		const c = sampleCase("c_one");
+		render(caseState(c), noActions);
+		expect(el("case-pages").hidden).toBe(true);
+		expect(el("open-page").hidden).toBe(false);
+		expect(el("open-page").textContent).toBe("www.example.com/kk");
+	});
+
+	test("the size offered is the one the marks of the page in front were made at", () => {
+		const c = flow("c_sizes");
+		const on = (url: string) =>
+			caseState(c, (s) => {
+				s.tab = { id: 1, url, title: "", size: { width: 1000, height: 800 } };
+			});
+		render(on("http://localhost:3000/cart"), noActions);
+		expect(el("case-size").textContent).toContain(
+			"This tab is 1000×800, the marks were made at 1280×800.",
+		);
+		render(on("http://localhost:3000/checkout/pay"), noActions);
+		expect(el("case-size").textContent).toContain(
+			"This tab is 1000×800, the marks were made at 390×800.",
+		);
+	});
+
+	test("a mark of another page is on another page, not lost; none found is said of the page's own", () => {
+		const c = flow("c_judged");
+		const on = (url: string, matches: AnnotationMatch[]) =>
+			caseState(c, (s) => {
+				s.tab = { id: 1, url, title: "", size: undefined };
+				s.loaded = {
+					caseId: c.id,
+					tabId: 1,
+					url,
+					matches: new Map(matches.map((m) => [m.annotationId, m])),
+				};
+				s.caseHint = { kind: "found" };
+			});
+		const word = (n: number) =>
+			el("case-view").querySelector(
+				`[data-annotation="a${n}"] .mark-sub .state`,
+			)?.textContent;
+		const cart = "http://localhost:3000/cart";
+		render(
+			on(cart, [match(1, "found"), match(2, "found"), match(3, "lost")]),
+			noActions,
+		);
+		expect(el("none-found").hidden).toBe(true);
+		expect(el("case-hint").textContent).toBe(
+			"2 of 2 marks found on localhost:3000/cart. 1 more is on other pages of the case.",
+		);
+		expect(word(1)).toContain("Found here");
+		expect(word(3)).toBe("On another page");
+		// Not red, and no "Not found" in its row.
+		const row = el("case-view").querySelector('[data-annotation="a3"]');
+		expect(row?.getAttribute("data-colour")).toBeNull();
+		expect(row?.textContent).toContain("On shop.example/checkout/pay");
+		expect(row?.textContent).not.toContain("Not found");
+
+		// The page's own marks are gone: that is said, of this page.
+		render(
+			on(cart, [match(1, "lost"), match(2, "lost"), match(3, "lost")]),
+			noActions,
+		);
+		expect(el("none-found").hidden).toBe(false);
+		expect(el("none-found").textContent).toContain(
+			"None of this case's marks were found on this page.",
+		);
+		expect(el("none-found").textContent).not.toContain("other pages");
+
+		// A page that is none of the case's: it names the case's pages.
+		render(
+			on("http://localhost:3000/account", [
+				match(1, "lost"),
+				match(2, "lost"),
+				match(3, "lost"),
+			]),
+			noActions,
+		);
+		expect(el("none-found").textContent).toContain(
+			"It is probably for other pages: shop.example/cart, shop.example/checkout/pay.",
+		);
+
+		// The payment page's mark found on the cart all the same (a
+		// look-alike, or a header both have): unsure, and not counted.
+		render(
+			on(cart, [
+				match(1, "found"),
+				match(2, "found"),
+				{ ...match(3, "found"), otherPage: true },
+			]),
+			noActions,
+		);
+		expect(word(3)).toBe("Also on this page?");
+		expect(
+			el("case-view")
+				.querySelector('[data-annotation="a3"]')
+				?.getAttribute("data-colour"),
+		).toBe("unsure");
+		expect(el("case-hint").textContent).toBe(
+			"2 of 2 marks found on localhost:3000/cart. 1 of the case's other pages may be here too (dashed).",
+		);
+
+		// The tab went on within the page (a single-page app): what the panel
+		// has is about the page before until it is read again, and then says
+		// the new page's numbers, not the old ones.
+		const pay = "http://localhost:3000/checkout/pay";
+		const moved = on(pay, [
+			match(1, "lost"),
+			match(2, "lost"),
+			match(3, "found"),
+		]);
+		render(moved, noActions);
+		expect(el("case-hint").textContent).toBe(
+			"1 of 1 marks found on localhost:3000/checkout/pay. 2 more are on other pages of the case.",
+		);
+		expect(word(3)).toContain("Found here");
+		expect(word(1)).toBe("On another page");
+	});
+});
+
+describe("the account and the sync with a team (DEC-039)", () => {
+	type Cloud = PanelState["cloud"];
+	const TEAM = {
+		id: "t_1",
+		name: "Pedal & Pine web",
+		permissions: ["case:create", "case:delete", "mark:create"],
+	};
+	const account = (
+		more: Partial<NonNullable<Cloud["account"]>> = {},
+	): NonNullable<Cloud["account"]> => ({
+		name: "Tess Tester",
+		email: "tess@example.com",
+		userId: "u_tess",
+		server: "https://app.sitegloss.dev",
+		teams: [TEAM],
+		teamId: "t_1",
+		expired: false,
+		...more,
+	});
+	const home = (cloud: Partial<Cloud>, actions: Actions = noActions) => {
+		const state = initialState();
+		Object.assign(state.cloud, cloud);
+		render(state, actions);
+		return state;
+	};
+	const button = (action: string, within = "cloud") =>
+		el(within).querySelector(
+			`[data-action="${action}"]`,
+		) as unknown as HTMLButtonElement | null;
+
+	test("signed out: what signing in sends where, in one sentence, and Sign in", () => {
+		const clicked: string[] = [];
+		home({}, actionsWith({ cloudSignIn: () => void clicked.push("in") }));
+		expect(el("cloud-heading").textContent).toBe("Account");
+		expect(el("cloud").dataset["cloud"]).toBe("off");
+		expect(el("cloud").textContent).toContain(
+			"Sign in to sync with your team.",
+		);
+		expect(el("cloud").textContent).toContain(
+			"Signed in, your cases go to app.sitegloss.dev and to the members of your team: their marks, comments, findings and screenshots, and the address of every page you marked (without its query). Without an account everything stays in this browser, as now.",
+		);
+		// The service itself: no word about the server, and nothing to choose
+		// unless one opens "Server".
+		expect(el("cloud-server-name")).toBeNull();
+		const details = el("cloud").querySelector(
+			".cloud-server",
+		) as unknown as HTMLDetailsElement;
+		expect(details.hasAttribute("open")).toBe(false);
+		button("cloud-sign-in")?.click();
+		expect(clicked).toEqual(["in"]);
+		expect(el("cloud-banner").hidden).toBe(true);
+		// The browser's window is open: no second one.
+		home({ signingIn: true });
+		expect(button("cloud-sign-in")?.disabled).toBe(true);
+		expect(button("cloud-sign-in")?.textContent).toBe("Signing in…");
+		// And no other server meanwhile: the sign-in ends where it began.
+		expect(el<HTMLSelectElement>("cloud-server-choice").disabled).toBe(true);
+		expect(el<HTMLInputElement>("cloud-server").disabled).toBe(true);
+		home({});
+		expect(el<HTMLSelectElement>("cloud-server-choice").disabled).toBe(false);
+		expect(el<HTMLInputElement>("cloud-server").disabled).toBe(false);
+	});
+
+	test("the server is chosen from three: the service, the development server, another address (DEC-041)", () => {
+		const set: string[] = [];
+		const actions = actionsWith({
+			cloudServer: (text) => void set.push(text),
+		});
+		home({}, actions);
+		const choice = () => el<HTMLSelectElement>("cloud-server-choice");
+		const pick = (value: string) => {
+			choice().value = value;
+			choice().dispatchEvent(new window.Event("change") as unknown as Event);
+		};
+		expect(
+			[...choice().querySelectorAll("option")].map((o) => [
+				o.getAttribute("value"),
+				o.textContent,
+			]),
+		).toEqual([
+			["production", "Sitegloss (app.sitegloss.dev)"],
+			["development", "Development server"],
+			["other", "Another address…"],
+		]);
+		expect(choice().value).toBe("production");
+		expect(el("cloud-server-other").hidden).toBe(true);
+		pick("development");
+		expect(set).toEqual(["https://app.dev.sitegloss.dev"]);
+		// Another address: the field shows, and nothing is chosen until one is typed.
+		pick("other");
+		expect(set).toHaveLength(1);
+		expect(el("cloud-server-other").hidden).toBe(false);
+		const field = el<HTMLInputElement>("cloud-server");
+		field.value = "  ";
+		field.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(set).toHaveLength(1);
+		field.value = "http://localhost:3200";
+		field.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(set).toEqual([
+			"https://app.dev.sitegloss.dev",
+			"http://localhost:3200",
+		]);
+		// Back to the service: its own address, said as "none set".
+		field.blur();
+		pick("production");
+		expect(set.at(-1)).toBe("");
+	});
+
+	test("a server that is not the service is said in words, beside the account and before signing in", () => {
+		home({ server: "https://app.dev.sitegloss.dev" });
+		expect(el("cloud-server-name").textContent).toBe(
+			"Development server (app.dev.sitegloss.dev): not the real Sitegloss",
+		);
+		expect(el<HTMLSelectElement>("cloud-server-choice").value).toBe(
+			"development",
+		);
+		expect(el("cloud").textContent).toContain(
+			"your cases go to app.dev.sitegloss.dev",
+		);
+		// The other address the development server may get is it as well.
+		home({ server: "https://app-dev.sitegloss.dev" });
+		expect(el("cloud-server-name").textContent).toBe(
+			"Development server (app-dev.sitegloss.dev): not the real Sitegloss",
+		);
+		home({ server: "http://localhost:3200" });
+		expect(el("cloud-server-name").textContent).toBe(
+			"Another server (localhost:3200): not sitegloss.dev",
+		);
+		expect(el<HTMLSelectElement>("cloud-server-choice").value).toBe("other");
+		expect(el<HTMLInputElement>("cloud-server").value).toBe(
+			"http://localhost:3200",
+		);
+		expect(el("cloud-server-other").hidden).toBe(false);
+		// Signed in: beside the account, and nothing to choose any more.
+		home({
+			server: "https://app.dev.sitegloss.dev",
+			account: account({ server: "https://app.dev.sitegloss.dev" }),
+		});
+		expect(el("cloud-server-name").textContent).toBe(
+			"Development server (app.dev.sitegloss.dev): not the real Sitegloss",
+		);
+		expect(el("cloud-server-choice")).toBeNull();
+		home({ account: account() });
+		expect(el("cloud-server-name")).toBeNull();
+	});
+
+	test("signed in: who, which team, what the sync is at, Sync now and Sign out", () => {
+		const did: string[] = [];
+		const actions = actionsWith({
+			cloudSyncNow: () => void did.push("sync"),
+			cloudSignOut: () => void did.push("out"),
+		});
+		home(
+			{
+				account: account(),
+				status: {
+					state: "synced",
+					lastSyncedAt: "2026-11-19T10:00:00.000Z",
+					problems: [],
+					undecided: 0,
+				},
+			},
+			actions,
+		);
+		expect(el("cloud-who").textContent).toBe(
+			"Signed in as Tess Tester (tess@example.com)",
+		);
+		expect(el("cloud-team-name").textContent).toBe("Team: Pedal & Pine web");
+		expect(el("cloud-status").textContent).toStartWith("Synced ");
+		expect(el("cloud").dataset["cloud"]).toBe("synced");
+		button("cloud-sync-now")?.click();
+		button("cloud-sign-out")?.click();
+		expect(did).toEqual(["sync", "out"]);
+
+		const at = (status: Cloud["status"]) => {
+			home({ account: account(), status }, actions);
+			return el("cloud-status").textContent;
+		};
+		expect(at({ state: "syncing", left: 3, problems: [], undecided: 0 })).toBe(
+			"Syncing 3 cases…",
+		);
+		expect(
+			at({
+				state: "offline",
+				text: "The server cannot be reached. Your changes are kept and sent when it can.",
+				problems: [],
+				undecided: 0,
+			}),
+		).toBe(
+			"Offline, will retry. The server cannot be reached. Your changes are kept and sent when it can.",
+		);
+		// What the server did not take, in its words, by case.
+		at({
+			state: "problem",
+			problems: [
+				{
+					caseId: "c_1",
+					title: "Checkout",
+					text: "A change to a mark was not taken: A mark holds at most 20 findings.",
+				},
+			],
+			undecided: 0,
+		});
+		expect(el("cloud-problems").textContent).toBe(
+			"“Checkout”: A change to a mark was not taken: A mark holds at most 20 findings.",
+		);
+	});
+
+	test("several teams: a chooser; no team yet: where to make one", () => {
+		const chosen: string[] = [];
+		const teams = [TEAM, { id: "t_2", name: "Other team", permissions: [] }];
+		home(
+			{ account: account({ teams, teamId: undefined }) },
+			actionsWith({ cloudTeam: (id) => void chosen.push(id) }),
+		);
+		const select = el<HTMLSelectElement>("cloud-team");
+		expect([...select.options].map((o) => o.textContent)).toEqual([
+			"Choose a team…",
+			"Pedal & Pine web",
+			"Other team",
+		]);
+		expect(el("cloud-status").textContent).toBe("Choose a team to sync with.");
+		select.value = "t_2";
+		select.dispatchEvent(new window.Event("change") as unknown as Event);
+		expect(chosen).toEqual(["t_2"]);
+		home({ account: account({ teams: [], teamId: undefined }) });
+		expect(el("cloud-status").textContent).toBe(
+			"You are in no team yet. Create or join one on app.sitegloss.dev, then click Sync now.",
+		);
+	});
+
+	test("a note is said under the status, and not as a warning", () => {
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				lastSyncedAt: "2026-11-19T10:00:00.000Z",
+				problems: [],
+				notes: [
+					{
+						caseId: "c_1",
+						title: "Your cart",
+						text: "1 mark deleted while not syncing is back: the team still has it.",
+					},
+				],
+				undecided: 0,
+			},
+		});
+		expect(el("cloud").dataset["cloud"]).toBe("synced");
+		expect(el("cloud-problems")).toBeNull();
+		const note = el("cloud-notes").querySelector("li");
+		expect(note?.textContent).toBe(
+			"“Your cart”: 1 mark deleted while not syncing is back: the team still has it.",
+		);
+		expect(note?.getAttribute("role")).toBeNull();
+		expect(note?.className).toBe("meta");
+	});
+
+	test("cases that were here before the team: asked above every view, with what sharing means", () => {
+		const answers: boolean[] = [];
+		const state = home(
+			{
+				account: account(),
+				status: { state: "synced", problems: [], undecided: 2 },
+			},
+			actionsWith({ cloudDecide: (share) => void answers.push(share) }),
+		);
+		const banner = el("cloud-banner");
+		expect(banner.hidden).toBe(false);
+		expect(banner.textContent).toContain(
+			"2 cases are on this device only. Sync them with “Pedal & Pine web”? Its members will see them, with their marks, screenshots and the addresses of the pages marked.",
+		);
+		button("cloud-sync-them", "cloud-banner")?.click();
+		button("cloud-keep-them", "cloud-banner")?.click();
+		expect(answers).toEqual([true, false]);
+		expect(button("cloud-keep-them", "cloud-banner")?.textContent).toBe(
+			"Keep them on this device",
+		);
+		// Cases the team already has: the question says what the click replaces.
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				problems: [],
+				undecided: 2,
+				joins: { cases: 1, marks: 3 },
+			},
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"addresses of the pages marked. The team already has 1 of them; where both differ the team's text is kept: 3 marks.",
+		);
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				problems: [],
+				undecided: 1,
+				joins: { cases: 1, marks: 1 },
+			},
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"The team already has this case; where both differ the team's text is kept: 1 mark.",
+		);
+		home({
+			account: account(),
+			status: {
+				state: "synced",
+				problems: [],
+				undecided: 1,
+				joins: { cases: 1, marks: 0 },
+			},
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"pages marked. The team already has this case.",
+		);
+		// On a server that is not the service the question names the server:
+		// a team's name is that server's word, and the click sends cases.
+		for (const [server, host] of [
+			["https://sync.example.org", "sync.example.org"],
+			["https://app.dev.sitegloss.dev", "app.dev.sitegloss.dev"],
+		] as const) {
+			home({
+				server,
+				account: account({ server }),
+				status: { state: "synced", problems: [], undecided: 2 },
+			});
+			expect(el("cloud-banner").textContent).toContain(
+				`Sync them with “Pedal & Pine web” on ${host}? Its members`,
+			);
+		}
+		home({
+			account: account(),
+			status: { state: "synced", problems: [], undecided: 2 },
+		});
+		expect(el("cloud-banner").textContent).not.toContain(" on app.");
+		// In a case too: the banner is above the views.
+		state.view = { kind: "case", id: "c_x" };
+		state.current = sampleCase("c_x");
+		render(state, noActions);
+		expect(el("cloud-banner").hidden).toBe(false);
+		// One case, and a role that may not share.
+		home({
+			account: account({ teams: [{ ...TEAM, permissions: [] }] }),
+			status: { state: "synced", problems: [], undecided: 1 },
+		});
+		expect(el("cloud-banner").textContent).toContain(
+			"1 case is on this device only. Your role in the team does not allow sharing cases with it.",
+		);
+		expect(button("cloud-sync-them", "cloud-banner")).toBeNull();
+	});
+
+	test("a sign-in that ran out: said above every view, with Sign in again", () => {
+		const clicked: string[] = [];
+		home(
+			{ account: account({ expired: true }) },
+			actionsWith({ cloudSignIn: () => void clicked.push("in") }),
+		);
+		expect(el("cloud-banner").textContent).toContain(
+			"Team sync is signed out. Sign in again to go on syncing; what you change meanwhile is kept and sent then.",
+		);
+		button("cloud-sign-in", "cloud-banner")?.click();
+		expect(clicked).toEqual(["in"]);
+		expect(el("cloud").dataset["cloud"]).toBe("signed-out");
+		expect(button("cloud-sync-now")).toBeNull();
+	});
+
+	test("a case says whether the team has it; one on this device only can be shared, and is tagged in the list", () => {
+		const shared: string[] = [];
+		const c = sampleCase("c_local");
+		const cloud: Partial<Cloud> = {
+			account: account(),
+			modes: { c_local: "local", c_team: "synced" },
+		};
+		const state = caseState(c, (s) => Object.assign(s.cloud, cloud));
+		render(state, actionsWith({ cloudShare: (id) => void shared.push(id) }));
+		expect(el("case-team").hidden).toBe(false);
+		expect(el("case-team").firstElementChild?.textContent).toBe(
+			"On this device only. ",
+		);
+		expect(el("share-case").hidden).toBe(false);
+		el("share-case").click();
+		expect(shared).toEqual(["c_local"]);
+		// The team's case, and one made since (the sync has not seen it yet).
+		for (const id of ["c_team", "c_new"]) {
+			const team = caseState(sampleCase(id), (s) =>
+				Object.assign(s.cloud, cloud),
+			);
+			render(team, noActions);
+			expect(el("case-team").firstElementChild?.textContent).toBe(
+				"Synced with “Pedal & Pine web”",
+			);
+			expect(el("share-case").hidden).toBe(true);
+		}
+		// Nobody signed in: nothing about a team anywhere.
+		render(caseState(sampleCase("c_local")), noActions);
+		expect(el("case-team").hidden).toBe(true);
+
+		const list = initialState();
+		Object.assign(list.cloud, cloud);
+		list.cases = [sampleCase("c_local"), sampleCase("c_team")];
+		render(list, noActions);
+		const tag = (id: string) =>
+			window.document.querySelector(`[data-case="${id}"] .device-only`)
+				?.textContent;
+		expect(tag("c_local")).toBe("This device only");
+		expect(tag("c_team")).toBeUndefined();
+	});
+
+	test("deleting a case the team has says that it deletes it for the team; a role that may not cannot", () => {
+		const cloud: Partial<Cloud> = {
+			account: account(),
+			modes: { c_team: "synced" },
+		};
+		const armed = (id: string, with_: Partial<Cloud>, arm: boolean) => {
+			const state = caseState(sampleCase(id), (s) => {
+				Object.assign(s.cloud, with_);
+				s.deleteArmedAt = arm ? 1 : undefined;
+			});
+			render(state, noActions);
+			return el<HTMLButtonElement>("delete-case");
+		};
+		expect(armed("c_team", cloud, false).title).toBe(
+			"Delete this case and its screenshots, here and for everyone in “Pedal & Pine web” (click twice). Files exported before stay.",
+		);
+		expect(armed("c_team", cloud, true).textContent).toBe(
+			"Really delete for the team?",
+		);
+		expect(armed("c_team", cloud, true).title).toBe(
+			"Click again to delete this case and its screenshots, here and for everyone in “Pedal & Pine web”",
+		);
+		// A case on this device only is deleted as ever.
+		expect(
+			armed("c_local", { ...cloud, modes: { c_local: "local" } }, true)
+				.textContent,
+		).toBe("Really delete?");
+		const noDelete = {
+			...cloud,
+			account: account({ teams: [{ ...TEAM, permissions: ["case:create"] }] }),
+		};
+		const button = armed("c_team", noDelete, false);
+		expect(button.disabled).toBe(true);
+		expect(button.title).toBe(
+			"Your role in “Pedal & Pine web” does not allow deleting its cases",
+		);
+		expect(
+			armed("c_local", { ...noDelete, modes: { c_local: "local" } }, false)
+				.disabled,
+		).toBe(false);
+	});
+
+	test("who did something shows: by Dana, by Claude for Dana, added by Tess", () => {
+		const c = sampleCase("c_who");
+		const app = {
+			id: "https://claude.ai/oauth",
+			name: "Claude",
+			host: "claude.ai",
+		};
+		const marked: Case = {
+			...c,
+			shots: [
+				{
+					id: "s1",
+					image: "shots/s1.webp",
+					scrollX: 0,
+					scrollY: 0,
+					viewport: { width: 1280, height: 800, dpr: 2 },
+					capturedAt: "2026-11-19T09:00:00.000Z",
+				},
+			],
+			annotations: [
+				{
+					id: "a1",
+					number: 1,
+					shot: "s1",
+					comment: "Too pale",
+					author: "user",
+					shape: { kind: "note", at: { x: 1, y: 2 } },
+					crop: "crops/a1.webp",
+					element: null,
+					createdBy: { id: "u_tess", name: "Tess Tester" },
+					resolution: {
+						kind: "fixed",
+						at: "2026-11-19T10:00:00.000Z",
+						app,
+						user: { id: "u_dana", name: "Dana Developer" },
+						verified: {
+							at: "2026-11-19T11:00:00.000Z",
+							user: { id: "u_tess", name: "Tess Tester" },
+						},
+					},
+					findings: [
+						{
+							id: "f_1",
+							text: "The token is overridden",
+							app,
+							at: "2026-11-19T09:30:00.000Z",
+							user: { id: "u_dana", name: "Dana Developer" },
+						},
+					],
+				},
+			],
+		};
+		render(caseState(marked), noActions);
+		const mark = el("case-view").querySelector('[data-annotation="a1"]');
+		const history = [...(mark?.querySelectorAll(".history li") ?? [])].map(
+			(li) => li.textContent,
+		);
+		expect(history[0]).toContain("by Claude (claude.ai) for Dana Developer");
+		expect(history[1]).toContain("by Tess Tester");
+		expect(mark?.querySelector(".finding-meta")?.textContent).toContain(
+			"Claude (claude.ai) for Dana Developer",
+		);
+		expect(mark?.querySelector(".mark-by")?.textContent).toBe(
+			"Added by Tess Tester",
+		);
+	});
+});
+
 describe("what stays between renders", () => {
 	test("the open case's buttons stay the same elements", () => {
 		const c = sampleCase("c_keep");
@@ -1776,13 +2542,13 @@ describe("the AI app", () => {
 				{
 					...off,
 					problem: "connection",
-					status: "Not connected: the address is in use elsewhere.",
+					status: "Not connected: Sitegloss's connection is in use elsewhere.",
 				},
 				{
 					label: "AI problem",
-					line: "Not connected: the address is in use elsewhere.",
+					line: "Not connected: Sitegloss's connection is in use elsewhere.",
 					title:
-						"Not connected: the address is in use elsewhere. Click for the AI app card.",
+						"Not connected: Sitegloss's connection is in use elsewhere. Click for the AI app card.",
 				},
 			],
 			[
@@ -2257,9 +3023,16 @@ describe("a case's link (DEC-028)", () => {
 			caseState(c),
 			actionsWith({ startLink: (x) => void called.push(x.id) }),
 		);
-		expect(el("case-link").previousElementSibling?.className).toContain(
-			"case-meta",
-		);
+		// Between them, shown only when they have something to say: the list of
+		// pages (a case of several, DEC-038) and the team's line (DEC-039).
+		let above = el("case-link").previousElementSibling as HTMLElement;
+		const between: string[] = [];
+		while (above.hidden) {
+			between.push(above.id);
+			above = above.previousElementSibling as HTMLElement;
+		}
+		expect(between).toEqual(["case-team", "case-pages"]);
+		expect(above.className).toContain("case-meta");
 		expect(shown("case-link-open")).toBe(false);
 		expect(edit().textContent).toBe("Add a link");
 		expect(edit().className).toContain("link");

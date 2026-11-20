@@ -8,16 +8,21 @@ import { BROWSER, FIREFOX, requestPermissions } from "../lib/browser.ts";
 import {
 	type Annotation,
 	type Case,
+	casePages,
 	cleanLink,
 	cleanTitle,
 	linkProblem,
+	MARK_CHANGED,
 	MAX_COMMENT,
 	MAX_LINK,
+	markFor,
+	markKey,
 	markStatus,
 	newId,
 	nextNumbers,
 	type PageInfo,
 	validateCase,
+	viewportAt,
 	withChoice,
 	withComment,
 	withLink,
@@ -50,6 +55,8 @@ import {
 import { IdbStore } from "../lib/store.ts";
 import { inject, NoAccessError, sendToTab } from "../lib/tabs.ts";
 import { blurFormsNow, startAi } from "./ai.ts";
+import { cloudActions, startCloud } from "./cloud.ts";
+import { caseSync } from "./cloud-view.ts";
 import { byId, isWebPage, sitePattern } from "./dom.ts";
 import {
 	askForDownloads,
@@ -57,7 +64,13 @@ import {
 	type SavedFile,
 	saveFile,
 } from "./download.ts";
-import { type Drawn, followStep, isFound, newsLetsIn } from "./follow.ts";
+import {
+	type Drawn,
+	followStep,
+	isFound,
+	movedOn,
+	newsLetsIn,
+} from "./follow.ts";
 import { isUntouched, mayHold, newCase, type TabAnswer } from "./fresh.ts";
 import { CaseHints } from "./hints.ts";
 import { markAsked } from "./picked.ts";
@@ -65,6 +78,8 @@ import { cssSize, onScreen, type Size, sameSize, windowFor } from "./size.ts";
 import {
 	type CaseHint,
 	type Exported,
+	editAfter,
+	heldAfter,
 	type ImportBatch,
 	Latest,
 	Panel,
@@ -345,6 +360,55 @@ async function followPage(caseId: string, tabId: number): Promise<boolean> {
 	return false;
 }
 
+/** How long after a route change the page is asked once more: its content may come late. */
+const ROUTE_SETTLE_MS = 1800;
+
+/**
+ * The tab went on to another page with the case still drawn on it (a
+ * single-page app's next route): the page looks again for the marks it did
+ * not have, and says what it found there. Once more a moment later
+ * (`again`), for content that comes after the address.
+ */
+async function readMatches(
+	c: Case,
+	tabId: number,
+	hint: ReturnType<typeof followHint>,
+	again: boolean,
+): Promise<void> {
+	const result = (await chrome.tabs
+		.sendMessage(tabId, { type: "case:matches", caseId: c.id })
+		.catch(() => null)) as LoadResult | null;
+	// Not for what another draw put there meanwhile.
+	if (
+		result === null ||
+		!showing(c.id) ||
+		(state.loaded !== undefined &&
+			(state.loaded.tabId !== tabId || state.loaded.caseId !== c.id))
+	)
+		return;
+	update((s) => {
+		s.loaded = {
+			caseId: c.id,
+			tabId,
+			matches: new Map(result.matches.map((m) => [m.annotationId, m])),
+			url: result.url,
+			settling: again,
+		};
+	});
+	hint({ kind: "found" });
+	if (!again) return;
+	setTimeout(() => {
+		// Still that page of that case on that tab: what it has now.
+		if (
+			state.loaded?.tabId === tabId &&
+			state.loaded.caseId === c.id &&
+			state.loaded.url === result.url &&
+			state.current?.id === c.id
+		)
+			void readMatches(state.current, tabId, hint, false);
+	}, ROUTE_SETTLE_MS);
+}
+
 /**
  * The page shows the case already (the panel opened it from there): what it
  * found, without a draw again, which would drop the candidates chosen.
@@ -481,6 +545,12 @@ async function follow(): Promise<void> {
 	// A case without marks (just created, DEC-026) has nothing to draw: its
 	// first mark draws it (refreshCase).
 	if (front === undefined || c.annotations.length === 0) return;
+	// The page went on to its next route with the case drawn on it: what was
+	// found is read again, for the page it shows now (DEC-038's review).
+	if (movedOn(state.loaded, c.id, front, pageCase)) {
+		await readMatches(c, front.id, hint, true);
+		return;
+	}
 	if (front.id !== followed) {
 		// What the hints said was about the tab before (opening the case
 		// cleared them already).
@@ -702,7 +772,22 @@ async function refreshCase(): Promise<void> {
 		!opened &&
 		state.current?.annotations.length === 0 &&
 		c.annotations.length > 0;
-	update((s) => (s.current = c));
+	update((s) => {
+		s.current = c;
+		// What can no longer be told from another mark is let go, and said.
+		const lost = [s.markEdit, s.markDeleteArmed, s.findingDeleteArmed].some(
+			(held) =>
+				held !== undefined &&
+				markFor(c, held.annotationId, held.mark) === "ambiguous",
+		);
+		// An open form stays on its mark, whatever the mark's id is now; so
+		// does a delete asked once (its second click must not find another
+		// mark under the id).
+		s.markEdit = editAfter(s.markEdit, c);
+		s.markDeleteArmed = heldAfter(s.markDeleteArmed, c);
+		s.findingDeleteArmed = heldAfter(s.findingDeleteArmed, c);
+		if (lost) s.caseHint = MARK_CHANGED;
+	});
 	// Just opened, or its first mark is in: its marks go to the tab in front
 	// (DEC-022, DEC-026).
 	if (opened || first) void follow();
@@ -1510,15 +1595,16 @@ const actions: Actions = {
 			);
 	},
 
-	openPage(c) {
-		if (!isWebPage(c.page.url)) return;
+	openPage(c, url = c.page.url) {
+		// One of the case's own pages only (DEC-038).
+		if (!isWebPage(url) || !casePages(c).some((p) => p.url === url)) return;
 		const hint = caseHintWriter();
 		// Now, while the click allows Chrome's prompt. The tab opens meanwhile;
 		// once it has loaded, the case's marks follow it there (DEC-022), and
 		// without a yes the icon's click lets Sitegloss run there.
-		void askForSite(c.page.url);
+		void askForSite(url);
 		void chrome.tabs
-			.create({ url: c.page.url })
+			.create({ url })
 			.catch((error: unknown) =>
 				hint(`Could not open the page: ${message(error)}`),
 			);
@@ -1528,11 +1614,10 @@ const actions: Actions = {
 		const hint = caseHintWriter();
 		void (async () => {
 			try {
-				const want = {
-					width: c.page.viewport.width,
-					height: c.page.viewport.height,
-				};
 				const first = await activeTab();
+				// The window the marks of the page in front were made in (DEC-038).
+				const made = viewportAt(c, first?.url ?? state.tab?.url);
+				const want = { width: made.width, height: made.height };
 				if (first?.id === undefined) return;
 				// A maximised or full-screen window takes no size; leaving that
 				// state takes a moment (an animation on macOS).
@@ -1715,10 +1800,15 @@ const actions: Actions = {
 			return;
 		}
 		if (Date.now() - armedAt < DELETE_CLICK_GAP_MS) return;
+		// The team's case, and not this user's to delete there (DEC-039).
+		if (!caseSync(state.cloud, c.id).mayDelete) return;
 		const hint = caseHintWriter();
 		void (async () => {
 			// The toolbar adding to it goes first, with the marks not in it yet.
 			await endToolbars(c.id, { discard: true });
+			// The store records the delete with it: the sync deletes a case
+			// for the team only by that record, never because the case is
+			// not there, and nothing here waits for the sync.
 			await store.deleteCase(c.id);
 			closeCase();
 			void clearDeleted(c.id);
@@ -1726,12 +1816,13 @@ const actions: Actions = {
 		})().catch((error: unknown) => hint(`Could not delete: ${message(error)}`));
 	},
 
-	editMark(_c, a, mode) {
+	editMark(c, a, mode) {
 		const status = markStatus(a);
 		update((s) => {
 			s.markDeleteArmed = undefined;
 			s.markEdit = {
 				annotationId: a.id,
+				mark: markKey(c, a),
 				mode,
 				kind: status === "open" ? "fixed" : status,
 				text:
@@ -1756,15 +1847,15 @@ const actions: Actions = {
 
 	resolveMark(c, a, kind, note) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
-			value: withChoice(current, a.id, kind, note, now),
+		void changeMark(c, a, (current, id) => ({
+			value: withChoice(current, id, kind, note, now),
 		}));
 	},
 
 	verifyMark(c, a) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
-			value: withVerified(current, a.id, undefined, now),
+		void changeMark(c, a, (current, id) => ({
+			value: withVerified(current, id, undefined, now),
 		}));
 	},
 
@@ -1772,9 +1863,9 @@ const actions: Actions = {
 		// The developer reads it first: in the panel, a reopen says why.
 		if (note.trim() === "") return;
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
+		void changeMark(c, a, (current, id) => ({
 			// Opened meanwhile: the form stays, and says why.
-			value: withReopen(current, a.id, { note, refuseOpen: true }, now),
+			value: withReopen(current, id, { note, refuseOpen: true }, now),
 		}));
 	},
 
@@ -1791,8 +1882,8 @@ const actions: Actions = {
 
 	saveComment(c, a, text) {
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) => ({
-			value: withComment(current, a.id, text, now),
+		void changeMark(c, a, (current, id) => ({
+			value: withComment(current, id, text, now),
 		}));
 	},
 
@@ -1802,7 +1893,7 @@ const actions: Actions = {
 			const at = Date.now();
 			update((s) => {
 				s.markEdit = undefined;
-				s.markDeleteArmed = { annotationId: a.id, at };
+				s.markDeleteArmed = { annotationId: a.id, mark: markKey(c, a), at };
 			});
 			setTimeout(() => {
 				update((s) => {
@@ -1816,8 +1907,8 @@ const actions: Actions = {
 		if (deleting.has(a.id)) return;
 		deleting.add(a.id);
 		const now = new Date().toISOString();
-		void changeMark(c.id, a.id, (current) =>
-			withoutAnnotation(current, a.id, now),
+		void changeMark(c, a, (current, id) =>
+			withoutAnnotation(current, id, now),
 		).finally(() => deleting.delete(a.id));
 	},
 
@@ -1826,7 +1917,13 @@ const actions: Actions = {
 		if (armed?.annotationId !== a.id || armed.findingId !== findingId) {
 			const at = Date.now();
 			update(
-				(s) => (s.findingDeleteArmed = { annotationId: a.id, findingId, at }),
+				(s) =>
+					(s.findingDeleteArmed = {
+						annotationId: a.id,
+						mark: markKey(c, a),
+						findingId,
+						at,
+					}),
 			);
 			setTimeout(() => {
 				update((s) => {
@@ -1843,9 +1940,9 @@ const actions: Actions = {
 		deleting.add(key);
 		const now = new Date().toISOString();
 		void changeMark(
-			c.id,
-			a.id,
-			(current) => ({ value: withoutFinding(current, a.id, findingId, now) }),
+			c,
+			a,
+			(current, id) => ({ value: withoutFinding(current, id, findingId, now) }),
 			// The mark's comment or resolve form, unsaved, stays open.
 			{ keepEdit: true },
 		).finally(() => {
@@ -1967,10 +2064,14 @@ const actions: Actions = {
 	},
 
 	...syncActions(() => panelSync),
+	...cloudActions(() => panelCloud),
 };
 
 /** The sync to Downloads or a folder (DEC-021, DEC-025): the worker writes, the panel chooses. */
 const panelSync = startSync(update);
+
+/** The account at sitegloss.dev and the sync with a team (DEC-039): the worker syncs, the panel asks. */
+const panelCloud = startCloud(update);
 
 // --- settings and import -------------------------------------------------------------
 
@@ -2167,17 +2268,32 @@ const deleting = new Set<string>();
  */
 /** Answers why it was not saved, if it was not (the hint says so too). */
 async function changeMark(
-	caseId: string,
-	annotationId: string,
-	change: (current: Case) => { value: Case; images?: string[] },
+	c: Case,
+	a: Annotation,
+	/** `id`: the mark's id in the case as it is stored now. */
+	change: (current: Case, id: string) => { value: Case; images?: string[] },
 	{ keepEdit = false } = {},
 ): Promise<string | undefined> {
 	const hint = caseHintWriter();
+	const caseId = c.id;
+	let annotationId = a.id;
+	// Which mark it is about, whatever its id is by now: the team's sync can
+	// give a mark another number while its form is open, and the id it had
+	// is then a teammate's mark (DEC-039).
+	const key = markKey(c, a);
 	try {
 		// The images go in the same transaction: a save may take a freed path.
 		const saved = await store.updateCase(caseId, (current) => {
 			if (current === undefined) throw new Error("The case no longer exists.");
-			const next = change(current);
+			const now = markFor(current, a.id, key);
+			if (now === undefined)
+				throw new Error(
+					"This mark is no longer in the case as it was: it was changed or removed meanwhile. Nothing was saved.",
+				);
+			// Not to be told from another mark: not applied to the first found.
+			if (now === "ambiguous") throw new Error(MARK_CHANGED);
+			annotationId = now.id;
+			const next = change(current, now.id);
 			return {
 				value: validateCase(next.value),
 				deleteImages: next.images ?? [],
@@ -2231,6 +2347,10 @@ function answerMark(
 		answer({ ok: false, error: "That mark is no longer in the case." });
 		return false;
 	}
+	if (a === "changed") {
+		answer({ ok: false, error: MARK_CHANGED });
+		return false;
+	}
 	const done = (why: string | undefined) =>
 		answer(why === undefined ? { ok: true } : { ok: false, error: why });
 	const now = new Date().toISOString();
@@ -2248,18 +2368,18 @@ function answerMark(
 				answer({ ok: false, error: "That comment is too long." });
 				return false;
 			}
-			void changeMark(c.id, a.id, (current) => ({
-				value: withComment(current, a.id, request.text, now),
+			void changeMark(c, a, (current, id) => ({
+				value: withComment(current, id, request.text, now),
 			})).then(done);
 			return true;
 		case "mark:resolve":
-			void changeMark(c.id, a.id, (current) => ({
-				value: withChoice(current, a.id, request.kind, request.note, now),
+			void changeMark(c, a, (current, id) => ({
+				value: withChoice(current, id, request.kind, request.note, now),
 			})).then(done);
 			return true;
 		case "mark:verify":
-			void changeMark(c.id, a.id, (current) => ({
-				value: withVerified(current, a.id, undefined, now),
+			void changeMark(c, a, (current, id) => ({
+				value: withVerified(current, id, undefined, now),
 			})).then(done);
 			return true;
 		case "mark:reopen":
@@ -2268,11 +2388,11 @@ function answerMark(
 				answer({ ok: false, error: "Say what is still wrong." });
 				return false;
 			}
-			void changeMark(c.id, a.id, (current) => ({
+			void changeMark(c, a, (current, id) => ({
 				// Opened meanwhile: the form stays, and says why.
 				value: withReopen(
 					current,
-					a.id,
+					id,
 					{ note: request.note, refuseOpen: true },
 					now,
 				),
@@ -2284,8 +2404,8 @@ function answerMark(
 				return false;
 			}
 			deleting.add(a.id);
-			void changeMark(c.id, a.id, (current) =>
-				withoutAnnotation(current, a.id, now),
+			void changeMark(c, a, (current, id) =>
+				withoutAnnotation(current, id, now),
 			)
 				.then(done)
 				.finally(() => deleting.delete(a.id));
@@ -2361,6 +2481,7 @@ function hear(news: Broadcast, sender: chrome.runtime.MessageSender): false {
 		caseChanged(news.caseId);
 		void refreshTab();
 	} else if (news?.type === "sync:changed") void panelSync.refresh();
+	else if (news?.type === "cloud:changed") void panelCloud.refresh();
 	return false;
 }
 

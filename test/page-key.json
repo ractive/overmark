@@ -1,0 +1,40 @@
+{
+	"about": "pageKey(url) as packages/api/src/v1/page.ts computes it. An implementation in another codebase has to give the same key for every entry.",
+	"vectors": [
+		{ "url": "https://shop.example/cart", "key": "/cart" },
+		{ "url": "https://shop.example/cart/", "key": "/cart" },
+		{ "url": "https://shop.example/cart//", "key": "/cart" },
+		{ "url": "http://localhost:3000/cart", "key": "/cart" },
+		{ "url": "https://staging.shop.example/cart?step=2", "key": "/cart" },
+		{ "url": "https://shop.example/cart#summary", "key": "/cart" },
+		{ "url": "https://shop.example/Cart", "key": "/Cart" },
+		{ "url": "https://shop.example/a/b/", "key": "/a/b" },
+		{ "url": "https://shop.example/", "key": "https://shop.example/" },
+		{ "url": "https://shop.example", "key": "https://shop.example/" },
+		{
+			"url": "https://shop.example/?utm=1#top",
+			"key": "https://shop.example/"
+		},
+		{ "url": "http://localhost:3000/", "key": "http://localhost:3000/" },
+		{ "url": "https://shop.example//", "key": "https://shop.example/" },
+		{ "url": "https://app.example/#/cart", "key": "#/cart" },
+		{ "url": "http://localhost:5173/#/cart", "key": "#/cart" },
+		{ "url": "https://app.example/#!/cart", "key": "#/cart" },
+		{ "url": "https://app.example/#/cart/", "key": "#/cart" },
+		{ "url": "https://app.example/#/cart?step=2", "key": "#/cart" },
+		{ "url": "https://app.example/#/", "key": "https://app.example/" },
+		{ "url": "https://x.example/demo/#/book", "key": "/demo#/book" },
+		{ "url": "https://x.example/demo#/book", "key": "/demo#/book" },
+		{ "url": "https://x.example/demo/#/", "key": "/demo" },
+		{ "url": "https://x.example/demo/", "key": "/demo" },
+		{ "url": "https://x.example/demo/#/pay", "key": "/demo#/pay" },
+		{ "url": "https://x.example/a%20b/", "key": "/a%20b" },
+		{
+			"url": "file:///Users/someone/page.html",
+			"key": "file:///Users/someone/page.html"
+		},
+		{ "url": "about:blank", "key": "about:blank" },
+		{ "url": "not an address", "key": "not an address" },
+		{ "url": "", "key": "" }
+	]
+}

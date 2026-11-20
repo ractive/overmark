@@ -5,7 +5,13 @@
  * of work for the same thing makes an older one drop its result (`Latest`).
  */
 
-import type { Case, ResolveChoice, StatusGroup } from "../lib/case.ts";
+import {
+	type Case,
+	markFor,
+	type ResolveChoice,
+	type StatusGroup,
+} from "../lib/case.ts";
+import type { CloudStatus, SyncMode } from "../lib/cloud/book.ts";
 import type { CheckedExport } from "../lib/export.ts";
 import type { AnnotationMatch, OverlayState } from "../lib/messages.ts";
 import type { SyncStatus, SyncTargetKind } from "../lib/sync.ts";
@@ -13,6 +19,11 @@ import type { Size } from "./size.ts";
 
 export interface MarkEdit {
 	annotationId: string;
+	/**
+	 * Which mark the form was opened on (`markKey`): its id can come to be
+	 * another mark's while the form is open (the team's sync renumbers).
+	 */
+	mark: string;
 	/** Resolve… or Change…, Edit comment, or Reopen… with its note (DEC-023). */
 	mode: "resolve" | "comment" | "reopen";
 	/** The status chosen (resolve). */
@@ -175,13 +186,15 @@ export interface PanelState {
 	 */
 	picked: { caseId: string; annotationId: string; at: number } | undefined;
 	/** A mark's Delete, clicked once: the second click deletes. */
-	markDeleteArmed: { annotationId: string; at: number } | undefined;
+	markDeleteArmed:
+		| { annotationId: string; mark: string; at: number }
+		| undefined;
 	/**
 	 * A finding's Delete, clicked once: the second click deletes. A finding's
 	 * id is unique on its mark only (a case from a file).
 	 */
 	findingDeleteArmed:
-		| { annotationId: string; findingId: string; at: number }
+		| { annotationId: string; mark: string; findingId: string; at: number }
 		| undefined;
 	/**
 	 * Next to "Save summary": "Saved", or why not. The summary for the
@@ -212,6 +225,35 @@ export interface PanelState {
 		changing: boolean;
 		/** The user said no to Allow access or Allow downloads. */
 		refused: boolean;
+	};
+	/** The account at sitegloss.dev and the sync with a team (DEC-039). */
+	cloud: {
+		/** The server chosen: the service's address, unless another was chosen (DEC-041). */
+		server: string;
+		/** Who is signed in; `undefined`: nobody. */
+		account:
+			| {
+					name: string;
+					email: string;
+					userId: string;
+					/** Where they are signed in. */
+					server: string;
+					/** Their teams, with what they may do in each (`case:create`, …). */
+					teams: { id: string; name: string; permissions: string[] }[];
+					/** The team the cases sync with; none chosen yet: `undefined`. */
+					teamId: string | undefined;
+					/** The server refused the sign-in: sign in again. */
+					expired: boolean;
+			  }
+			| undefined;
+		/** What the worker's sync is at, once it has run. */
+		status: CloudStatus | undefined;
+		/** How each case syncs, by its id; one not named was made since. */
+		modes: Record<string, SyncMode>;
+		/** The browser's sign-in window is open. */
+		signingIn: boolean;
+		/** What the panel itself could not do (the sign-in, the address). */
+		problem: string | undefined;
 	};
 	ai: {
 		status: string;
@@ -279,6 +321,14 @@ export const initialState = (): PanelState => ({
 		changing: false,
 		refused: false,
 	},
+	cloud: {
+		server: "https://app.sitegloss.dev",
+		account: undefined,
+		status: undefined,
+		modes: {},
+		signingIn: false,
+		problem: undefined,
+	},
 	ai: {
 		status: "Not connected",
 		connected: false,
@@ -313,3 +363,39 @@ export class Panel {
 }
 
 export { Latest } from "../lib/latest.ts";
+
+/**
+ * The open form after the case changed: still on its mark, also when that
+ * mark has another id now (the team's sync gave it another number, and
+ * the id it had is a teammate's mark). Closed when the mark is gone.
+ */
+export function editAfter(
+	edit: MarkEdit | undefined,
+	c: Case | undefined,
+): MarkEdit | undefined {
+	if (edit === undefined || c === undefined) return edit;
+	const now = markFor(c, edit.annotationId, edit.mark);
+	// Gone, or not to be told from another mark: nothing to hold a form to.
+	if (now === undefined || now === "ambiguous") return undefined;
+	return now.id === edit.annotationId
+		? edit
+		: { ...edit, annotationId: now.id };
+}
+
+/**
+ * What is held on a mark by its id (a delete asked once, a finding's) after
+ * the case changed: still on its mark, under the id the mark has now; gone
+ * when the mark is, or cannot be told from another. A "Really delete?" must
+ * not be waiting on a teammate's mark that got the id.
+ */
+export function heldAfter<T extends { annotationId: string; mark: string }>(
+	held: T | undefined,
+	c: Case | undefined,
+): T | undefined {
+	if (held === undefined || c === undefined) return held;
+	const now = markFor(c, held.annotationId, held.mark);
+	if (now === undefined || now === "ambiguous") return undefined;
+	return now.id === held.annotationId
+		? held
+		: { ...held, annotationId: now.id };
+}

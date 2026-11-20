@@ -1,8 +1,8 @@
 /**
  * The AI connection's settings, kept by the service worker in its own
  * IndexedDB (`kv.ts`, DEC-016): the relay, "Keep AI access on", "Blur form
- * fields in screenshots" and a takeover of the address. Whether AI access is
- * on for this browser session is in `chrome.storage.session`.
+ * fields in screenshots" and a takeover of the connection. Whether AI access
+ * is on for this browser session is in `chrome.storage.session`.
  */
 
 import type { Kv } from "./kv.ts";
@@ -54,8 +54,8 @@ export const SESSION_ON = "aiOn";
 export const SESSION_STOPPED = "aiStopped";
 
 /**
- * Another tab or program took the address over (`replaced`): kept across
- * worker restarts, so a restart does not take the address back by itself.
+ * Another tab or program took Sitegloss's connection over (`replaced`):
+ * kept across worker restarts, so a restart does not take it back by itself.
  */
 export interface Replaced {
 	sibling: boolean;

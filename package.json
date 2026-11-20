@@ -1,6 +1,6 @@
 {
 	"name": "sitegloss",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"private": true,
 	"description": "Mark what is wrong on a web page, open the marks in another environment to fix it, and talk them through with your AI app",
 	"type": "module",
@@ -21,15 +21,18 @@
 		"test": "bun test --timeout 30000"
 	},
 	"dependencies": {
-		"@ractive-ch/tab-mcp-client": "0.16.2"
+		"@ractive-ch/tab-mcp-client": "0.18.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.6.7",
 		"@modelcontextprotocol/client": "2.4.0",
-		"@ractive-ch/tab-mcp": "0.10.3",
+		"@ractive-ch/tab-mcp": "0.12.0",
 		"@types/bun": "1.4.4",
 		"@types/chrome": "0.3.7",
+		"ajv": "8.20.0",
 		"happy-dom": "21.0.4",
-		"typescript": "7.0.2"
+		"openapi-typescript": "7.13.0",
+		"typescript": "7.0.2",
+		"typescript-5": "npm:typescript@5.9.3"
 	}
 }

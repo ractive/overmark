@@ -66,6 +66,13 @@ export type ContentRequest =
 			/** `null` comes back when another case (or none) is loaded. */
 			caseId: string;
 			annotationId: string;
+			/**
+			 * Which mark is meant (`markKey`), where the asker knows: `null`
+			 * comes back when the page's copy of the case has another mark
+			 * under that id (it predates a renumbering), and the asker loads
+			 * the case again.
+			 */
+			mark?: string;
 			candidate?: number;
 	  }
 	/**
@@ -73,6 +80,13 @@ export type ContentRequest =
 	 * candidates chosen (`LoadResult`, or `null` where another case is loaded).
 	 */
 	| { type: "case:update"; case: Case }
+	/**
+	 * What the loaded case's marks are at on the page as it is now
+	 * (`LoadResult`, or `null` where another case is loaded): after the address
+	 * changed within the page (a single-page app's next route), the marks not
+	 * there before are looked for first.
+	 */
+	| { type: "case:matches"; caseId: string }
 	/** Remove the marks (`OverlayState`): only that case's, where it is named. */
 	| { type: "case:clear"; caseId?: string }
 	/**
@@ -97,7 +111,12 @@ export type ContentRequest =
 			type: "element:inspect";
 			caseId: string;
 			annotationId: string;
-			/** The case's page: a mark without an element is looked for only there. */
+			/** As for `case:show`. */
+			mark?: string;
+			/**
+			 * The mark's page, its screenshot's (DEC-038): a mark without an
+			 * element is looked for only there.
+			 */
 			casePage: string;
 			selector?: string;
 	  }
@@ -133,6 +152,8 @@ export type DescribedElement =
 			scroll: { x: number; y: number };
 			url: string;
 			title: string;
+			/** The page's language, where it names one (DEC-038). */
+			lang?: string;
 	  }
 	| { ok: false; error: string };
 
@@ -186,6 +207,13 @@ export interface AnnotationMatch {
 	candidates: CandidateInfo[];
 	/** Only part of the page was searched (very many elements, or out of time). */
 	truncated?: boolean;
+	/**
+	 * The element was found on another page of the case than the mark's own
+	 * (DEC-038): a header every page has, or something that only looks like
+	 * it. Never sure: drawn dashed, and not counted among the page's marks
+	 * found.
+	 */
+	otherPage?: true;
 }
 
 /** A load stopped by a clear or by another case's load: nothing to say. */
@@ -290,7 +318,67 @@ export type Broadcast =
 	 * From the side panel: bring the sync up to date now; `force` (Try again,
 	 * a new choice) also after a failure only the user can end.
 	 */
-	| { type: "sync:run"; force?: boolean };
+	| { type: "sync:run"; force?: boolean }
+	/** The worker's account or team sync changed (DEC-039): read it again. */
+	| { type: "cloud:changed" };
+
+/**
+ * What the side panel asks of the worker about the account and the sync
+ * with a team (DEC-039); from an extension page only. The worker holds the
+ * tokens and is the one that syncs.
+ */
+export type CloudRequest =
+	/** Start a sign-in: the answer's `url` is what the browser's window opens. */
+	| { type: "cloud:begin" }
+	/** The browser's window ended on `redirect`: finish the sign-in. */
+	| { type: "cloud:finish"; redirect: string }
+	/** The window of the sign-in begun with `url` closed without an answer: forget it. */
+	| { type: "cloud:abandon"; url: string }
+	| { type: "cloud:sign-out" }
+	| { type: "cloud:team"; teamId: string }
+	/** The cases that were here before the team: share them, or keep them here. */
+	| { type: "cloud:decide"; share: boolean }
+	/** Share one case kept on this device with the team. */
+	| { type: "cloud:share"; caseId: string }
+	/**
+	 * Sync now. `cursor`: the team is at this revision (the events stream
+	 * said so), nothing to do when this device is too. `retry`: also what the
+	 * server refused before.
+	 */
+	| { type: "cloud:run"; cursor?: number; retry?: boolean }
+	/**
+	 * An access token for the events stream of that team at that server;
+	 * `fresh`: the last was refused. Refused when they are not the account's
+	 * (a stream that outlived its account must not get another server's token).
+	 */
+	| { type: "cloud:token"; server: string; teamId: string; fresh?: boolean }
+	/** The server's address; empty: sitegloss.dev's. Only while signed out. */
+	| { type: "cloud:server"; server: string };
+
+export type CloudAnswer =
+	| { ok: true; url?: string; token?: string }
+	| { ok: false; error: string };
+
+const CLOUD_REQUESTS: ReadonlySet<string> = new Set<CloudRequest["type"]>([
+	"cloud:begin",
+	"cloud:finish",
+	"cloud:abandon",
+	"cloud:sign-out",
+	"cloud:team",
+	"cloud:decide",
+	"cloud:share",
+	"cloud:run",
+	"cloud:token",
+	"cloud:server",
+]);
+
+export function isCloudRequest(message: unknown): message is CloudRequest {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		CLOUD_REQUESTS.has((message as { type?: unknown }).type as string)
+	);
+}
 
 /**
  * What a page asks of the side panel about a mark of the case drawn on it
@@ -299,7 +387,7 @@ export type Broadcast =
  * open and drew on that tab, and does it as its own buttons would; nobody
  * answers when no panel shows the case.
  */
-export type MarkRequest =
+export type MarkRequest = (
 	| { type: "mark:picked"; caseId: string; annotationId: string }
 	| { type: "mark:comment"; caseId: string; annotationId: string; text: string }
 	| { type: "mark:delete"; caseId: string; annotationId: string }
@@ -313,7 +401,15 @@ export type MarkRequest =
 	  }
 	| { type: "mark:verify"; caseId: string; annotationId: string }
 	/** Reopen…: with what is still wrong, which the panel requires. */
-	| { type: "mark:reopen"; caseId: string; annotationId: string; note: string };
+	| { type: "mark:reopen"; caseId: string; annotationId: string; note: string }
+) & {
+	/**
+	 * Which mark the popover was opened on (`markKey`): its id is another
+	 * mark's after the team's sync gave marks other numbers, and what was
+	 * typed for one mark must not be saved onto another.
+	 */
+	mark?: string;
+};
 
 export type MarkAnswer = { ok: true } | { ok: false; error: string };
 

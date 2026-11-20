@@ -90,8 +90,8 @@ describe.skipIf(browserBinary === undefined)("AI findings on a mark", () => {
 		await step("bring the page to the front", () => tab.page.activate());
 		panel = await openSidePanel(h);
 		const address = await connectAi(panel, relay.url);
-		claude = await mcpClient(relay.store, address);
-		other = await mcpClient(relay.store, address, {
+		claude = await mcpClient(relay, address);
+		other = await mcpClient(relay, address, {
 			clientId: "https://other.example/cimd.json",
 			clientName: "Other app",
 		});

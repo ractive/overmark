@@ -5,7 +5,7 @@
  * page. Pure: main.ts carries the steps out.
  */
 
-import { type Case, samePath } from "../lib/case.ts";
+import { type Case, markUrl, pageAt, samePage } from "../lib/case.ts";
 import type { AnnotationMatch } from "../lib/messages.ts";
 import { shortUrl } from "./dom.ts";
 import type { Loaded } from "./state.ts";
@@ -123,6 +123,8 @@ export const isFound = (m: AnnotationMatch): boolean =>
  */
 export const isUnsure = (m: AnnotationMatch): boolean =>
 	m.status === "no-element" ||
+	// Found on a page that is not the mark's own: maybe only a look-alike.
+	m.otherPage === true ||
 	(m.status !== "lost" &&
 		!(m.status !== "ambiguous" && m.candidates[m.current]?.found === true));
 
@@ -142,24 +144,108 @@ export function dashDrawn(
 		const a = c.annotations.find((x) => x.id === m.annotationId);
 		if (a === undefined || a.shape.kind === "note") return false;
 		if (m.status !== "no-element") return true;
-		const shot = c.shots.find((x) => x.id === a.shot);
-		return samePath(shot?.url ?? c.page.url, url);
+		return samePage(markUrl(c, a), url);
 	});
 }
 
 /**
+ * What a draw on the page at `url` says, mark by mark (DEC-038 and its
+ * review): `own`, the marks of that page, which are what the page is judged
+ * by; `also`, marks of other pages whose element was found here all the same
+ * (a header every page has, or a look-alike: never sure, never counted as
+ * found); `elsewhere`, marks of other pages that are not here, which nobody
+ * expected. On a page that is none of the case's, every mark is looked for
+ * and counted, as in a case of one page.
+ */
+export function findsOn(
+	c: Case,
+	matches: readonly AnnotationMatch[],
+	url: string,
+): { own: AnnotationMatch[]; also: number; elsewhere: number } {
+	if (pageAt(c, url) === undefined)
+		return { own: [...matches], also: 0, elsewhere: 0 };
+	const pageOf = new Map(c.annotations.map((a) => [a.id, a]));
+	const own: AnnotationMatch[] = [];
+	let also = 0;
+	let elsewhere = 0;
+	for (const m of matches) {
+		const a = pageOf.get(m.annotationId);
+		if (a === undefined || samePage(markUrl(c, a), url)) own.push(m);
+		else if (isFound(m)) also++;
+		else elsewhere++;
+	}
+	return { own, also, elsewhere };
+}
+
+/** The matches of the marks whose page is the page at `url` (`findsOn`). */
+export function matchesHere(
+	c: Case,
+	matches: readonly AnnotationMatch[],
+	url: string,
+): AnnotationMatch[] {
+	return findsOn(c, matches, url).own;
+}
+
+/**
+ * The search found none of the marks the page at `url` should have: of its
+ * own marks, or, on a page that is none of the case's, of all of them. A
+ * mark of another page found here does not make up for them.
+ */
+export function noneHere(
+	c: Case,
+	matches: readonly AnnotationMatch[],
+	url: string,
+): boolean {
+	return noneFound(findsOn(c, matches, url).own);
+}
+
+/**
+ * The tab went on to another page while the case stayed drawn on it (a
+ * single-page app's next route): what the panel knows of the draw is about
+ * the page before, or was dropped (Chrome says "loading" for a pushState
+ * too, and what was found is forgotten then), and has to be read again.
+ */
+export function movedOn(
+	loaded: Pick<Loaded, "caseId" | "tabId" | "url"> | undefined,
+	caseId: string,
+	tab: { id: number; url: string } | undefined,
+	pageCase: string | undefined,
+): boolean {
+	if (tab === undefined || tab.url === "" || pageCase !== caseId) return false;
+	if (loaded === undefined) return true;
+	return (
+		loaded.caseId === caseId &&
+		loaded.tabId === tab.id &&
+		!samePage(loaded.url, tab.url)
+	);
+}
+
+/**
  * What a draw found, in the case's This-tab block; `page` is the page's short
- * address. The page shows the rest: a mark's colour is its status, and only
- * the dash needs a word, where one was drawn (`dashed`, see `dashDrawn`).
+ * address, `matches` the page's own marks (`findsOn`), `also` and `elsewhere`
+ * the other pages' marks that are and are not here. The page shows the rest:
+ * a mark's colour is its status, and only the dash needs a word, where one
+ * was drawn (`dashed`, see `dashDrawn`).
  */
 export function foundText(
 	matches: readonly AnnotationMatch[],
 	page: string,
 	dashed: boolean,
+	elsewhere = 0,
+	also = 0,
 ): string {
+	const maybe =
+		also === 0
+			? ""
+			: ` ${also} of the case's other pages may be here too (dashed).`;
 	const found = matches.filter(isFound).length;
 	const said = `${found} of ${matches.length} marks found on ${page}.`;
-	return dashed ? `${said} Dashed: unsure.` : said;
+	// The marks of the case's other pages, not expected here (DEC-038).
+	const rest =
+		elsewhere === 0
+			? ""
+			: ` ${elsewhere} more ${elsewhere === 1 ? "is" : "are"} on other pages of the case.`;
+	return `${said}${dashed ? " Dashed: unsure." : ""}${maybe}${rest}`;
 }
 
 /**
@@ -173,13 +259,16 @@ export function foundLine(
 	c: Case,
 	loaded: Pick<Loaded, "matches" | "url" | "settling">,
 ): string | undefined {
-	const matches = [...loaded.matches.values()];
-	if (matches.length === 0 || (noneFound(matches) && !loaded.settling))
+	const all = [...loaded.matches.values()];
+	const { own, also, elsewhere } = findsOn(c, all, loaded.url);
+	if (all.length === 0 || (noneHere(c, all, loaded.url) && !loaded.settling))
 		return undefined;
 	return foundText(
-		matches,
+		own,
 		shortUrl(loaded.url),
-		dashDrawn(c, matches, loaded.url),
+		dashDrawn(c, own, loaded.url),
+		elsewhere,
+		also,
 	);
 }
 

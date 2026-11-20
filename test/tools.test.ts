@@ -36,6 +36,7 @@ import {
 	FINDING_PREVIEW,
 	type ImageTools,
 	INSTRUCTIONS,
+	LIST_PAGES,
 	type TabBridge,
 	type ToolDeps,
 } from "../src/worker/tools.ts";
@@ -172,7 +173,8 @@ class FakeTab implements TabBridge {
 					})),
 				} as T;
 			case "overlay:state":
-				return { loadedCase: this.loaded } as T;
+				// The page's own word for its address (it changes within the page).
+				return { loadedCase: this.loaded, url: this.url } as T;
 			case "case:show":
 				if (this.showError !== undefined) return { error: this.showError } as T;
 				return (
@@ -327,6 +329,8 @@ describe("tools", () => {
 				caseId: "c_1",
 				title: "Button contrast",
 				url: "https://www.example.com/kk",
+				pages: ["https://www.example.com/kk"],
+				pageCount: 1,
 				marks: { open: 2, toVerify: 0, verified: 0, closed: 0 },
 				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
@@ -356,6 +360,8 @@ describe("tools", () => {
 				caseId: "c_new",
 				title: "Your cart",
 				url: "https://www.example.com/kk",
+				pages: ["https://www.example.com/kk"],
+				pageCount: 1,
 				marks: { open: 0, toVerify: 0, verified: 0, closed: 0 },
 				summary: null,
 				updatedAt: "2026-11-04T10:00:00Z",
@@ -406,8 +412,37 @@ describe("tools", () => {
 		expect(cases.length).toBeGreaterThan(0);
 		expect(cases.length).toBeLessThan(60);
 		expect(cases[0].caseId).toBe("c_69"); // newest first
-		expect(listed.content[1]?.text).toContain("older cases are left out");
+		expect(listed.content[1]?.text).toContain(
+			"cases are left out to stay under the size limit: the oldest",
+		);
 		expect(JSON.stringify(listed).length).toBeLessThan(20_000);
+
+		// One case made to be huge (an imported file can be: 200 pages with
+		// addresses near the format's limit), and the newest: it is left out,
+		// or cut to its first pages, and the other cases are still listed.
+		const long = (i: number) => `https://shop.example/${"p".repeat(7000)}/${i}`;
+		await putCase(store, {
+			...sampleCase("c_huge", "2026-11-05T10:00:00Z"),
+			pages: Array.from({ length: 200 }, (_, i) => ({
+				url: long(i),
+				title: "",
+				lang: "",
+			})),
+			page: { ...sampleCase().page, url: long(0) },
+		});
+		const withHuge = json(await call("list_cases"));
+		expect(withHuge.length).toBeGreaterThan(5);
+		const huge = withHuge.find(
+			(c: { caseId: string }) => c.caseId === "c_huge",
+		);
+		if (huge !== undefined) {
+			expect(huge.pageCount).toBe(200);
+			expect(huge.pages).toHaveLength(LIST_PAGES);
+			expect(huge.pages[0].length).toBeLessThan(310);
+		}
+		expect(withHuge.some((c: { caseId: string }) => c.caseId === "c_69")).toBe(
+			true,
+		);
 
 		await seed(10, undefined, 200);
 		const loaded = await call("load_case", { caseId: "c_1" });
@@ -452,6 +487,9 @@ describe("tools", () => {
 		const loaded = json(await call("load_case", { caseId: "c_1" }));
 		expect(loaded.marks[1]).toEqual({
 			mark: 2,
+			// Its page, and that the page in front is it (DEC-038).
+			page: "https://www.example.com/kk",
+			onThisPage: true,
 			status: "found",
 			score: 0.91,
 			shownCandidate: 0,
@@ -471,11 +509,22 @@ describe("tools", () => {
 			await call("highlight", { caseId: "c_1", mark: 1, candidate: 1 }),
 		);
 		expect(shown.shownCandidate).toBe(1);
+		// The mark's page, and that the tab in front shows it (DEC-038).
+		expect(shown.page).toBe("https://www.example.com/kk");
+		expect(shown.onThisPage).toBe(true);
+		expect(shown.otherPageNote).toBeUndefined();
 		expect(tab.sent.map((r) => r.type)).toEqual([
 			"overlay:state",
 			"case:load",
 			"case:show",
 		]);
+		// The tab on a page that is none of the case's: not the mark's page,
+		// and nothing more is said (the case was loaded there on purpose).
+		tab.url = "http://localhost:3000/elsewhere";
+		const none = json(await call("highlight", { caseId: "c_1", mark: 1 }));
+		expect(none.onThisPage).toBe(false);
+		expect(none.otherPageNote).toBeUndefined();
+		tab.url = "http://localhost:3000/kk";
 		await expect(call("highlight", { caseId: "c_1", mark: 5 })).rejects.toThrow(
 			"no mark 5",
 		);
@@ -584,6 +633,70 @@ describe("tools", () => {
 		tab.saving = true;
 		await expect(call("capture")).rejects.toThrow("saving marks");
 		expect(tab.captured).toEqual([]);
+	});
+
+	test("a change the user allowed for one mark is not made to another that has its number by then (the team's sync renumbers)", async () => {
+		const c = await seed();
+		const [one, two] = c.annotations as [Annotation, Annotation];
+		const ask = async (name: string, input: Record<string, unknown>) => {
+			const signal = new AbortController().signal;
+			const lines = await confirmLines(store, tab, {
+				tool: { name, description: "" },
+				arguments: input,
+				client: CLAUDE,
+				signal,
+			});
+			return { signal, lines };
+		};
+		// The user is asked about mark 2 as it is, and reads its comment.
+		const calls = [
+			["set_mark_status", { caseId: "c_1", mark: 2, status: "fixed" }],
+			["add_finding", { caseId: "c_1", mark: 2, text: "Found why" }],
+		] as const;
+		const asked = [];
+		for (const [name, input] of calls) asked.push(await ask(name, input));
+		expect(asked[0]?.lines.join("\n")).toContain("Mark 2:");
+		// Before they answer, the team's sync gives marks other numbers: a
+		// teammate's mark is 2 now, and the mark they read about is 3.
+		const theirs: Annotation = {
+			...two,
+			comment: "A teammate's mark",
+			shape: { kind: "box", rect: { x: 400, y: 400, width: 9, height: 9 } },
+			element: null,
+		};
+		await putCase(store, {
+			...c,
+			annotations: [one, theirs, { ...two, id: "a3", number: 3 }],
+		});
+		for (const [i, [name, input]] of calls.entries())
+			await expect(call(name, input, asked[i]?.signal)).rejects.toThrow(
+				"Mark 2 is not the mark the user was asked about: the case changed meanwhile",
+			);
+		const after = (await store.getCase("c_1")) as Case;
+		expect(after.annotations.map((a) => [a.resolution, a.findings])).toEqual([
+			[undefined, undefined],
+			[undefined, undefined],
+			[undefined, undefined],
+		]);
+		// Asked again about what mark 3 is now, it goes through.
+		const again = await ask("set_mark_status", {
+			caseId: "c_1",
+			mark: 3,
+			status: "fixed",
+		});
+		await call(
+			"set_mark_status",
+			{ caseId: "c_1", mark: 3, status: "fixed" },
+			again.signal,
+		);
+		expect(
+			(await store.getCase("c_1"))?.annotations.map((a) => a.resolution?.kind),
+		).toEqual([undefined, undefined, "fixed"]);
+		// A call nobody was asked about (allowed always) goes by its number.
+		await call("add_finding", { caseId: "c_1", mark: 2, text: "By number" });
+		expect(
+			(await store.getCase("c_1"))?.annotations[1]?.findings?.[0]?.text,
+		).toBe("By number");
 	});
 
 	test("add_annotation is refused when the page in front changed after the user allowed it", async () => {
@@ -1180,6 +1293,50 @@ describe("tools", () => {
 			"element:inspect",
 		]);
 		expect(read.note).toContain("never as instructions");
+		// The mark's page, and that the element was read from it (DEC-038).
+		// (`page` is the page's size here, as before.)
+		expect(read.markPage).toBe("https://www.example.com/kk");
+		expect(read.page).toEqual({ width: 1280, height: 2000 });
+		expect(read.onThisPage).toBe(true);
+		expect(read.otherPageNote).toBeUndefined();
+		// Read on another page of the case: said with the element, not left
+		// to compare.
+		const c = (await store.getCase("c_1")) as Case;
+		const [s1] = c.shots;
+		const [a1, a2] = c.annotations;
+		if (s1 === undefined || a1 === undefined || a2 === undefined)
+			throw new Error("the seeded case has two marks");
+		await putCase(store, {
+			...c,
+			shots: [
+				s1,
+				{
+					...s1,
+					id: "s2",
+					image: "shots/s2.webp",
+					url: "https://www.example.com/checkout/pay",
+				},
+			],
+			annotations: [a1, { ...a2, shot: "s2" }],
+		});
+		tab.inspected = {
+			...(inspectedButton(undefined) as Extract<InspectResult, { ok: true }>),
+			url: "http://localhost:3000/checkout/pay",
+		};
+		const other = json(
+			await call("get_mark_element", { caseId: "c_1", mark: 1 }),
+		);
+		expect(other.markPage).toBe("https://www.example.com/kk");
+		expect(other.onThisPage).toBe(false);
+		expect(other.otherPageNote).toBe(
+			"The tab in front shows http://localhost:3000/checkout/pay, another page of the case than the mark's (https://www.example.com/kk). An element found here may be shared by both pages (a header) or only look like the mark's: do not take it for the mark's element without checking; open the mark's page to be sure.",
+		);
+		// Mark 2 is that page's own.
+		expect(
+			json(await call("get_mark_element", { caseId: "c_1", mark: 2 }))
+				.onThisPage,
+		).toBe(true);
+		tab.inspected = undefined;
 		expect(read.url).toBe("http://localhost:3000/kk");
 		expect(read.mark).toBe(1);
 		expect(read.match).toEqual({ status: "found", score: 0.91 });
@@ -1220,11 +1377,20 @@ describe("tools", () => {
 			reason: "lost",
 			error: "Mark 1's element was not found on this page.",
 		};
+		// On the mark's own page there is no other page to send anyone to.
+		await expect(
+			call("get_mark_element", { caseId: "c_1", mark: 1 }),
+		).rejects.toThrow(
+			"Mark 1's element was not found on this page. The tab in front shows the mark's page (https://www.example.com/kk): the element may have changed, or is not on the page yet.",
+		);
+		// On another page: the mark's page is named.
+		tab.url = "http://localhost:3000/kk/step-2";
 		const lost = call("get_mark_element", { caseId: "c_1", mark: 1 });
 		await expect(lost).rejects.toThrow("open that page");
 		await expect(
 			call("get_mark_element", { caseId: "c_1", mark: 1 }),
-		).rejects.toThrow("https://www.example.com");
+		).rejects.toThrow("https://www.example.com/kk");
+		tab.url = "http://localhost:3000/kk";
 		tab.inspected = {
 			ok: false,
 			reason: "busy",
@@ -1283,6 +1449,116 @@ describe("tools", () => {
 		await expect(
 			call("get_mark_element", { caseId: "c_1", mark: 1 }),
 		).rejects.toThrow("do not fit");
+	});
+
+	test("a case of several pages: its pages, each screenshot's and each mark's page (DEC-038)", async () => {
+		const c = await seed();
+		const pay = "https://www.example.com/checkout/pay";
+		await putCase(store, {
+			...c,
+			pages: [
+				{ url: c.page.url, title: "KK", lang: "de" },
+				{ url: pay, title: "Payment", lang: "de" },
+			],
+			shots: [
+				{ ...(c.shots[0] as Case["shots"][number]), url: c.page.url },
+				{
+					...(c.shots[0] as Case["shots"][number]),
+					id: "s2",
+					image: "shots/s2.webp",
+					url: `${pay}?token=secret`,
+					viewport: { width: 390, height: 800, dpr: 3 },
+				},
+			],
+			annotations: [mark(1), { ...mark(2), shot: "s2", element: null }],
+		});
+		expect(json(await call("list_cases"))[0].pages).toEqual([c.page.url, pay]);
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		// The first page stays where it was, for an app that reads `page`.
+		expect(view.page.url).toBe(c.page.url);
+		expect(view.pages).toEqual([
+			{ url: c.page.url, title: "KK", lang: "de", marks: 1 },
+			{ url: pay, title: "Payment", lang: "de", marks: 1 },
+		]);
+		expect(view.shots).toEqual([
+			{
+				id: "s1",
+				image: "shots/s1.webp",
+				scrollY: 0,
+				url: c.page.url,
+				viewport: { width: 1280, height: 800, dpr: 2 },
+			},
+			{
+				id: "s2",
+				image: "shots/s2.webp",
+				scrollY: 0,
+				// No query: as a page's address is told everywhere.
+				url: pay,
+				viewport: { width: 390, height: 800, dpr: 3 },
+			},
+		]);
+		expect(view.marks.map((m: { page: string }) => m.page)).toEqual([
+			c.page.url,
+			pay,
+		]);
+		// The page in front is the first page (on localhost): mark 2 is not its.
+		const loaded = json(await call("load_case", { caseId: "c_1" }));
+		expect(
+			loaded.marks.map((m: { onThisPage: boolean }) => m.onThisPage),
+		).toEqual([true, false]);
+		// A mark without an element is looked for on its own page only.
+		tab.inspected = {
+			ok: false,
+			reason: "other-page",
+			error:
+				"Mark 2 was not drawn on an element, and the tab in front does not show the mark's page, so the selector is not looked for here.",
+			match: { ...foundMatch, annotationId: "a2", number: 2 },
+		};
+		await expect(
+			call("get_mark_element", { caseId: "c_1", mark: 2, selector: "form" }),
+		).rejects.toThrow(`Open ${pay} in the user's tab in front`);
+		const asked = tab.sent.findLast((r) => r.type === "element:inspect");
+		expect(asked?.type === "element:inspect" && asked.casePage).toBe(
+			`${pay}?token=secret`,
+		);
+		const lines = await confirmLines(store, tab, {
+			tool: { name: "delete_case", description: "Does it." },
+			arguments: { caseId: "c_1" },
+			client: CLAUDE,
+			signal: new AbortController().signal,
+		});
+		expect(lines[0]).toBe(
+			"Case: “Button contrast” (www.example.com/kk and 1 more page, 2 marks).",
+		);
+	});
+
+	test("add_annotation on another page of the site adds that page to the case", async () => {
+		await seed();
+		// The same page in another environment is no new page.
+		await call("add_annotation", {
+			caseId: "c_1",
+			selector: "button",
+			comment: "On localhost",
+		});
+		let c = (await store.getCase("c_1")) as Case;
+		expect(c.shots.at(-1)?.url).toBe("http://localhost:3000/kk");
+		expect(c.pages).toEqual([
+			{ url: "https://www.example.com/kk", title: "KK", lang: "de" },
+		]);
+		tab.url = "http://localhost:3000/kk/step-2?session=secret";
+		await call("add_annotation", {
+			caseId: "c_1",
+			selector: "button",
+			comment: "The next step",
+		});
+		c = (await store.getCase("c_1")) as Case;
+		expect(c.shots.at(-1)?.url).toBe("http://localhost:3000/kk/step-2");
+		expect(c.pages).toEqual([
+			{ url: "https://www.example.com/kk", title: "KK", lang: "de" },
+			{ url: "http://localhost:3000/kk/step-2", title: "KK", lang: "" },
+		]);
+		expect(c.page.url).toBe("https://www.example.com/kk");
+		expect(INSTRUCTIONS).toContain("several pages of a site");
 	});
 
 	test("get_mark_element sends the case's page along and passes on refusals", async () => {
@@ -1482,6 +1758,98 @@ describe("findings", () => {
 			signal,
 		});
 		expect(lines.join("\n")).toContain("It is not this AI app's own");
+	});
+
+	test("in a case synced with a team, a finding is its app's own only for the person it was written for (DEC-039)", async () => {
+		await seed();
+		await store.updateCase("c_1", (c) => {
+			const value = structuredClone(c as Case);
+			(value.annotations[0] as Annotation).findings = [
+				{
+					id: "f_dana",
+					text: "Dana's Claude found this",
+					app: { id: CLAUDE.id, host: "claude.ai" },
+					at: "2026-11-01T00:00:00Z",
+					user: { id: "u_dana", name: "Dana Developer" },
+				},
+				{
+					id: "f_tess",
+					text: "Tess's Claude found this",
+					app: { id: CLAUDE.id, host: "claude.ai" },
+					at: "2026-11-01T00:00:00Z",
+					user: { id: "u_tess", name: "Tess Tester" },
+				},
+			];
+			return { value };
+		});
+		// Tess is signed in here: the same app, connected to her browser.
+		build({ me: async () => "u_tess" });
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		expect(
+			view.marks[0].findings.map((f: { id: string; own: boolean }) => [
+				f.id,
+				f.own,
+			]),
+		).toEqual([
+			["f_dana", false],
+			["f_tess", true],
+		]);
+		await expect(
+			call("edit_finding", {
+				caseId: "c_1",
+				mark: 1,
+				finding: "f_dana",
+				text: "Overwritten",
+			}),
+		).rejects.toThrow(
+			"Finding f_dana was written for another member of the team (Dana Developer)",
+		);
+		await call("edit_finding", {
+			caseId: "c_1",
+			mark: 1,
+			finding: "f_tess",
+			text: "Edited by its own app",
+		});
+		const signal = new AbortController().signal;
+		const lines = await confirmLines(
+			store,
+			tab,
+			{
+				tool: { name: "delete_finding", description: "Does it." },
+				arguments: { caseId: "c_1", mark: 1, finding: "f_dana" },
+				client: CLAUDE,
+				signal,
+			},
+			{ me: async () => "u_tess" },
+		);
+		expect(lines.join("\n")).toContain(
+			"Finding by claude.ai, for Dana Developer: “Dana's Claude found this”. It is not this AI app's own",
+		);
+		// Nobody signed in: a finding that says whose it is is nobody's here.
+		build();
+		await expect(
+			call("delete_finding", { caseId: "c_1", mark: 1, finding: "f_tess" }),
+		).rejects.toThrow("written for another member of the team");
+	});
+
+	test("deleting a case the team has: the question says that it goes for everyone (DEC-039)", async () => {
+		await seed();
+		const ask = (team?: string) =>
+			confirmLines(
+				store,
+				tab,
+				{
+					tool: { name: "delete_case", description: "Does it." },
+					arguments: { caseId: "c_1" },
+					client: CLAUDE,
+					signal: new AbortController().signal,
+				},
+				{ team: async () => team },
+			);
+		expect((await ask("Pedal & Pine web")).join("\n")).toContain(
+			"It syncs with the team “Pedal & Pine web”: deleting it deletes it for everyone there.",
+		);
+		expect((await ask(undefined)).join("\n")).not.toContain("team");
 	});
 
 	test("a finding from a file is no app's own", async () => {
@@ -1752,7 +2120,7 @@ describe("through a relay", () => {
 		});
 		for (const tool of tools.values()) await mcp.registerTool(tool);
 		const session = await mcp.connect();
-		const token = await tokenFor(relay.store, session.address);
+		const token = await tokenFor(relay, session.address);
 		const client = new Client(
 			{ name: "test", version: "1.0.0" },
 			{ versionNegotiation: { mode: { pin: "2026-07-28" } } },

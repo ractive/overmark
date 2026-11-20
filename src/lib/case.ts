@@ -53,6 +53,9 @@ export const MAX_URL = 8000;
 /** The longest page title a case may hold. */
 export const MAX_PAGE_TITLE = 2000;
 
+/** The most pages a case lists (DEC-038). */
+export const MAX_PAGES = 200;
+
 export interface Point {
 	x: number;
 	y: number;
@@ -119,7 +122,11 @@ export interface Shot {
 	scrollY: number;
 	viewport: Viewport;
 	capturedAt: string;
-	/** The page's address when it was taken; a case can span an app's routes. */
+	/**
+	 * The page's address when it was taken: a case spans pages (DEC-038).
+	 * Every screenshot taken since has one; one from before may have none,
+	 * and is then the case's first page's (`shotUrl`).
+	 */
 	url?: string;
 }
 
@@ -145,6 +152,18 @@ export interface Annotation {
 	reopens?: Reopen[];
 	/** What AI apps found about the mark, oldest first; none: no findings. */
 	findings?: Finding[];
+	/** Who made it, in a case synced with a team (DEC-039). */
+	createdBy?: UserRef;
+}
+
+/**
+ * A person, as sitegloss.dev names who did something (DEC-039): there only
+ * on what went through a team's sync, where the server wrote it down from
+ * the login. Nothing here sets it.
+ */
+export interface UserRef {
+	id: string;
+	name: string;
 }
 
 /** The AI app that wrote a finding, as the relay named it then. */
@@ -171,6 +190,8 @@ export interface Finding {
 	editedAt?: string;
 	/** Came in from a file: no app's own, whichever app it names. */
 	imported?: true;
+	/** Whose AI app wrote it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 /** An AI app as the panel and the questions name it: its name beside its host. */
@@ -178,9 +199,22 @@ export function appLabel(app: FindingApp): string {
 	return app.name ? `${app.name} (${app.host})` : app.host;
 }
 
-/** A finding the AI app `clientId` wrote here, not one from a file. */
-export function isOwnFinding(f: Finding, clientId: string): boolean {
-	return f.imported !== true && f.app.id === clientId;
+/**
+ * A finding the AI app `clientId` wrote here, not one from a file. In a case
+ * synced with a team a finding says whose app wrote it: the same app
+ * connected to a teammate's browser is another one's, so only a finding of
+ * the person signed in here (`me`) is this app's own.
+ */
+export function isOwnFinding(
+	f: Finding,
+	clientId: string,
+	me?: string,
+): boolean {
+	return (
+		f.imported !== true &&
+		f.app.id === clientId &&
+		(f.user === undefined || f.user.id === me)
+	);
 }
 
 /** What became of a mark: fixed, or left as it is and why. */
@@ -208,6 +242,8 @@ export interface Resolution {
 	verified?: Verification;
 	/** Came in from a file: who set it and when is what the file says. */
 	imported?: true;
+	/** Who set it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 export interface Verification {
@@ -216,6 +252,8 @@ export interface Verification {
 	app?: FindingApp;
 	/** Came in from a file. */
 	imported?: true;
+	/** Who verified it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 /** A settled mark opened again, and the resolution that ended (DEC-023). */
@@ -229,6 +267,8 @@ export interface Reopen {
 	was: Resolution;
 	/** Came in from a file. */
 	imported?: true;
+	/** Who reopened it, in a case synced with a team (DEC-039). */
+	user?: UserRef;
 }
 
 /** The most reopens a mark keeps; the oldest goes when there are more. */
@@ -324,13 +364,33 @@ export interface PageInfo {
 	userAgent: string;
 }
 
+/**
+ * A page of a case (DEC-038): its address as `plainUrl` gives it, and its
+ * title and language when the mark was made (empty where not known).
+ */
+export interface CasePage {
+	url: string;
+	title: string;
+	lang: string;
+}
+
 export interface Case {
 	format: typeof CASE_FORMAT;
 	id: string;
 	title: string;
 	createdAt: string;
 	updatedAt: string;
+	/**
+	 * The case's first page, and the window and browser it was started in.
+	 * Builds before DEC-038 know only this page.
+	 */
 	page: PageInfo;
+	/**
+	 * The pages the case's marks are on, the first one first (DEC-038). A case
+	 * stored before has none: read them with `casePages`, which also gives
+	 * those of such a case.
+	 */
+	pages?: CasePage[];
 	shots: Shot[];
 	annotations: Annotation[];
 	/** The summary for the developer: what should change, as agreed (DEC-019). */
@@ -410,7 +470,8 @@ export function imageScale(
  * (DEC-009). A hash route (`#/path`, `#!/path`) names the page, so it stays,
  * up to the first character that starts parameters.
  */
-const hashRoute = (hash: string) => /^#!?\/[^?#&=]*/.exec(hash)?.[0] ?? "";
+export const hashRoute = (hash: string) =>
+	/^#!?\/[^?#&=]*/.exec(hash)?.[0] ?? "";
 
 export function plainUrl(href: string): string {
 	try {
@@ -535,27 +596,266 @@ export function shapeOnBox(shape: Shape, from: Rect, to: Rect): Shape {
 }
 
 /**
- * The same page, whatever the origin: a case from prod "belongs" to localhost
- * too. A hash route names a page; a plain `#section` does not.
+ * Which page an address is (DEC-038). A case lists each page once, and a page
+ * is its path in whatever environment: a case made on production is looked at
+ * on staging and fixed on localhost, and a mark added there is on the same
+ * page, not on a second one. So the key leaves the origin out, except for a
+ * home page, where the origin is all there is to tell two sites apart.
+ *
+ * The key is the path without the slashes at its end, and the hash route
+ * (`#/book`, `#!/book`) written as `#/book`, also without slashes at its end.
+ * A query and a plain fragment (`#section`) name no page. What is no web
+ * address is its own key.
+ *
+ * This is the server's function (sitegloss.dev, `packages/api/src/v1/page.ts`)
+ * and has to stay it: `test/page-key.json` holds the server's vectors, and
+ * everything here that asks "the same page?" asks this.
  */
-export function samePath(a: string, b: string): boolean {
-	const page = (href: string) => {
-		const { pathname, hash } = new URL(href);
-		return `${pathname.replace(/\/+$/, "") || "/"}${hashRoute(hash)}`;
-	};
+export function pageKey(address: string): string {
+	let url: URL;
 	try {
-		return page(a) === page(b);
+		url = new URL(address);
 	} catch {
-		return false;
+		return address;
 	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return address;
+	const path = url.pathname.replace(/\/+$/, "");
+	const route = (/^#!?(\/[^?#&=]*)/.exec(url.hash)?.[1] ?? "").replace(
+		/\/+$/,
+		"",
+	);
+	if (path === "" && route === "") return `${url.origin}/`;
+	return route === "" ? path : `${path}#${route}`;
+}
+
+/** Whether two addresses are the same page of a case (`pageKey`). */
+export const samePage = (a: string, b: string): boolean =>
+	pageKey(a) === pageKey(b);
+
+/**
+ * What tells a mark from every other mark of its case, whatever its number:
+ * when its screenshot was taken, and its drawing. A mark's id (`a<number>`)
+ * is another mark's after the team's sync gave it another number (DEC-039),
+ * so what is opened on one mark is held to this, not to the id.
+ */
+export function markKey(c: Case, a: Annotation): string {
+	return markKeys(c).get(a.id) ?? drawnKey(c, a);
+}
+
+/** A mark's screenshot time and drawing, as a key. */
+function drawnKey(c: Case, a: Annotation): string {
+	const shot = c.shots.find((s) => s.id === a.shot);
+	return JSON.stringify([
+		shot?.capturedAt ?? "",
+		a.shape,
+		a.element?.selector ?? null,
+		a.element?.rect ?? null,
+	]);
 }
 
 /**
- * The case is for `url`, sure enough to load it without a click: every site's
- * home page has the same path.
+ * Every mark's `markKey`, by id. Twins (the same drawing on the same
+ * screenshot: the same element marked twice) are told apart by nothing but
+ * their ids, so their key also names the ids all of them have now: once a
+ * renumbering moves any of them, a key held from before names no mark, and
+ * `markFor` refuses instead of taking a twin for the mark meant.
+ */
+function markKeys(c: Case): Map<string, string> {
+	const drawn = new Map<string, string[]>();
+	const of = new Map<string, string>();
+	for (const a of c.annotations) {
+		const key = drawnKey(c, a);
+		of.set(a.id, key);
+		drawn.set(key, [...(drawn.get(key) ?? []), a.id]);
+	}
+	const keys = new Map<string, string>();
+	for (const [id, key] of of) {
+		const twins = drawn.get(key) ?? [];
+		keys.set(
+			id,
+			twins.length > 1
+				? JSON.stringify([...(JSON.parse(key) as unknown[]), [...twins].sort()])
+				: key,
+		);
+	}
+	return keys;
+}
+
+/**
+ * The mark of `c` that something opened on the mark `id` with the key `key`
+ * is about now (`markKey`): the mark under that id while it is still that
+ * mark; else the one mark with that key (it has another number now). None:
+ * it is not in the case any more. `"ambiguous"`: the key names no mark, or
+ * more than one, and a mark with its screenshot and drawing is there (twins
+ * whose ids moved, or a twin made since): nothing says which is meant,
+ * whatever the ids say, and nothing may be changed.
+ */
+export function markFor(
+	c: Case,
+	id: string,
+	key: string,
+): Annotation | "ambiguous" | undefined {
+	const keys = markKeys(c);
+	const under = c.annotations.find((a) => a.id === id);
+	if (under !== undefined && keys.get(under.id) === key) return under;
+	const same = c.annotations.filter((a) => keys.get(a.id) === key);
+	if (same.length === 1) return same[0];
+	if (same.length > 1) return "ambiguous";
+	let drawn: string;
+	try {
+		drawn = JSON.stringify((JSON.parse(key) as unknown[]).slice(0, 4));
+	} catch {
+		return undefined;
+	}
+	return c.annotations.some((a) => drawnKey(c, a) === drawn)
+		? "ambiguous"
+		: undefined;
+}
+
+/** What is said when a change cannot be held to its mark. */
+export const MARK_CHANGED =
+	"The case changed meanwhile, and this is not the mark it was: open the mark again. Nothing was saved.";
+
+/** The address of the page a screenshot was taken on. */
+export const shotUrl = (c: Case, shot: Shot | undefined): string =>
+	shot?.url ?? c.page.url;
+
+/** The address of the page a mark is on: its screenshot's. */
+export function markUrl(c: Case, a: Annotation): string {
+	return shotUrl(
+		c,
+		c.shots.find((s) => s.id === a.shot),
+	);
+}
+
+/**
+ * The case's pages, the first one first (DEC-038): the stored list, or for a
+ * case from before the list the first page; and every page a screenshot was
+ * taken on that is not among them, without a title. A page is there once
+ * (`pageKey`).
+ */
+export function casePages(c: Case): CasePage[] {
+	const pages: CasePage[] = [];
+	const seen = new Set<string>();
+	const add = (page: CasePage) => {
+		const key = pageKey(page.url);
+		if (seen.has(key)) return;
+		seen.add(key);
+		pages.push(page);
+	};
+	for (const page of c.pages ?? []) add(page);
+	if (c.pages === undefined || c.pages.length === 0)
+		add({ url: c.page.url, title: c.page.title, lang: c.page.lang });
+	for (const shot of c.shots)
+		if (shot.url !== undefined) add({ url: shot.url, title: "", lang: "" });
+	return pages.slice(0, MAX_PAGES);
+}
+
+/**
+ * How many marks each page of the case has, by the page's key: one pass over
+ * the screenshots and one over the marks, for a list of pages with counts.
+ */
+export function marksByPage(c: Case): Map<string, number> {
+	const first = pageKey(c.page.url);
+	const pageOf = new Map(
+		c.shots.map((s) => [s.id, s.url === undefined ? first : pageKey(s.url)]),
+	);
+	const counts = new Map<string, number>();
+	for (const a of c.annotations) {
+		const key = pageOf.get(a.shot) ?? first;
+		counts.set(key, (counts.get(key) ?? 0) + 1);
+	}
+	return counts;
+}
+
+/** How many of the case's marks are on the page `url`. */
+export function marksOnPage(c: Case, url: string): number {
+	return marksByPage(c).get(pageKey(url)) ?? 0;
+}
+
+/**
+ * The page of the case that the address `url` shows, whatever the origin: the
+ * case's page in another environment is the same page.
+ */
+export function pageAt(c: Case, url: string): CasePage | undefined {
+	const key = pageKey(url);
+	return casePages(c).find((p) => pageKey(p.url) === key);
+}
+
+/**
+ * The case with its list of pages as its screenshots have them: a page no
+ * screenshot is of any more goes, and `page` follows the first one left,
+ * with the window that page's first screenshot was taken in. A case without
+ * screenshots keeps the pages it was started on; one stored before the list
+ * (DEC-038) stays without it.
+ */
+export function withPagesOfShots(c: Case): Case {
+	if (c.pages === undefined || c.shots.length === 0) return c;
+	const taken = new Set(c.shots.map((s) => pageKey(shotUrl(c, s))));
+	const pages = casePages(c).filter((p) => taken.has(pageKey(p.url)));
+	const first = pages[0];
+	if (first === undefined) return c;
+	if (samePage(first.url, c.page.url)) return { ...c, pages };
+	// A screenshot that names no page is of the page that leaves: it says so
+	// before `page` becomes another one, or it would move with it.
+	const shots = c.shots.map((s) =>
+		s.url === undefined ? { ...s, url: c.page.url } : s,
+	);
+	const shot = shots.find((s) => samePage(s.url ?? "", first.url));
+	return {
+		...c,
+		shots,
+		pages,
+		page: {
+			...c.page,
+			url: first.url,
+			title: first.title,
+			lang: first.lang,
+			...(shot === undefined ? {} : { viewport: shot.viewport }),
+		},
+	};
+}
+
+/**
+ * A case as it comes in from elsewhere (a file, the team), with `page`, the
+ * list and the screenshots agreeing (DEC-038): every screenshot names its
+ * page (one that did not is of `page`), `page` is the first of the list, and
+ * a page is there once. Nothing checks this in a file, and what follows
+ * (counts per page, "Open the page", a delete) relies on it.
+ */
+export function withPagesAgreed(c: Case): Case {
+	const shots = c.shots.some((s) => s.url === undefined)
+		? c.shots.map((s) => (s.url === undefined ? { ...s, url: c.page.url } : s))
+		: c.shots;
+	if (c.pages === undefined) return shots === c.shots ? c : { ...c, shots };
+	const own = c.pages.find((p) => samePage(p.url, c.page.url)) ?? {
+		url: c.page.url,
+		title: c.page.title,
+		lang: c.page.lang,
+	};
+	const pages = casePages({ ...c, shots: [], pages: [own, ...c.pages] });
+	return { ...c, shots, pages };
+}
+
+/**
+ * The window a mark of the page at `url` was made in: that of the page's
+ * first screenshot, else of the case's first page (DEC-038).
+ */
+export function viewportAt(c: Case, url: string | undefined): Viewport {
+	const key = url ? pageKey(url) : undefined;
+	const shot =
+		key === undefined
+			? undefined
+			: c.shots.find((s) => pageKey(shotUrl(c, s)) === key);
+	return shot?.viewport ?? c.page.viewport;
+}
+
+/**
+ * The case is for `url`, sure enough to load it without a click: one of its
+ * pages. A home page is one site's only (`pageKey`).
  */
 export function isPageOf(c: Case, url: string): boolean {
-	return isPageUrl(c.page.url, url);
+	return pageAt(c, url) !== undefined;
 }
 
 /** A web page's address, one a click may open (an imported case's is anyone's). */
@@ -563,17 +863,6 @@ export function isWebPage(url: string): boolean {
 	try {
 		const { protocol } = new URL(url);
 		return protocol === "https:" || protocol === "http:";
-	} catch {
-		return false;
-	}
-}
-
-/** `isPageOf` for a case's page address. */
-export function isPageUrl(caseUrl: string, url: string): boolean {
-	if (!samePath(caseUrl, url)) return false;
-	try {
-		const { origin, pathname } = new URL(url);
-		return pathname !== "/" || origin === new URL(caseUrl).origin;
 	} catch {
 		return false;
 	}
@@ -821,12 +1110,14 @@ export function validateCase(value: unknown): Case {
 				: { resolution: resolution(a["resolution"], `${p}.resolution`) }),
 			...reopensOf(a["reopens"], `${p}.reopens`),
 			...findingsOf(a["findings"], `${p}.findings`),
+			...createdByOf(a["createdBy"], `${p}.createdBy`),
 		};
 	});
 	const verdict = o["verdict"];
 	const importedAt = o["importedAt"];
 	const lastNumber = o["lastNumber"];
 	const link = o["link"];
+	const pages = o["pages"];
 	return {
 		format: CASE_FORMAT,
 		id: id(o["id"], "case.id"),
@@ -840,6 +1131,7 @@ export function validateCase(value: unknown): Case {
 			viewport: viewport(page["viewport"], "case.page.viewport"),
 			userAgent: str(page["userAgent"], "case.page.userAgent", 2000),
 		},
+		...(pages === undefined ? {} : { pages: pagesOf(pages) }),
 		shots,
 		annotations,
 		verdict:
@@ -854,6 +1146,19 @@ export function validateCase(value: unknown): Case {
 			? {}
 			: { lastNumber: highest(lastNumber, annotations) }),
 	};
+}
+
+/** A case's list of pages (DEC-038); a page's language may be left out. */
+function pagesOf(value: unknown): CasePage[] {
+	return arr(value, "case.pages", MAX_PAGES).map((v, i): CasePage => {
+		const p = `case.pages[${i}]`;
+		const page = obj(v, p);
+		return {
+			url: str(page["url"], `${p}.url`, MAX_URL),
+			title: str(page["title"], `${p}.title`, MAX_PAGE_TITLE),
+			lang: language(page["lang"] ?? "", `${p}.lang`),
+		};
+	});
 }
 
 /**
@@ -887,6 +1192,7 @@ function resolution(value: unknown, path: string): Resolution {
 			? {}
 			: { verified: verification(verified, `${path}.verified`) }),
 		...importedOf(o["imported"], `${path}.imported`),
+		...userOf(o["user"], `${path}.user`),
 	};
 }
 
@@ -896,7 +1202,31 @@ function verification(value: unknown, path: string): Verification {
 		at: str(o["at"], `${path}.at`, 64),
 		...appOf(o["app"], `${path}.app`),
 		...importedOf(o["imported"], `${path}.imported`),
+		...userOf(o["user"], `${path}.user`),
 	};
+}
+
+/**
+ * Who did something, as a team's sync wrote it down (DEC-039), or nobody: an
+ * addition a build before it leaves out, as every field it does not know.
+ */
+function person(value: unknown, path: string): UserRef | undefined {
+	if (value === undefined || value === null) return undefined;
+	const user = obj(value, path);
+	return {
+		id: str(user["id"], `${path}.id`, 64),
+		name: str(user["name"], `${path}.name`, 200),
+	};
+}
+
+function userOf(value: unknown, path: string): { user?: UserRef } {
+	const user = person(value, path);
+	return user === undefined ? {} : { user };
+}
+
+function createdByOf(value: unknown, path: string): { createdBy?: UserRef } {
+	const createdBy = person(value, path);
+	return createdBy === undefined ? {} : { createdBy };
 }
 
 /** `imported: true`, or nothing; anything else is refused. */
@@ -955,6 +1285,7 @@ function reopensOf(value: unknown, path: string): { reopens?: Reopen[] } {
 			...appOf(r["app"], `${p}.app`),
 			was: cutWas(resolution(r["was"], `${p}.was`)),
 			...importedOf(r["imported"], `${p}.imported`),
+			...userOf(r["user"], `${p}.user`),
 		};
 	});
 	return reopens.length > 0 ? { reopens } : {};
@@ -984,6 +1315,7 @@ function findingsOf(value: unknown, path: string): { findings?: Finding[] } {
 				? {}
 				: { editedAt: str(editedAt, `${p}.editedAt`, 64) }),
 			...(imported === true ? { imported: true } : {}),
+			...userOf(f["user"], `${p}.user`),
 		};
 	});
 	return findings.length > 0 ? { findings } : {};
@@ -1312,7 +1644,8 @@ export function withoutAnnotation(
 	const shotUsed = annotations.some((a) => a.shot === gone.shot);
 	const shot = c.shots.find((s) => s.id === gone.shot);
 	return {
-		value: {
+		// A page whose last screenshot went with the mark leaves the list.
+		value: withPagesOfShots({
 			...c,
 			annotations,
 			shots: shotUsed ? c.shots : c.shots.filter((s) => s.id !== gone.shot),
@@ -1321,7 +1654,7 @@ export function withoutAnnotation(
 				...c.annotations.map((a) => a.number),
 			),
 			updatedAt: now,
-		},
+		}),
 		images: [
 			gone.crop,
 			...(shotUsed || shot === undefined ? [] : [shot.image]),

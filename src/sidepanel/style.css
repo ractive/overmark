@@ -474,7 +474,7 @@ textarea + .row {
 /*
  * Something stands in the way and there is a way out: Sitegloss may not run on
  * the tab in front, none of the case's marks were found there (DEC-022), a
- * case in a file is here already, the address is in use elsewhere.
+ * case in a file is here already, Sitegloss's connection is in use elsewhere.
  */
 .notice,
 #import-prompt,
@@ -708,6 +708,23 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	padding: 0 10px;
 	font-size: 12px;
 	line-height: 16px;
+}
+
+/* "Fill in the code for <app>?", under the top bar on every view (DEC-044). */
+.pair-fill-ask {
+	display: grid;
+	gap: var(--s1);
+	padding: var(--s2) var(--s4);
+	border-bottom: 1px solid var(--rule);
+	background: var(--wash);
+}
+
+.pair-fill-ask[hidden] {
+	display: none;
+}
+
+.pair-fill-ask p {
+	margin: 0;
 }
 
 /* Each connected AI app's "Allow all changes", under the top bar (DEC-036).
@@ -1145,6 +1162,67 @@ ul.cases .title {
 .case-meta button.page-link {
 	display: inline;
 	min-height: 0;
+}
+
+/* The pages of a case that has several (DEC-038): one a line, under the meta line. */
+.case-pages {
+	margin: -4px 0 0;
+	padding: 0;
+	list-style: none;
+}
+
+.case-pages li {
+	padding: 1px 0;
+}
+
+.case-pages button.page-link {
+	display: inline;
+	min-height: 0;
+}
+
+.case-pages li[data-here] .meta {
+	color: var(--ink);
+}
+
+/* Whether the case is the team's, and "Share with team" (DEC-039). */
+.case-team {
+	margin-top: -4px;
+}
+
+/* A case the team does not have, in the list. */
+.cases .device-only {
+	align-self: start;
+}
+
+/* What the server did not take: one line each, under the status. */
+.cloud-problems {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.cloud-problems li + li {
+	margin-top: var(--s1);
+}
+
+.cloud-server summary {
+	cursor: pointer;
+	color: var(--ink-2);
+}
+
+.cloud select {
+	max-width: 100%;
+}
+
+/* Not the service: said as a warning is, beside the account (DEC-041). */
+.cloud-server-note {
+	margin: 0;
+	padding: var(--s1) var(--s2);
+	border: 1px solid var(--warn-edge);
+	border-radius: var(--r-control);
+	background: var(--warn-bg);
+	color: var(--warn);
+	font-weight: 600;
 }
 
 /*

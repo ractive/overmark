@@ -12,7 +12,13 @@
  * Always allow and "Allow all changes" for each AI app (DEC-018).
  */
 
-import { askDataConsent, FIREFOX, PANEL } from "../lib/browser.ts";
+import {
+	askDataConsent,
+	FIREFOX,
+	PANEL,
+	requestPermissions,
+} from "../lib/browser.ts";
+import { HOSTED_ORIGIN, PAIR_FILL_SITE } from "../worker/pair-fill.ts";
 import {
 	type AiState,
 	type Answer,
@@ -45,8 +51,12 @@ declare const SITEGLOSS_FIREFOX: boolean | undefined;
 
 /** How long the panel must be visible and focused before Allow and Always allow count. */
 const ALLOW_DELAY_MS = 750;
-/** After a first click on New address with apps connected: the second makes it. */
+/** After a first click on Disconnect all apps with apps connected: the second does it. */
 const NEW_ADDRESS_ARMED_MS = 4000;
+/** The pairing code's place while there is none: as long as a code, `XXXX-XXXX`. */
+const CODE_PLACEHOLDER = "––––-––––";
+/** The button that disconnects every AI app (the library's `newAddress()`). */
+const DISCONNECT_ALL = "Disconnect all apps";
 
 /** How long the panel waits for the worker's Blur form fields before it starts an overlay. */
 const BLUR_KNOWN_MS = 2000;
@@ -105,7 +115,7 @@ export function statusText(a: AiState): string {
 		a.problem &&
 		`Not connected: ${a.problem}${a.retrying ? " Trying again…" : ""}`;
 	const replaced =
-		a.replaced && "Not connected: the address is in use elsewhere.";
+		a.replaced && "Not connected: Sitegloss's connection is in use elsewhere.";
 	return (
 		[a.relayNote, replaced ?? problem].filter(Boolean).join(" ") ||
 		"Not connected"
@@ -310,8 +320,78 @@ export async function startAi(
 		}
 		showCard(a);
 		showAllows(a);
+		showFill(a);
 		showQuestions(a.questions);
 	}
+
+	// --- Filling in the code on the relay's pairing page (DEC-044) ---
+
+	const fillAsk = byId("pair-fill-ask");
+	const fillYes = byId<HTMLButtonElement>("pair-fill-yes");
+	/** The question shown, and since when (Fill in the code waits, as Allow does). */
+	let fillShown: { id: string; at: number } | undefined;
+	/** Sitegloss may see the hosted relay's site: asked once, then on each change. */
+	let fillAllowed: boolean | undefined;
+	const checkFillAllowed = () =>
+		chrome.permissions.contains(PAIR_FILL_SITE).then(
+			(yes) => {
+				fillAllowed = yes;
+				if (current) showFill(current);
+			},
+			() => {},
+		);
+	void checkFillAllowed();
+	chrome.permissions.onAdded?.addListener(() => void checkFillAllowed());
+	chrome.permissions.onRemoved?.addListener(() => void checkFillAllowed());
+
+	function showFill(a: AiState): void {
+		const problem = byId("pair-fill-problem");
+		problem.hidden = a.fillProblem === undefined;
+		problem.textContent = a.fillProblem ?? "";
+		const ask = a.fill;
+		fillAsk.hidden = ask === undefined;
+		if (ask === undefined) fillShown = undefined;
+		else if (fillShown?.id !== ask.id) {
+			fillShown = { id: ask.id, at: Date.now() };
+			// As text: the names come from a web page.
+			byId("pair-fill-ask-text").textContent =
+				`${ask.name} (${ask.host}) wants to connect to Sitegloss on the relay's page in this browser. Fill in the code there?`;
+			fillYes.disabled = true;
+		}
+		// Under the code: the offer to fill it in, on the hosted relay only.
+		const hosted = new URL(a.relay).origin === HOSTED_ORIGIN;
+		const host = new URL(HOSTED_ORIGIN).host;
+		byId("pair-fill").hidden = !hosted || fillAllowed === undefined;
+		byId("pair-fill-allow").hidden = fillAllowed !== false;
+		byId("pair-fill-text").textContent = fillAllowed
+			? `Pairing in this browser? When the AI app opens ${host}'s page, Sitegloss asks you, then fills in the code.`
+			: `Pairing in this browser? Sitegloss can fill in the code on ${host}'s page for you, after asking.`;
+	}
+
+	/** Fill in the code counts once the panel has been in front a moment, as Allow does. */
+	setInterval(() => {
+		if (fillShown === undefined) return;
+		const ready =
+			document.visibilityState === "visible" &&
+			document.hasFocus() &&
+			Date.now() - fillShown.at >= ALLOW_DELAY_MS;
+		if (fillYes.disabled === ready) fillYes.disabled = !ready;
+	}, 100);
+	for (const [button, yes] of [
+		[fillYes, true],
+		[byId<HTMLButtonElement>("pair-fill-no"), false],
+	] as const)
+		button.addEventListener("click", () => {
+			if (fillShown === undefined || button.disabled) return;
+			send({ type: "fill", id: fillShown.id, yes });
+		});
+	byId<HTMLButtonElement>("pair-fill-allow").addEventListener("click", () => {
+		// In the click: the browser asks only during one.
+		void requestPermissions(PAIR_FILL_SITE).then(
+			() => checkFillAllowed(),
+			() => checkFillAllowed(),
+		);
+	});
 
 	// --- Commands ---
 
@@ -456,9 +536,10 @@ export async function startAi(
 		turnOn({ type: "connect" }),
 	);
 
-	// Under the code, and in the takeover notice: there AI access is off and
-	// the code is hidden, and a new address is what drops the apps paired
-	// with the address taken over.
+	// "Disconnect all apps", under the code and in the takeover notice: there
+	// AI access is off and the code is hidden, and a new secret is what drops
+	// the apps paired with the connection taken over. The address stays: it
+	// names the app (DEC-042).
 	const newAddressButtons = [
 		"pair-new-address",
 		"pair-replaced-new-address",
@@ -477,12 +558,12 @@ export async function startAi(
 				newAddressText("Really? Every app must pair again");
 				setTimeout(() => {
 					newAddressArmedAt = undefined;
-					newAddressText("New address");
+					newAddressText(DISCONNECT_ALL);
 				}, NEW_ADDRESS_ARMED_MS);
 				return;
 			}
 			newAddressArmedAt = undefined;
-			newAddressText("New address");
+			newAddressText(DISCONNECT_ALL);
 			send({ type: "new-address" });
 		});
 
@@ -626,7 +707,9 @@ export async function startAi(
 									class: "link",
 									"data-focus": `ask-again:${tool}`,
 									"aria-label": `Ask again before ${title}`,
-									title: `Ask you again each time ${app} wants to run ${title}`,
+									title: grant.allowAll
+										? `Ask you again each time ${app} wants to run ${title}; this also turns Allow all changes off`
+										: `Ask you again each time ${app} wants to run ${title}`,
 									onclick: () =>
 										send({ type: "ask-again", grantId: grant.grantId, tool }),
 								},
@@ -683,8 +766,8 @@ export async function startAi(
 		byId("connect").hidden = !view.turnOn;
 		byId("pair-replaced").hidden = a.replaced === undefined;
 		byId("pair-replaced-text").textContent = a.replaced?.sibling
-			? "Sitegloss's address is in use elsewhere in this browser."
-			: "Another tab or program took over this address, and the AI apps paired with it may now talk to it. Make a new address to disconnect them.";
+			? "Sitegloss's connection is in use elsewhere in this browser."
+			: "Another tab or program took over Sitegloss's connection, and the AI apps paired with it may now talk to it. Disconnect all apps to end that.";
 		const problem = [
 			a.relayNote,
 			a.state === "disconnected" ? a.problem : undefined,
@@ -752,8 +835,8 @@ export async function startAi(
 		byId("pair-address").textContent = view.address;
 		setup.show(view.address);
 		const code = a.code;
-		byId("pair-code").textContent =
-			code === undefined ? "––– –––" : `${code.slice(0, 3)} ${code.slice(3)}`;
+		// As the relay sends it, `XXXX-XXXX`; typed with or without the dash.
+		byId("pair-code").textContent = code ?? CODE_PLACEHOLDER;
 		byId<HTMLButtonElement>("pair-copy-code").disabled = code === undefined;
 	}
 
@@ -881,7 +964,7 @@ export async function startAi(
 		const titles: Record<Answer, string> = {
 			deny: "Refuse this call; nothing changes",
 			allow: "Run this call once; the app asks again next time",
-			always: `Run this call, and from now on ${q.title ?? q.tool} for ${q.app} without asking, until you disconnect it`,
+			always: `Run this call, and from now on ${q.title ?? q.tool} for ${q.app} without asking, until you disconnect it or an update of Sitegloss changes this tool`,
 		};
 		// Three buttons that look alike (DEC-037, as the tab-mcp extension's):
 		// the card does not nudge towards allowing.
@@ -961,7 +1044,7 @@ export async function startAi(
 			h(
 				"p",
 				{ class: "meta" },
-				`Always allow: ${q.title ?? q.tool} runs without asking for ${q.app}, until you disconnect it.`,
+				`Always allow: ${q.title ?? q.tool} runs without asking for ${q.app}, until you disconnect it or an update of Sitegloss changes this tool.`,
 			),
 		);
 	}

@@ -83,7 +83,7 @@ describe.skipIf(browserBinary === undefined)(
 			await step("bring the page to the front", () => tab.page.activate());
 			panel = await openSidePanel(h);
 			address = await connectAi(panel, relay.url);
-			client = await mcpClient(relay.store, address);
+			client = await mcpClient(relay, address);
 		}, 60_000);
 
 		afterAll(async () => {
@@ -321,6 +321,13 @@ describe.skipIf(browserBinary === undefined)(
 			await panel.waitFor(
 				`${byId("pair-address")}.textContent === ${JSON.stringify(address)}`,
 			);
+			// The app's address, the same for every installation (DEC-042), and
+			// the code as the relay sends it: 8 letters, `XXXX-XXXX`.
+			expect(address).toBe(`${relay.url}/s/sitegloss/mcp`);
+			await panel.waitFor(
+				`/^[A-Z]{4}-[A-Z]{4}$/.test(${byId("pair-code")}.textContent)`,
+				10_000,
+			);
 			// "How do I add it?" under it, collapsed, with the steps for this address.
 			expect(
 				await panel.eval(
@@ -426,14 +433,16 @@ describe.skipIf(browserBinary === undefined)(
 			expect((await third).isError).toBeFalsy();
 		});
 
-		test("after a takeover, New address in the notice drops the address taken over", async () => {
+		test("after a takeover, Disconnect all apps in the notice drops the connection taken over; the address stays", async () => {
 			const key = `tab-mcp:secret:${relay.url}:sitegloss`;
 			const secret = (await settingsOf(h))[key];
 			expect(typeof secret).toBe("string");
-			// Another program with a copy of the address secret takes it over.
+			// Another program with a copy of the address secret takes the
+			// connection over.
 			const other = new TabMcp({
 				relay: relay.url,
 				server: { name: "sitegloss", version: "1.0.0" },
+				app: "sitegloss",
 				storage: {
 					getItem: (k) => (k === key ? (secret as string) : null),
 					setItem() {},
@@ -449,15 +458,19 @@ describe.skipIf(browserBinary === undefined)(
 				await panel.eval(`${button}.click()`);
 				// With apps listed it asks first.
 				if (
-					(await panel.eval<string>(`${button}.textContent`)) !== "New address"
+					(await panel.eval<string>(`${button}.textContent`)) !==
+					"Disconnect all apps"
 				) {
 					await Bun.sleep(100);
 					await panel.eval(`${button}.click()`);
 				}
+				// The notice goes, and the card shows the same address (it names
+				// the app, DEC-042) with a new secret behind it.
 				await panel.waitFor(
-					`${byId("pair-replaced")}.hidden && ${byId("pair-address")}.textContent.endsWith("/mcp") && ${byId("pair-address")}.textContent !== ${JSON.stringify(address)}`,
+					`${byId("pair-replaced")}.hidden && ${byId("pair-address")}.textContent === ${JSON.stringify(address)}`,
 					10_000,
 				);
+				expect((await settingsOf(h))[key]).not.toBe(secret);
 			} finally {
 				other.disconnect();
 			}

@@ -33,7 +33,8 @@ a [tab-mcp](https://github.com/ractive/tab-mcp) relay.
    `https://dev.example.com/…`, later prod, and checks the fix.
 
 Sitegloss never opens or switches environments itself: a case's marks are drawn on
-whatever tab is in front (DEC-022). Forwarding cases to a team (tickets, links) is out of scope for now.
+whatever tab is in front (DEC-022). A team shares its cases through sitegloss.dev, for
+whoever signs in (DEC-039); tickets and links to other tools are out of scope.
 
 ## The screenshot is the record
 
@@ -120,7 +121,10 @@ the page's origin and never touches it directly.
 - Optional `<all_urls>`, asked for in the side panel ("Allow on all sites", in the options
   in Settings and in the notice the panel shows on a tab Sitegloss may not run on yet, DEC-022) only
   when the user wants Sitegloss without clicking the icon on each tab. `captureVisibleTab` accepts
-  `activeTab` or `<all_urls>`, not a single site's permission.
+  `activeTab` or `<all_urls>`, not a single site's permission. One site of it is asked for
+  by itself: `https://tab-mcp.ractive.ch/*`, with the click on "Allow on that site" under the
+  pairing code, to fill in the code on the hosted relay's pairing page after asking
+  (DEC-044). Nothing is required at install.
 
 No JavaScript from an AI app or a server ever runs: the tools are fixed (Chrome Web Store
 rules on remote code, and safety).
@@ -131,7 +135,10 @@ rules on remote code, and safety).
 extension context. Its WebSocket therefore carries the extension's origin
 `chrome-extension://<id>`, which a website cannot fake. A content script's requests would
 carry the page's origin, so the connection must not live there. The relay must allow the
-extension's origin (relay 0.7.0 and later take it in `TAB_MCP_SITES`). The connection
+extension's origin (relay 0.7.0 and later take it in `TAB_MCP_SITES`) and be relay
+0.12.0 or later (client 0.17 and later; Sitegloss has 0.18). The MCP address names the app, `<relay>/s/sitegloss/mcp`,
+the same for every installation and the Firefox build (DEC-042); the pairing code alone
+says which installation an AI app is paired with. The connection
 stays while the side panel is closed; the panel is a view that talks to it over one named
 port, whose sender the worker checks (the panel's own page, not in a tab). "Keep AI access
 on" connects at every worker start and after an idle session; without it AI access stays
@@ -161,10 +168,13 @@ the export, so an export is the case plus its images:
   "format": "sitegloss/1",
   "id": "c_…", "title": "Login button contrast",
   "createdAt": "…", "updatedAt": "…",
-  "page": { "url": "https://www.example.com/…", "title": "…", "lang": "de",
+  "page": { "url": "https://www.example.com/cart", "title": "…", "lang": "de",
             "viewport": { "width": 1440, "height": 900, "dpr": 2 }, "userAgent": "…" },
+  "pages": [{ "url": "https://www.example.com/cart", "title": "…", "lang": "de" },
+            { "url": "https://www.example.com/checkout", "title": "…", "lang": "de" }],
   "shots": [{ "id": "s1", "image": "shots/s1.webp", "scrollX": 0, "scrollY": 0,
-              "viewport": { "width": 1440, "height": 900, "dpr": 2 }, "capturedAt": "…" }],
+              "viewport": { "width": 1440, "height": 900, "dpr": 2 }, "capturedAt": "…",
+              "url": "https://www.example.com/cart" }],
   "annotations": [{
     "id": "a1", "number": 1, "shot": "s1", "comment": "…", "author": "user",
     "shape": { "kind": "box", "rect": { "x": 10, "y": 20, "width": 200, "height": 40 } },
@@ -209,6 +219,43 @@ W3C Web Annotation `CssSelector`; a full W3C export is a follow-up if a consumer
 `plainUrl` in `src/lib/case.ts`. A case that came from a file also has `importedAt`, set
 on import whatever the file says.
 
+A case spans pages (DEC-038): a tester goes through a flow and marks each page of it in
+one case. `pages` lists them in order, the first one being `page`, which stays as it was
+for builds that know only it; every screenshot has the address of its page (`url`), and a
+mark's page is its screenshot's. A case stored before `pages` has none, and its pages are
+read from `page` and its screenshots (`casePages`). A page is told by its path, whatever
+the origin, as a case's page always was.
+
+## A team at sitegloss.dev
+
+Sitegloss is local first: the cases are in the browser, and nothing needs an account.
+Someone signed in to sitegloss.dev (DEC-039) has their cases synced with their team in
+both directions, by the service worker:
+
+- **Sign-in** is OAuth 2.1 with PKCE as a public client, in the browser's own window
+  (`identity.launchWebAuthFlow`); the tokens are in the worker's database
+  `sitegloss-cloud`, out of the pages' reach.
+- **Which server** (DEC-041): the service, unless the user chose its development server
+  or another address under "Server" while signed out; the Account section says so when
+  it is not the service. Where a server signs people in is read from its discovery
+  document. Everything below is kept per server, so nothing synced with one reaches
+  another unless the user shares that case there.
+- **Sending:** each synced case is compared with what the server last had of it, and
+  the difference becomes operations (a new mark, a changed comment, a status, a finding,
+  a delete), written down with ids of their own before they are sent, images first. The
+  server applies an operation's id once.
+- **Fetching:** everything after the team's revision this browser has seen; what was
+  not changed here becomes the server's, what was changed here stays and is sent next.
+- **Ids:** `a<number>` and `s<n>` stay what they are here; the server knows marks and
+  screenshots by ids of their own, and the bookkeeping maps one to the other. A mark's
+  number is the server's to give when two people drew the same one.
+- **Live:** the open side panel listens to the server's events stream and tells the
+  worker; without a panel an alarm looks every five minutes.
+
+The case format gains only who did something, where the server wrote it down:
+`user { id, name }` on a resolution, a verification, a reopen and a finding, and
+`createdBy` on a mark. The sync to a folder (DEC-021) is apart from this and unchanged.
+
 ## Finding an element again
 
 Sitegloss stores a fingerprint of the element, not a selector, and scores every candidate
@@ -250,12 +297,12 @@ loading is searched for again.
 
 | Tool | What it does | Asks first |
 |---|---|---|
-| `list_cases` | Cases with title, page, their marks by status (`open`, `toVerify`, `verified`, `closed`), the start of the summary for the developer | no |
-| `get_case` | A case's summary, annotations with their status, resolution (`verified`, `by`), reopens and findings (`own` for the caller's), element details and crops | no |
+| `list_cases` | Cases with title, pages, their marks by status (`open`, `toVerify`, `verified`, `closed`), the start of the summary for the developer | no |
+| `get_case` | A case's pages and summary, its screenshots with their pages, annotations with their page, status, resolution (`verified`, `by`), reopens and findings (`own` for the caller's), element details and crops | no |
 | `get_image` | One screenshot or crop, scaled to at most 1568 px | no |
 | `load_case` | Loads a case onto the tab in front and reports what was found | no |
 | `highlight` | Scrolls to and outlines one annotation's element (or another candidate) | no |
-| `get_mark_element` | Reads one annotation's element (or, by selector, an ancestor or an element inside it; for an annotation without an element, an element of the case's page) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
+| `get_mark_element` | Reads one annotation's element (or, by selector, an ancestor or an element inside it; for an annotation without an element, an element of the annotation's page) from the tab in front: trimmed HTML, box, computed styles, matching CSS rules, ancestors and children (DEC-013) | no |
 | `capture` | A screenshot of the tab in front | no |
 | `add_annotation` | Adds a comment on an element (by CSS selector) to a case | yes |
 | `set_summary` | Writes the case's summary for the developer (stored as `verdict`, DEC-019) | yes |

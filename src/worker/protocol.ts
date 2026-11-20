@@ -17,6 +17,15 @@ export const PANEL_PORT = "ai";
  */
 export const SERVER_NAME = "sitegloss";
 
+/**
+ * Sitegloss's app id: its MCP address is `<relay>/s/sitegloss/mcp`, the same
+ * for every installation, the Firefox build's too (DEC-042, tab-mcp's
+ * DEC-196); the pairing code alone says which installation an AI app is
+ * paired with. Set, not left to the library to derive from `SERVER_NAME`,
+ * so that a change of the server's name cannot change the address.
+ */
+export const APP_ID = "sitegloss";
+
 /** The side panel's page in the build. */
 export const PANEL_PATH = "/sidepanel/index.html";
 
@@ -51,7 +60,9 @@ export type PanelCommand =
 	| { type: "ask-again"; grantId: string; tool: string }
 	| { type: "new-address" }
 	| { type: "set-relay"; relay: string }
-	| { type: "answer"; id: string; answer: Answer };
+	| { type: "answer"; id: string; answer: Answer }
+	/** The answer to "Fill in the code for <app>?" (DEC-044): only a yes fills it in. */
+	| { type: "fill"; id: string; yes: boolean };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -118,10 +129,27 @@ export interface AiState {
 	/** A panel's pairing view is open. */
 	pairing: boolean;
 	code?: string;
-	/** Another tab or program took the address over. */
+	/** Another tab or program took Sitegloss's connection over (it connects with Sitegloss's secret). */
 	replaced?: { sibling: boolean };
 	lastCall?: CallView;
 	questions: QuestionView[];
+	/**
+	 * An AI app opened the hosted relay's pairing page in this browser:
+	 * Sitegloss asks whether to fill in its code there (DEC-044). The name
+	 * and host as the page's form gives them.
+	 */
+	fill?: FillView;
+	/** Why the last fill-in did not happen, for a while after it (DEC-044). */
+	fillProblem?: string;
+}
+
+/** The question whether to fill in the code for an AI app (DEC-044). */
+export interface FillView {
+	id: string;
+	/** `data-client-name`: the name the AI app gave itself. */
+	name: string;
+	/** `data-client-host`: its verified host. */
+	host: string;
 }
 
 /** From the service worker. */
@@ -218,6 +246,10 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 					m["answer"] === "deny" ||
 					m["answer"] === "always")
 				? { type: "answer", id: m["id"], answer: m["answer"] }
+				: undefined;
+		case "fill":
+			return isString(m["id"]) && isBoolean(m["yes"])
+				? { type: "fill", id: m["id"], yes: m["yes"] }
 				: undefined;
 		default:
 			return undefined;

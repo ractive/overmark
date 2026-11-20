@@ -86,10 +86,32 @@ describe.skipIf(browserBinary === undefined)(
 			await panel.waitFor(`!${QUESTION}`);
 			return result;
 		};
-		const kept = async () =>
-			(await settingsOf(h))["alwaysAllowed"] as
-				| Record<string, { all: boolean; tools: string[] }>
-				| undefined;
+		/**
+		 * What the library keeps for the apps (DEC-043), beside the secret in
+		 * the worker's settings database, by grant: `undefined` for nothing.
+		 * Sitegloss's own store from before is never there.
+		 */
+		const kept = async () => {
+			const settings = await settingsOf(h);
+			expect(settings["alwaysAllowed"]).toBeUndefined();
+			const text = settings[`tab-mcp:secret:${relay.url}:sitegloss#allowed`];
+			if (typeof text !== "string") return undefined;
+			const { grants } = JSON.parse(text) as {
+				grants: {
+					grantId: string;
+					everything: boolean;
+					tools: { name: string }[];
+				}[];
+			};
+			const out: Record<string, { all: boolean; tools: string[] }> = {};
+			for (const g of grants)
+				if (g.everything || g.tools.length > 0)
+					out[g.grantId] = {
+						all: g.everything,
+						tools: g.tools.map((t) => t.name),
+					};
+			return Object.keys(out).length > 0 ? out : undefined;
+		};
 
 		/**
 		 * A new AI app paired with the address. The test token comes straight
@@ -97,7 +119,7 @@ describe.skipIf(browserBinary === undefined)(
 		 * the relay list it, as pairing would.
 		 */
 		const pairApp = async () => {
-			client = await mcpClient(relay.store, address);
+			client = await mcpClient(relay, address);
 			await panel.eval(`${byId("stop-ai")}.click()`);
 			await panel.waitFor(
 				`document.documentElement.dataset.aiState === "disconnected"`,
@@ -189,7 +211,7 @@ describe.skipIf(browserBinary === undefined)(
 				),
 			).toMatch(/^(5\d|60) s left to answer; no answer is Don't allow\.$/);
 			expect(await panel.eval<string>(`${QUESTION}.textContent`)).toContain(
-				"Always allow: Record the summary for the developer runs without asking for Test client (client.example), until you disconnect it.",
+				"Always allow: Record the summary for the developer runs without asking for Test client (client.example), until you disconnect it or an update of Sitegloss changes this tool.",
 			);
 			expect(
 				await panel.eval(
@@ -237,7 +259,8 @@ describe.skipIf(browserBinary === undefined)(
 					"document.activeElement?.dataset.focus",
 				),
 			).toBe("allow-all");
-			expect(await kept()).toBeUndefined();
+			// Written through to the database a moment after the library has it.
+			await until(kept, (k) => k === undefined, 10_000);
 			expect(
 				(await asks("set_summary", { caseId: "c_1", summary: "Four" }, "deny"))
 					.isError,

@@ -77,8 +77,15 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 
 	/** The panel on an empty store with these cases and no settings. */
 	async function fresh(cases: Case[] = []): Promise<void> {
+		// Made as the extension's store makes it, should this come first (a
+		// test run by itself): opened without a version it would have no
+		// stores, the transaction would throw, and this would wait for ever.
 		await h.control.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("sitegloss");
+			const open = indexedDB.open("sitegloss", 1);
+			open.onupgradeneeded = () => {
+				open.result.createObjectStore("cases", { keyPath: "id" });
+				open.result.createObjectStore("images");
+			};
 			open.onerror = () => reject(open.error);
 			open.onsuccess = () => {
 				const tx = open.result.transaction(["cases", "images"], "readwrite");
@@ -217,6 +224,11 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			await enter();
 			await h.control.waitFor(`!${id("home")}.hidden`);
 			expect(await storedCase("c_keys")).toBeUndefined();
+			// The delete is on record, written with it (DEC-039): by this
+			// the sync deletes the case for a team, and by nothing else.
+			expect(
+				(await h.control.eval<{ deleted: string[] }>(READ_DB)).deleted,
+			).toEqual(["c_keys"]);
 		},
 	);
 
@@ -254,6 +266,64 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 				`${id("delete-case")}.textContent === "Really delete?"`,
 			);
 			expect(await storedCase("c_late")).toBeDefined();
+		},
+	);
+
+	slowTest(
+		"an armed Delete stays where it was clicked while the marks found on the tab are said above it: a second click in the same place deletes",
+		async () => {
+			await fresh();
+			const marked = await h.open("v1");
+			await marked.page.activate();
+			const panel = await openSidePanel(h);
+			try {
+				// A case made with the toolbar on v1; the side panel shows it.
+				await showToolbar(h, marked.page, marked.tabId);
+				await markElement(marked.page, "[data-truth=submit]", "Too pale");
+				await saveAs(marked.page, "Held in place", panel);
+				const caseId = (await readDb()).cases.find(
+					(c) => c.title === "Held in place",
+				)?.id as string;
+				// Another page in front: the case's mark is not found there.
+				const other = await h.open("long");
+				await other.page.activate();
+				const found = `(${id("case-hint")}?.textContent ?? "").includes("1 of 1 marks found")`;
+				await panel.waitFor(
+					`!(${found}) && !${id("this-tab")}.innerText.includes("Looking for")`,
+					10_000,
+				);
+				// The first click arms it (where the button is then does not
+				// matter); the second goes to the spot it was armed at.
+				await panel.eval(`${id("delete-case")}.click()`);
+				await panel.waitFor(
+					`${id("delete-case")}.hasAttribute("data-armed")`,
+					2000,
+				);
+				const armedAt = Date.now();
+				const at = await panel.eval<{ x: number; y: number }>(
+					`(() => { const r = ${id("delete-case")}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+				);
+				// Between the two clicks v1 comes to the front: the panel finds
+				// the mark there and says so above the button.
+				await marked.page.activate();
+				// Within the 4 s the Delete stays armed (DELETE_ARMED_MS).
+				await panel.waitFor(found, 3500 - (Date.now() - armedAt));
+				// The button is where the first click found it (no click is
+				// aimed until it is: a test is faster than a hand), and the
+				// same place, a second time, confirms.
+				await panel.waitFor(
+					`(() => { const r = ${id("delete-case")}.getBoundingClientRect(); return Math.abs(r.x + r.width / 2 - ${at.x}) < 1 && Math.abs(r.y + r.height / 2 - ${at.y}) < 1 && document.elementFromPoint(${at.x}, ${at.y})?.id === "delete-case"; })()`,
+					3000,
+				);
+				// A confirming click this soon after the first counts as a
+				// double-click and deletes nothing (DELETE_CLICK_GAP_MS).
+				await Bun.sleep(Math.max(0, 600 - (Date.now() - armedAt)));
+				await panel.clickAt(at.x, at.y);
+				await panel.waitFor(`!${id("home")}.hidden`, 5000);
+				expect(await storedCase(caseId)).toBeUndefined();
+			} finally {
+				await closeSidePanel(h, panel);
+			}
 		},
 	);
 
@@ -583,6 +653,36 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			);
 			expect((await overlayOf(tabId)).loadedCase).toBe("c_here");
 			await page.send("Page.close");
+		},
+	);
+
+	slowTest(
+		"the page goes on within itself (a single-page app's next route): the panel's numbers are about the page it shows now",
+		async () => {
+			await fresh();
+			const a = await annotated("Route change");
+			await a.page.activate();
+			await openPanel();
+			await openCase(a.caseId);
+			await until(
+				async () => (await pageCase(a.tabId)) === a.caseId,
+				"the marks on the tab in front",
+			);
+			await h.control.waitFor(
+				`/marks found on [^ ]+\\/v1\\.$/.test(${id("case-hint")}.textContent)`,
+			);
+			// The address changes within the page, as a router does it: no
+			// load, the case stays drawn, and the page is another one now.
+			await a.page.eval(
+				`history.pushState({}, "", location.pathname.replace("v1", "v2"))`,
+			);
+			await h.control.waitFor(
+				`/marks found on [^ ]+\\/v2\\.$/.test(${id("case-hint")}.textContent)`,
+			);
+			expect(await pageCase(a.tabId)).toBe(a.caseId);
+			expect(await h.control.eval(`${id("load-case")}.textContent`)).toBe(
+				"Hide marks",
+			);
 		},
 	);
 
@@ -1855,7 +1955,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		/** A paired MCP client, through the address the card shows (none paired yet). */
 		async function pairedClient(
 			panel: Page,
-			store: Parameters<typeof mcpClient>[0],
+			relay: Parameters<typeof mcpClient>[0],
 		) {
 			await panel.waitFor(
 				`${id("pair-address")}.textContent.endsWith("/mcp")`,
@@ -1864,7 +1964,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			const address = await panel.eval<string>(
 				`${id("pair-address")}.textContent`,
 			);
-			return mcpClient(store, address);
+			return mcpClient(relay, address);
 		}
 
 		const visible = (page: Page, name: string) =>
@@ -1950,7 +2050,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`${status} === "Waiting for an AI app to pair"`,
 					10_000,
 				);
-				const client = await pairedClient(panel, relay.store);
+				const client = await pairedClient(panel, relay);
 				const list = () =>
 					client.callTool({ name: "list_cases", arguments: {} });
 				try {
@@ -2041,7 +2141,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`${status} === "Waiting for an AI app to pair"`,
 					10_000,
 				);
-				const client = await pairedClient(panel, relay.store);
+				const client = await pairedClient(panel, relay);
 				try {
 					const verdict = client.callTool({
 						name: "set_summary",

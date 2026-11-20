@@ -216,17 +216,51 @@ in other environments, alone or with an AI app the user connects.
 |---|---|
 | `activeTab` | Add the annotation toolbar to the tab where the user clicked the icon, read the marked elements' details, and take screenshots of that tab. |
 | `alarms` | While the user has the AI app connected, wake the background service worker once a minute, so the connection comes back after the computer slept. |
-| `notifications` | When the connected AI app wants to change something (add a mark, record the summary for the developer, change a mark's status, add, change or delete one of its findings on a mark, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Always allow; closing it is Don't allow. Where the call's arguments do not fit in a notification, it offers only Don't allow and says to answer in the side panel, which shows them all (its question has Don't allow, Allow and Always allow). A tool runs without a question only after the user chose Always allow for that tool, or turned on "Allow all changes", for that AI app, until the app is disconnected; otherwise nothing changes without the user's answer. |
+| `notifications` | When the connected AI app wants to change something (add a mark, record the summary for the developer, change a mark's status, add, change or delete one of its findings on a mark, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Always allow; closing it is Don't allow. Where the call's arguments do not fit in a notification, it offers only Don't allow and says to answer in the side panel, which shows them all (its question has Don't allow, Allow and Always allow). A tool runs without a question only after the user chose Always allow for that tool, or turned on "Allow all changes", for that AI app, until the app's pairing ends (the user disconnects it, or the relay lets it expire; a tool always allowed one by one also asks again once an update changes what it says it does); otherwise nothing changes without the user's answer. |
 | `offscreen` | The sync to Downloads, which the user turns on with "Sync to Downloads": the background service worker cannot make a URL for a case's file (no `URL.createObjectURL`), so while it writes the cases it opens an offscreen document (reason `BLOBS`) that builds one case's export file and makes its blob URL, which the worker downloads; the document closes when the cases are written. |
 | `scripting` | Inject the toolbar and outlines into that tab. |
 | `sidePanel` | The side panel lists cases, loads them onto the tab, and shows the AI app's connection and its questions. |
-| `storage` | Session storage, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others, and whether AI access is on. (The AI connection's settings and the secret from which its address is derived are in the extension's own IndexedDB, used by its service worker only.) |
+| `storage` | Session storage, cleared when the browser closes: which marks the toolbar on which tab just added, so its Undo can take back those marks and no others, and whether AI access is on. (The AI connection's settings and the secret by which the relay knows this installation are in the extension's own IndexedDB, used by its service worker only.) |
 | `unlimitedStorage` | Cases and their screenshots exist only in the browser's IndexedDB. This keeps the browser from evicting them when disk space runs low, and lets a user keep more than the default quota. |
 | `downloads` (optional) | Asked for when the user clicks Export (or Export all cases) or "Sync to Downloads" in the side panel. Sitegloss saves its own export file through `chrome.downloads.download` and reads that one download's path (`downloads.search` by its id), to show the user where the file went with Copy and "Show in folder" (`downloads.show`). With the sync to Downloads it writes each case as its own file to `Sitegloss/` in the downloads folder, overwriting that case's file when the case changes, and erases its own previous entry from the download list (`downloads.erase`, the file stays). It reads no other download. Without it the export is saved as a plain download, without the path, and the sync can only go to a folder the user chooses. |
-| `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page in a new tab (the case's address in its header, or "Open the case's page" when none of its marks were found on the tab in front), so the case's marks are drawn there without clicking the icon. All sites only when the user clicks "Allow on all sites" (in the side panel's notice on a tab Sitegloss may not run on yet) or turns on the option "Allow on all sites, without clicking the icon on each tab". |
+| `<all_urls>` (optional) | Asked for one site at a time when the user opens a case's page in a new tab (the case's address in its header, or "Open the case's page" when none of its marks were found on the tab in front), so the case's marks are drawn there without clicking the icon. All sites only when the user clicks "Allow on all sites" (in the side panel's notice on a tab Sitegloss may not run on yet) or turns on the option "Allow on all sites, without clicking the icon on each tab". One site by itself: `https://tab-mcp.ractive.ch/*`, the hosted relay, asked when the user clicks "Allow on that site" under the pairing code. With it, when an AI app opens the relay's pairing page for Sitegloss in this browser, Sitegloss reads that page's form (which AI app asks), asks the user in the side panel, and only on a yes types its pairing code into the form's field and clicks Connect. |
+
+**For the version with team sync (DEC-039), to enter by hand before it is published:**
+
+- **New permission `identity`:** it has no install warning, so the update is not held
+  back for users to approve. Justification: "When the user clicks Sign in, open the
+  browser's own sign-in window (`identity.launchWebAuthFlow`) on the user's Sitegloss
+  account at app.sitegloss.dev (OAuth 2.1 with PKCE). It is not used to read the
+  browser's or the Google account's identity."
+- **`alarms`,** add: "and, while the user is signed in to sitegloss.dev, look for the
+  team's changes every five minutes when the side panel is closed."
+- **Description,** a paragraph after the one on export and the folder sync: "Working in
+  a team? Sign in to sitegloss.dev and your cases sync with your team, both ways and
+  live: everyone sees the same marks, statuses and findings, in the extension and on the
+  web. Without an account everything stays in your browser." And the last paragraph's
+  first sentence becomes: "Your cases stay in your browser unless you export them, sync
+  them, connect an AI app or sign in to sitegloss.dev."
+- **Single purpose:** add "and sharing them with the user's team".
+- **Data usage:** under *Collected*, add **Personally identifiable information** (the
+  signed-in user's name and e-mail address, received from the service and shown in the
+  side panel) and **Authentication information** (the OAuth tokens of the user's own
+  Sitegloss account, kept in the extension's IndexedDB). Under *Transmitted*, add: "and,
+  only for a user who signs in, to app.sitegloss.dev, the developer's service, where the
+  cases are stored for the user's team". Web history, website content and user activity
+  now also go there for such a user.
+- **Privacy policy:** the page at `ractive.ch/sitegloss/privacy/` has to be the new
+  `PRIVACY.md` before the version is submitted.
+- **Edge Add-ons:** the same texts.
+- **The service's side:** the store version's redirect address is that of the store's
+  key, `https://ldmcfigcnobhnbaigehcaodheklibeon.chromiumapp.org/` (the same as unpacked
+  builds, DEC-031), and Firefox's is in `firefox-add-ons.md`; both have to be in the
+  server's `EXTENSION_REDIRECT_URIS`. An Edge Add-ons build gets another id from that
+  store, and so another address (`https://<its id>.chromiumapp.org/`), to add there once
+  it is known.
 
 **Remote code:** No. All code is in the package; the connection to the relay carries
-data only, and no tool runs code an AI app sends.
+data only, and no tool runs code an AI app sends. The same holds for sitegloss.dev: the
+extension exchanges data with its API and runs nothing it sends.
 
 **Data usage (Privacy practices tab):**
 

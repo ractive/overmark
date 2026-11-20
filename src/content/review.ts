@@ -17,17 +17,23 @@ import {
 	type Annotation,
 	type Case,
 	caseCounts,
+	MARK_CHANGED,
 	MAX_COMMENT,
 	MAX_REOPEN_NOTE,
 	type MarkStatus,
+	markFor,
+	markKey,
 	markStatus,
+	markUrl,
+	pageAt,
+	pageKey,
 	RESOLUTION_LABEL,
 	RESOLVE_CHOICES,
 	type Rect,
 	type ResolveChoice,
 	type Shape,
 	STATUS_LABEL,
-	samePath,
+	samePage,
 	shapeBounds,
 	shapeOnBox,
 	translateShape,
@@ -82,6 +88,9 @@ export const DELETE_ARMED_MS = 4000;
 /** A double click is no second thought. */
 const DELETE_CLICK_GAP_MS = 400;
 
+/** How long one tick looks again for the marks a route did not have. */
+const STALE_BUDGET_MS = 25;
+
 /** The four ways Resolve… and Change… settle a mark, as the panel says them. */
 const CHOICE_LABEL: Record<ResolveChoice, string> = {
 	fixed: "Fixed, to verify",
@@ -95,7 +104,17 @@ const CHOICE_LABEL: Record<ResolveChoice, string> = {
  * the mark's commands, or the form of one of them.
  */
 interface OpenMark {
+	/** The mark's id as it is now: it follows the mark when the id changes. */
 	annotationId: string;
+	/**
+	 * Which mark the popover was opened on (`markKey`). The team's sync can
+	 * give the mark another number while the popover is open, and the id it
+	 * had is then a teammate's mark: the popover follows its mark, and what
+	 * it asks names the mark, not only the id.
+	 */
+	mark: string;
+	/** The case has more than one mark this could be: nothing is asked for it. */
+	lost?: boolean;
 	mode: "main" | "resolve" | "reopen";
 	/** The comment as the case has it, and as typed here. */
 	base: string;
@@ -148,6 +167,16 @@ export class Reviewer {
 	#timer: ReturnType<typeof setInterval> | undefined;
 	/** A newer load or a clear stops a load that is still running. */
 	#generation = 0;
+	/** Which page (`pageKey`) the marks were last looked for on. */
+	#page = "";
+	/**
+	 * Marks to look for again: the address changed within the page (a
+	 * single-page app went on to its next route), and a mark that was not
+	 * there may be now.
+	 */
+	readonly #stale = new Set<Entry>();
+	/** Looks still to take for a route's content that comes late; ticks until the next. */
+	#late = { looks: 0, ticks: 0 };
 	/** The case a load is finding marks for now, and a newer version of it. */
 	#loading: { caseId: string } | undefined;
 	#newer: Case | undefined;
@@ -241,19 +270,25 @@ export class Reviewer {
 		)) {
 			await yieldToPage();
 			if (generation !== this.#generation) throw new LoadReplaced();
-			entries.push(this.#find(search, annotation));
+			entries.push(this.#find(search, annotation, c));
 		}
 		this.#closeMark();
 		this.#case = c;
 		this.#entries = entries;
+		this.#page = pageKey(location.href);
+		this.#stale.clear();
+		this.#late = { looks: 0, ticks: 0 };
 		this.#focused = undefined;
 		this.overlay.setReviewing(true);
 		clearInterval(this.#timer);
 		// Layout changes (lazy content, accordions) move elements without a scroll.
 		this.#timer = setInterval(() => {
+			this.#checkPage();
 			// One search a tick: a new route replaces every element at once.
 			const replaced = this.#entries.find((e) => this.#replaced(e));
 			if (replaced !== undefined) this.#findAgain(replaced);
+			// The marks the last route did not have, a few a tick.
+			else this.#lookAgain(STALE_BUDGET_MS);
 			this.#schedule();
 		}, 500);
 		this.#renderBar();
@@ -286,8 +321,12 @@ export class Reviewer {
 			const annotation = byId.get(e.annotation.id);
 			if (annotation === undefined) continue;
 			// A replaced copy (an import) may give the id to another mark.
-			if (sameMark(annotation, e.annotation)) kept.push({ ...e, annotation });
-			else search.push(annotation);
+			if (sameMark(annotation, e.annotation)) {
+				const next = { ...e, annotation };
+				// Still to be looked for again, as the entry it replaces was.
+				if (this.#stale.delete(e)) this.#stale.add(next);
+				kept.push(next);
+			} else search.push(annotation);
 		}
 		const known = new Set(this.#entries.map((e) => e.annotation.id));
 		search.push(...c.annotations.filter((a) => !known.has(a.id)));
@@ -297,7 +336,7 @@ export class Reviewer {
 				await yieldToPage();
 				if (generation !== this.#generation || this.#case?.id !== c.id)
 					return null;
-				kept.push(this.#find(page, annotation));
+				kept.push(this.#find(page, annotation, c));
 			}
 			kept.sort((a, b) => a.annotation.number - b.annotation.number);
 			clearTextCache();
@@ -306,7 +345,7 @@ export class Reviewer {
 		this.#entries = kept;
 		if (this.#focused !== undefined && !byId.has(this.#focused))
 			this.#focused = undefined;
-		this.#follow(byId);
+		this.#follow(c);
 		this.#renderBar();
 		this.#render();
 		return {
@@ -320,7 +359,114 @@ export class Reviewer {
 		return createSearch(this.overlay.doc, { exclude: this.overlay.host });
 	}
 
-	#find(search: PageSearch, annotation: Annotation): Entry {
+	/**
+	 * The address changed within the page to another page (`pageKey`): the
+	 * marks that were not found are looked for again (the next route of a
+	 * single-page app has the next page's marks, finding 1 of DEC-038's
+	 * review), and which mark is on its own page is judged anew.
+	 */
+	#checkPage(): void {
+		const page = pageKey(location.href);
+		if (page === this.#page || this.#case === undefined) return;
+		this.#page = page;
+		for (const entry of this.#entries) {
+			if (entry.match.status === "lost") this.#stale.add(entry);
+			else this.#judgePage(entry);
+		}
+		// A route's content often comes after its address.
+		this.#late = { looks: 2, ticks: 3 };
+		this.#renderBar();
+		this.#render();
+	}
+
+	/** Look for stale marks again, for `budget` ms at most; whether any is left. */
+	#lookAgain(budget: number): boolean {
+		if (this.#stale.size === 0) {
+			// Once more, a moment later, for this page's marks still not there.
+			if (this.#late.looks === 0 || --this.#late.ticks > 0) return false;
+			this.#late = { looks: this.#late.looks - 1, ticks: 3 };
+			for (const entry of this.#entries)
+				if (entry.match.status === "lost" && this.#own(entry.annotation))
+					this.#stale.add(entry);
+			if (this.#stale.size === 0) return false;
+		}
+		const until = performance.now() + budget;
+		const search = this.#search();
+		for (const entry of [...this.#stale]) {
+			this.#stale.delete(entry);
+			if (this.#entries.includes(entry)) {
+				const fresh = this.#find(search, entry.annotation);
+				entry.candidates = fresh.candidates;
+				entry.match = fresh.match;
+			}
+			if (performance.now() >= until) break;
+		}
+		clearTextCache();
+		this.#renderBar();
+		this.#render();
+		return this.#stale.size > 0;
+	}
+
+	/**
+	 * The loaded case's marks on the page as it is now, for the panel: after
+	 * the address changed within the page, the marks not there before are
+	 * looked for first. `null` when another case, or none, is loaded.
+	 */
+	async matches(caseId: string): Promise<LoadResult | null> {
+		if (this.#case?.id !== caseId) return null;
+		const generation = this.#generation;
+		this.#checkPage();
+		// A new route replaced the elements: those marks are looked for too,
+		// now, not one a tick.
+		for (const entry of this.#entries)
+			if (this.#replaced(entry)) this.#stale.add(entry);
+		while (this.#lookAgain(STALE_BUDGET_MS)) {
+			await yieldToPage();
+			if (generation !== this.#generation || this.#case?.id !== caseId)
+				return null;
+		}
+		return {
+			caseId,
+			url: location.href,
+			matches: this.#entries.map((e) => e.match),
+		};
+	}
+
+	/** Whether the mark's own page is the page in front. */
+	#own(annotation: Annotation, c: Case | undefined = this.#case): boolean {
+		return c !== undefined && samePage(markUrl(c, annotation), location.href);
+	}
+
+	/**
+	 * Say of a found mark whether it is on another page of the case than its
+	 * own (DEC-038): on the cart, a find of the payment page's mark may be a
+	 * look-alike. On a page that is none of the case's nothing is said: the
+	 * user loaded the case there, and every mark is looked for as on its own
+	 * page (the page in another version, under another path).
+	 */
+	#judgePage(entry: Entry, c: Case | undefined = this.#case): void {
+		const { otherPage: _was, ...match } = entry.match;
+		const found = match.status !== "lost" && match.status !== "no-element";
+		entry.match =
+			found &&
+			c !== undefined &&
+			pageAt(c, location.href) !== undefined &&
+			!this.#own(entry.annotation, c)
+				? { ...match, otherPage: true }
+				: match;
+	}
+
+	#find(
+		search: PageSearch,
+		annotation: Annotation,
+		c: Case | undefined = this.#case,
+	): Entry {
+		const entry = this.#findOnPage(search, annotation);
+		this.#judgePage(entry, c);
+		return entry;
+	}
+
+	#findOnPage(search: PageSearch, annotation: Annotation): Entry {
 		const base = {
 			annotationId: annotation.id,
 			number: annotation.number,
@@ -353,6 +499,18 @@ export class Reviewer {
 		return this.#element(entry)?.isConnected === false;
 	}
 
+	/**
+	 * The entry as the page has it now, for an answer about this one mark: its
+	 * element left the page, or the address changed within the page and the
+	 * mark was not looked for since.
+	 */
+	#fresh(entry: Entry): void {
+		this.#checkPage();
+		if (!this.#replaced(entry) && !this.#stale.has(entry)) return;
+		this.#stale.delete(entry);
+		this.#findAgain(entry);
+	}
+
 	#findAgain(entry: Entry): void {
 		const fresh = this.#find(this.#search(), entry.annotation);
 		entry.candidates = fresh.candidates;
@@ -375,14 +533,29 @@ export class Reviewer {
 		};
 	}
 
+	/**
+	 * Whether the mark under `annotationId` in the case as loaded here is the
+	 * mark `key` names (`markKey`); a copy from before a renumbering has
+	 * another mark there.
+	 */
+	holds(annotationId: string, key: string): boolean {
+		const c = this.#case;
+		const entry = this.#entries.find((e) => e.annotation.id === annotationId);
+		return (
+			c !== undefined &&
+			entry !== undefined &&
+			markKey(c, entry.annotation) === key
+		);
+	}
+
 	/** Scroll to an annotation's element (or another candidate) and focus it. */
 	show(annotationId: string, candidate?: number): AnnotationMatch | undefined {
 		const entry = this.#entries.find((e) => e.annotation.id === annotationId);
 		if (entry === undefined) return undefined;
+		this.#fresh(entry);
 		const count = entry.candidates.length;
 		if (candidate !== undefined && count > 0)
 			entry.match.current = ((candidate % count) + count) % count;
-		if (this.#replaced(entry)) this.#findAgain(entry);
 		entry.match.score = entry.candidates[entry.match.current]?.score ?? 0;
 		this.#focused = annotationId;
 		const element = this.#element(entry);
@@ -408,7 +581,7 @@ export class Reviewer {
 	): { element: Element | undefined; match: AnnotationMatch } | undefined {
 		const entry = this.#entries.find((e) => e.annotation.id === annotationId);
 		if (entry === undefined) return undefined;
-		if (this.#replaced(entry)) this.#findAgain(entry);
+		this.#fresh(entry);
 		return { element: this.#element(entry), match: entry.match };
 	}
 
@@ -443,6 +616,7 @@ export class Reviewer {
 			return;
 		const open: OpenMark = {
 			annotationId: annotation.id,
+			mark: markKey(c, annotation),
 			mode: "main",
 			base: annotation.comment,
 			draft: annotation.comment,
@@ -718,11 +892,23 @@ export class Reviewer {
 	 * Answers whether it did, and `false` when the popover went meanwhile.
 	 */
 	async #request(open: OpenMark, request: MarkRequest): Promise<boolean> {
+		// Not to be told from another mark any more: nothing is asked for it.
+		if (open.lost) {
+			open.problem.textContent = MARK_CHANGED;
+			open.problem.hidden = false;
+			return false;
+		}
 		open.busy = true;
 		const was = open.controls.map((b) => b.disabled);
 		for (const b of open.controls) b.disabled = true;
 		open.problem.hidden = true;
-		const answer = await this.#ask(request);
+		// About the mark the popover is on now, and said which one that is:
+		// the panel refuses when the case has another mark under that id.
+		const answer = await this.#ask({
+			...request,
+			annotationId: open.annotationId,
+			mark: open.mark,
+		});
 		if (this.#open !== open) return false;
 		open.busy = false;
 		open.controls.forEach((b, i) => {
@@ -811,14 +997,28 @@ export class Reviewer {
 	 * here, in the panel, by an AI app); a comment changed elsewhere shows
 	 * unless one is being typed; another status draws its commands anew.
 	 */
-	#follow(byId: Map<string, Annotation>): void {
+	#follow(c: Case): void {
 		const open = this.#open;
 		if (open === undefined) return;
-		const annotation = byId.get(open.annotationId);
+		// Its mark, under whatever id it has now. Gone: the popover goes,
+		// with what was typed.
+		const annotation = markFor(c, open.annotationId, open.mark);
 		if (annotation === undefined) {
 			this.#closeMark();
 			return;
 		}
+		// The id is another mark's, and more than one mark has this one's
+		// screenshot and drawing: a change is not applied to the first found.
+		// It is refused and said, and what was typed stays to be read.
+		if (annotation === "ambiguous") {
+			open.lost = true;
+			open.problem.textContent = MARK_CHANGED;
+			open.problem.hidden = false;
+			return;
+		}
+		open.lost = false;
+		const moved = annotation.id !== open.annotationId;
+		open.annotationId = annotation.id;
 		const untouched = typed(open).trim() === open.base;
 		open.base = annotation.comment;
 		if (untouched) {
@@ -826,6 +1026,13 @@ export class Reviewer {
 			if (open.field !== undefined) open.field.value = annotation.comment;
 		}
 		const status = markStatus(annotation);
+		// Another number: the popover says the one the mark has now, and what
+		// is being typed stays (`#fill` keeps it).
+		if (moved && !open.busy) {
+			open.status = status;
+			this.#fill(open);
+			return;
+		}
 		if (status === open.status) return;
 		open.status = status;
 		// A request under way ends the popover or says why not; a form open
@@ -847,6 +1054,8 @@ export class Reviewer {
 		this.#timer = undefined;
 		this.#case = undefined;
 		this.#entries = [];
+		this.#stale.clear();
+		this.#late = { looks: 0, ticks: 0 };
 		this.#focused = undefined;
 		this.overlay.renderReview([]);
 		this.overlay.setReviewing(false);
@@ -885,8 +1094,10 @@ export class Reviewer {
 				: annotation.shape,
 			rect,
 			// The shown candidate itself decides the colour.
+			// And only on the mark's own page: elsewhere it may be a look-alike.
 			found:
 				entry.match.status !== "ambiguous" &&
+				entry.match.otherPage !== true &&
 				entry.candidates[entry.match.current]?.found === true,
 			focused: annotation.id === this.#focused,
 			status: markStatus(annotation),
@@ -895,9 +1106,9 @@ export class Reviewer {
 
 	/** A mark without an element, where it was; its page may be another route. */
 	#whereItWas(annotation: Annotation): ReviewItem | undefined {
-		const shot = this.#case?.shots.find((s) => s.id === annotation.shot);
-		const url = shot?.url ?? this.#case?.page.url ?? "";
-		if (!samePath(url, location.href)) return undefined;
+		// Only on its own page: a case spans pages (DEC-038).
+		const url = this.#case ? markUrl(this.#case, annotation) : "";
+		if (!samePage(url, location.href)) return undefined;
 		const win = this.overlay.doc.defaultView;
 		return {
 			number: annotation.number,
@@ -956,8 +1167,12 @@ export class Reviewer {
 			const status = markStatus(e.annotation);
 			return status === "open" || status === "fixed";
 		});
+		// Not one found on a page that is not its own: maybe a look-alike.
 		const found = active.filter(
-			(e) => e.match.status !== "lost" && e.match.status !== "no-element",
+			(e) =>
+				e.match.status !== "lost" &&
+				e.match.status !== "no-element" &&
+				e.match.otherPage !== true,
 		).length;
 		const toVerify = this.#case ? caseCounts(this.#case).toVerify : 0;
 		const title = doc.createElement("span");

@@ -10,7 +10,8 @@
  * reloaded or disabled (all of which clear `chrome.storage.session`). The
  * settings and the address secret are in the worker's own IndexedDB
  * (`kv.ts`, DEC-016), out of content scripts' reach, as is what each AI app
- * may do without asking (`always.ts`, DEC-018).
+ * may do without asking, which the library keeps beside the secret
+ * (`always.ts`, DEC-018, DEC-043).
  */
 
 import {
@@ -25,24 +26,40 @@ import {
 	dataConsent,
 	FIREFOX,
 	notificationOptions,
+	PANEL,
 } from "../lib/browser.ts";
 import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
-import { AlwaysAllowed } from "./always.ts";
+import { AlwaysAllowed, removeOldStore } from "./always.ts";
 import { badge } from "./badge.ts";
 import { decide } from "./decide.ts";
 import { endedProblem, KeepOn } from "./keep-on.ts";
 import { type Kv, openKv } from "./kv.ts";
 import {
+	fillPairingForm,
+	HOSTED_ORIGIN,
+	isCode,
+	isPairingPage,
+	type PairingForm,
+	readPairingForm,
+} from "./pair-fill.ts";
+import {
 	type AiState,
+	APP_ID,
 	type CallView,
+	type FillView,
 	type PanelCommand,
 	parseCommand,
 	SERVER_NAME,
 	type WorkerMessage,
 } from "./protocol.ts";
-import { appName, Questions, type QuestionsHost } from "./questions.ts";
+import {
+	appName,
+	Questions,
+	type QuestionsHost,
+	visible,
+} from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
@@ -66,6 +83,23 @@ import {
 /** Wakes the worker while AI access is on, should the connection be down. */
 export const ALARM = "sitegloss-ai";
 
+declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
+
+/** How long "Fill in the code for <app>?" waits for an answer: the code's own life. */
+export const FILL_ASK_MS = 120_000;
+/** How long pairing stays on after a fill-in, for the relay to take the code. */
+const FILL_PAIRING_MS = 120_000;
+/** The notification of the fill-in question, when no panel is on screen. */
+const FILL_NOTIFICATION = "sitegloss-fill";
+
+/** The fill-in question that waits (DEC-044). */
+interface Fill {
+	view: FillView;
+	tabId: number;
+	form: PairingForm;
+	timer: ReturnType<typeof setTimeout>;
+}
+
 /** One open side panel. */
 interface Panel {
 	port: chrome.runtime.Port;
@@ -81,6 +115,10 @@ export interface ConnectionDeps {
 	capture: Capture;
 	/** A tool changed or deleted a case (the sync writes it, DEC-021). */
 	changed?: (caseId: string) => void;
+	/** Who is signed in to sitegloss.dev here, by id (DEC-039); none: nobody. */
+	me?: () => Promise<string | undefined>;
+	/** The team a case syncs with, by name; none: it is on this device only. */
+	team?: (caseId: string) => Promise<string | undefined>;
 	/** The settings database: `openKv()` unless given (a memory one in tests). */
 	kv?: Kv;
 }
@@ -272,8 +310,6 @@ export class Connection {
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
 	readonly #keep: KeepOn;
-	/** Always allow and Allow all changes, by AI app (DEC-018). */
-	readonly #always: AlwaysAllowed;
 	/** The tools' titles, by name, for the card's list. */
 	#titles = new Map<string, string>();
 	#settings: Settings;
@@ -299,6 +335,14 @@ export class Connection {
 	#revokes: Promise<void> = Promise.resolve();
 	/** Panel commands, one after the other. */
 	#commands: Promise<void> = Promise.resolve();
+	/** "Fill in the code for <app>?", while it waits (DEC-044). */
+	#fill: Fill | undefined;
+	/** Why the last fill-in did not happen, and when that goes. */
+	#fillProblem:
+		| { text: string; timer: ReturnType<typeof setTimeout> }
+		| undefined;
+	/** Pairing is on for a code Sitegloss filled in, until this timer. */
+	#fillPairing: ReturnType<typeof setTimeout> | undefined;
 	#sending = false;
 
 	private constructor(
@@ -307,11 +351,9 @@ export class Connection {
 		storage: CachedSecretStorage,
 		settings: Settings,
 		sessionOn: boolean,
-		always: AlwaysAllowed,
 	) {
 		this.#deps = deps;
 		this.#kv = kv;
-		this.#always = always;
 		this.#tab = workerTab(deps.capture);
 		this.#storage = storage;
 		this.#settings = settings;
@@ -348,11 +390,15 @@ export class Connection {
 		const kv = deps.kv ?? (await openKv());
 		// A previous worker's questions died with it.
 		await clearNotifications();
-		const [storage, settings, session, always] = await Promise.all([
+		// Sitegloss's own Always allow store, from before the library kept
+		// them (DEC-043): nothing in it outlived client 0.17's new addresses.
+		await removeOldStore(kv).catch((error: unknown) =>
+			console.warn("Sitegloss: removing the old Always allow", error),
+		);
+		const [storage, settings, session] = await Promise.all([
 			CachedSecretStorage.load(kv),
 			loadSettings(kv),
 			chrome.storage.session.get([SESSION_ON, SESSION_STOPPED]),
-			AlwaysAllowed.load(kv),
 		]);
 		// A Stop in this browser session holds, whatever was stored before it.
 		const stopped = session[SESSION_STOPPED] === true;
@@ -362,9 +408,9 @@ export class Connection {
 			storage,
 			stopped ? { ...settings, keepOn: false } : settings,
 			!stopped && session[SESSION_ON] === true,
-			always,
 		);
 		connection.#showBadge();
+		connection.#watchTabs();
 		connection.keepUp();
 		// Overlays a panel started before this worker knew: the stored value.
 		connection.#tellBlur();
@@ -375,8 +421,9 @@ export class Connection {
 
 	/** A connection to `relay`; throws a `TypeError` for an address the library refuses. */
 	#create(relay: string): TabMcp {
-		// The library's own "Always allow" stays off: Sitegloss asks itself, and
-		// keeps Always allow per AI app and tool (DEC-018).
+		// The library's `alwaysAllow` stays unset: its dialogs are not used.
+		// Sitegloss asks itself, and the library keeps what the user allowed
+		// per AI app and tool in `storage` and honours it first (DEC-043).
 		const mcp: TabMcp = new TabMcp({
 			relay,
 			server: {
@@ -386,6 +433,7 @@ export class Connection {
 				instructions: INSTRUCTIONS,
 				icons: [],
 			},
+			app: APP_ID,
 			appName: "Sitegloss",
 			storage: this.#storage,
 			onConfirm: (request) => this.#decide(mcp, request),
@@ -402,6 +450,7 @@ export class Connection {
 			// write to the store succeeded, so this is what the panel shows.
 			blurForms: () => this.#settings.blurForms,
 			maxMessageBytes: () => mcp.session?.limits.maxMessageBytes,
+			...(this.#deps.me ? { me: this.#deps.me } : {}),
 		});
 		// AI apps through the relay only: no WebMCP (off anyway, and a worker
 		// has no document) and no served port. `tools.ts` refuses other
@@ -413,10 +462,13 @@ export class Connection {
 	}
 
 	/**
-	 * A tool that changes something: runs without asking if the user chose
-	 * Always allow for it, or Allow all changes, for this AI app (DEC-018);
-	 * otherwise asks. The "Last AI call" is recorded either way ("toolcall").
+	 * Always allow and Allow all changes, by AI app (DEC-018): the library's,
+	 * for the connection now (DEC-043).
 	 */
+	get #always(): AlwaysAllowed {
+		return AlwaysAllowed.of(this.#mcp);
+	}
+
 	/** Questions an Always allow given meanwhile covers are allowed. */
 	#allowCovered(): void {
 		this.#questions.allowCovered((grantId, tool) =>
@@ -424,12 +476,21 @@ export class Connection {
 		);
 	}
 
+	/**
+	 * A tool that changes something: runs without asking if the user chose
+	 * Always allow for it, or Allow all changes, for this AI app (DEC-018);
+	 * otherwise asks. The library checks that first and asks only for the
+	 * rest (DEC-043). The "Last AI call" is recorded either way ("toolcall").
+	 */
 	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<ConfirmAnswer> {
 		return decide(
 			{
-				always: this.#always,
+				always: AlwaysAllowed.of(mcp),
 				ask: async (r) => {
-					const lines = await confirmLines(this.#deps.store, this.#tab, r);
+					const lines = await confirmLines(this.#deps.store, this.#tab, r, {
+						...(this.#deps.me ? { me: this.#deps.me } : {}),
+						...(this.#deps.team ? { team: this.#deps.team } : {}),
+					});
 					const front = await tabInFront().catch(() => undefined);
 					// No answer in time is "timeout": `decide` tells the library
 					// "unanswered", which the AI app hears as such, not as a no.
@@ -441,22 +502,9 @@ export class Connection {
 					console.warn(
 						`Sitegloss: refused ${r.tool.name} through WebMCP: only an AI app connected through the relay may change something`,
 					),
-				notKept: (error) => {
-					console.warn("Sitegloss: keeping Always allow", error);
-					this.#problem = `Always allow could not be saved: ${message(error)}`;
-				},
 			},
 			request,
 		).finally(() => this.#changed());
-	}
-
-	/** An app whose grant is gone takes its Always allow with it. */
-	#keepGrants(grants: readonly { grantId: string }[]): void {
-		this.#always.keepGrants(grants.map((g) => g.grantId)).then(
-			() => this.#changed(),
-			(error: unknown) =>
-				console.warn("Sitegloss: forgetting Always allow", error),
-		);
 	}
 
 	#watch(mcp: TabMcp): void {
@@ -466,12 +514,14 @@ export class Connection {
 		const changed = () => this.#changed();
 		for (const type of ["pairingcode", "grantschange"] as const)
 			mcp.addEventListener(type, changed, { signal });
-		// The relay's list of the apps connected to this address: only it, so
-		// a start or a lost connection (no list yet) forgets nothing.
+		// Allowances changed (by a switch, Always allow, an app's grant gone).
+		signal.addEventListener("abort", AlwaysAllowed.of(mcp).onChange(changed));
+		// The relay's list of the apps connected: only it, so a start or a
+		// lost connection (no list yet) forgets nothing. The library forgets
+		// the allowances of an app no longer in it itself (DEC-043).
 		mcp.addEventListener(
 			"grantschange",
 			({ detail: { grants } }) => {
-				this.#keepGrants(grants);
 				for (const id of this.#revokeProblems.keys())
 					if (!grants.some((g) => g.grantId === id))
 						this.#revokeProblems.delete(id);
@@ -497,6 +547,8 @@ export class Connection {
 		mcp.addEventListener(
 			"statechange",
 			({ detail }) => {
+				// The question to fill in a code needs a connection to give one.
+				if (detail.state !== "connected") this.#endFill();
 				if (detail.state === "connected") {
 					this.#problem = undefined;
 					// "Not connected" no longer holds; a new session owes no answers.
@@ -555,7 +607,8 @@ export class Connection {
 		return (
 			this.#mcp.state !== "disconnected" ||
 			this.#keep.retrying ||
-			this.#questions.list.length > 0
+			this.#questions.list.length > 0 ||
+			this.#fill !== undefined
 		);
 	}
 
@@ -611,7 +664,7 @@ export class Connection {
 		});
 	}
 
-	/** The alarm runs while AI access is on (and the address is ours). */
+	/** The alarm runs while AI access is on (and the connection is ours, not taken over). */
 	async #syncAlarm(): Promise<void> {
 		const on =
 			(this.#settings.keepOn || this.#sessionOn) &&
@@ -743,7 +796,7 @@ export class Connection {
 				return;
 			case "connect":
 				if (FIREFOX && !(await this.#consented())) return;
-				// The user's click takes the address back after a takeover. AI
+				// The user's click takes the connection back after a takeover. AI
 				// access is on for the session once connected ("connected").
 				await this.#setReplaced(undefined);
 				await this.#setStopped(false);
@@ -803,12 +856,12 @@ export class Connection {
 				// Only for an app the card shows.
 				if (!this.#mcp.grants.some((g) => g.grantId === command.grantId))
 					return;
-				await this.#always.setAll(command.grantId, command.on);
+				this.#always.setAll(command.grantId, command.on);
 				if (command.on) this.#allowCovered();
 				this.#changed();
 				return;
 			case "ask-again":
-				await this.#always.removeTool(command.grantId, command.tool);
+				this.#always.removeTool(command.grantId, command.tool);
 				this.#changed();
 				return;
 			case "new-address":
@@ -825,18 +878,24 @@ export class Connection {
 			case "answer":
 				this.#questions.answer(command.id, command.answer);
 				return;
+			case "fill":
+				await this.#fillAnswer(command.id, command.yes);
+				return;
 		}
 	}
 
 	/**
-	 * A new address. The library first takes the old address back, connected
-	 * or not, taken over or not (since client 0.16), so the relay revokes
-	 * every grant of it and disconnects the AI apps that may now talk to
-	 * whoever took it; then it connects with the new one if it was on. After
-	 * a takeover AI access is off, and a new worker's library knows nothing
-	 * of the takeover: the new address connects, so the card shows it to
-	 * pair again. Once the address is new, the takeover notice goes, also
-	 * when connecting with it fails (`addressChanged`, client 0.16.1).
+	 * "Disconnect all apps" (the library's `newAddress()`). The address the
+	 * AI apps are added with stays: it names the app (DEC-042). What is new is
+	 * the secret behind it, the page the relay knows. The library first takes
+	 * the old page back, connected or not, taken over or not, so the relay
+	 * revokes every grant of it and disconnects the AI apps that may now talk
+	 * to whoever took it; then it connects with the new secret if it was on.
+	 * After a takeover AI access is off, and a new worker's library knows
+	 * nothing of the takeover: it connects, so the card shows the address and
+	 * a code to pair again. Once the secret is new, the takeover notice goes,
+	 * also when connecting with it fails (`addressChanged`, which still names
+	 * the secret's change).
 	 */
 	async #newAddress(): Promise<void> {
 		const replaced = this.#settings.replaced !== undefined;
@@ -845,14 +904,14 @@ export class Connection {
 		try {
 			// "connected" turns AI access on.
 			await this.#mcp.newAddress();
-			// The address is new: no longer the one taken over, also should
+			// The secret is new: no longer the one taken over, also should
 			// the connect after it fail.
 			await this.#setReplaced(undefined);
 			if (replaced && (!FIREFOX || (await this.#consented())))
 				await this.#mcp.connect({ resume: true });
 		} catch (error) {
 			this.#problem = message(error);
-			// The address changed, and only connecting with it failed (the
+			// The secret changed, and only connecting with it failed (the
 			// library connects itself after a takeover it saw).
 			if ((error as { addressChanged?: unknown }).addressChanged === true)
 				await this.#setReplaced(undefined).catch(() => {});
@@ -862,7 +921,7 @@ export class Connection {
 
 	/**
 	 * Disconnect one AI app (DEC-017). Its Always allow goes with the grant,
-	 * once the library's list no longer has it (`#keepGrants`, DEC-018): also
+	 * once the library's list no longer has it (DEC-018, DEC-043): also
 	 * for a grant the relay does not know (expired), which client 0.16.1
 	 * drops from the list when relay 0.10.2 says so. A relay before 0.10.2
 	 * names no grant in its `unknown_id`: the library rejects, the app stays
@@ -890,15 +949,197 @@ export class Connection {
 					(error as { code?: unknown }).code === "unknown_id" &&
 					!failure.unattributed
 				)
-					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
+					AlwaysAllowed.of(mcp).forget(grantId);
 				this.#changed();
 			});
 		});
 	}
 
-	/** Pairing stops once no panel's pairing view is open. */
+	/**
+	 * Pairing stops once no panel's pairing view is open, and no code
+	 * Sitegloss filled in waits for the relay.
+	 */
 	#pairingOff(): void {
-		if (![...this.#panels].some((p) => p.pairing)) this.#mcp.stopPairing();
+		if (
+			![...this.#panels].some((p) => p.pairing) &&
+			this.#fillPairing === undefined
+		)
+			this.#mcp.stopPairing();
+	}
+
+	// --- Filling in the code on the relay's pairing page (DEC-044) ---
+
+	/**
+	 * The origins whose pairing page Sitegloss fills in: the hosted relay's,
+	 * while it is the relay Sitegloss connects to. A test build also takes
+	 * the origins its end-to-end tests set (the define itself: other builds
+	 * drop it).
+	 */
+	#fillOrigins(): string[] {
+		const origins =
+			new URL(this.#relay).origin === HOSTED_ORIGIN ? [HOSTED_ORIGIN] : [];
+		if (typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD) {
+			const test = (globalThis as { siteglossTestFillOrigins?: unknown })
+				.siteglossTestFillOrigins;
+			if (Array.isArray(test))
+				origins.push(...test.filter((o) => typeof o === "string"));
+		}
+		return origins;
+	}
+
+	/**
+	 * A tab finished loading `url`. On the relay's pairing page, with AI access
+	 * connected and the user's leave to see that site, its form is read; one
+	 * that is for Sitegloss gets the question. Anything else: nothing happens,
+	 * and the user types the code as before.
+	 */
+	async pairingPage(tabId: number, url: string | undefined): Promise<void> {
+		if (!isPairingPage(url, this.#fillOrigins())) return;
+		if (this.#mcp.state !== "connected") return;
+		const origin = new URL(url as string).origin;
+		const allowed = await chrome.permissions
+			.contains({ origins: [`${origin}/*`] })
+			.catch(() => false);
+		if (!allowed) return;
+		let form: PairingForm | null | undefined;
+		try {
+			const [result] = await chrome.scripting.executeScript({
+				target: { tabId, frameIds: [0] },
+				func: readPairingForm,
+			});
+			form = result?.result as PairingForm | null | undefined;
+		} catch {
+			return;
+		}
+		if (form?.app !== APP_ID) return;
+		// The page may have moved on while it was read.
+		const now = await chrome.tabs.get(tabId).catch(() => undefined);
+		if (now?.url !== url) return;
+		this.#endFill();
+		const id = crypto.randomUUID();
+		// Invisible and direction characters shown as `\uXXXX`, as in the
+		// questions: the names come from a web page.
+		const name = visible(form.clientName);
+		const host = visible(form.clientHost);
+		this.#fill = {
+			view: { id, name, host },
+			tabId,
+			form,
+			timer: setTimeout(() => {
+				if (this.#fill?.view.id === id) {
+					this.#endFill();
+					this.#changed();
+				}
+			}, FILL_ASK_MS),
+		};
+		if (![...this.#panels].some((p) => p.visible))
+			void chrome.notifications
+				.create(
+					FILL_NOTIFICATION,
+					notificationOptions({
+						type: "basic",
+						iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+						title: `Connect ${name}?`,
+						message: `${name} (${host}) wants to connect to Sitegloss. To fill in the code, click the Sitegloss icon and answer in the ${PANEL}; or type the code yourself.`,
+						priority: 2,
+					}),
+				)
+				.catch(() => undefined);
+		this.#changed();
+	}
+
+	/**
+	 * Tabs that load the relay's pairing page. Added here, not at the
+	 * worker's top level: it matters only while AI access is connected,
+	 * which keeps the worker running, so no tab's loading wakes it.
+	 */
+	#watchTabs(): void {
+		chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
+			if (info.status === "complete") void this.pairingPage(tabId, tab.url);
+			else if (info.url !== undefined) this.tabLeft(tabId, info.url);
+		});
+		chrome.tabs?.onRemoved?.addListener((tabId) => this.tabLeft(tabId));
+	}
+
+	/** The question goes: answered, run out, or replaced by a newer page. */
+	#endFill(): void {
+		if (this.#fill === undefined) return;
+		clearTimeout(this.#fill.timer);
+		this.#fill = undefined;
+		void chrome.notifications.clear(FILL_NOTIFICATION).catch(() => {});
+	}
+
+	/** The question's tab went, or left the page: the question goes too. */
+	tabLeft(tabId: number, url?: string): void {
+		const fill = this.#fill;
+		if (fill === undefined || fill.tabId !== tabId) return;
+		if (url !== undefined && isPairingPage(url, this.#fillOrigins())) return;
+		this.#endFill();
+		this.#changed();
+	}
+
+	/**
+	 * The user's answer. A yes types the current code into the form's code
+	 * field and clicks Connect, if the tab still shows that form; pairing
+	 * is turned on for it if no panel had it on.
+	 */
+	async #fillAnswer(id: string, yes: boolean): Promise<void> {
+		const fill = this.#fill;
+		if (fill === undefined || fill.view.id !== id) return;
+		this.#endFill();
+		this.#changed();
+		if (!yes) return;
+		const failed = () =>
+			this.#setFillProblem(
+				`Sitegloss could not fill in the code for ${fill.view.name}. Type the code from the AI app card on the relay's page.`,
+			);
+		const tab = await chrome.tabs.get(fill.tabId).catch(() => undefined);
+		if (!isPairingPage(tab?.url, this.#fillOrigins())) return failed();
+		const code = await this.#codeForFill();
+		if (!isCode(code)) return failed();
+		try {
+			const [result] = await chrome.scripting.executeScript({
+				target: { tabId: fill.tabId, frameIds: [0] },
+				func: fillPairingForm,
+				args: [code, fill.form],
+			});
+			if (result?.result !== true) return failed();
+		} catch {
+			return failed();
+		}
+		this.#setFillProblem(undefined);
+	}
+
+	/** Say why a fill-in did not happen, for 20 s; `undefined` takes it away. */
+	#setFillProblem(text: string | undefined): void {
+		clearTimeout(this.#fillProblem?.timer);
+		this.#fillProblem =
+			text === undefined
+				? undefined
+				: {
+						text,
+						timer: setTimeout(() => {
+							this.#fillProblem = undefined;
+							this.#changed();
+						}, 20_000),
+					};
+		this.#changed();
+	}
+
+	/** The code now, pairing turned on for it (and off after a while) if needed. */
+	async #codeForFill(): Promise<string | undefined> {
+		const mcp = this.#mcp;
+		clearTimeout(this.#fillPairing);
+		this.#fillPairing = setTimeout(() => {
+			this.#fillPairing = undefined;
+			if (mcp === this.#mcp) this.#pairingOff();
+		}, FILL_PAIRING_MS);
+		if (mcp.pairingCode?.code !== undefined) return mcp.pairingCode.code;
+		mcp.startPairing();
+		const end = Date.now() + 10_000;
+		while (mcp.pairingCode?.code === undefined && Date.now() < end)
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		return mcp.pairingCode?.code;
 	}
 
 	#questionsHost(): QuestionsHost {
@@ -983,6 +1224,10 @@ export class Connection {
 				: {}),
 			...(this.#lastCall !== undefined ? { lastCall: this.#lastCall } : {}),
 			questions: this.#questions.list,
+			...(this.#fill !== undefined ? { fill: this.#fill.view } : {}),
+			...(this.#fillProblem !== undefined
+				? { fillProblem: this.#fillProblem.text }
+				: {}),
 		};
 	}
 
@@ -1013,7 +1258,7 @@ export class Connection {
 	 */
 	#showBadge(): void {
 		badge.ai({
-			questions: this.#questions.list.length,
+			questions: this.#questions.list.length + (this.#fill ? 1 : 0),
 			ai: badgeOf(this.#mcp.state),
 		});
 	}

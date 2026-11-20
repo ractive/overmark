@@ -3,7 +3,7 @@
  * into the same page is a no-op: the first one keeps answering.
  */
 
-import { isPageUrl } from "../lib/case.ts";
+import { LANGUAGE, samePage } from "../lib/case.ts";
 import { cssSelector, describeElement } from "../lib/element.ts";
 import {
 	insideInput,
@@ -93,6 +93,9 @@ function mark(
 		scroll: { x: scrollX, y: scrollY },
 		url: location.href,
 		title: document.title,
+		lang: LANGUAGE.test(document.documentElement.lang)
+			? document.documentElement.lang
+			: "",
 	};
 }
 
@@ -103,6 +106,7 @@ function inspect(
 	request: {
 		caseId: string;
 		annotationId: string;
+		mark?: string;
 		casePage: string;
 		selector?: string;
 	},
@@ -111,6 +115,13 @@ function inspect(
 	if (activity.busy !== undefined)
 		return { ok: false, reason: "busy", error: activity.busy };
 	if (reviewer.caseId !== request.caseId) return null;
+	// The page's copy of the case has another mark under that id (it
+	// predates a renumbering): the asker loads the case again.
+	if (
+		request.mark !== undefined &&
+		!reviewer.holds(request.annotationId, request.mark)
+	)
+		return null;
 	const target = reviewer.target(request.annotationId);
 	if (target === undefined) return null;
 	const { match } = target;
@@ -124,12 +135,12 @@ function inspect(
 				match,
 			};
 		// Without an element to start from, a selector could name anything
-		// of any page; only the case's own page is searched.
-		if (!isPageUrl(request.casePage, location.href))
+		// of any page; only the mark's own page is searched (DEC-038).
+		if (!samePage(request.casePage, location.href))
 			return {
 				ok: false,
 				reason: "other-page",
-				error: `Mark ${n} was not drawn on an element, and the tab in front does not show the case's page, so the selector is not looked for here.`,
+				error: `Mark ${n} was not drawn on an element, and the tab in front does not show the mark's page, so the selector is not looked for here.`,
 				match,
 			};
 	} else if (target.element === undefined)
@@ -254,6 +265,11 @@ function start(): void {
 							),
 					);
 					return true; // answers asynchronously
+				case "case:matches":
+					reviewer
+						.matches(message.caseId)
+						.then(sendResponse, () => sendResponse(null));
+					return true; // answers asynchronously
 				case "case:update":
 					reviewer.update(message.case).then(
 						(result) => {
@@ -272,7 +288,9 @@ function start(): void {
 						break;
 					}
 					sendResponse(
-						reviewer.caseId === message.caseId
+						reviewer.caseId === message.caseId &&
+							(message.mark === undefined ||
+								reviewer.holds(message.annotationId, message.mark))
 							? (reviewer.show(message.annotationId, message.candidate) ?? null)
 							: null,
 					);

@@ -566,8 +566,11 @@ describe("import", () => {
 			height: 1,
 		});
 		const imported = await importCase(target, zip);
+		// Every screenshot of an imported case names its page (DEC-038): one
+		// that did not is of the case's page.
 		expect(imported).toEqual({
 			...c,
+			shots: c.shots.map((s) => ({ url: c.page.url, ...s })),
 			importedAt: imported.importedAt as string,
 		});
 		expect(await target.getCase(c.id)).toEqual(imported);

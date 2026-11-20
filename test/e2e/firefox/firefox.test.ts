@@ -366,7 +366,7 @@ describe.skipIf(!firefoxReady)("Firefox: the test build", () => {
 			20_000,
 		);
 		expect(address).toContain(url);
-		const token = await tokenFor(relay.store, address, {});
+		const token = await tokenFor(relay, address);
 		const client = new Client(
 			{ name: "firefox-e2e", version: "1.0.0" },
 			{ versionNegotiation: { mode: { pin: "2026-07-28" } } },

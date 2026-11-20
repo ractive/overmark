@@ -59,6 +59,8 @@ describe("manifest", () => {
 		expect(m["permissions"]).toEqual([
 			"activeTab",
 			"alarms",
+			// The browser's sign-in window, for sitegloss.dev (DEC-039).
+			"identity",
 			"notifications",
 			"offscreen",
 			"scripting",
@@ -112,6 +114,7 @@ describe("Firefox manifest", () => {
 		expect(m["permissions"]).toEqual([
 			"activeTab",
 			"alarms",
+			"identity",
 			"notifications",
 			"scripting",
 			"storage",
@@ -429,4 +432,38 @@ describe("checkOutdir", () => {
 		writeFileSync(join(dir, "old", "content.js"), "");
 		await checkOutdir(join(dir, "old"));
 	});
+});
+
+describe("the sitegloss.dev API's types (DEC-039)", () => {
+	test("api.gen.ts is what the committed OpenAPI document gives", async () => {
+		const { SPEC, TYPES, typesOf } = await import("../scripts/api-types.ts");
+		expect(await Bun.file(TYPES).text()).toBe(await typesOf(SPEC));
+	}, 60_000);
+
+	test("the generator is a dev dependency: the build holds no code of it, and no package but the client", async () => {
+		const pkg = (await Bun.file(
+			join(import.meta.dir, "..", "package.json"),
+		).json()) as {
+			dependencies: Record<string, string>;
+			devDependencies: Record<string, string>;
+		};
+		expect(Object.keys(pkg.dependencies)).toEqual([
+			"@ractive-ch/tab-mcp-client",
+		]);
+		expect(pkg.devDependencies["openapi-typescript"]).toMatch(
+			/^\d+\.\d+\.\d+$/,
+		);
+		// TypeScript 5 for the generator alone: this repository's is 7.
+		expect(pkg.devDependencies["typescript-5"]).toMatch(
+			/^npm:typescript@5\.\d+\.\d+$/,
+		);
+		const outdir = tempDir();
+		await build({ outdir });
+		const licences = await Bun.file(join(outdir, NOTICES_FILE)).text();
+		expect(licences).not.toContain("openapi-typescript");
+		const worker = await Bun.file(join(outdir, "background.js")).text();
+		// The sync is in the worker, in its own words.
+		expect(worker).toContain("sitegloss-cloud");
+		expect(worker).not.toContain("openapi-typescript");
+	}, 60_000);
 });

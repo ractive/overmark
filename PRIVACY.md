@@ -1,9 +1,11 @@
 # Sitegloss privacy policy
 
 Sitegloss is a browser extension for annotating web pages, for Chrome, Edge and
-Firefox. It has no account and no analytics. What it keeps stays in your browser, unless you export it, sync it or connect
-an AI app. Its author receives nothing from it, except what passes through the hosted
-relay when you connect an AI app through it.
+Firefox. It works without an account and has no analytics. What it keeps stays in your
+browser, unless you export it, sync it, connect an AI app or sign in to sitegloss.dev
+to share your cases with a team. Its author receives nothing from it, except what
+passes through the hosted relay when you connect an AI app through it, and what you
+send to sitegloss.dev when you sign in there.
 
 ## What Sitegloss keeps, and where
 
@@ -11,19 +13,21 @@ Sitegloss stores in your browser, on your computer:
 
 - the case's title, your comments, the summary for the developer, a link you attach,
   and a connected AI app's findings;
-- the page's address, title and language, the window size, and the browser's user
-  agent. The address is kept without its query string or fragment (only a fragment
-  that is a route of the page stays);
+- the address, title and language of each page you mark, the window size, and the
+  browser's user agent. An address is kept without its query string or fragment (only a
+  fragment that is a route of the page stays);
 - for each marked element: its tag, role, name, a short piece of its text, a few
   attributes, its position, and a CSS selector;
 - screenshots of the visible part of the tab, with the marks on them;
-- its settings, and where it syncs to.
+- its settings, and where it syncs to;
+- if you sign in to sitegloss.dev: your name and e-mail address there, your teams, the
+  tokens that keep you signed in, and what the service last had of each case.
 
 The exact fields are defined in the source code ([`src/lib/`](src/lib/)).
 
 ## When data leaves your computer
 
-Only in three cases, all started by you:
+Only in four cases, all started by you:
 
 1. **Export.** Export writes a case, or every case, to a zip file. Where it goes from
    there is up to you.
@@ -42,12 +46,65 @@ Only in three cases, all started by you:
    without storing it ([its privacy statement](https://ractive.ch/tab-mcp/privacy/)).
    The AI app's provider handles it under its own privacy policy.
 
-   Changes the AI app wants to make are asked first, unless you chose "Always allow".
+   Changes the AI app wants to make are asked first, unless you chose "Always allow"
+   for that change or "Allow all changes" for that AI app; either lasts until that AI
+   app is disconnected. Which ones you chose is kept in the browser, beside the
+   connection's secret, and goes nowhere.
+
+   If you allow Sitegloss on `tab-mcp.ractive.ch` (optional, asked under the pairing
+   code), it reads that site's pairing page when an AI app opens it in your browser:
+   which app asks to connect, as the page names it. Only after you say yes in Sitegloss
+   does it type its pairing code into that page's field and click Connect. It reads
+   nothing else there, and the code goes only into that field.
 
    In Firefox, the browser first asks, at the click that turns AI access on, for its own
    data collection consent for website content and browsing activity. Without it AI
    access does not start, and it ends when you take the consent back in Firefox's add-on
    settings. Nothing is required at install.
+
+4. **A team at sitegloss.dev.** If you sign in ("Sign in" in the side panel's Account
+   section), Sitegloss sends your cases to the service at `app.sitegloss.dev`, run by
+   Sitegloss's developer, and fetches your team's: titles, links, summaries, the
+   addresses, titles and languages of the pages, the window size and the browser's user
+   agent, the marks with their comments, statuses, notes, element details and AI
+   findings, and the screenshots and crops. The members of the team you choose can see
+   and change them, in the extension and on the website; the service keeps them until
+   they are deleted, with who made or changed what, and under
+   [its own privacy policy](https://sitegloss.dev/privacy/).
+
+   The address of every page you marked in a case is part of that: the site, the path
+   and a hash route (`#/cart`), without the query (`?…`), which Sitegloss never keeps.
+   Your team sees these addresses. A case can cross to other sites, so this includes
+   the path of a payment provider's page or of a link someone was sent (a password
+   reset, an invitation), and some sites put a token or a session's name in the path.
+   Look at a case's list of pages before you share it; a mark you delete takes its
+   page off the list when it was the page's last.
+
+   Cases that were in your browser before you signed in are sent only when you say so
+   ("Sync them"); "Keep them on this device" leaves them where they are. Cases you make
+   while signed in go to the team once they have a mark. Deleting a case that the team
+   has deletes it for the team. "Sign out" stops this: the cases stay in your browser,
+   the team keeps its copies, and the tokens are deleted.
+
+   You sign in on the service's own page, in a window of the browser: Sitegloss never
+   sees your password. Under "Server" you can choose another server than the service
+   (its development server, or an address you type) before you sign in; all of this
+   then goes to that server instead, the Account section says which, and what synced
+   with one server is not sent to another unless you share that case there.
+
+   While you are signed in and the side panel is open, the panel keeps a connection to
+   the server open, over which the server says when your team changed something. The
+   server can therefore tell when your panel is open. With the panel closed, Sitegloss
+   asks the server every few minutes instead. A case you kept on this device is not
+   sent because the server, or a teammate, has a case with the same id; Sitegloss tells
+   you, and "Share with team" is what joins the two: marks only you have are then sent,
+   and where both have the same mark with other words the team's are kept, which
+   Sitegloss says before you click, with the number of marks. A case is deleted for
+   the team only when you delete it while it syncs; what you delete while signed out,
+   the team keeps, and it comes back to you at the next sign-in.
+
+   In Firefox, the browser asks at "Sign in" for the same data collection consent as for
+   an AI app (website content and browsing activity); taking it back signs you out.
 
 Sitegloss itself sends nothing else. It does not sell data, use it for advertising or
 for anything but annotating pages and reviewing the annotations, or use it to determine
@@ -72,7 +129,10 @@ creditworthiness.
 - **sidePanel:** for its side panel (Chrome and Edge; Firefox has a sidebar instead).
 - **storage:** session storage, forgotten when the browser closes: what Undo can take
   back, and whether AI access is on.
-- **alarms:** so the AI app's connection comes back after the computer slept.
+- **alarms:** so the AI app's connection comes back after the computer slept, and, if
+  you are signed in to sitegloss.dev, to look for your team's changes every few minutes.
+- **identity:** for the browser's own sign-in window when you sign in to sitegloss.dev.
+  Sitegloss does not read your browser's or your Google account's identity with it.
 - **notifications:** to ask whether the AI app may make a change when the side panel
   is not in front.
 - **unlimitedStorage:** so the browser does not delete your cases to free disk space.
@@ -89,11 +149,15 @@ creditworthiness.
 
 Delete a case in the side panel; its screenshots go with it. Removing the extension
 deletes everything it stored in the browser. Files it wrote (exports, synced files)
-stay until you delete them.
+stay until you delete them. A case your team has at sitegloss.dev is deleted there too
+when you delete it while signed in; what is at the service otherwise stays until it is
+deleted there. So that a deleted case can be told from one the browser lost, the id of
+a deleted case and the time stay in the browser until the delete has reached the team,
+at most 30 days.
 
 ## Contact
 
 Jean-Pierre Bergamin, <https://ractive.ch>, james@ractive.ch.
 Source code: <https://github.com/ractive/sitegloss>.
 
-Last changed: 17 November 2026.
+Last changed: 19 November 2026.

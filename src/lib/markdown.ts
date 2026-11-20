@@ -9,17 +9,23 @@ import {
 	appLabel,
 	type Case,
 	caseCounts,
+	casePages,
 	cropImage,
 	type Finding,
 	type FindingApp,
 	isSafeId,
 	isWebPage,
 	markStatus,
+	marksByPage,
+	markUrl,
+	pageKey,
 	RESOLUTION_LABEL,
 	type Resolution,
 	type ShapeKind,
 	STATUS_LABEL,
 	shotImage,
+	shotUrl,
+	type UserRef,
 } from "./case.ts";
 import { summarize } from "./element.ts";
 
@@ -96,12 +102,21 @@ function image(alt: string, path: string, own: string | undefined): string {
 /** An AI app's finding: who wrote it and when, then its text as a block. */
 function finding(f: Finding): string {
 	const when = `${inline(f.at)}${f.editedAt ? `, edited ${inline(f.editedAt)}` : ""}`;
-	return `By ${inline(appLabel(f.app))}${f.imported ? " (as the file says)" : ""}, ${when}:\n\n${block(f.text)}\n`;
+	return `By ${inline(appLabel(f.app))}${f.user ? ` for ${inline(f.user.name)}` : ""}${f.imported ? " (as the file says)" : ""}, ${when}:\n\n${block(f.text)}\n`;
 }
 
-/** ` by Claude (claude.ai)` for what an AI app did; nothing for the panel. */
-const by = (app: FindingApp | undefined) =>
-	app ? ` by ${inline(appLabel(app))}` : "";
+/**
+ * ` by Claude (claude.ai)` for what an AI app did; in a case synced with a
+ * team also the person (` by Dana`, ` by Claude (claude.ai) for Dana`,
+ * DEC-039); nothing for what was done in the panel of a case that never
+ * synced.
+ */
+const by = (app: FindingApp | undefined, user?: UserRef) =>
+	app
+		? ` by ${inline(appLabel(app))}${user ? ` for ${inline(user.name)}` : ""}`
+		: user
+			? ` by ${inline(user.name)}`
+			: "";
 
 /** What came in from a file is what the file says. */
 const fromFile = (imported: boolean | undefined) =>
@@ -122,22 +137,22 @@ function status(a: Annotation): string[] {
 	if (r?.verified)
 		lines.push(
 			"- Status: Verified",
-			`- Fixed: ${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)}`,
+			`- Fixed: ${inline(r.at)}${r.app || r.user ? `,${by(r.app, r.user)}` : ""}${fromFile(r.imported)}`,
 		);
 	else {
 		const when = r
-			? ` (${inline(r.at)}${r.app ? `,${by(r.app)}` : ""}${fromFile(r.imported)})`
+			? ` (${inline(r.at)}${r.app || r.user ? `,${by(r.app, r.user)}` : ""}${fromFile(r.imported)})`
 			: "";
 		lines.push(`- Status: ${STATUS_LABEL[markStatus(a)]}${when}`);
 	}
 	if (r?.note) lines.push(`- Note: ${inline(r.note)}`);
 	if (r?.verified)
 		lines.push(
-			`- Verified: ${inline(r.verified.at)}${r.verified.app ? `,${by(r.verified.app)}` : ""}${fromFile(r.verified.imported)}`,
+			`- Verified: ${inline(r.verified.at)}${r.verified.app || r.verified.user ? `,${by(r.verified.app, r.verified.user)}` : ""}${fromFile(r.verified.imported)}`,
 		);
 	for (const reopen of a.reopens ?? []) {
 		lines.push(
-			`- Reopened ${inline(reopen.at)}${by(reopen.app)}${fromFile(reopen.imported)}, was ${was(reopen.was)}${reopen.note ? ":" : ""}`,
+			`- Reopened ${inline(reopen.at)}${by(reopen.app, reopen.user)}${fromFile(reopen.imported)}, was ${was(reopen.was)}${reopen.note ? ":" : ""}`,
 		);
 		if (reopen.note)
 			lines.push(
@@ -162,13 +177,16 @@ function countsLine(c: Case): string {
 	return `- Marks: ${parts.length > 0 ? parts.join(", ") : "none"}`;
 }
 
-function annotation(a: Annotation): string {
+/** A mark; `page`: its page's address, said where the case has several. */
+function annotation(a: Annotation, page: string | undefined): string {
 	const lines = [
 		`### ${a.number}. ${KIND[a.shape.kind]}${a.author === "ai" ? " (by an AI app)" : ""}`,
 		"",
 	];
 	lines.push(a.comment ? block(a.comment) : "_No comment._", "");
+	if (a.createdBy) lines.push(`- Added by: ${inline(a.createdBy.name)}`);
 	lines.push(...status(a));
+	if (page !== undefined) lines.push(`- Page: ${address(page)}`);
 	if (a.element) {
 		lines.push(`- Element: ${inline(summarize(a.element))}`);
 		if (a.element.selector)
@@ -198,15 +216,31 @@ function annotation(a: Annotation): string {
 	return lines.join("\n");
 }
 
+/** `3 marks`, `1 mark`. */
+const marksCount = (n: number) => `${n} mark${n === 1 ? "" : "s"}`;
+
 export function caseMarkdown(c: Case): string {
 	const v = c.page.viewport;
+	const pages = casePages(c);
+	const counts = marksByPage(c);
+	// A case of one page reads as before; one of several lists them (DEC-038).
+	const several = pages.length > 1;
 	const out = [
 		`# ${inline(c.title)}`,
 		"",
-		`- Page: ${address(c.page.url)}`,
+		...(several
+			? [
+					`- Pages (${pages.length}):`,
+					...pages.map(
+						(p) =>
+							`  - ${address(p.url)}${p.title ? `, ${inline(p.title)}` : ""} (${marksCount(counts.get(pageKey(p.url)) ?? 0)})`,
+					),
+				]
+			: [`- Page: ${address(c.page.url)}`]),
 		// The link the user attached (DEC-028), written as the page's address.
 		...(c.link === undefined ? [] : [`- Link: ${address(c.link)}`]),
-		`- Page title: ${inline(c.page.title)}`,
+		// A case of several pages has their titles in the list above.
+		...(several ? [] : [`- Page title: ${inline(c.page.title)}`]),
 		`- Window: ${v.width}×${v.height} CSS pixels, device pixel ratio ${v.dpr}${c.page.lang ? `, language ${inline(c.page.lang)}` : ""}`,
 		`- Created: ${inline(c.createdAt)}, updated: ${inline(c.updatedAt)}`,
 		countsLine(c),
@@ -219,7 +253,9 @@ export function caseMarkdown(c: Case): string {
 		"",
 		`## Marks (${c.annotations.length})`,
 		"",
-		...[...c.annotations].sort((a, b) => a.number - b.number).map(annotation),
+		...[...c.annotations]
+			.sort((a, b) => a.number - b.number)
+			.map((a) => annotation(a, several ? markUrl(c, a) : undefined)),
 		"## Screenshots",
 		"",
 		...c.shots.map(
@@ -228,7 +264,13 @@ export function caseMarkdown(c: Case): string {
 					`Screenshot ${inline(s.id)}, scrolled to ${Math.round(s.scrollX)}, ${Math.round(s.scrollY)}`,
 					s.image,
 					isSafeId(s.id) ? shotImage(s.id) : undefined,
-				)}\n`,
+				)}\n${
+					// Which page it is of and in what window, where the case has
+					// several (DEC-038): the first lines say it for a case of one.
+					several
+						? `\nScreenshot ${inline(s.id)} is of ${address(shotUrl(c, s))}, in a window of ${s.viewport.width}×${s.viewport.height} CSS pixels.\n`
+						: ""
+				}`,
 		),
 	];
 	return `${out.join("\n").trimEnd()}\n`;

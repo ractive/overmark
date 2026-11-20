@@ -25,7 +25,7 @@ import {
 	newId,
 	nextNumbers,
 	plainUrl,
-	samePath,
+	samePage,
 	shapeOnBox,
 	textLength,
 	validateCase,
@@ -605,23 +605,23 @@ describe("a case for a page", () => {
 	});
 });
 
-describe("the same path", () => {
+describe("the same page", () => {
 	test("whatever the origin or a last slash", () => {
 		expect(
-			samePath("https://www.example.com/kk/", "http://localhost:3000/kk"),
+			samePage("https://www.example.com/kk/", "http://localhost:3000/kk"),
 		).toBe(true);
-		expect(samePath("https://a.ch/kk", "https://a.ch/hypo")).toBe(false);
-		expect(samePath("not an address", "https://a.ch/")).toBe(false);
+		expect(samePage("https://a.ch/kk", "https://a.ch/hypo")).toBe(false);
+		expect(samePage("not an address", "https://a.ch/")).toBe(false);
 	});
 
 	test("a hash route is another page, a plain anchor is not", () => {
-		expect(samePath("https://a.ch/#/orders", "https://b.ch/#/orders")).toBe(
+		expect(samePage("https://a.ch/#/orders", "https://b.ch/#/orders")).toBe(
 			true,
 		);
-		expect(samePath("https://a.ch/#/orders", "https://a.ch/#/settings")).toBe(
+		expect(samePage("https://a.ch/#/orders", "https://a.ch/#/settings")).toBe(
 			false,
 		);
-		expect(samePath("https://a.ch/kk#top", "https://a.ch/kk#bottom")).toBe(
+		expect(samePage("https://a.ch/kk#top", "https://a.ch/kk#bottom")).toBe(
 			true,
 		);
 	});

@@ -17,10 +17,20 @@
  * to the folder the user chose, after every change and at each start,
  * whoever made the change, and puts "!" on the icon while the sync needs the
  * user.
+ *
+ * And, for someone signed in to sitegloss.dev, it syncs the cases with their
+ * team both ways and holds the tokens (DEC-039, `worker/cloud.ts`).
  */
 
-import { BROWSER, FIREFOX, openPanel, PANEL } from "./lib/browser.ts";
+import {
+	BROWSER,
+	FIREFOX,
+	openPanel,
+	PANEL,
+	signInRedirect,
+} from "./lib/browser.ts";
 import { isSafeId, pendingImage } from "./lib/case.ts";
+import { CLOUD_DATABASE } from "./lib/cloud/book.ts";
 import {
 	cropImages,
 	drawMarks,
@@ -32,6 +42,7 @@ import {
 	type Broadcast,
 	type CaptureResult,
 	type ContentRequest,
+	isCloudRequest,
 	isWorkerRequest,
 	type NumberCheck,
 	type SaveResult,
@@ -55,6 +66,7 @@ import {
 import { injectOnClick } from "./lib/tabs.ts";
 import { AddLedger } from "./lib/undo.ts";
 import { badge } from "./worker/badge.ts";
+import { Cloud } from "./worker/cloud.ts";
 import { ALARM, Connection } from "./worker/connection.ts";
 import { chromeDownloads } from "./worker/downloads.ts";
 import {
@@ -154,6 +166,25 @@ const sync = new Sync({
 void sync.request();
 
 /**
+ * The sync with a team at sitegloss.dev (DEC-039), for whoever is signed in:
+ * it runs after every change, at each start, when a panel asks, and on an
+ * alarm every few minutes. Nobody signed in: it does nothing. A case it
+ * changed here is told as any other change (the panels show it, the folder
+ * sync writes it), but not back to itself.
+ */
+const cloudKv = kvWhenOpen(() => openKv(CLOUD_DATABASE));
+const cloud = new Cloud({
+	store,
+	kv: cloudKv,
+	changed: (caseId) => void tell({ type: "cases:changed", caseId }),
+	news: () => void tell({ type: "cloud:changed" }),
+	redirect: signInRedirect,
+	alarms: chrome.alarms,
+	keepAlive: () => void chrome.runtime.getPlatformInfo().catch(() => {}),
+});
+cloud.start();
+
+/**
  * The end of a download the sync waits for wakes the worker, should it have
  * stopped meanwhile: its run settles it. At the top level where Sitegloss has
  * the (optional) permission, and once it is given.
@@ -179,6 +210,8 @@ hearDownloads();
 chrome.permissions.onRemoved.addListener(() => {
 	void sync.request();
 	if (FIREFOX) withConnection((c) => void c.consentChanged());
+	// Without that consent nothing may go to sitegloss.dev either.
+	void cloud.consentChanged();
 });
 chrome.permissions.onAdded.addListener(() => {
 	hearDownloads();
@@ -252,13 +285,20 @@ function capture(tabId: number, windowId: number): Promise<string> {
 	return next;
 }
 
-async function broadcast(message: Broadcast): Promise<void> {
+/** Tell the panels, and the folder sync of a case that changed. */
+async function tell(message: Broadcast): Promise<void> {
 	if (message.type === "cases:changed") void sync.request();
 	try {
 		await chrome.runtime.sendMessage(message);
 	} catch {
 		// No side panel open.
 	}
+}
+
+/** A case changed here: the panels, the folder sync and the team hear of it. */
+async function broadcast(message: Broadcast): Promise<void> {
+	if (message.type === "cases:changed") cloud.request();
+	await tell(message);
 }
 
 async function handle(
@@ -369,13 +409,22 @@ const fromExtensionPage = (sender: chrome.runtime.MessageSender) =>
 chrome.runtime.onMessage.addListener(
 	(request: WorkerRequest | Broadcast, sender, sendResponse) => {
 		if (sender.id !== chrome.runtime.id) return false;
-		// The side panel changed a case, or opened: the sync folder follows.
+		// The side panel changed a case, or opened: the sync folder follows,
+		// and the team (DEC-039).
 		if (
 			(request?.type === "cases:changed" || request?.type === "sync:run") &&
 			fromExtensionPage(sender)
 		) {
 			void sync.request(request.type === "sync:run" && request.force === true);
+			if (request.type === "cases:changed") cloud.request();
 			return false;
+		}
+		// The account and the team sync: asked by a page of the extension
+		// only, never by a content script (a web page's origin).
+		if (isCloudRequest(request)) {
+			if (!fromExtensionPage(sender)) return false;
+			void cloud.handle(request).then(sendResponse);
+			return true;
 		}
 		if (!isWorkerRequest(request)) return false;
 		handle(request, sender).then(
@@ -396,7 +445,14 @@ chrome.runtime.onMessage.addListener(
 const ready = Connection.start({
 	store,
 	capture,
-	changed: () => void sync.request(),
+	changed: () => {
+		void sync.request();
+		cloud.request();
+	},
+	// Whose findings are this app's own, and what deleting a case means,
+	// in a case synced with a team (DEC-039).
+	me: () => cloud.me().catch(() => undefined),
+	team: (caseId) => cloud.teamOf(caseId).catch(() => undefined),
 });
 ready.catch((error: unknown) =>
 	console.error("Sitegloss: AI connection", error),
@@ -459,6 +515,7 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.runtime.onInstalled.addListener(() => withConnection((c) => c.keepUp()));
 chrome.runtime.onStartup.addListener(() => withConnection((c) => c.keepUp()));
 chrome.alarms.onAlarm.addListener((alarm) => {
+	if (cloud.alarm(alarm.name)) return;
 	if (alarm.name === ALARM) withConnection((c) => c.keepUp());
 });
 

@@ -115,7 +115,13 @@ user agent. What differs from Chrome and Edge:
    those an AI app drew; with a mark not in the case yet the panel stays and says so,
    and a second click leaves without it. A new case starts there, with "New case for
    this page". Closing the side panel leaves marks and toolbar on the page; opening it again
-   opens the case the page shows.
+   opens the case the page shows. A case can span several pages: go on to the next page
+   of what you are testing, click "Add marks" again, and the marks you draw there go into
+   the same case, which lists its pages with their marks and opens each with a click.
+   A page is its path (and its hash route, `#/cart`), in whatever environment; a site's
+   home page is that site's only. Pages that differ only in their query
+   (`?route=cart`, `?id=2`) are one page to Sitegloss, which keeps no query: such a
+   case has one page.
 4. On the same page in another environment (say `localhost:3000`), click the case in the side panel:
    its marks are drawn on the tab in front, whatever page that is. While the case is open
    they follow the tab in front: another tab, a reload or a navigation draws them there
@@ -123,7 +129,8 @@ user agent. What differs from Chrome and Edge:
    "Hide marks" takes them off, and they stay off on that tab, also through a reload,
    until "Show marks" or the case is opened again. When none of the case's marks is
    found, the case says it is probably for another page and offers to open the case's
-   page. On a tab Sitegloss may not run on yet (after reloading the extension, say),
+   page. In a case of several pages the marks of the other pages count as "on another
+   page", not as lost, and Home lists the case under "This page" on each of its pages. On a tab Sitegloss may not run on yet (after reloading the extension, say),
    Chrome hides the address, and the side panel says so with a warning: click the
    Sitegloss icon there (or press Alt+Shift+O) and the marks are drawn, or press "Allow
    on all sites" in that notice; until then what needs the page is off. The case's
@@ -209,12 +216,12 @@ The tools:
 
 | Tool | What it does |
 |---|---|
-| `list_cases` | The saved cases, with their marks by status |
-| `get_case` | A case's summary for the developer and its marks with their comments, statuses, reopens, AI findings, element details and crops |
+| `list_cases` | The saved cases, with their pages and their marks by status |
+| `get_case` | A case's pages, its summary for the developer and its marks with their page, comments, statuses, reopens, AI findings, element details and crops |
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
-| `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children; a CSS selector reads one of its ancestors or an element inside it instead (for a mark without an element, an element of the case's page) |
+| `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children; a CSS selector reads one of its ancestors or an element inside it instead (for a mark without an element, an element of the mark's page) |
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |
 | `set_summary` | Records the summary for the developer: what should change overall, as agreed; asks first |
@@ -231,8 +238,9 @@ and URLs without their query string, fragment or user name and password.
 
 ### A relay on your computer, for Claude Code
 
-The relay must allow Sitegloss's origin, `chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon`.
-Relay 0.7.0 and later take it as a site:
+The relay must allow Sitegloss's origin, `chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon`,
+and be relay 0.12.0 or later (Sitegloss uses `@ractive-ch/tab-mcp-client` 0.18, which
+older relays do not take):
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
@@ -240,13 +248,15 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_STORE=memory \
   -e TAB_MCP_SITES='[{"origin":"chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon","name":"Sitegloss"}]' \
-  ractive/tab-mcp:0.10.3
+  ractive/tab-mcp:0.12.0
 ```
 
 Then, in the side panel's "AI app" card, set the relay to `http://localhost:8080`
 and click "Turn on AI access" (or flip the AI access switch). With no AI app paired yet,
 the card shows the address and a code at once; with apps paired, "+ Add another AI app"
-shows them. Under the address, "How do I add it?" opens the steps for Claude, ChatGPT,
+shows them. The address is `<relay>/s/sitegloss/mcp`, the same for everyone who has
+Sitegloss (the Firefox build's too); the code, 8 letters shown as `XXXX-XXXX`, pairs the
+AI app with this browser's Sitegloss. Under the address, "How do I add it?" opens the steps for Claude, ChatGPT,
 Claude Code and Codex (the tab-mcp client library's, with the address in them), each
 command with its own Copy, and a link to the step-by-step guide. Add the address to
 Claude Code, then run `/mcp` there and choose Authenticate:
@@ -255,11 +265,35 @@ Claude Code, then run `/mcp` there and choose Authenticate:
 claude mcp add --transport http sitegloss <address>
 ```
 
-Your browser opens the relay's page; type the code from the side panel. The connection
+Your browser opens the relay's page; type the code from the side panel.
+
+If that page opens in the browser Sitegloss runs in, Sitegloss can fill in the code for
+you. Under the code, "Allow on that site" asks the browser for Sitegloss's access to
+`tab-mcp.ractive.ch` (optional, only that site; Chrome says "Read and change your data on
+tab-mcp.ractive.ch"). From then on, when an AI app opens the hosted relay's pairing page
+for Sitegloss in this browser while AI access is on, the side panel asks "<app> (<host>)
+wants to connect to Sitegloss on the relay's page in this browser. Fill in the code
+there?", naming the app as the page does. "Fill in the code" (it waits a moment, as Allow
+does) types Sitegloss's code into the page's field and clicks Connect; "No" leaves the
+page as it is. With the side panel closed, a notification says to open it. Sitegloss
+never fills in a page of another site or one that is not for Sitegloss, and never
+connects without that yes. Typing the code always works too, also in another browser.
+With another relay set, there is no offer.
+
+The connection
 stays when you close the side panel (the icon shows "on"), until you turn the switch off
 or click "Stop AI access" (either keeps the pairing), the relay's end of an idle session, or the browser closes; an update
 or reload of the extension (or turning it off) ends it too. "Keep AI access on" connects
 again by itself after all of these but "Stop AI access".
+
+"Disconnect all apps", under the code, disconnects every AI app paired with Sitegloss;
+each one pairs again with a new code, at the same address. With apps paired it asks for a
+second click first. If another tab or program takes Sitegloss's connection over, the card
+says so and offers it too, or "Connect again" to take the connection back.
+
+Pairings from before Sitegloss used client 0.17 or later (the address `<relay>/a/<id>/mcp`) do
+not work any more: remove that connector from the AI app, add the new address and pair
+again.
 
 A tool that changes something (marked "asks first" above) asks first: in the side
 panel when it is open and on screen in the window in front (another extension's panel,
@@ -272,9 +306,12 @@ app is told you did not answer. "Always allow" lets that
 tool run without asking for that AI app from then on; "Allow all changes", a switch
 for each connected app under the side panel's top bar (and under the app in the AI app
 card, in Settings, which the AI pill at the top opens), does so for every tool that
-changes something, deleting a case too. The card lists the tools always allowed for each app, each with
-"Ask again". Both last until you disconnect the app (or make a new address), also
-across browser restarts. An AI app can be steered by text on a page it reads, so allow
+changes something, deleting a case too, also tools a later version adds. The card
+lists the tools always allowed for each app, each with "Ask again" ("Ask again" while
+"Allow all changes" is on turns that off too). Both last until the app's pairing ends
+(you disconnect it, or all apps, or the relay lets it expire), also across browser
+restarts; a tool always allowed asks again once an update of Sitegloss changes what it
+says it does. The tab-mcp client library keeps them, beside the connection's secret. An AI app can be steered by text on a page it reads, so allow
 always only what you would not need to check.
 
 Sitegloss needs Chrome 116 or later. The connection's settings and its address secret
@@ -292,12 +329,73 @@ notifications").
 claude.ai, Claude Desktop and ChatGPT connect from their own servers, so they need a
 relay with a public HTTPS address that allows Sitegloss's ID, such as the hosted one.
 
+## With a team
+
+Sitegloss works without an account, and nothing in it asks for one. If your team uses
+[sitegloss.dev](https://sitegloss.dev), "Sign in" in the side panel's Account section
+(on Home, under the cases) syncs your cases with the team, both ways:
+
+- You sign in on the service's own page, in a window of the browser. With several
+  teams you choose one; with one, that is it.
+- Cases that were in the browser before are not sent without a word: a banner says how
+  many there are and that the team's members will see them, with "Sync them" and "Keep
+  them on this device". A case kept here has "Share with team" in its view, and the list
+  tags it "This device only". A case you make while signed in is the team's once it has
+  a mark.
+- Everything is still stored in the browser first. What you change goes to the team a
+  moment later; what a teammate changes, in the extension or on the website, shows in
+  the open side panel within a second or two, and otherwise within a few minutes. With
+  the server away, your changes wait and are sent when it is back.
+- Two people who change different things of one mark both keep their change; for the
+  same thing the later one wins. Two who add a mark at once: the later one gets the next
+  number (its pin in the screenshot keeps the number it was drawn with).
+- A resolution, a verification, a reopen and a finding say who made them ("by Dana"),
+  and a mark who added it.
+- Deleting a case the team has deletes it for the team; the button says so. A case
+  deleted for the team goes here too. What you delete while signed out is not deleted
+  for the team: at the next sign-in the team's marks are back, and Sitegloss says so.
+  A case that is merely gone from this device (the browser lost its database) is not
+  deleted for anyone: it is read from the team again.
+- A case the team already has (the same file on two devices) is joined with the
+  team's, not sent a second time: marks only here are sent, the team's other marks
+  come here, and where both differ the team's text is kept. Sitegloss says so before
+  you share, with the number of marks; when it finds out only while sending, it stops
+  and asks then, and replaces nothing before you answer.
+- The Account section shows who is signed in, the team, what the sync is at (synced,
+  syncing, offline and trying again, or what the server did not take and why), "Sync
+  now" and "Sign out". Signing out stops the sync and keeps the cases, on this device
+  only.
+- "Server" there chooses where to sign in, while nobody is signed in: Sitegloss
+  itself (app.sitegloss.dev, unless you choose otherwise), its development server, or
+  another address (https, or plain http on this computer). When it is not Sitegloss
+  itself, the Account section says so. Each server has its own account, team and
+  sync: a case synced with one is on this device only as far as another goes, until
+  you share it there, and switching back finds everything as it was.
+
+The sync to a folder above is another thing and stays as it is: one way, to files.
+Permission for signing in: `identity` (no install warning).
+
 ## Development
 
 ```sh
 bun run verify     # Biome, type check, tests
 bun run fix        # format and apply safe lint fixes
 ```
+
+`bun scripts/api-types.ts` writes the types of the sitegloss.dev API
+(`src/lib/cloud/api.gen.ts`) from the copy of its OpenAPI document in
+`src/lib/cloud/openapi-v1.json`; with a path, it takes a new copy first. Both files are
+committed, and a test fails when they disagree.
+
+Three tests run only against a real sitegloss.dev server, named in `SITEGLOSS_SERVER`
+(the server's `bun scripts/serve-local.ts 3200 --demo` and
+`SITEGLOSS_SERVER=http://localhost:3200`, with its demo users' password in
+`SITEGLOSS_PASSWORD`): `test/cloud-server.test.ts` (the sync engine),
+`test/e2e/cloud.test.ts` (the extension in Chromium) and
+`test/e2e/firefox/cloud.test.ts` (in Firefox; the server has to allow Firefox's
+redirect address, in its `EXTENSION_REDIRECT_URIS`). In both browsers "Sign in" opens
+the browser's real sign-in window, and the test signs the demo user in there. Without
+the variable they are skipped.
 
 The end-to-end tests load the extension into Chrome for Testing or Chromium
 (`CHROME_PATH`, or Playwright's download in its usual cache). Branded Chrome ignores

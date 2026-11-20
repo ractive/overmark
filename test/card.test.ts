@@ -20,7 +20,7 @@ const base: AiState = {
 	pairing: false,
 	questions: [],
 };
-const ADDRESS = "https://relay.example/a/x/mcp";
+const ADDRESS = "https://relay.example/s/sitegloss/mcp";
 const claude = {
 	grantId: "g1",
 	name: "Claude",

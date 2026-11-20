@@ -1397,3 +1397,723 @@ Not taken over, for the owner to decide:
 - "Not answered in time: <tool> did not run." for 15 s after a question ran out unseen.
 - One notification button only ("Allow once"; tab-mcp's DEC-139: a standing permission
   needs the whole question). Sitegloss's notification has Allow and Always allow.
+
+## DEC-038: A case spans several pages
+
+2026-11-19. The owner asked for it, with the plan for sitegloss.dev: a tester goes
+through a feature across pages (the cart, then the payment page) and marks all of it in
+one case. Until now a case had one page (`page.url`), though every screenshot already
+recorded its own address (DEC-012). How it is done is decided here and is the owner's to
+change.
+
+- **The format stays `sitegloss/1`,** and grows by one optional field: `pages`, the
+  case's pages in order, each `{ url, title, lang }` with the address as `plainUrl` keeps
+  it. `page` stays what it was, the first page with the window and browser the case was
+  started in, so a build before this one reads a new file: `validateCase` builds its
+  result from the fields it knows and leaves out the rest, and it knew `shots[].url`. Such
+  a build shows the first page only and loses `pages` when it stores the case again; the
+  screenshots keep their addresses, from which the pages are derived again.
+- **Nothing is migrated.** A case stored before has no `pages`; `casePages` reads its
+  pages from `page` and its screenshots' addresses. It gets the list with its next mark.
+- **Every screenshot says which page it is of.** The two that did not are fixed: an AI
+  app's `add_annotation` (the page in front), and an import, which now cuts the query off
+  the screenshots' and the pages' addresses as it did for `page.url`.
+- **A mark on another page adds that page to the open case.** The toolbar adds to the
+  open case on whatever page the tab shows (it always did; a navigation ends the toolbar,
+  "Add marks" starts it again on the new page), and saving the mark records the page. The
+  first mark's page is still the case's first page (a case started on one page and first
+  marked on another is that one's).
+- **A page is its path, in whatever environment,** as everywhere in Sitegloss (DEC-001):
+  a mark added on `localhost:3000/cart` to a case from `www.example.com/cart` is on the
+  same page, not on a second one. Two sites' home pages are two pages. One function
+  says which page an address is (`pageKey`, see "After the review" below).
+- **Pages of another site are allowed.** A flow crosses from a shop to its payment
+  provider. Nothing in the code needs one origin: a mark belongs to a screenshot, a
+  screenshot has an address, and Sitegloss asks for each site as it always did (the
+  icon's click, or the prompt when a case's page is opened). The cost of telling pages by
+  path only: two pages of different sites with the same path (other than `/`) count as
+  one page. Accepted; a host mapping per case would be the fix, and DEC-001 ruled
+  environment settings out.
+- **A page leaves the list with its last screenshot** (a mark deleted, an Undo), and
+  `page` then follows the first page left. A case without screenshots keeps the page it
+  was started on.
+- **What is judged per page:** "This page" on Home lists a case for any of its pages. A
+  mark without an element is drawn only on its own page (it was already). After a draw on
+  one of the case's pages, the marks of its other pages that are not there are "on
+  another page", neither lost nor counted ("2 of 2 marks found on …. 1 more is on other
+  pages of the case."), and "None of this case's marks were found" is said of the page's
+  own marks. On a page that is none of the case's, every mark is looked for as before.
+  The size "the marks were made at", and Match size, are those of the first screenshot of
+  the page in front. `get_mark_element` looks for a selector, for a mark without an
+  element, only on the mark's own page.
+- **The case's header** lists the pages of a case that has several, each with its marks
+  counted and a link that opens it; a case of one page looks as before.
+- **AI tools, additive:** `list_cases` has `pages` (addresses) beside `url`; `get_case`
+  has `pages` (address, title, language, marks) beside `page`, each screenshot's `url` and
+  `viewport`, and each mark's `page`; `load_case` says each mark's `page` and
+  `onThisPage`. `case.md` lists the pages, and says each mark's and each screenshot's page
+  where the case has several; a case of one page gives the same file as before.
+
+**After the review of this decision's commit** (2026-11-19, the same day; each point
+was a finding, checked here before it was fixed):
+
+- **One rule for "the same page", and it is the server's.** Four rules had grown
+  (`samePath`, `samePage`, `isPageUrl`, an exact comparison) and disagreed for a home
+  page and for a hash route at `/`. Now `pageKey(url)` alone decides, for the list, the
+  counts, "This page", what a draw found, `onThisPage` and the content script: the path
+  without the slashes at its end, plus the hash route written `#/…` without the slashes
+  at its end; the origin only when both are empty (a home page). It is the function of
+  sitegloss.dev (`packages/api/src/v1/page.ts`), and `test/page-key.json` is a copy of
+  the server's vectors that it has to pass. So a hash route at `/`
+  (`app.example.com/#/cart`) is a page of its own in any environment, a slash at the end
+  of a hash route says nothing, and `/demo/` and `/demo/#/` are one page. The price: a
+  site's home page on localhost is not its home page on production, anywhere; before,
+  a mark drawn on no element showed on any home page once the case was opened there.
+- **Pages told apart only by their query are one page.** The query is cut from every
+  address that is kept (DEC-009: it carries tokens and personal data), so
+  `index.php?route=cart` and `index.php?route=checkout`, or `/product?id=1` and
+  `?id=2`, are one page: such a case never gets a second page, and a box drawn on no
+  element shows on all of them. Known and accepted; the README says so.
+- **A page's short name keeps its hash route** (`x.example/demo/#/book`), which is all
+  that tells a hash-routed app's pages apart in the panel and in an AI app's question.
+- **When `page` follows the first page left, it takes that page's window** (its first
+  screenshot's), not the window of the page that left. A screenshot that named no page
+  is given the leaving page's address first, so it does not move with `page`.
+- **`page`, the list and the screenshots are made to agree where a case comes in** (an
+  import, and the sync): every screenshot names its page (one that did not is of
+  `page`), `page` is the first of the list (put there when missing), a page is there
+  once. A file can say otherwise and `validateCase` checks shapes only.
+- **The list of a started case is built from its screenshots at every save,** so the
+  first page of a case from before the list, kept when its last mark went, is not
+  written into the list with 0 marks.
+- **A round trip through 0.3.0 loses the titles and languages of all pages but the
+  first.** 0.3.0 drops `pages` when it stores the case; the pages come back from the
+  screenshots, in the screenshots' order, without titles. Accepted: the addresses, the
+  marks and their pages are whole. `test/case-0-3-0.ts` is 0.3.0's own case module, and
+  a test reads a new file with it.
+- **The 201st page is refused before anything is stored,** in the words of the other
+  limits ("holds marks on 200 pages, the most a case can"), not by the format's check
+  after the screenshot was made.
+- **Counting the marks of every page is one pass** (`marksByPage`), not one scan of the
+  screenshots per mark and page: a second per render at the format's limits before.
+- **`list_cases` names a case's first five pages and says how many it has**
+  (`pages`, each address cut to 300 characters, and `pageCount`); `get_case` has them
+  all. An entry too large by itself is left out of a list that does not fit and the
+  other entries stay, where before nothing was left once the first entry alone was too
+  large (an imported case of 200 long addresses emptied `list_cases`). The compact
+  `get_case` leaves out each screenshot's `viewport`.
+- **A single-page app's next route.** The case stays drawn when the address changes
+  within the page (as before: a draw again would drop the candidates chosen), but the
+  page in front is another one now. The content script notices (its tick compares
+  `pageKey(location.href)`), looks again for the marks that were not there, a few a
+  tick and twice more for content that comes after the address, and judges anew which
+  mark is on its own page. The panel, when the tab's address is another page than the
+  one its numbers are about (or has none: Chrome reports "loading" for a `pushState`
+  too, at which the panel drops what was found, so in a real browser the line under
+  the case went empty), asks the page for the matches again (`case:matches`) and
+  once more a moment later; "found on …", "on another page" and the page list then say
+  the same thing. An AI app's `highlight` and `get_mark_element` ask about one mark and
+  get it looked for at once.
+- **A mark found on another page of the case than its own is never sure.** A flow's
+  pages share look-alikes (the same "Continue" button on the cart and the payment
+  page). Such a find is drawn dashed, the row says "Also on this page?", it is not
+  among the page's marks found ("1 of 2 marks found on …. 1 of the case's other pages
+  may be here too (dashed)."), and it does not make up for the page's own marks when
+  none of those is found. `highlight` and `get_mark_element` say the mark's page and
+  `onThisPage` (`markPage` in `get_mark_element`, where `page` has always been the
+  page's size), and `otherPageNote` when the element was read on another page of the
+  case. **Narrower than the review proposed, on purpose:** on a page that is none of
+  the case's, every mark is looked for and counted as before. A case is loaded there
+  by a click, to compare another version of its page under another path (the
+  extension's own end-to-end fixture does exactly that, `/v1` to `/v2`); calling every
+  find there unsure would make the dash say nothing.
+
+Not done: a toolbar that comes back by itself after a navigation while marks are being
+added. The panel keeps the case open and "Add marks" is one click; whether the toolbar
+should follow is the owner's to decide (it touches DEC-023 and DEC-026).
+
+## DEC-039: Sign in to sitegloss.dev, and cases sync with a team both ways
+
+2026-11-19. The owner asked for it with the plan for sitegloss.dev, a service of the
+owner's (accounts, teams, an API for cases): the extension gets an account, and a
+signed-in user's cases sync with their team in both directions. The numbered constraints
+are the plan's, given to this work as decided; what is under "Decided here" is this
+work's and the owner's to change. This amends DEC-001 ("Forwarding cases to a team is
+handled elsewhere") and DEC-007's spirit holds: no new runtime dependency.
+
+**The plan's constraints, as built:**
+
+1. **Local first stays.** Without an account Sitegloss works as before; nothing asks for
+   one. Signed in, every action is still stored in the browser first and sent after. A
+   server that is away or fails never blocks an action and loses no change: what is not
+   sent waits.
+2. **No new runtime dependency.** Plain `fetch`, Web Crypto and
+   `identity.launchWebAuthFlow` (new permission `identity`; the same call in Chrome and
+   Firefox, wrapped in `browser.ts`). The API's types are generated (DEC-040).
+   "Version 1 only grows; ignore what you do not know" holds: an unknown field, error
+   code or kind of removed thing never fails anything.
+3. **Identity of things.** Ids here stay as they are (`a<number>`, `s<n>`): they say
+   where a thing is on this device. At the server a mark and a screenshot have ids of
+   their own (`m_…`, `sh_…`), made once on the device that makes them. Which is which is
+   in the sync's own bookkeeping, a new database `sitegloss-cloud` beside `sitegloss-sync`:
+   the account, the tokens, the team, the team's revision read so far, and per case the
+   two id maps, what the server last had of it (its "shadow") and the operations not
+   confirmed yet. The case format gains only optional provenance: `user { id, name }` on
+   a resolution, a verification, a reopen and a finding, and `createdBy` on a mark, as
+   the server writes them down. Nothing here sets them; they survive files, and builds
+   before this one leave them out.
+4. **Images** go before the operations that name them (`HEAD`, then `PUT` when the team
+   lacks one; named by the SHA-256 of their bytes) and are fetched when a case arrives.
+5. **Changes are found by comparing, not by hooks.** After any change (the worker's own
+   saves, the AI tools, the panel's `cases:changed`) each synced case is compared with its
+   shadow, and the difference becomes operations: `case.create` or `case.patch` (title,
+   link, summary, pages, the highest number used), `shot.create`, `mark.create`,
+   `mark.patch` with only what changed (comment and author; resolution and reopens
+   together; findings added, changed or removed one by one), `mark.delete`, `case.delete`.
+   They are written down with their `opId` before they are sent, so a reply that never
+   came costs nothing. Then the fetch: everything after the revision seen, in pages, and
+   the cursor moves on. Sending comes first, always, and a failed send ends the run, so
+   nothing waits to be sent while a fetch is applied; a change made here during a fetch
+   is kept by merging field by field (what was not changed here since the server last
+   had it becomes the server's; what was changed here stays and is sent next). `reset`
+   means the server's history is another one: its state is taken whole, but nothing is
+   deleted here on its word. What a restored server no longer has (a case, a mark) stays
+   in the browser and is sent again, under the ids it had.
+6. **Mark numbers.** When the server gives a new mark another number than it was sent
+   with, the mark here takes it: its id, its crop's path and the bookkeeping follow, in
+   one store transaction. The same when a mark from the team has a number that a mark
+   here, not sent yet, holds: the unsent one moves. The pin painted into the screenshot
+   (and the crop) keeps the old number: accepted, see the open questions.
+7. **Live.** While the side panel is open it listens to the server's events stream
+   (`fetch` with a streaming body; reconnects after the server's 15 minutes, and after a
+   failure with a wait that doubles up to a minute) and tells the worker of each change;
+   the worker fetches when the stream's revision is ahead of what it has seen. The
+   worker also syncs at its start (not within a minute of the last sync: a worker starts
+   often), when the panel opens, after every send, and on an alarm every 5 minutes. The
+   worker is never kept alive for the stream; while a run is under way it resets the
+   browser's idle timer every 20 seconds, so a long upload is not cut in the middle.
+8. **What syncs.** With a team chosen, cases sync with that team. Cases that were in
+   the browser before are not sent silently: a banner above every view says how many
+   there are and that the team's members will see them, and offers "Sync them" or "Keep
+   them on this device"; a kept case has "Share with team" in its view. A case without
+   marks is not sent until it has one. Deleting a synced case deletes it for the team,
+   and the button and its tooltip say so ("Really delete for the team?"); an AI app's
+   `delete_case` question says so too. A case deleted for the team goes here. Signing
+   out stops the sync, keeps the cases on this device only, ends the grant at the server
+   and wipes the tokens.
+9. **Not an import.** A case that came from the server gets no `importedAt` and no
+   `imported` flags of its own (it carries those the server has, which are true of its
+   texts).
+10. **Permissions and errors.** What the user may do in a team is its `permissions`
+    from `GET /me`, never the role's name: sharing needs `case:create`, deleting a synced
+    case `case:delete` (the Delete button is off without it), and an operation the user
+    may not make is not sent. What the server refuses is said in the Account section, by
+    case, in plain words, and is not sent again while it is the same change; "Sync now"
+    tries again. `blob_missing`: the image is uploaded and the operation sent once more.
+    A 401: one try with new tokens, then "Sign in again", with everything kept.
+11. **The panel.** An Account section on Home: signed out, "Sign in to sync with your
+    team" with one sentence on what leaves the device; signed in, who, the team (a
+    chooser when there are several), the sync's status, "Sync now" and "Sign out". The
+    server is chosen there too, while signed out (DEC-041). The folder sync (DEC-021,
+    DEC-025) stays and knows nothing of this.
+12. **Privacy and stores.** `PRIVACY.md` has the fourth way data leaves the computer and
+    what the service keeps; the manifests have `identity`; the listings' changes are in
+    the two operations runbooks, for the owner to enter.
+
+**Decided here:**
+
+- **The service worker syncs and holds the tokens; the panel asks.** One place sends, so
+  two windows' panels never send a change twice; one place refreshes, one refresh at a
+  time, because refresh tokens rotate and a used one ends the grant. The panel's
+  messages (`CloudRequest`) are taken from an extension page only, never from a content
+  script. The browser's sign-in window is opened by the panel, a page that stays open
+  while the user signs in; the PKCE verifier stays in the worker's database.
+- **No cookies, ever.** Every request to the server is sent with `credentials: "omit"`:
+  the token says who calls. After the sign-in window the browser holds the user's
+  session with the server, and the server refuses a request that carries that cookie
+  from the extension's origin (403, "Invalid origin"): found with the real window, where
+  the token exchange failed until the cookies were left out.
+- **The shadow is what the server confirmed, never what is hoped for.** It moves on an
+  operation's confirmation and on a fetch, in the form a case here stores things (what
+  comes in is cut exactly as `validateCase` cuts it), so "changed here" is a plain
+  comparison. Who did something (`user`) is left out of that comparison: only the
+  server says it.
+- **A crash between two writes costs nothing.** Ids for new marks and screenshots are
+  written to the bookkeeping before they are used, in both directions; a mark renumbered
+  in the store but not in the bookkeeping is put together with the server's again by its
+  drawing. Sent twice, a create is the server's "duplicate", by its id.
+- **A refusal is remembered by what was refused** (the operation without its id, hashed):
+  the same change is not sent again, another change to the same mark is. As a last guard,
+  the very same changes found again three times in a row, though the server took them,
+  are not sent a fourth time: the server and this device then disagree on how something
+  is written, and sending it again would never end.
+- **A case that is here and at the server, with no record of what the server had** (it
+  came in from a file exported elsewhere): its marks are matched to the server's by
+  number and drawing, the server's copy counts for those, and a mark only here is sent.
+- **Signing in again goes on where it was.** The bookkeeping of a case stays when the
+  user signs out; the same team later takes it up again, so nothing is sent twice. A
+  case the team deleted meanwhile stays on this device.
+- **A finding is its app's own only for the person it was written for.** With a team,
+  the same AI app is connected to several people's browsers, so `isOwnFinding` also
+  asks whose finding it is: Claude for Dana may not rewrite Claude for Tess's.
+- **Firefox:** the data collection consent (website content, browsing activity) is
+  asked for at "Sign in" as it is at "Turn on AI access", and taking it back signs out.
+  The manifest's declaration is unchanged.
+- **Tests.** The engine is tested against an API in memory that keeps the server's
+  rules (`test/cloud-fake.ts`), also over HTTP for the worker's part. Three suites run
+  against a real server when `SITEGLOSS_SERVER` names one: the engine alone, and the
+  extension in Chromium and in Firefox, where "Sign in" opens the browser's real sign-in
+  window and the test types the demo user's password into the server's page. No test
+  build hook stands in for the window.
+- **No version bump.** The version is set by a release (as 0.3.0 was); this is a
+  feature branch.
+
+**Known limits** are in the open questions (item 10).
+
+**The pages of a synced case** (added 2026-11-19, after the server's review):
+
+- **The list of pages is the server's.** It keeps the list from the screenshots: a
+  `shot.create` of a page the case does not have adds the page, a page leaves with its
+  last screenshot (the last page of all stays), and which page an address is, is
+  `pageKey` on both sides (DEC-038). So the extension sends no list: a new case names
+  no pages, a `shot.create` says its address (`shotUrl`) and, in `page`, what the page
+  is called (title, language), and no `case.patch` ever carries `pages`. A patch of
+  the list replaces the whole list with one device's view of it, and two people
+  adding different pages dropped each other's entry.
+- **What comes in is taken as sent.** The server's `pages` become the case's `pages`.
+  `page` is the first of them, with the window of that page's first screenshot; an
+  empty list: the first screenshot's page; without screenshots, what the case had. A
+  page only this device has yet (its screenshot is not sent, or was not taken) stays
+  after the server's, with its title. A screenshot from before screenshots named their
+  page is given `page`'s address first, so it does not move when `page` becomes
+  another one.
+- **Lengths.** The server counts UTF-16 units where this format counts code points, so
+  a text of many emoji within the limit here can be over it there. It is refused as
+  any other refused change: said in the Account section with its reason, left out,
+  not sent again, and nothing behind it waits (below).
+- **What is refused, and what is tried again.** An operation the server rejects
+  (`invalid`, `limit`, `forbidden`, `not_found`, `conflict`) leaves the queue, is said
+  by case in plain words, and is not sent again while the change is the same; the
+  operations after it go. A whole request refused for what it holds (400, 409, 413,
+  422) is found out one operation at a time. An image the server does not take (507
+  `quota`: the team's storage is full; too large) is said as "An image was not taken,
+  so its mark is not shared: …" and not uploaded again at every run. Only what may
+  pass is tried again by itself: no network, a 5xx, a 429, and a 401 once with new
+  tokens. "Sync now" tries everything once more.
+- **What the team sees of a page.** Every page's address (site, path, hash route; no
+  query) goes to the team with the case, also a payment provider's or a reset link's
+  path. The sign-in text, the question about the cases that were here before, and
+  `PRIVACY.md` say so.
+
+**After the review of the sign-in, the tokens and the server chooser** (2026-11-19;
+eleven findings, each confirmed with the reviewer's proof before it was fixed; finding 1
+is in DEC-041):
+
+- **No request follows a redirect** (`redirect: "error"` on discovery, the token
+  request, the revoke, every API call and the events stream). `discover` held the
+  endpoints to the chosen origin for the first hop only: a 307 from the chosen server
+  sent the refresh token, the code or the API's token on, or brought another site's
+  content back as a screenshot.
+- **A fetched image is taken only when it is the image named:** its SHA-256 is the name
+  it was asked by, its type is `image/webp`, and it is no larger than the API holds
+  (30 MiB, read up to that and no further). One that is not, also one the server does
+  not have, is not stored; the new mark or screenshot that needs it is left out and
+  that is said, and the rest of the case and of the run go on. "Sync now" reads the
+  team's whole state again, which brings it once the image is right.
+- **Answers have a size.** JSON up to 64 MiB; a page of `changes` over that is asked
+  for again with `limit=20` (20 things, or what one request changed when that is more:
+  the server never splits a revision). A line of the events stream, and the data of one
+  event, up to 64 KiB; one connection of the stream lives 20 minutes and is then made
+  anew.
+- **A refresh whose answer is lost is asked again in time.** The server rotates the
+  token when the request arrives, gives the same answer again for 30 s, and ends the
+  grant on a later second use. The stored token is the old one until the answer is
+  here, so the same request is sent again after 2, 8 and 18 s before it is given up as
+  offline; the worker's own retry (half a minute at the earliest) was the try that
+  signed the user out.
+- **Only `invalid_grant` is "the grant is gone".** Any other no from the token endpoint
+  (`invalid_client` after a bad deploy, `invalid_request`, a 400 or 401 from a proxy) is
+  the server's trouble and is tried again with back-off; it marked the account expired
+  before, which only a new sign-in cleared.
+- **A sign-in that fails after the code was changed for tokens ends them** at the
+  server and removes them here: tokens without an account had no "Sign out".
+- **Sign-ins under way are kept by their `state`**, so two windows do not take each
+  other's secrets. An answer is matched to its sign-in before anything else is read of
+  it, also a "no" (`error`); an answer that is nobody's takes nothing away. The panel
+  tells the worker when the window closed without an answer (`cloud:abandon`).
+- **Sign-out removes the tokens first,** then tells the server (10 s at most) and the
+  engine: a run under way ends at its next request and does not hold the click.
+- **The server is not chosen while a sign-in is under way** (the chooser is off, and
+  the worker refuses), so nobody ends up signed in at one server with the chooser at
+  another.
+- **`cloud:token` names the server and the team** the stream is of, and the worker
+  refuses any other.
+- **The question about the cases that were here names the host** on a server that is
+  not the service ("… with “Acme” on sync.example.org?"): the team's name is that
+  server's word.
+
+**After the review of the sync engine** (2026-11-19; fifteen findings, each confirmed
+with the reviewer's proof before it was fixed; the proofs are tests now):
+
+- **A case with no record at the server is never sent blind.** The run is: what waits
+  in the queue; the changes of cases the server is known to have; the fetch; then the
+  cases without a record, each as `case.create` alone. `duplicate` to that means the
+  team has a case of that id (the same file on two devices, or this device's own case
+  from a request whose answer was lost): nothing else is sent, the case is read from
+  the server by itself (`GET …/cases/{id}`) and the two are joined, and only then what
+  the team lacks is sent. Before, every mark was made a second time for the whole
+  team.
+- **Joining a case with the team's** (an import the team already has, "Share with
+  team", "Sync them"): marks and screenshots the team has and this device lacks are
+  added here, marks only here are sent, and for a mark both have (the same number and
+  drawing) with other words the team's are kept (point 9 above: the server's copy
+  counts). Nothing is replaced without the user having been told: a case kept back
+  that the team has is said in the Account section, and the question about the cases
+  that were here says it too, with the count ("The team already has this case; where
+  both differ the team's text is kept: 2 marks"). The count is made from the team's
+  marks as last seen (`CaseBook.theirs`).
+- **A case can be marked to be read again** (`CaseBook.reread`: a join, a change that
+  could not be stored, a case missing here, a book taken up again). Of a join, a
+  missing case and a book taken up again nothing is sent before the read; a read that
+  fails waits 1, 5, 30 minutes and then 6 hours, and what is wrong stays on the screen
+  until it works. "Sync now" reads them at once.
+- **A case that fails to apply is not passed by.** The cursor goes on (one case must
+  not hold the others), and the case gets that mark; before, the change never arrived
+  and nothing said so after the next run. An image the server cannot give, or that is
+  not the image named, is that case's matter in the same way: the case is stored
+  without the marks that need it, the run goes on, the cursor is written, and the case
+  is read again later. (The decision was to skip the whole case; it is stored without
+  those marks instead, so one lost image does not keep a case of fifty marks away.)
+- **Ids written down before their case is stored are checkable** (`announced`: each
+  with its mark's drawing, its screenshot's time). The order stays "ids first, then the
+  case", which closes the stop between the case and the book; a stop before the case,
+  or a failed write of the case, is closed by taking the ids back (on failure) and by
+  taking an announced id only for the mark it was meant for (after a stop). Before, a
+  mark the user made under such an id was taken for the teammate's.
+- **What an id here stands for is checked before anything is derived** (`relink`): a
+  screenshot is the server's only when it was taken at the same time (`capturedAt` is
+  kept in the shadow: `s<n>` is given again after an Undo or a delete), a mark only
+  with the same drawing on the same screenshot. A mark without an id is put together
+  with a mark of the server's that no mark stands for when it has the same number, or
+  when that mark's id here is gone or was shown to be another mark's (a renumbering
+  whose bookkeeping was not written; the decision asked for "the same number" alone,
+  which would undo what `relink` is for).
+- **A book taken up again derives no delete from its old shadow** (signed out and in,
+  another team or server and back): the case is read whole first, what was deleted of
+  it meanwhile and the team still has comes back, and that is said once ("2 marks
+  deleted while not syncing are back: the team still has them"). Edits and new marks
+  made meanwhile are sent as before. The reasoning is DEC-041's for a whole case.
+- **A delete for the team is the user's delete.** Only a case with a record of its
+  delete becomes a `case.delete` (first a message to the worker and a note in the
+  book; since the re-check the store's own record, see below). A synced case that is merely not in the store
+  (its database lost, or made anew) is read from the server again; before, a lost
+  database deleted every synced case for the team. Marks have no such record.
+- **What never changes of a mark is compared as it goes to the server and comes back**
+  (`fixedOf`: the element cut as it is sent, then read as it is received). An element
+  whose `id`, `testId` or `role` was longer than the server takes was "another mark"
+  at every comparison: deleted and made again, under a new number, for ever.
+- **The queue and the book are written in one transaction;** an image that was not at
+  the server when operations from the queue were sent (they have none at hand) is not
+  held against the case: the same run's look at the case has the images.
+- **Refusals:** a book's refusals go when a fetch leaves the case as the server has it
+  (a change to a mark a teammate deleted was said for ever). When a case has as many
+  refusals as are kept (50), nothing more of it is sent and that is said, instead of
+  sending the ones that fell off the list again in turns.
+- **A case that cannot be sent is passed by** until it or the role changes
+  (`CaseBook.idle`, with what there is to say about it), and what is held back or not
+  allowed is found out before any image is read (an operation's key no longer hangs
+  on its image). A new case goes alone before any of its images is read. A run with
+  nothing to do reads the cases once and the sync's database once; the progress
+  while sending reads nothing again. A worker's start looks at when the last sync was,
+  whatever came of it. Not done: keeping each image's SHA-256 in the book (it would
+  grow with every image; with the above no image of a case that cannot go is hashed,
+  and one that can is hashed when it is sent).
+- **A form open on a mark follows that mark** (`markKey`: when its screenshot was
+  taken, and its drawing), and a change made in the panel is held to the mark it was
+  opened on in the same transaction that writes it. The team's sync can give a mark
+  another number while its form is open, and the id it had is then a teammate's mark.
+- **The server in memory holds every request to the API's JSON schemas**
+  (`src/lib/cloud/openapi-v1.json`, with `ajv`, a dev dependency for the tests alone)
+  and to the limits of one request, so the contract is met in every test run and not
+  only against a real server.
+- **Notes are no problems** (`CloudStatus.notes`): a case kept on this device whose
+  id the team names, and marks that are back after a time without syncing, are told in
+  the Account section in plain text, do not make the state "problem", and so give no
+  reason to look at the server more often. A problem is something that did not go.
+- **A cursor of 0 is a revision like any other.** (For a few commits it was read as
+  "none", because the server answered `since=0` as the whole state, which names no
+  deletes. The server answers it properly now, and the special case made an empty team
+  read whole and say "syncing" at every run.)
+
+**After the re-check of both reviews** (2026-11-19):
+
+- **A delete is on record in the case store, written with the delete itself**
+  (`CaseStore.deletedCases`), in place of a message to the worker and a note in the
+  book: the note waited behind a run under way, and a note that was not written undid
+  the delete without a word. Every delete path records it without knowing of the sync;
+  the panel's Delete and `delete_case` return at once; there is no time limit. The
+  engine sends `case.delete` for a synced case that is gone and has a record; a book
+  taken up again honours only a delete made since (a case deleted while it did not
+  sync has no book any more and comes back, DEC-041; what records there are leave
+  when the book is taken up, so no times are compared). A record leaves when it was taken
+  up, when no book here could need it, or after 30 days; a case stored again under the
+  id takes it away. Each record the store writes takes those older than 30 days away
+  in its transaction, so they do not pile up for someone who never signs in (no
+  engine run forgets them then). The records are kept in the `images` object store under a key no
+  case's images can have (`!deleted/<id>`), not in a store of their own: a new store
+  needs a new version of the database, which an older build can no longer open, so a
+  rolled-back release, or the main branch on a profile this branch has used, would
+  find no cases at all.
+- **A join nobody was told about stops when it would replace text.** A case that is to
+  be the team's and that the team turns out to have (the server answers `duplicate`,
+  or the fetch brings it) is joined at once when no mark both have says something
+  else here. When one does, the case goes back to the question, which then says the
+  count; "Sync them" after that joins.
+- **A mark is held to by its screenshot's time and its drawing wherever its id is held
+  across a wait:** the panel's form and its "Really delete?", the popover on the page
+  (it follows its mark to its new number, and its requests name the mark), an AI
+  app's change the user was asked about (refused when the number is another mark's by
+  the time they answer), and `highlight` and `get_mark_element` (the page answers
+  "not loaded as you have it" and the case is loaded again). Twins (the same element
+  marked twice on one screenshot) have nothing else that tells them apart, so their
+  key also names the ids all twins had when it was taken: while those ids stay, each
+  twin is its own and can be changed; once a renumbering moves any (or a twin is made
+  meanwhile), the key names no mark, and nothing is changed and that is said. (Asked
+  for: "ambiguous whatever the ids say" for twins; that would refuse every change and
+  delete of either twin for good, also in the panel.)
+- **A screenshot's time is compared as it is sent, as an instant;** every id that
+  stands for another mark of the server's than before is announced, not only new ones,
+  and after a stop the book is made true to the case with `relink`.
+- **A renewal of the tokens gives up when a sign-in or a sign-out happened while it
+  waited** (a generation in `Session`), throws its answer away and ends that answer's
+  grant; a sign-in is "finishing" from its answer to the written account; the
+  discovery document, the token endpoint's answer and an error's body are read up to a
+  megabyte; a case too large to read by itself waits with its own back-off.
+
+## DEC-040: The API's types are generated, with TypeScript 5 for the generator alone
+
+2026-11-19, with DEC-039. `src/lib/cloud/api.gen.ts` is generated from a copy of the
+server's OpenAPI document kept here (`src/lib/cloud/openapi-v1.json`) by
+`bun scripts/api-types.ts`; both files are committed, so a build and CI need neither the
+server's repository nor the network. A test fails when the two disagree.
+
+The generator is `openapi-typescript` (a dev dependency, pinned; nothing of it is in the
+extension). It builds its output with TypeScript's compiler API, which TypeScript 7
+(this repository's, the native compiler) no longer has, so it does not run here as it is
+installed. Bun has no way to give one package another version of a peer dependency, so
+TypeScript 5 is a second dev dependency under the name `typescript-5`
+(`npm:typescript@5.9.3`), and the script bundles the generator with `typescript` pointed
+at it. When `openapi-typescript` runs on TypeScript 7, `typescript-5` and the bundling
+go. The alternative was a generator of our own for the part of OpenAPI the document
+uses; rejected for now because the plan named the tool, and because the document will
+grow.
+
+## DEC-041: The server is chosen from three, and each server's state is its own
+
+2026-11-19, with DEC-039, asked for by the owner while it was built. There are two
+servers: the service (`https://app.sitegloss.dev`) and its development server
+(`https://app.dev.sitegloss.dev`, which may become `https://app-dev.sitegloss.dev`).
+Both addresses of the second are known, in one module with the first
+(`src/lib/cloud/servers.ts`); the chooser sets the first of them, and either is named
+"Development server".
+
+- **A chooser, folded away.** "Server" in the Account section, shown while nobody is
+  signed in: "Sitegloss (app.sitegloss.dev)", "Development server", "Another
+  address…" (a field: https, or http on this computer only). Whoever never opens it
+  signs in to the service and is never asked. The server is chosen before signing in
+  and can be changed only while signed out: another server is another account.
+- **Not the service: said in words.** Whenever the server is not the service, the
+  Account section says so beside the account and before the sign-in ("Development
+  server (app.dev.sitegloss.dev): not the real Sitegloss", "Another server
+  (localhost:3200): not sitegloss.dev"), so nobody takes test data for real or the
+  other way round.
+- **Everything the sync keeps is kept per server.** The cloud's database holds one
+  entry that is nobody's, the server chosen; every other key is under the server's
+  origin (`@<origin> <key>`, `scopedKv`): the tokens, the sign-in under way, the
+  account and team, how far the changes were read, the queue of operations, the
+  status, each case's book (which mark here is which there, what the server last
+  confirmed) and so each case's local-only flag. The worker has one engine and one
+  session per server and uses the chosen one's. So a case synced with the development
+  server is never sent to the service by a switch, and switching back finds what was
+  there: the same marks at the server, no second copy.
+- **A case another server has is on this device only here, until shared.** At a
+  sign-in, the cases that were here before are asked about in one go (DEC-039, 6);
+  the ones that synced with another server are left out of that question and are
+  "This device only" for this server. "Share with team" on such a case sends it,
+  that one case, because the user said so. The alternative, asking about all of them
+  together, makes one click on "Sync them" copy a team's real cases to a test
+  server.
+- **A case deleted while signed out is not deleted for the team by signing in.** The
+  book of such a case is dropped at the sign-in and the team's copy comes back with
+  the next read: with several servers, deleting a case while with another one is
+  ordinary, and nobody was told it would delete anything elsewhere. The same for a
+  case deleted while the sign-in had run out: the panel says "from this browser"
+  then, so the engine notes which deletes were on record when it ran out
+  (`Account.liveDeletes`) and forgets every later one at the next sign-in; the case
+  comes back. Only a delete made with a live sign-in, of a synced case, is sent.
+- **Where a server signs people in is what it says itself.** The authorization, token
+  and revocation addresses are read from the server's discovery document
+  (`<origin>/.well-known/oauth-authorization-server/api/auth`, RFC 8414) at each
+  sign-in and kept with that server's tokens for the renewals; no path of them is
+  written in the extension. A document whose issuer is not `<origin>/api/auth`, or
+  whose addresses are not at the chosen origin, is refused ("… does not answer as a
+  Sitegloss server"): the password and the tokens go to the address the user chose
+  and nowhere else. A server that names no revocation address is only forgotten here
+  at sign-out. The client id (`sitegloss-extension`), the scopes and the redirect
+  addresses are the same for every server.
+- **A case kept on this device is not the team's because a server names its id**
+  (review B, finding 1). An id is no secret: it is in every export, every connected AI
+  app reads it, and every server and team the case was shared with has it. Before, a
+  case in `changes` with the id of a case here was merged and adopted whatever its book
+  said, so a server (or a teammate who imported the same file) got the marks and
+  screenshots of a case the user had kept local, or of another server's case. Now a
+  case here whose book for this server is `local` or `undecided` is neither merged nor
+  adopted: it is skipped, the book notes it (`theirs`), and the Account section says "…
+  is on this device only, and the team has a case with the same id. … “Share with
+  team” on the case joins the two." Sharing (or "Sync them") then reads the team's copy
+  first, so the same marks become one, and sends what the team lacks. A case without a
+  book here (made or imported since the sign-in) is the team's as before.
+- **A mark keeps its identity at one server when another renumbers it.** Marks are
+  `a<number>` here, and a server's numbers count while with that server; the other
+  servers' books are not told. A book entry whose mark here has another drawing than
+  the server's mark is therefore dropped, and the server's mark finds its own again by
+  its drawing (`relink`), instead of being deleted and made anew.
+- **Tested** in `test/cloud-worker.test.ts` ("each server is kept apart") with two
+  servers in memory: a case synced with one never reaches the other, the first is
+  not asked anything while the second is chosen, its tokens go nowhere else, and
+  back at the first the case goes on with the marks it had.
+
+## DEC-042: One MCP address for every installation, tab-mcp client 0.18 (owner)
+
+2026-11-20. The hosted relay `tab-mcp.ractive.ch` moved to relay 0.12.0, which has one
+fixed MCP address per app and refuses clients before 0.17.0 (tab-mcp's DEC-196 to
+DEC-198): an organisation that allows custom connectors only by one exact URL can then
+allow Sitegloss. Installed copies lose AI access until an update with client 0.17 or
+later ships. The owner asked for the update on the 0.3.0 line, with client 0.18.1.
+(Numbered after DEC-038 to DEC-041, which are on the `cloud-sync` branch, so the
+numbers stay unique once both lines meet.)
+
+- **The address** is `<relay>/s/sitegloss/mcp`, the same for every installation, the
+  Firefox build's too. Sitegloss names its app, `app: "sitegloss"` (`APP_ID` in
+  `src/worker/protocol.ts`), rather than leaving the library to derive it from the
+  server's name, so that renaming the server cannot move the address. The pairing code
+  alone says which installation an AI app is paired with.
+- **The Firefox build shares the app id.** A relay may reserve an app for listed origins
+  (tab-mcp's DEC-197); no list can name one Firefox extension, so on a relay that
+  reserved `sitegloss` for the Chrome origin the Firefox build would be refused
+  (`app_not_allowed`). The hosted relay reserves only its sign-in example's app, so
+  `sitegloss` stays open to the Chrome, Edge and Firefox builds. Should it ever be
+  reserved, the Firefox build needs an id of its own (as tab-mcp's extension has
+  `tab-mcp-extension-firefox`), and its users pair again.
+- **Every pairing from before is gone.** The relay knows an installation by its app id
+  and its secret together and deleted the tokens of the old addresses; the secret
+  itself stays under its key. Users remove the old connector (`<relay>/a/<id>/mcp`)
+  from their AI app, add the new address and pair again. Always allow and Allow all
+  changes go with the old grants (DEC-018).
+- **The code** is 8 letters, shown as the relay sends it, `XXXX-XXXX`; it was shown as
+  two groups of three characters. It is typed with or without the dash. A code has no
+  attempts of its own any more (no `locked`); Sitegloss never showed that reason.
+- **"New address" is "Disconnect all apps"**, as in the library's dialogs and tab-mcp's
+  extension. It still disconnects every AI app and makes a new secret (the library's
+  `newAddress()`, DEC-017); the address stays, and each app pairs again with a new code.
+  The takeover notice and the status say Sitegloss's *connection* is in use elsewhere,
+  not its address, since everyone has that address.
+- **Relays before 0.12.0 do not work** with this version, also as a relay the user
+  entered; the README's local relay is `ractive/tab-mcp:0.12.0`. The worker's handling
+  of relays before 0.10.2 (a revoke's error that names no grant) stays: it is harmless
+  and goes with a later clean-up.
+- **Client 0.18 changes nothing Sitegloss uses yet.** Its allowances of its own
+  (`alwaysAllow`, `allowedTools`, tab-mcp's DEC-200) stay unused: Sitegloss keeps
+  Always allow and Allow all changes itself (DEC-018) and answers every question in
+  its `onConfirm`; with nothing allowed in the library, every call that changes
+  something still reaches it. Moving onto `allowedTools` is later work.
+- Not in this change: filling in the code on the relay's `/authorize` page from the
+  extension after asking the user (tab-mcp's DEC-199).
+
+## DEC-043: Always allow and Allow all changes are the library's allowances (owner)
+
+2026-11-20. The owner asked for Sitegloss's own Always allow store (DEC-018) to give way
+to the tab-mcp client library's allowances (`allowedTools` of
+`@ractive-ch/tab-mcp-client/allowed`, client 0.18, tab-mcp's DEC-200), which keep the
+same thing: per AI app (grant) the tools that run without asking, and a switch for
+everything.
+
+- **One store.** The library keeps them in the `storage` Sitegloss already passes it,
+  under the secret's key with `#allowed` (`tab-mcp:secret:<relay origin>:sitegloss#allowed`,
+  in the worker's IndexedDB through `CachedSecretStorage`, out of content scripts'
+  reach as before, DEC-016): grant ids, tool names, the title and description the user
+  saw, a fingerprint of the secret; no arguments. `src/worker/always.ts` is a thin
+  wrapper in Sitegloss's words ("Always allow" is `allow`, "Ask again" `ask`, "Allow
+  all changes" `everything`). Sitegloss's key `alwaysAllowed` is removed at every
+  worker start and nothing in it is taken over: its grants ended with client 0.17's new
+  addresses (DEC-042), so it holds nothing that could still apply.
+- **Honoured first.** The library checks an allowance before it asks `onConfirm`, so an
+  allowed call runs without Sitegloss's question and the "Last AI call" still records
+  it. Every other call that changes something still reaches `onConfirm` and asks, in
+  the panel or a notification; `decide` keeps its own check for a call allowed while
+  its question was on the way, and refuses WebMCP and served ports as before. The
+  library's `alwaysAllow` option stays unset: Sitegloss never shows its dialogs.
+- **Where the library differs, it wins**, and the texts say so:
+  - An allowance ends with its grant as the relay reports it: Disconnect, Disconnect
+    all apps (the new secret ends them all), or the grant expiring. That is what
+    `keepGrants` did; a dropped connection or Stop AI access keeps them, as before.
+  - A tool allowed one by one asks again once its title or description changed, for
+    example after an update of Sitegloss. The question's line and the README say so.
+    "Allow all changes" covers every tool, also changed and later ones.
+  - "Ask again" for one tool while "Allow all changes" is on turns that off too (asking
+    again errs towards asking). Its tooltip says so.
+  - Nothing is kept for an app that is not connected (as `decide` already did for
+    Always allow), and "Allow all changes" cannot be turned on for one either.
+  - A write to the database that fails no longer shows "Always allow could not be
+    saved": the library keeps the allowance in memory and the cache logs the failure.
+- What the user sees is otherwise the same: Always allow in the question and the
+  notification, the card's list with "Ask again", and the switch under the top bar
+  (DEC-036).
+
+## DEC-044: Sitegloss fills in its code on the relay's pairing page, after asking (owner)
+
+2026-11-20. The owner asked for tab-mcp's DEC-199 in Sitegloss: when an AI app opens the
+relay's `/authorize` page in the browser Sitegloss runs in, Sitegloss asks its user and,
+on a yes, fills in its own code there. Typing the code stays the way that always works
+(another browser, profile or device, or a user who says no).
+
+- **No new required permission.** A new host permission in the manifest would make
+  Chrome disable the extension on update until the user accepts it. The manifest
+  already has the optional `<all_urls>` (DEC-022); one site of it,
+  `https://tab-mcp.ractive.ch/*`, is asked for by itself with a click on "Allow on that
+  site" under the pairing code (`permissions.request`, as `askForSite` does). Chrome
+  then asks "Read and change your data on tab-mcp.ractive.ch". Without it Sitegloss
+  cannot see the page, and nothing changes. Whoever allowed all sites has it already.
+  `scripting`, `tabs` events and `notifications` were there before.
+- **Only the hosted relay's page.** The tab's URL must have the origin
+  `https://tab-mcp.ractive.ch` exactly and the path `/authorize`, Sitegloss's relay
+  must be the hosted one, AI access must be connected, and the script runs in the
+  tab's top frame only. Of the page it reads only the form's hooks (version 1): exactly
+  one `form[data-tab-mcp-pairing="1"]` with exactly one `data-tab-mcp-field="code"`
+  input and one `data-tab-mcp-action="connect"` button, and its `data-app`, which must
+  be `sitegloss`, `data-client-name` and `data-client-host`. A page not as documented
+  gets no question. The listener is added by the connection while the worker runs, not
+  at its top level, so no page load wakes the worker.
+- **The question is Sitegloss's own**, under the top bar on every view: "<name>
+  (<host>) wants to connect to Sitegloss on the relay's page in this browser. Fill in
+  the code there?", the name and host as the form gives them, escaped as in the
+  questions and set as text. "Fill in the code" counts only once the panel has been in
+  front for 750 ms, as Allow does; "No" ends it. It ends by itself after 2 minutes (a
+  code's life), when the tab leaves the page or closes, when AI access is no longer
+  connected, and when a newer pairing page replaces it. With no panel on screen, a
+  notification says to click the icon and answer in the panel (it has no buttons: an
+  answer is given in the panel only), and the icon counts it as a question ("?").
+- **The fill-in.** On a yes, Sitegloss checks that the tab still shows the pairing page
+  and that the form still names the same app and host, turns pairing on for 2 minutes
+  if no panel had it on, types the current code into the code field (with an `input`
+  event) and clicks Connect. The code is passed only to that script and written only
+  into the field: no attribute, no log, no message. If anything is off, the panel says
+  Sitegloss could not fill in the code and to type it.
+- **Chromium and Firefox** share the code (`tabs.onUpdated`, `scripting.executeScript`,
+  `permissions.request` all exist in Firefox's MV3). The end-to-end test runs in
+  Chromium only: Firefox's suite drives its sidebar through a tab and has no test of it.
+- **Tested** against a fixture with the relay's markup (`test/pair-fill-page.ts`, relay
+  0.12.0's `oauth/server.ts`): the testing package's relay cannot show its form for a
+  test client, since it fetches an AI app's metadata over HTTPS. The test build takes
+  the fixture's origin from `siteglossTestFillOrigins` on the worker's global; other
+  builds drop that.
