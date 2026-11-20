@@ -96,8 +96,8 @@ describe("the library's state, as the worker reads it", () => {
 			expect(on({ state: "disconnected", reason })).toBe(false);
 			expect(on({ state: "disconnected", reason }, true)).toBeUndefined();
 		}
-		// Taken over (the `replaced` event turns it off), a new address:
-		// unchanged, as before.
+		// Taken over (the `replaced` event turns it off), Disconnect all apps
+		// (`new_address`): unchanged, as before.
 		for (const reason of ["replaced", "new_address"] as const)
 			expect(on({ state: "disconnected", reason })).toBeUndefined();
 		// A failed connect, reconnecting, connecting: unchanged.
