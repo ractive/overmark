@@ -51,6 +51,12 @@ Only in four cases, all started by you:
    app is disconnected. Which ones you chose is kept in the browser, beside the
    connection's secret, and goes nowhere.
 
+   If you allow Sitegloss on `tab-mcp.ractive.ch` (optional, asked under the pairing
+   code), it reads that site's pairing page when an AI app opens it in your browser:
+   which app asks to connect, as the page names it. Only after you say yes in Sitegloss
+   does it type its pairing code into that page's field and click Connect. It reads
+   nothing else there, and the code goes only into that field.
+
    In Firefox, the browser first asks, at the click that turns AI access on, for its own
    data collection consent for website content and browsing activity. Without it AI
    access does not start, and it ends when you take the consent back in Firefox's add-on

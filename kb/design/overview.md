@@ -121,7 +121,10 @@ the page's origin and never touches it directly.
 - Optional `<all_urls>`, asked for in the side panel ("Allow on all sites", in the options
   in Settings and in the notice the panel shows on a tab Sitegloss may not run on yet, DEC-022) only
   when the user wants Sitegloss without clicking the icon on each tab. `captureVisibleTab` accepts
-  `activeTab` or `<all_urls>`, not a single site's permission.
+  `activeTab` or `<all_urls>`, not a single site's permission. One site of it is asked for
+  by itself: `https://tab-mcp.ractive.ch/*`, with the click on "Allow on that site" under the
+  pairing code, to fill in the code on the hosted relay's pairing page after asking
+  (DEC-044). Nothing is required at install.
 
 No JavaScript from an AI app or a server ever runs: the tools are fixed (Chrome Web Store
 rules on remote code, and safety).

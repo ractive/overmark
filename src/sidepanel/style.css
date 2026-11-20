@@ -710,6 +710,23 @@ button.chip[aria-pressed="true"]:hover:not(:disabled) {
 	line-height: 16px;
 }
 
+/* "Fill in the code for <app>?", under the top bar on every view (DEC-044). */
+.pair-fill-ask {
+	display: grid;
+	gap: var(--s1);
+	padding: var(--s2) var(--s4);
+	border-bottom: 1px solid var(--rule);
+	background: var(--wash);
+}
+
+.pair-fill-ask[hidden] {
+	display: none;
+}
+
+.pair-fill-ask p {
+	margin: 0;
+}
+
 /* Each connected AI app's "Allow all changes", under the top bar (DEC-036).
    Settings shows the card, which has the same switch. */
 .ai-allow {

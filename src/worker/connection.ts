@@ -26,6 +26,7 @@ import {
 	dataConsent,
 	FIREFOX,
 	notificationOptions,
+	PANEL,
 } from "../lib/browser.ts";
 import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
@@ -36,15 +37,29 @@ import { decide } from "./decide.ts";
 import { endedProblem, KeepOn } from "./keep-on.ts";
 import { type Kv, openKv } from "./kv.ts";
 import {
+	fillPairingForm,
+	HOSTED_ORIGIN,
+	isCode,
+	isPairingPage,
+	type PairingForm,
+	readPairingForm,
+} from "./pair-fill.ts";
+import {
 	type AiState,
 	APP_ID,
 	type CallView,
+	type FillView,
 	type PanelCommand,
 	parseCommand,
 	SERVER_NAME,
 	type WorkerMessage,
 } from "./protocol.ts";
-import { appName, Questions, type QuestionsHost } from "./questions.ts";
+import {
+	appName,
+	Questions,
+	type QuestionsHost,
+	visible,
+} from "./questions.ts";
 import { CachedSecretStorage } from "./secret.ts";
 import {
 	DEFAULT_RELAY,
@@ -67,6 +82,23 @@ import {
 
 /** Wakes the worker while AI access is on, should the connection be down. */
 export const ALARM = "sitegloss-ai";
+
+declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
+
+/** How long "Fill in the code for <app>?" waits for an answer: the code's own life. */
+export const FILL_ASK_MS = 120_000;
+/** How long pairing stays on after a fill-in, for the relay to take the code. */
+const FILL_PAIRING_MS = 120_000;
+/** The notification of the fill-in question, when no panel is on screen. */
+const FILL_NOTIFICATION = "sitegloss-fill";
+
+/** The fill-in question that waits (DEC-044). */
+interface Fill {
+	view: FillView;
+	tabId: number;
+	form: PairingForm;
+	timer: ReturnType<typeof setTimeout>;
+}
 
 /** One open side panel. */
 interface Panel {
@@ -303,6 +335,14 @@ export class Connection {
 	#revokes: Promise<void> = Promise.resolve();
 	/** Panel commands, one after the other. */
 	#commands: Promise<void> = Promise.resolve();
+	/** "Fill in the code for <app>?", while it waits (DEC-044). */
+	#fill: Fill | undefined;
+	/** Why the last fill-in did not happen, and when that goes. */
+	#fillProblem:
+		| { text: string; timer: ReturnType<typeof setTimeout> }
+		| undefined;
+	/** Pairing is on for a code Sitegloss filled in, until this timer. */
+	#fillPairing: ReturnType<typeof setTimeout> | undefined;
 	#sending = false;
 
 	private constructor(
@@ -370,6 +410,7 @@ export class Connection {
 			!stopped && session[SESSION_ON] === true,
 		);
 		connection.#showBadge();
+		connection.#watchTabs();
 		connection.keepUp();
 		// Overlays a panel started before this worker knew: the stored value.
 		connection.#tellBlur();
@@ -506,6 +547,8 @@ export class Connection {
 		mcp.addEventListener(
 			"statechange",
 			({ detail }) => {
+				// The question to fill in a code needs a connection to give one.
+				if (detail.state !== "connected") this.#endFill();
 				if (detail.state === "connected") {
 					this.#problem = undefined;
 					// "Not connected" no longer holds; a new session owes no answers.
@@ -564,7 +607,8 @@ export class Connection {
 		return (
 			this.#mcp.state !== "disconnected" ||
 			this.#keep.retrying ||
-			this.#questions.list.length > 0
+			this.#questions.list.length > 0 ||
+			this.#fill !== undefined
 		);
 	}
 
@@ -834,6 +878,9 @@ export class Connection {
 			case "answer":
 				this.#questions.answer(command.id, command.answer);
 				return;
+			case "fill":
+				await this.#fillAnswer(command.id, command.yes);
+				return;
 		}
 	}
 
@@ -908,9 +955,191 @@ export class Connection {
 		});
 	}
 
-	/** Pairing stops once no panel's pairing view is open. */
+	/**
+	 * Pairing stops once no panel's pairing view is open, and no code
+	 * Sitegloss filled in waits for the relay.
+	 */
 	#pairingOff(): void {
-		if (![...this.#panels].some((p) => p.pairing)) this.#mcp.stopPairing();
+		if (
+			![...this.#panels].some((p) => p.pairing) &&
+			this.#fillPairing === undefined
+		)
+			this.#mcp.stopPairing();
+	}
+
+	// --- Filling in the code on the relay's pairing page (DEC-044) ---
+
+	/**
+	 * The origins whose pairing page Sitegloss fills in: the hosted relay's,
+	 * while it is the relay Sitegloss connects to. A test build also takes
+	 * the origins its end-to-end tests set (the define itself: other builds
+	 * drop it).
+	 */
+	#fillOrigins(): string[] {
+		const origins =
+			new URL(this.#relay).origin === HOSTED_ORIGIN ? [HOSTED_ORIGIN] : [];
+		if (typeof SITEGLOSS_TEST_BUILD !== "undefined" && SITEGLOSS_TEST_BUILD) {
+			const test = (globalThis as { siteglossTestFillOrigins?: unknown })
+				.siteglossTestFillOrigins;
+			if (Array.isArray(test))
+				origins.push(...test.filter((o) => typeof o === "string"));
+		}
+		return origins;
+	}
+
+	/**
+	 * A tab finished loading `url`. On the relay's pairing page, with AI access
+	 * connected and the user's leave to see that site, its form is read; one
+	 * that is for Sitegloss gets the question. Anything else: nothing happens,
+	 * and the user types the code as before.
+	 */
+	async pairingPage(tabId: number, url: string | undefined): Promise<void> {
+		if (!isPairingPage(url, this.#fillOrigins())) return;
+		if (this.#mcp.state !== "connected") return;
+		const origin = new URL(url as string).origin;
+		const allowed = await chrome.permissions
+			.contains({ origins: [`${origin}/*`] })
+			.catch(() => false);
+		if (!allowed) return;
+		let form: PairingForm | null | undefined;
+		try {
+			const [result] = await chrome.scripting.executeScript({
+				target: { tabId, frameIds: [0] },
+				func: readPairingForm,
+			});
+			form = result?.result as PairingForm | null | undefined;
+		} catch {
+			return;
+		}
+		if (form?.app !== APP_ID) return;
+		// The page may have moved on while it was read.
+		const now = await chrome.tabs.get(tabId).catch(() => undefined);
+		if (now?.url !== url) return;
+		this.#endFill();
+		const id = crypto.randomUUID();
+		// Invisible and direction characters shown as `\uXXXX`, as in the
+		// questions: the names come from a web page.
+		const name = visible(form.clientName);
+		const host = visible(form.clientHost);
+		this.#fill = {
+			view: { id, name, host },
+			tabId,
+			form,
+			timer: setTimeout(() => {
+				if (this.#fill?.view.id === id) {
+					this.#endFill();
+					this.#changed();
+				}
+			}, FILL_ASK_MS),
+		};
+		if (![...this.#panels].some((p) => p.visible))
+			void chrome.notifications
+				.create(
+					FILL_NOTIFICATION,
+					notificationOptions({
+						type: "basic",
+						iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+						title: `Connect ${name}?`,
+						message: `${name} (${host}) wants to connect to Sitegloss. To fill in the code, click the Sitegloss icon and answer in the ${PANEL}; or type the code yourself.`,
+						priority: 2,
+					}),
+				)
+				.catch(() => undefined);
+		this.#changed();
+	}
+
+	/**
+	 * Tabs that load the relay's pairing page. Added here, not at the
+	 * worker's top level: it matters only while AI access is connected,
+	 * which keeps the worker running, so no tab's loading wakes it.
+	 */
+	#watchTabs(): void {
+		chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
+			if (info.status === "complete") void this.pairingPage(tabId, tab.url);
+			else if (info.url !== undefined) this.tabLeft(tabId, info.url);
+		});
+		chrome.tabs?.onRemoved?.addListener((tabId) => this.tabLeft(tabId));
+	}
+
+	/** The question goes: answered, run out, or replaced by a newer page. */
+	#endFill(): void {
+		if (this.#fill === undefined) return;
+		clearTimeout(this.#fill.timer);
+		this.#fill = undefined;
+		void chrome.notifications.clear(FILL_NOTIFICATION).catch(() => {});
+	}
+
+	/** The question's tab went, or left the page: the question goes too. */
+	tabLeft(tabId: number, url?: string): void {
+		const fill = this.#fill;
+		if (fill === undefined || fill.tabId !== tabId) return;
+		if (url !== undefined && isPairingPage(url, this.#fillOrigins())) return;
+		this.#endFill();
+		this.#changed();
+	}
+
+	/**
+	 * The user's answer. A yes types the current code into the form's code
+	 * field and clicks Connect, if the tab still shows that form; pairing
+	 * is turned on for it if no panel had it on.
+	 */
+	async #fillAnswer(id: string, yes: boolean): Promise<void> {
+		const fill = this.#fill;
+		if (fill === undefined || fill.view.id !== id) return;
+		this.#endFill();
+		this.#changed();
+		if (!yes) return;
+		const failed = () =>
+			this.#setFillProblem(
+				`Sitegloss could not fill in the code for ${fill.view.name}. Type the code from the AI app card on the relay's page.`,
+			);
+		const tab = await chrome.tabs.get(fill.tabId).catch(() => undefined);
+		if (!isPairingPage(tab?.url, this.#fillOrigins())) return failed();
+		const code = await this.#codeForFill();
+		if (!isCode(code)) return failed();
+		try {
+			const [result] = await chrome.scripting.executeScript({
+				target: { tabId: fill.tabId, frameIds: [0] },
+				func: fillPairingForm,
+				args: [code, fill.form],
+			});
+			if (result?.result !== true) return failed();
+		} catch {
+			return failed();
+		}
+		this.#setFillProblem(undefined);
+	}
+
+	/** Say why a fill-in did not happen, for 20 s; `undefined` takes it away. */
+	#setFillProblem(text: string | undefined): void {
+		clearTimeout(this.#fillProblem?.timer);
+		this.#fillProblem =
+			text === undefined
+				? undefined
+				: {
+						text,
+						timer: setTimeout(() => {
+							this.#fillProblem = undefined;
+							this.#changed();
+						}, 20_000),
+					};
+		this.#changed();
+	}
+
+	/** The code now, pairing turned on for it (and off after a while) if needed. */
+	async #codeForFill(): Promise<string | undefined> {
+		const mcp = this.#mcp;
+		clearTimeout(this.#fillPairing);
+		this.#fillPairing = setTimeout(() => {
+			this.#fillPairing = undefined;
+			if (mcp === this.#mcp) this.#pairingOff();
+		}, FILL_PAIRING_MS);
+		if (mcp.pairingCode?.code !== undefined) return mcp.pairingCode.code;
+		mcp.startPairing();
+		const end = Date.now() + 10_000;
+		while (mcp.pairingCode?.code === undefined && Date.now() < end)
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		return mcp.pairingCode?.code;
 	}
 
 	#questionsHost(): QuestionsHost {
@@ -995,6 +1224,10 @@ export class Connection {
 				: {}),
 			...(this.#lastCall !== undefined ? { lastCall: this.#lastCall } : {}),
 			questions: this.#questions.list,
+			...(this.#fill !== undefined ? { fill: this.#fill.view } : {}),
+			...(this.#fillProblem !== undefined
+				? { fillProblem: this.#fillProblem.text }
+				: {}),
 		};
 	}
 
@@ -1025,7 +1258,7 @@ export class Connection {
 	 */
 	#showBadge(): void {
 		badge.ai({
-			questions: this.#questions.list.length,
+			questions: this.#questions.list.length + (this.#fill ? 1 : 0),
 			ai: badgeOf(this.#mcp.state),
 		});
 	}

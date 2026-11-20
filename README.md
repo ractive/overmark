@@ -265,7 +265,22 @@ Claude Code, then run `/mcp` there and choose Authenticate:
 claude mcp add --transport http sitegloss <address>
 ```
 
-Your browser opens the relay's page; type the code from the side panel. The connection
+Your browser opens the relay's page; type the code from the side panel.
+
+If that page opens in the browser Sitegloss runs in, Sitegloss can fill in the code for
+you. Under the code, "Allow on that site" asks the browser for Sitegloss's access to
+`tab-mcp.ractive.ch` (optional, only that site; Chrome says "Read and change your data on
+tab-mcp.ractive.ch"). From then on, when an AI app opens the hosted relay's pairing page
+for Sitegloss in this browser while AI access is on, the side panel asks "<app> (<host>)
+wants to connect to Sitegloss on the relay's page in this browser. Fill in the code
+there?", naming the app as the page does. "Fill in the code" (it waits a moment, as Allow
+does) types Sitegloss's code into the page's field and clicks Connect; "No" leaves the
+page as it is. With the side panel closed, a notification says to open it. Sitegloss
+never fills in a page of another site or one that is not for Sitegloss, and never
+connects without that yes. Typing the code always works too, also in another browser.
+With another relay set, there is no offer.
+
+The connection
 stays when you close the side panel (the icon shows "on"), until you turn the switch off
 or click "Stop AI access" (either keeps the pairing), the relay's end of an idle session, or the browser closes; an update
 or reload of the extension (or turning it off) ends it too. "Keep AI access on" connects

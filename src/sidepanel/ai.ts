@@ -12,7 +12,13 @@
  * Always allow and "Allow all changes" for each AI app (DEC-018).
  */
 
-import { askDataConsent, FIREFOX, PANEL } from "../lib/browser.ts";
+import {
+	askDataConsent,
+	FIREFOX,
+	PANEL,
+	requestPermissions,
+} from "../lib/browser.ts";
+import { HOSTED_ORIGIN, PAIR_FILL_SITE } from "../worker/pair-fill.ts";
 import {
 	type AiState,
 	type Answer,
@@ -314,8 +320,78 @@ export async function startAi(
 		}
 		showCard(a);
 		showAllows(a);
+		showFill(a);
 		showQuestions(a.questions);
 	}
+
+	// --- Filling in the code on the relay's pairing page (DEC-044) ---
+
+	const fillAsk = byId("pair-fill-ask");
+	const fillYes = byId<HTMLButtonElement>("pair-fill-yes");
+	/** The question shown, and since when (Fill in the code waits, as Allow does). */
+	let fillShown: { id: string; at: number } | undefined;
+	/** Sitegloss may see the hosted relay's site: asked once, then on each change. */
+	let fillAllowed: boolean | undefined;
+	const checkFillAllowed = () =>
+		chrome.permissions.contains(PAIR_FILL_SITE).then(
+			(yes) => {
+				fillAllowed = yes;
+				if (current) showFill(current);
+			},
+			() => {},
+		);
+	void checkFillAllowed();
+	chrome.permissions.onAdded?.addListener(() => void checkFillAllowed());
+	chrome.permissions.onRemoved?.addListener(() => void checkFillAllowed());
+
+	function showFill(a: AiState): void {
+		const problem = byId("pair-fill-problem");
+		problem.hidden = a.fillProblem === undefined;
+		problem.textContent = a.fillProblem ?? "";
+		const ask = a.fill;
+		fillAsk.hidden = ask === undefined;
+		if (ask === undefined) fillShown = undefined;
+		else if (fillShown?.id !== ask.id) {
+			fillShown = { id: ask.id, at: Date.now() };
+			// As text: the names come from a web page.
+			byId("pair-fill-ask-text").textContent =
+				`${ask.name} (${ask.host}) wants to connect to Sitegloss on the relay's page in this browser. Fill in the code there?`;
+			fillYes.disabled = true;
+		}
+		// Under the code: the offer to fill it in, on the hosted relay only.
+		const hosted = new URL(a.relay).origin === HOSTED_ORIGIN;
+		const host = new URL(HOSTED_ORIGIN).host;
+		byId("pair-fill").hidden = !hosted || fillAllowed === undefined;
+		byId("pair-fill-allow").hidden = fillAllowed !== false;
+		byId("pair-fill-text").textContent = fillAllowed
+			? `Pairing in this browser? When the AI app opens ${host}'s page, Sitegloss asks you, then fills in the code.`
+			: `Pairing in this browser? Sitegloss can fill in the code on ${host}'s page for you, after asking.`;
+	}
+
+	/** Fill in the code counts once the panel has been in front a moment, as Allow does. */
+	setInterval(() => {
+		if (fillShown === undefined) return;
+		const ready =
+			document.visibilityState === "visible" &&
+			document.hasFocus() &&
+			Date.now() - fillShown.at >= ALLOW_DELAY_MS;
+		if (fillYes.disabled === ready) fillYes.disabled = !ready;
+	}, 100);
+	for (const [button, yes] of [
+		[fillYes, true],
+		[byId<HTMLButtonElement>("pair-fill-no"), false],
+	] as const)
+		button.addEventListener("click", () => {
+			if (fillShown === undefined || button.disabled) return;
+			send({ type: "fill", id: fillShown.id, yes });
+		});
+	byId<HTMLButtonElement>("pair-fill-allow").addEventListener("click", () => {
+		// In the click: the browser asks only during one.
+		void requestPermissions(PAIR_FILL_SITE).then(
+			() => checkFillAllowed(),
+			() => checkFillAllowed(),
+		);
+	});
 
 	// --- Commands ---
 
