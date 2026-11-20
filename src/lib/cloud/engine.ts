@@ -23,6 +23,7 @@
 
 import {
 	type Case,
+	MAX_CASE_COMMENTS,
 	type Rect,
 	newId as randomId,
 	validateCase,
@@ -69,6 +70,8 @@ import {
 } from "./book.ts";
 import {
 	applyOp,
+	appOut,
+	carryVia,
 	cutKey,
 	deriveOps,
 	differing,
@@ -668,6 +671,14 @@ export class CloudSync {
 			)
 				for (const text of book.idle.texts)
 					problems.push({ caseId: book.caseId, title: kept.title, text });
+			// Comments past the most a case holds: kept here, unsent (DEC-046).
+			const parked = book.parkedComments?.length ?? 0;
+			if (parked > 0 && book.mode === "synced" && kept !== undefined)
+				problems.push({
+					caseId: book.caseId,
+					title: kept.title,
+					text: `${parked === 1 ? "A comment" : `${parked} comments`} written here ${parked === 1 ? "is" : "are"} kept back and not sent: the case holds the most comments it can (${MAX_CASE_COMMENTS.toLocaleString("en-US")}). ${parked === 1 ? "It goes" : "They go"} once comments are deleted.`,
+				});
 			// A case that could not be read or stored: said until it is.
 			if (book.reread?.text !== undefined && book.mode === "synced")
 				problems.push({
@@ -1288,6 +1299,9 @@ export class CloudSync {
 				opId: this.#newId("o"),
 				type: "case.create",
 				case: newCaseOf(c),
+				// Made by an AI app's call through this browser: the app
+				// (DEC-046); shared by hand, nobody's but the person's.
+				...(c.createdVia === undefined ? {} : { via: appOut(c.createdVia) }),
 			};
 			if (
 				may.has(PERMISSION["case.create"]) &&
@@ -1686,10 +1700,13 @@ export class CloudSync {
 					const value = renumber(current, next, to, crops, out);
 					if (value === current) throw NOTHING;
 					return {
-						value: validateCase({
-							...value,
-							updatedAt: this.#now().toISOString(),
-						}),
+						// The app's change, if one waits, is still the app's.
+						value: validateCase(
+							carryVia(current, {
+								...value,
+								updatedAt: this.#now().toISOString(),
+							}),
+						),
 						images: out.images as Map<string, StoredImage>,
 						deleteImages: [...out.deleteImages],
 					};

@@ -135,7 +135,8 @@ describe.skipIf(SERVER === undefined || browserBinary === undefined)(
 				"Team: Pedal & Pine web",
 			);
 			await panel.waitFor(
-				`${text("cloud-status")}.startsWith("Synced")`,
+				// The state in words since DEC-045: up to date while it listens.
+				`${text("cloud-status")}.startsWith("Up to date")`,
 				30_000,
 			);
 			// Signed in at a server that is not the service: said beside the account.

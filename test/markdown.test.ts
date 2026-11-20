@@ -430,6 +430,8 @@ describe("an arrow's ends in case.md (DEC-047)", () => {
 			],
 		});
 		expect(md).toContain("- From: nothing recorded\n- To: p");
+	});
+});
 
 describe("the thread and closing in case.md (DEC-046)", () => {
 	test("comments after the marks, with who, which app and which mark; who closed the case; a comment's text stays a block", () => {

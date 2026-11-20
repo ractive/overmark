@@ -11,12 +11,15 @@ import {
 	withCaseComment,
 	withCaseCommentText,
 	withClosed,
+	withComment,
 	withoutAnnotation,
 	withoutCaseComment,
 	withResolution,
 } from "../src/lib/case.ts";
 import type { Op } from "../src/lib/cloud/api.ts";
 import type { CaseBook } from "../src/lib/cloud/book.ts";
+import { commentIn, mergeCase, viaOf } from "../src/lib/cloud/wire.ts";
+import { exportCase, readExport, storeImport } from "../src/lib/export.ts";
 import type { FakeApi } from "./cloud-fake.ts";
 import { FakeServer } from "./cloud-fake.ts";
 import {
@@ -27,6 +30,7 @@ import {
 	PAY,
 	signIn,
 	startCase,
+	status,
 	sync,
 } from "./cloud-helpers.ts";
 
@@ -365,5 +369,299 @@ describe("the AI app's name (via)", () => {
 				CLAUDE.id,
 			),
 		).toBe(false);
+	});
+});
+
+describe("who did it, per thing (review of DEC-046)", () => {
+	test("a hand delete of one's own comment and an app's change to the case, in one push: the delete names no app and is taken", async () => {
+		await shared();
+		await change(tess, "c_flow", (c, now) =>
+			withCaseComment(c, { id: "k_hand", text: "By hand" }, now),
+		);
+		await tess.engine.request();
+		expect(server.commentsOf("c_flow")).toHaveLength(1);
+		recording(tess);
+		// By hand: the comment goes. Then the app changes the summary, last.
+		await change(tess, "c_flow", (c, now) =>
+			withoutCaseComment(c, "k_hand", now),
+		);
+		await change(tess, "c_flow", (c, now) => ({
+			...withVerdict(c, "Shorter labels", now),
+			via: { app: CLAUDE, at: now },
+		}));
+		await tess.engine.request();
+		const del = sent(tess, "comment.delete")[0];
+		expect(del && "via" in del).toBe(false);
+		const patch = sent(tess, "case.patch")[0];
+		expect(patch && "via" in patch ? patch.via : undefined).toEqual(CLAUDE);
+		expect(server.commentsOf("c_flow")).toEqual([]);
+		expect(status(tess)?.problems).toEqual([]);
+	});
+
+	test("a comment the app deleted goes with the app's name, whatever came after", async () => {
+		await shared();
+		await change(tess, "c_flow", (c, now) =>
+			withCaseComment(c, { id: "k_app", text: "By Claude", app: CLAUDE }, now),
+		);
+		await tess.engine.request();
+		recording(tess);
+		await change(tess, "c_flow", (c, now) =>
+			withoutCaseComment(c, "k_app", now, CLAUDE),
+		);
+		// A hand change after it.
+		await change(tess, "c_flow", (c, now) => withVerdict(c, "By hand", now));
+		await tess.engine.request();
+		const del = sent(tess, "comment.delete")[0];
+		expect(del && "via" in del ? del.via : undefined).toEqual(CLAUDE);
+		expect(server.commentsOf("c_flow")).toEqual([]);
+		// Once the server has it, the note goes.
+		await tess.engine.request();
+		expect((await caseHere(tess)).deletedVia).toBeUndefined();
+	});
+
+	test("a hand edit of a mark's comment, before or after an app's change to the case: the person's, and stays so", async () => {
+		await shared();
+		recording(tess);
+		await change(tess, "c_flow", (c, now) =>
+			withComment(c, "a1", "Edited by hand", now),
+		);
+		await change(tess, "c_flow", (c, now) => ({
+			...withVerdict(c, "From Claude", now),
+			via: { app: CLAUDE, at: now },
+		}));
+		await tess.engine.request();
+		const patch = sent(tess, "mark.patch")[0];
+		expect(patch && "via" in patch).toBe(false);
+		const wire = server.marksOf("c_flow")[0];
+		expect(wire?.author).toBe("user");
+		expect(wire?.commentBy?.app).toBeUndefined();
+		await tess.engine.request();
+		const a = (await caseHere(tess)).annotations[0];
+		expect(a?.comment).toBe("Edited by hand");
+		expect(a?.author).toBe("user");
+	});
+
+	test("a case shared by hand after an app touched it: its making names no app; one an app's call made does", async () => {
+		await signIn(tess);
+		await startCase(tess, "c_local");
+		await addMark(tess, "c_local", "First");
+		recording(tess);
+		// The app changes the summary last, before the case first goes.
+		await change(tess, "c_local", (c, now) => ({
+			...withVerdict(c, "From Claude", now),
+			via: { app: CLAUDE, at: now },
+		}));
+		await tess.engine.request();
+		const made = sent(tess, "case.create")[0];
+		expect(made && "via" in made).toBe(false);
+		// A case an app's call made.
+		await startCase(tess, "c_app");
+		await addMark(tess, "c_app", "First");
+		await change(tess, "c_app", (c) => ({ ...c, createdVia: CLAUDE }));
+		await tess.engine.request();
+		const byApp = sent(tess, "case.create").find(
+			(o) => o.type === "case.create" && o.case.id === "c_app",
+		);
+		expect(byApp && "via" in byApp ? byApp.via : undefined).toEqual(CLAUDE);
+	});
+
+	test("an app's change still waiting keeps its name when the sync changes the case first", async () => {
+		await shared();
+		// The app's change waits (a push comes first in a run; a merge before
+		// it happens when the push could not go, or the change came while
+		// the run was reading).
+		const waiting = await change(tess, "c_flow", (c, now) => ({
+			...withVerdict(c, "From Claude", now),
+			via: { app: CLAUDE, at: now },
+		}));
+		await change(dana, "c_flow", (c, now) =>
+			withCaseComment(c, { id: "k_dana", text: "From Dana" }, now),
+		);
+		await dana.engine.request();
+		const merged = mergeCase(
+			waiting,
+			book(tess, "c_flow"),
+			{
+				shots: [],
+				marks: [],
+				removedMarks: [],
+				removedShots: [],
+				comments: server.commentsOf("c_flow"),
+			},
+			new Map(),
+			new Map(),
+			{
+				teamId: "team_1",
+				whole: false,
+				now: "2030-01-01T00:00:00.000Z",
+				me: TESS.id,
+			},
+		);
+		const c = merged?.value as Case;
+		expect(c.comments?.map((k) => k.id)).toEqual(["k_dana"]);
+		expect(c.updatedAt).not.toBe(waiting.updatedAt);
+		expect(viaOf(c).via).toEqual(CLAUDE);
+		// A merge that changes the case's own content ends it: that is no
+		// longer what the app left.
+		const renamed = mergeCase(
+			waiting,
+			book(tess, "c_flow"),
+			{
+				case: {
+					...(server.caseOf("c_flow") as NonNullable<
+						ReturnType<FakeServer["caseOf"]>
+					>),
+					title: "Renamed by Dana",
+				},
+				shots: [],
+				marks: [],
+				removedMarks: [],
+				removedShots: [],
+			},
+			new Map(),
+			new Map(),
+			{
+				teamId: "team_1",
+				whole: false,
+				now: "2030-01-01T00:00:00.000Z",
+				me: TESS.id,
+			},
+		);
+		expect(viaOf(renamed?.value as Case).via).toBeUndefined();
+	});
+});
+
+describe("the thread kept right (review of DEC-046)", () => {
+	test("a server restored without a case's comments gets them again", async () => {
+		await shared();
+		await change(tess, "c_flow", (c, now) =>
+			withCaseComment(c, { id: "k_1", text: "Before the restore" }, now),
+		);
+		await tess.engine.request();
+		expect(server.commentsOf("c_flow")).toHaveLength(1);
+		// The backup had the case, not its comment.
+		for (const [id, k] of server.comments)
+			if (k.value.caseId === "c_flow") server.comments.delete(id);
+		server.restore();
+		await tess.engine.request();
+		await tess.engine.request();
+		expect(server.commentsOf("c_flow").map((k) => k.id)).toEqual(["k_1"]);
+	});
+
+	test("another's comment changed here is not sent, takes the server's text back, and does not hold the case", async () => {
+		await shared();
+		await change(dana, "c_flow", (c, now) =>
+			withCaseComment(c, { id: "k_dana", text: "Dana's words" }, now),
+		);
+		await sync(dana, tess);
+		recording(tess);
+		await change(tess, "c_flow", (c, now) => ({
+			...c,
+			comments: (c.comments ?? []).map((k) => ({ ...k, text: "Changed here" })),
+			updatedAt: now,
+		}));
+		await tess.engine.request();
+		expect(sent(tess, "comment.patch")).toEqual([]);
+		expect(server.commentsOf("c_flow")[0]?.text).toBe("Dana's words");
+		// At the next merge the server's text is back.
+		await change(dana, "c_flow", (c, now) => withVerdict(c, "Anything", now));
+		await dana.engine.request();
+		await tess.engine.request();
+		expect((await caseHere(tess)).comments?.[0]?.text).toBe("Dana's words");
+		expect(status(tess)?.problems).toEqual([]);
+	});
+
+	test("comments past the most a case holds are parked, said, and go once there is room", async () => {
+		await shared();
+		// Dana fills the thread to one short of the limit.
+		await change(dana, "c_flow", (c, now) => {
+			let next = c;
+			for (let i = 0; i < 999; i++)
+				next = withCaseComment(next, { id: `k_d${i}`, text: `Dana ${i}` }, now);
+			return next;
+		});
+		// Tess, offline, writes two.
+		tess.api.offline = true;
+		await change(tess, "c_flow", (c, now) =>
+			withCaseComment(
+				withCaseComment(c, { id: "k_t1", text: "Tess one" }, now),
+				{ id: "k_t2", text: "Tess two" },
+				now,
+			),
+		);
+		await tess.engine.request();
+		await dana.engine.request();
+		expect(server.commentsOf("c_flow")).toHaveLength(999);
+		tess.api.offline = false;
+		await tess.engine.request();
+		await tess.engine.request();
+		const here = await caseHere(tess);
+		expect(here.comments).toHaveLength(1000);
+		expect(server.commentsOf("c_flow")).toHaveLength(1000);
+		expect(book(tess, "c_flow")?.parkedComments?.map((k) => k.id)).toEqual([
+			"k_t2",
+		]);
+		expect(
+			status(tess)
+				?.problems.map((p) => p.text)
+				.join(" "),
+		).toContain("kept back and not sent");
+		// Dana deletes one: the parked one comes back and goes.
+		await change(dana, "c_flow", (c, now) =>
+			withoutCaseComment(c, "k_d0", now),
+		);
+		await dana.engine.request();
+		await tess.engine.request();
+		await tess.engine.request();
+		expect(server.commentsOf("c_flow").map((k) => k.id)).toContain("k_t2");
+		expect(book(tess, "c_flow")?.parkedComments).toBeUndefined();
+	}, 60_000);
+
+	test("a synced comment whose writer is gone is nobody's own; one not synced yet is one's own", () => {
+		const gone = commentIn(
+			{
+				id: "k_1",
+				caseId: "c_1",
+				markId: null,
+				text: "Old",
+				at: "2026-11-20T10:00:00.000Z",
+				user: null,
+				rev: 1,
+			} as never,
+			new Map(),
+		);
+		expect(gone.writerGone).toBe(true);
+		expect(isOwnComment(gone, "u_tess")).toBe(false);
+		expect(isOwnComment({ id: "k_2", text: "Mine", at: "x" }, "u_tess")).toBe(
+			true,
+		);
+	});
+});
+
+describe("a file put in place of a synced case (review of DEC-046)", () => {
+	test("an older file without the thread deletes none of it, and an older text does not replace a newer one", async () => {
+		await shared();
+		const before = await caseHere(tess);
+		// The file: the case before anybody commented.
+		const zip = await exportCase(tess.store, before);
+		await change(tess, "c_flow", (c, now) =>
+			withCaseComment(c, { id: "k_tess", text: "Tess, after the file" }, now),
+		);
+		await change(dana, "c_flow", (c, now) =>
+			withCaseComment(c, { id: "k_dana", text: "Dana, after the file" }, now),
+		);
+		await sync(tess, dana);
+		recording(tess);
+		await storeImport(tess.store, await readExport(zip));
+		await tess.engine.request();
+		expect(sent(tess, "comment.delete", "comment.patch")).toEqual([]);
+		expect(server.commentsOf("c_flow").map((k) => k.text)).toEqual([
+			"Tess, after the file",
+			"Dana, after the file",
+		]);
+		expect((await caseHere(tess)).comments?.map((k) => k.id)).toEqual([
+			"k_tess",
+			"k_dana",
+		]);
 	});
 });

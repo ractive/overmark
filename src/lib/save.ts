@@ -278,6 +278,9 @@ export async function saveCase(
 				// server does with it.
 				comments: current?.comments,
 				summaryBy: current?.summaryBy,
+				deletedVia: current?.deletedVia,
+				// Made by an app's call: its making names the app (DEC-046).
+				createdVia: current === undefined ? app : current.createdVia,
 				...(app === undefined ? {} : { via: { app, at: stamp } }),
 				// The highest number used, the new marks' too: a case's format
 				// refuses a lastNumber below a mark's (it was kept as it was, so

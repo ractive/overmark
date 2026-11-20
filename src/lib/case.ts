@@ -174,6 +174,13 @@ export interface Annotation {
 	 */
 	createdVia?: FindingApp;
 	/**
+	 * The AI app that made the mark's last change through this browser, while
+	 * the mark is as that change left it (`of`: `markSignature`): what is sent
+	 * of the change names the app. Any later change to the mark ends it, by
+	 * hand too (DEC-046). This browser's note for its sync, never in a file.
+	 */
+	via?: { app: FindingApp; of: string };
+	/**
 	 * Who wrote the comment as it reads now, once it was changed after the
 	 * mark was made: the server's record (DEC-046). Shown, never compared.
 	 */
@@ -227,6 +234,11 @@ export interface CaseComment {
 	 * and what is sent of it carries no app (DEC-046).
 	 */
 	imported?: true;
+	/**
+	 * Synced, and its writer is no longer known to the team (the account is
+	 * gone): nobody's own (DEC-046).
+	 */
+	writerGone?: true;
 }
 
 /**
@@ -493,6 +505,17 @@ export interface Case {
 	 * too, ends it.
 	 */
 	via?: { app: FindingApp; at: string };
+	/**
+	 * The AI app whose call made the case, through this browser: its
+	 * `case.create` names the app (DEC-046). This browser's note, never in
+	 * a file.
+	 */
+	createdVia?: FindingApp;
+	/**
+	 * Comments an AI app deleted through this browser, while the delete is
+	 * not sent: what is sent names the app (DEC-046). Never in a file.
+	 */
+	deletedVia?: { id: string; app: FindingApp }[];
 }
 
 /** The longest case title. */
@@ -1220,6 +1243,15 @@ export function validateCase(value: unknown): Case {
 			...(a["commentBy"] === undefined
 				? {}
 				: { commentBy: stampOf(a["commentBy"], `${p}.commentBy`) }),
+			...(a["via"] === undefined
+				? {}
+				: {
+						via: {
+							app: appOf(obj(a["via"], `${p}.via`)["app"], `${p}.via.app`)
+								.app as FindingApp,
+							of: str(obj(a["via"], `${p}.via`)["of"], `${p}.via.of`, 64),
+						},
+					}),
 		};
 	});
 	const verdict = o["verdict"];
@@ -1264,6 +1296,28 @@ export function validateCase(value: unknown): Case {
 			? {}
 			: { summaryBy: stampOf(o["summaryBy"], "case.summaryBy") }),
 		...(o["via"] === undefined ? {} : { via: viaOf(o["via"]) }),
+		...(o["createdVia"] === undefined
+			? {}
+			: {
+					createdVia: appOf(o["createdVia"], "case.createdVia")
+						.app as FindingApp,
+				}),
+		...(o["deletedVia"] === undefined
+			? {}
+			: {
+					deletedVia: arr(
+						o["deletedVia"],
+						"case.deletedVia",
+						MAX_CASE_COMMENTS,
+					).map((v, i) => {
+						const d = obj(v, `case.deletedVia[${i}]`);
+						return {
+							id: id(d["id"], `case.deletedVia[${i}].id`),
+							app: appOf(d["app"], `case.deletedVia[${i}].app`)
+								.app as FindingApp,
+						};
+					}),
+				}),
 	};
 }
 
@@ -1308,7 +1362,10 @@ function commentsOf(value: unknown, marks: Annotation[]): CaseComment[] {
 			return {
 				id: commentId,
 				...(mark === undefined || gone ? {} : { mark }),
-				...(gone || o["markGone"] === true ? { markGone: true } : {}),
+				// About a live mark, or about one deleted: never both.
+				...(gone || (mark === undefined && o["markGone"] === true)
+					? { markGone: true }
+					: {}),
 				text,
 				at: str(o["at"], `${p}.at`, 64),
 				...userOf(o["user"], `${p}.user`),
@@ -1317,6 +1374,7 @@ function commentsOf(value: unknown, marks: Annotation[]): CaseComment[] {
 					? {}
 					: { edited: stampOf(o["edited"], `${p}.edited`) }),
 				...(o["imported"] === true ? { imported: true as const } : {}),
+				...(o["writerGone"] === true ? { writerGone: true as const } : {}),
 			};
 		},
 	);
@@ -1673,23 +1731,42 @@ export function withReopen(
 			);
 		return c;
 	}
-	return changed(
+	return openedBy(
 		c,
-		annotationId,
-		(a) => {
-			const { resolution: was, reopens = [], ...open } = a;
-			if (was === undefined) return a;
-			const note = cutText(reopen.note?.trim() ?? "", MAX_REOPEN_NOTE);
-			const entry: Reopen = {
-				...(note ? { note } : {}),
-				at: now,
-				...(reopen.app ? { app: reopen.app } : {}),
-				was: cutWas(was),
-			};
-			return { ...open, reopens: [...reopens, entry].slice(-MAX_REOPENS) };
-		},
-		now,
+		changed(
+			c,
+			annotationId,
+			(a) => {
+				const { resolution: was, reopens = [], ...open } = a;
+				if (was === undefined) return a;
+				const note = cutText(reopen.note?.trim() ?? "", MAX_REOPEN_NOTE);
+				const entry: Reopen = {
+					...(note ? { note } : {}),
+					at: now,
+					...(reopen.app ? { app: reopen.app } : {}),
+					was: cutWas(was),
+				};
+				return { ...open, reopens: [...reopens, entry].slice(-MAX_REOPENS) };
+			},
+			now,
+		),
 	);
+}
+
+/**
+ * `c` after `next`: a mark that went from settled to open opens a closed
+ * case, as at the server (DEC-046).
+ */
+function openedBy(c: Case, next: Case): Case {
+	if (next.closed === undefined) return next;
+	const reopened = next.annotations.some(
+		(a) =>
+			a.resolution === undefined &&
+			c.annotations.find((x) => x.id === a.id)?.resolution !== undefined,
+	);
+	if (!reopened) return next;
+	const { closed: _c, ...open } = next;
+	return open;
 }
 
 export function withComment(
@@ -1959,6 +2036,66 @@ export function withoutFinding(
 
 // --- the case's thread and its closing (DEC-046) ---------------------------------
 
+/** `value` as JSON with its keys in order: the same content, the same text. */
+function canonicalJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	if (value !== null && typeof value === "object")
+		return `{${Object.keys(value)
+			.filter((k) => (value as Record<string, unknown>)[k] !== undefined)
+			.sort()
+			.map(
+				(k) =>
+					`${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`,
+			)
+			.join(",")}}`;
+	return JSON.stringify(value);
+}
+
+/**
+ * What can change of a mark (its comment, author, status, reopens and
+ * findings), as a short text: equal while the mark is unchanged (DEC-046).
+ */
+export function markSignature(a: Annotation): string {
+	const text = canonicalJson([
+		a.comment,
+		a.author,
+		a.resolution ?? null,
+		a.reopens ?? [],
+		a.findings ?? [],
+	]);
+	// FNV-1a, twice over, as 16 hex digits.
+	let h1 = 0x811c9dc5;
+	let h2 = 0x01000193;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text.charCodeAt(i);
+		h1 = Math.imul(h1 ^ ch, 0x01000193) >>> 0;
+		h2 = Math.imul(h2 ^ ch, 0x811c9dc5) >>> 0;
+	}
+	return `${h1.toString(16).padStart(8, "0")}${h2.toString(16).padStart(8, "0")}:${text.length}`;
+}
+
+/**
+ * The mark `markId` as changed by `app` through this browser: what is sent
+ * of the change names the app, until the mark changes again (DEC-046).
+ * Without an app: the person's, and an earlier app's note ends.
+ */
+export function withMarkVia(
+	c: Case,
+	markId: string,
+	app: FindingApp | undefined,
+): Case {
+	return {
+		...c,
+		annotations: c.annotations.map((a) => {
+			if (a.id !== markId) return a;
+			const { via: _v, ...rest } = a;
+			return app === undefined
+				? rest
+				: { ...rest, via: { app, of: markSignature(rest) } };
+		}),
+	};
+}
+
 /**
  * The case after a change `app` made through this browser's AI connection:
  * what is sent of it names the app (`via`) while nothing changes after it.
@@ -2034,8 +2171,10 @@ export function withCaseCommentText(
 			`A comment holds at most ${MAX_CASE_COMMENT.toLocaleString("en-US")} characters.`,
 		);
 	const comments = c.comments ?? [];
-	if (!comments.some((k) => k.id === commentId))
-		throw new CaseError("The comment no longer exists.");
+	const was = comments.find((k) => k.id === commentId);
+	if (was === undefined) throw new CaseError("The comment no longer exists.");
+	// The same text: nothing changes, nobody is named.
+	if (was.text === clean) return c;
 	return changedBy(
 		{
 			...c,
@@ -2065,9 +2204,18 @@ export function withoutCaseComment(
 	if (!comments.some((k) => k.id === commentId))
 		throw new CaseError("The comment no longer exists.");
 	const left = comments.filter((k) => k.id !== commentId);
-	const { comments: _k, ...rest } = c;
+	const { comments: _k, deletedVia: gone = [], ...rest } = c;
+	// Who deleted it goes with the delete, not with the case (DEC-046).
+	const deletedVia = [
+		...gone.filter((d) => d.id !== commentId),
+		...(app === undefined ? [] : [{ id: commentId, app }]),
+	].slice(-MAX_CASE_COMMENTS);
 	return changedBy(
-		left.length > 0 ? { ...rest, comments: left } : rest,
+		{
+			...rest,
+			...(left.length > 0 ? { comments: left } : {}),
+			...(deletedVia.length > 0 ? { deletedVia } : {}),
+		},
 		now,
 		app,
 	);
@@ -2101,7 +2249,10 @@ export function isOwnComment(
 	me: string | undefined,
 	appId?: string,
 ): boolean {
-	const mine = k.user === undefined || k.user.id === me;
+	// Not synced yet (no person on it): one's own. Synced and its writer
+	// gone: nobody's.
+	const mine =
+		k.writerGone !== true && (k.user === undefined || k.user.id === me);
 	if (appId === undefined) return mine;
 	// What a file says of an app proves nothing: no app's own.
 	return mine && k.imported !== true && k.app?.id === appId;

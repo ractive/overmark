@@ -12,6 +12,7 @@
  * is which here.
  */
 
+import type { CaseComment } from "../case.ts";
 import type { Kv } from "../kv.ts";
 import type {
 	ImageRef,
@@ -141,6 +142,11 @@ export interface Rejected {
 /** The bookkeeping of one case. */
 export interface CaseBook {
 	caseId: string;
+	/**
+	 * Comments written here that would take the case past the most it holds
+	 * (DEC-046): kept, unsent, and said; back in the case when there is room.
+	 */
+	parkedComments?: CaseComment[];
 	mode: SyncMode;
 	/** The team it is synced with, or was. */
 	teamId?: string;

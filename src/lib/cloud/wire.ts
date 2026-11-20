@@ -20,6 +20,7 @@ import {
 	type FindingApp,
 	LANGUAGE,
 	MAX_CASE_COMMENT,
+	MAX_CASE_COMMENTS,
 	MAX_COMMENT,
 	MAX_FINDING,
 	MAX_FINDINGS,
@@ -32,6 +33,7 @@ import {
 	MAX_TITLE,
 	MAX_URL,
 	MAX_VERDICT,
+	markSignature,
 	pageAt,
 	pageKey,
 	type Rect,
@@ -68,6 +70,7 @@ import type {
 	CaseContent,
 	MarkContent,
 	Shadow,
+	ShadowComment,
 	ShadowMark,
 	TheirMark,
 } from "./book.ts";
@@ -163,11 +166,42 @@ export function appOut(app: FindingApp): AppRef {
 
 /**
  * The AI app the case's last change was made through, while it is the last
- * change (`Case.via`); none: the person's, by hand.
+ * change (`Case.via`); none: the person's, by hand. For what is the case's
+ * own (its patch, closing and reopening) only: a mark, a comment and the
+ * case's making say their own app (DEC-046).
  */
 export function viaOf(c: Case): { via?: AppRef } {
 	return c.via !== undefined && c.via.at === c.updatedAt
 		? { via: appOut(c.via.app) }
+		: {};
+}
+
+/**
+ * `after`, a change the sync made to `before` (a merge, a renumbering), with
+ * `before`'s AI app note carried over when the case's own content (title,
+ * link, summary, closed) is as it was: the app's change is still what waits
+ * to be sent (DEC-046).
+ */
+export function carryVia(before: Case | undefined, after: Case): Case {
+	const via = before?.via;
+	if (before === undefined || via === undefined) return after;
+	if (via.at !== before.updatedAt) return after;
+	// A note of its own, made with the change: that one.
+	if (after.via !== undefined && after.via.at === after.updatedAt) return after;
+	const same =
+		after.title === before.title &&
+		after.link === before.link &&
+		after.verdict === before.verdict &&
+		(after.closed === undefined) === (before.closed === undefined);
+	return same
+		? { ...after, via: { app: via.app, at: after.updatedAt } }
+		: after;
+}
+
+/** The AI app a mark's last change was made through, while the mark is as it left it. */
+export function markViaOf(a: Annotation): { via?: AppRef } {
+	return a.via !== undefined && a.via.of === markSignature(a)
+		? { via: appOut(a.via.app) }
 		: {};
 }
 
@@ -494,7 +528,8 @@ export function deriveOps(
 			opId: newId("o"),
 			type: "case.create",
 			case: newCaseOf(c),
-			...via,
+			// Only when an app's call made the case: sharing it is the person's.
+			...(c.createdVia === undefined ? {} : { via: appOut(c.createdVia) }),
 		});
 	else {
 		const patch = casePatch(content, shadow.case);
@@ -586,10 +621,10 @@ export function deriveOps(
 				type: "mark.patch",
 				markId: wire,
 				...patch,
-				...via,
+				...markViaOf(a),
 			});
 	}
-	ops.push(...commentOps(c, book, newId, via, me));
+	ops.push(...commentOps(c, book, newId, me));
 	// Closed once the marks are there: a new open mark sent after the close
 	// would open it again at the server.
 	if (c.closed !== undefined && shadow?.closed !== true)
@@ -607,20 +642,23 @@ function commentOps(
 	c: Case,
 	book: CaseBook,
 	newId: (prefix: string) => string,
-	via: { via?: AppRef },
 	me: string | undefined,
 ): Op[] {
 	const ops: Op[] = [];
 	const known = book.shadow?.comments ?? {};
 	const here = new Set((c.comments ?? []).map((k) => k.id));
+	const deletedBy = new Map((c.deletedVia ?? []).map((d) => [d.id, d.app]));
 	for (const [id, before] of Object.entries(known))
-		if (!here.has(id) && (before.userId === undefined || before.userId === me))
+		if (!here.has(id) && ownAtServer(before, me)) {
+			const app = deletedBy.get(id);
 			ops.push({
 				opId: newId("o"),
 				type: "comment.delete",
 				commentId: id,
-				...via,
+				// The app that deleted it, if one did; by hand, none.
+				...(app === undefined ? {} : { via: appOut(app) }),
 			});
+		}
 	for (const k of c.comments ?? []) {
 		const before = known[k.id];
 		if (before === undefined) {
@@ -638,7 +676,9 @@ function commentOps(
 				},
 				...(k.app === undefined || k.imported ? {} : { via: appOut(k.app) }),
 			});
-		} else if (before.text !== k.text)
+		} else if (before.text !== k.text && ownAtServer(before, me))
+			// Only one's own: another's text here is the server's again at
+			// the next merge (DEC-046).
 			ops.push({
 				opId: newId("o"),
 				type: "comment.patch",
@@ -651,6 +691,10 @@ function commentOps(
 	}
 	return ops;
 }
+
+/** A comment the server has is one's own: written by the person signed in (or not known). */
+const ownAtServer = (before: ShadowComment, me: string | undefined) =>
+	before.userId === undefined || before.userId === me;
 
 /** The case's content as a new case's operation said it. */
 const contentOfNew = (n: OpOf<"case.create">["case"]): CaseContent => ({
@@ -822,6 +866,8 @@ export function commentIn(
 		text: text(w.text, MAX_CASE_COMMENT) || "…",
 		at: text(w.at, 64),
 		...userIn(w.user),
+		// Synced with no writer: the account is gone, and it is nobody's own.
+		...(w.user === null ? { writerGone: true as const } : {}),
 		...appIn(w.app),
 		...(w.edited === undefined ? {} : { edited: stampIn(w.edited) }),
 	};
@@ -1502,7 +1548,15 @@ export function mergeCase(
 			),
 		};
 
-	c = mergeComments(c, book, given, incoming, options.whole, options.lost);
+	c = mergeComments(
+		c,
+		book,
+		given,
+		incoming,
+		options.whole,
+		options.lost,
+		options.me,
+	);
 
 	// Screenshots the server no longer has: gone here when no mark is on them.
 	const shotNow = reverse(book.shots);
@@ -1590,6 +1644,8 @@ export function mergeCase(
 							: new Date(Date.parse(current.updatedAt) + 1).toISOString(),
 		};
 	}
+	// What the sync changed does not end an app's change waiting to go.
+	if (changed) c = carryVia(current, c);
 	book.title = c.title;
 	book.mode = "synced";
 	book.teamId = options.teamId;
@@ -1611,12 +1667,12 @@ export function mergeCase(
 }
 
 /**
- * The thread after what came (DEC-046), and the shadow's record of it. A
- * comment the server no longer has goes; one of the server's that was not
- * changed here since takes the server's text and record; one changed here
- * keeps its text, which is sent next; one deleted here stays deleted. New
- * ones come at the end, in the server's order; a whole read puts the whole
- * thread in the server's order, with what only this device has after it.
+ * The thread merged with the server's (DEC-046). The server's comments come
+ * in; one's own changed here keeps its text (it is sent); another's takes
+ * the server's back. A delete the server lost goes from the shadow, so the
+ * comment is sent again. Comments only here that would take the case past
+ * `MAX_CASE_COMMENTS` are parked in the book, unsent, and said; they come
+ * back when there is room.
  */
 function mergeComments(
 	c: Case,
@@ -1625,6 +1681,7 @@ function mergeComments(
 	incoming: Incoming,
 	whole: boolean,
 	lost: boolean | undefined,
+	me: string | undefined,
 ): Case {
 	const shadow = book.shadow as Shadow;
 	const known = { ...shadow.comments };
@@ -1639,7 +1696,6 @@ function mergeComments(
 				else removed.add(id);
 			}
 	}
-	if (removed.size === 0 && came.length === 0) return c;
 	let list = (c.comments ?? []).filter((k) => !removed.has(k.id));
 	for (const id of removed) delete known[id];
 	const marks = reverse(book.marks);
@@ -1655,7 +1711,9 @@ function mergeComments(
 		if (at >= 0) {
 			const mine = list[at] as CaseComment;
 			list[at] =
-				before !== undefined && mine.text !== before.text
+				before !== undefined &&
+				mine.text !== before.text &&
+				ownAtServer(before, me)
 					? {
 							...theirs,
 							text: mine.text,
@@ -1664,6 +1722,15 @@ function mergeComments(
 					: theirs;
 		} else if (before === undefined) list.push(theirs);
 	}
+	// Another's text changed here (a file put in place): the server's again.
+	list = list.map((k) => {
+		const before = known[k.id];
+		return before !== undefined &&
+			before.text !== k.text &&
+			!ownAtServer(before, me)
+			? { ...k, text: before.text }
+			: k;
+	});
 	if (whole && incoming.comments !== undefined) {
 		const order = new Map(came.map((w, i) => [w.id, i]));
 		list = [
@@ -1673,9 +1740,28 @@ function mergeComments(
 			...list.filter((k) => !order.has(k.id)),
 		];
 	}
+	// Within the limit: what only this device has waits beyond it.
+	const parked = [...(book.parkedComments ?? [])];
+	const room = MAX_CASE_COMMENTS - list.length;
+	if (room < 0) {
+		const extra = list.filter((k) => known[k.id] === undefined).slice(room);
+		const out = new Set(extra.map((k) => k.id));
+		list = list.filter((k) => !out.has(k.id));
+		parked.unshift(...extra);
+	} else if (parked.length > 0) list.push(...parked.splice(0, room));
+	if (parked.length > 0) book.parkedComments = parked;
+	else delete book.parkedComments;
+	// Who deleted a comment matters until the server has the delete.
+	const deletedVia = (c.deletedVia ?? []).filter(
+		(d) => known[d.id] !== undefined,
+	);
 	shadow.comments = known;
-	const { comments: _k, ...rest } = c;
-	return list.length > 0 ? { ...rest, comments: list } : rest;
+	const { comments: _k, deletedVia: _d, ...rest } = c;
+	return {
+		...rest,
+		...(list.length > 0 ? { comments: list } : {}),
+		...(deletedVia.length > 0 ? { deletedVia } : {}),
+	};
 }
 
 /** The case without its time, as one text; who did something counts: it shows. */
@@ -1703,7 +1789,12 @@ export function isClean(c: Case, book: CaseBook, me?: string): boolean {
 	// The thread: what commentOps would send.
 	const known = shadow.comments ?? {};
 	const here = new Map((c.comments ?? []).map((k) => [k.id, k]));
-	for (const k of here.values()) if (known[k.id]?.text !== k.text) return false;
+	for (const k of here.values()) {
+		const before = known[k.id];
+		if (before === undefined) return false;
+		// Another's text that differs is not sent: it does not wait.
+		if (before.text !== k.text && ownAtServer(before, me)) return false;
+	}
 	return Object.entries(known).every(
 		([id, before]) =>
 			here.has(id) || (before.userId !== undefined && before.userId !== me),

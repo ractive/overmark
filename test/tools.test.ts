@@ -19,7 +19,10 @@ import {
 	MAX_FINDINGS,
 	MAX_FINDINGS_TEXT,
 	validateCase,
+	withComment,
 } from "../src/lib/case.ts";
+import { emptyBook } from "../src/lib/cloud/book.ts";
+import { deriveOps, markViaOf } from "../src/lib/cloud/wire.ts";
 import type {
 	AnnotationMatch,
 	ContentRequest,
@@ -2301,5 +2304,97 @@ describe("the thread and closing (DEC-046)", () => {
 			{ kind: "webmcp" } as ToolCallClient,
 		);
 		expect((await store.getCase("c_1"))?.via).toBeUndefined();
+	});
+
+	test("a mark an AI app adds is stored as the app's, and what is sent of it names the app", async () => {
+		await seed();
+		await call("add_annotation", {
+			caseId: "c_1",
+			selector: "form button",
+			comment: "From Claude",
+		});
+		const c = (await store.getCase("c_1")) as Case;
+		const added = c.annotations.find((a) => a.number === 3);
+		expect(added?.createdVia?.name).toBe("Claude");
+		// As the sync derives it for a case the team does not have yet.
+		const { ops } = deriveOps(
+			c,
+			emptyBook("c_1", "synced", "team_1"),
+			(path) => ({
+				sha256: path.padEnd(64, "0").slice(0, 64),
+				width: 10,
+				height: 10,
+				bytes: 1,
+			}),
+			(prefix) => `${prefix}_1${Math.random().toString(36).slice(2, 8)}`,
+		);
+		const create = ops.find(
+			(o) => o.type === "mark.create" && o.mark.number === 3,
+		);
+		expect(create && "via" in create ? create.via?.name : undefined).toBe(
+			"Claude",
+		);
+		// The case was not made by the app's call: its making names no app.
+		const made = ops.find((o) => o.type === "case.create");
+		expect(made && "via" in made).toBe(false);
+	});
+
+	test("deleting a comment: the question says it goes for the team too", async () => {
+		await seed();
+		await putCase(store, {
+			...((await store.getCase("c_1")) as Case),
+			comments: [
+				{
+					id: "k_1",
+					text: "Mine",
+					at: "2026-11-20T10:00:00.000Z",
+					app: { id: CLAUDE.id, name: "Claude", host: "claude.ai" },
+				},
+			],
+		});
+		const lines = await confirmLines(
+			store,
+			tab,
+			{
+				tool: { name: "delete_comment", description: "Does it." },
+				arguments: { caseId: "c_1", comment: "k_1" },
+				client: CLAUDE,
+				signal: new AbortController().signal,
+			},
+			{ team: async () => "Pedal & Pine web" },
+		);
+		expect(lines.join("\n")).toContain(
+			"It is deleted for the team “Pedal & Pine web” too.",
+		);
+	});
+
+	test("reopening a mark of a closed case opens the case, as the server does", async () => {
+		await seed();
+		await call("set_mark_status", { caseId: "c_1", mark: 1, status: "fixed" });
+		await call("set_case_status", { caseId: "c_1", status: "closed" });
+		expect((await store.getCase("c_1"))?.closed).toBeDefined();
+		await call("set_mark_status", {
+			caseId: "c_1",
+			mark: 1,
+			status: "open",
+			note: "Still cut off",
+		});
+		expect((await store.getCase("c_1"))?.closed).toBeUndefined();
+	});
+
+	test("what an app does to a mark names the app on that mark; a hand change after it does not", async () => {
+		await seed();
+		await call("set_mark_status", { caseId: "c_1", mark: 1, status: "fixed" });
+		const c = (await store.getCase("c_1")) as Case;
+		const a = c.annotations[0] as Annotation;
+		expect(markViaOf(a).via?.name).toBe("Claude");
+		// The person changes the mark's comment by hand: no longer the app's.
+		const byHand = withComment(
+			c,
+			a.id,
+			"Changed by hand",
+			"2026-11-20T12:00:00.000Z",
+		);
+		expect(markViaOf(byHand.annotations[0] as Annotation).via).toBeUndefined();
 	});
 });

@@ -9,11 +9,13 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
 	type Case,
-	validateCase,
 	withCaseComment,
 	withClosed,
 	withoutCaseComment,
 } from "../src/lib/case.ts";
+import { exportCase, readExport, storeImport } from "../src/lib/export.ts";
+import { MemoryStore } from "../src/lib/store.ts";
+import { readZip } from "../src/lib/zip.ts";
 import type { FakeApi } from "./cloud-fake.ts";
 import { FakeServer } from "./cloud-fake.ts";
 import {
@@ -183,11 +185,13 @@ describe("a 0.3.0 browser on the same team", () => {
 });
 
 describe("a file this build writes", () => {
-	test("0.3.0 reads it, without what it does not know; this build reads it back whole", async () => {
+	test("0.3.0 reads it, without what it does not know; this build reads it back whole, without this browser's notes", async () => {
 		await startCase(tess, "c_file");
 		await addMark(tess, "c_file", "Total is cut off");
-		const c = await change(tess, "c_file", (k, now) =>
-			withClosed(
+		// The thread, a close and a mark made through Claude, as the tools
+		// and the panel make them.
+		const c = await change(tess, "c_file", (k, now) => ({
+			...withClosed(
 				withCaseComment(
 					withCaseComment(k, { id: "k_1", text: "On the case" }, now),
 					{ id: "k_2", text: "On mark 1", mark: "a1", app: CLAUDE },
@@ -197,34 +201,44 @@ describe("a file this build writes", () => {
 				now,
 				CLAUDE,
 			),
+			annotations: k.annotations.map((a) => ({ ...a, createdVia: CLAUDE })),
+			createdVia: CLAUDE,
+		}));
+		expect(c.via?.app.name).toBe("Claude");
+		const zip = await exportCase(tess.store, c);
+		const json = JSON.parse(
+			new TextDecoder().decode(
+				(await readZip(zip)).get("case.json") as Uint8Array,
+			),
 		);
-		const file = JSON.parse(
-			JSON.stringify({
-				...c,
-				annotations: c.annotations.map((a) => ({
-					...a,
-					createdVia: CLAUDE,
-					commentBy: { at: c.updatedAt, app: CLAUDE },
-				})),
-				summaryBy: { at: c.updatedAt, user: TESS },
-			}),
-		);
+		// This browser's notes for its sync are not in the file.
+		expect("via" in json || "createdVia" in json).toBe(false);
+		expect("createdVia" in (json.annotations[0] ?? {})).toBe(true);
 		// 0.3.0: the case and its marks, nothing else.
-		const old = validateCase030(file);
+		const old = validateCase030(json);
 		expect(old.annotations.map((a) => a.comment)).toEqual(["Total is cut off"]);
 		expect(Object.keys(old)).not.toContain("comments");
 		expect(Object.keys(old)).not.toContain("closed");
 		expect(Object.keys(old.annotations[0] ?? {})).not.toContain("createdVia");
-		// This build: all of it.
-		const back = validateCase(file);
+		// This build, imported as a user imports it: the thread and the close;
+		// who wrote a comment is what the file says; a mark's app, the server's
+		// to say, is left out.
+		const into = new MemoryStore();
+		const back = await storeImport(into, await readExport(zip));
 		expect(
-			back.comments?.map((k) => [k.id, k.mark ?? null, k.app?.name ?? null]),
+			back.comments?.map((k) => [
+				k.id,
+				k.mark ?? null,
+				k.app?.name ?? null,
+				k.imported ?? false,
+			]),
 		).toEqual([
-			["k_1", null, null],
-			["k_2", "a1", "Claude"],
+			["k_1", null, null, true],
+			["k_2", "a1", "Claude", true],
 		]);
 		expect(back.closed?.app?.name).toBe("Claude");
-		expect(back.summaryBy?.user?.name).toBe("Tess Tester");
-		expect(back.annotations[0]?.createdVia?.name).toBe("Claude");
+		expect(back.annotations[0]?.createdVia).toBeUndefined();
+		expect(back.via).toBeUndefined();
+		expect(back.createdVia).toBeUndefined();
 	});
 });

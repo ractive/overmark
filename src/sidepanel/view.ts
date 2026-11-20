@@ -619,7 +619,7 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 					type: "button",
 					"data-action": "import-replace",
 					title:
-						"Put the file's copy in place of the case here, with its marks and screenshots; what only the case here has is lost",
+						"Put the file's copy in place of the case here, with its marks and screenshots; what only the case here has is lost, except its comments, which stay as they are here",
 					onclick: () => actions.importReplace(),
 				},
 				"Replace it",

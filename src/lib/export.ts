@@ -73,6 +73,20 @@ interface CaseFile {
 	data: Blob;
 }
 
+/**
+ * `c` without this browser's notes for its sync (DEC-046): which AI app made
+ * the case, its last change, a mark's last change, a comment's delete. A
+ * file carries none of them, in or out: sent, they would claim an app did
+ * what the person does.
+ */
+function withoutSyncNotes(c: Case): Case {
+	const { via: _v, createdVia: _c, deletedVia: _d, ...rest } = c;
+	return {
+		...rest,
+		annotations: rest.annotations.map(({ via: _a, ...a }) => a),
+	};
+}
+
 /** A case's files, each name after `folder` (`""`: at the top), case.json first. */
 async function caseFiles(
 	store: CaseStore,
@@ -81,7 +95,7 @@ async function caseFiles(
 ): Promise<CaseFile[]> {
 	// Which app made the last change is this browser's note for its sync
 	// (DEC-046), not part of the case: a file never carries it.
-	const { via: _via, ...written } = c;
+	const written = withoutSyncNotes(c);
 	const files: CaseFile[] = [
 		{
 			name: `${folder}case.json`,
@@ -435,7 +449,15 @@ export async function storeImport(
 		parsed.images instanceof Map ? parsed.images : await parsed.images();
 	// `page`, the list and the screenshots are made to agree (DEC-038):
 	// nothing in a file says they do.
-	const { via: _via, ...fromFile } = parsed.case;
+	const { comments: _fileThread, ...fromFile } = withoutSyncNotes(parsed.case);
+	// A file put in place of a case here replaces its marks and screenshots,
+	// not its thread (DEC-046): the thread is the conversation the case has
+	// here (and with the team), and a file is a copy of an earlier moment.
+	// Taken from the file, it would delete what was written since, or put
+	// an old text back in place of a teammate's newer one.
+	const existing = options.copy
+		? undefined
+		: await store.getCase(parsed.case.id);
 	const c: Case = withPagesAgreed({
 		...fromFile,
 		...(options.copy
@@ -447,14 +469,23 @@ export async function storeImport(
 		// Who wrote a comment is what the file says (DEC-046). A comment's id
 		// is the server's too, taken there by the original's: a copy's
 		// comments are new ones.
-		...(parsed.case.comments === undefined
-			? {}
-			: {
-					comments: (options.copy
-						? parsed.case.comments.map((k) => ({ ...k, id: newId("k") }))
-						: parsed.case.comments
-					).map((k) => ({ ...k, imported: true as const })),
-				}),
+		...(existing !== undefined
+			? {
+					...(existing.comments === undefined
+						? {}
+						: { comments: existing.comments }),
+					...(existing.deletedVia === undefined
+						? {}
+						: { deletedVia: existing.deletedVia }),
+				}
+			: parsed.case.comments === undefined
+				? {}
+				: {
+						comments: (options.copy
+							? parsed.case.comments.map((k) => ({ ...k, id: newId("k") }))
+							: parsed.case.comments
+						).map((k) => ({ ...k, imported: true as const })),
+					}),
 		page: { ...parsed.case.page, url: plainUrl(parsed.case.page.url) },
 		// The other pages' addresses too (DEC-038): its list's and its screenshots'.
 		...(parsed.case.pages === undefined
@@ -491,8 +522,22 @@ export async function storeImport(
 		})),
 		importedAt: (options.now ?? new Date()).toISOString(),
 	});
-	await store.replaceCase(c, images);
-	return c;
+	// A comment kept from here about a mark the file does not have: about a
+	// deleted mark.
+	const live = new Set(c.annotations.map((a) => a.id));
+	const value: Case =
+		c.comments === undefined
+			? c
+			: {
+					...c,
+					comments: c.comments.map(({ mark, ...k }) =>
+						mark === undefined || live.has(mark)
+							? { ...k, ...(mark === undefined ? {} : { mark }) }
+							: { ...k, markGone: true as const },
+					),
+				};
+	await store.replaceCase(value, images);
+	return value;
 }
 
 const COPY = " (copy)";

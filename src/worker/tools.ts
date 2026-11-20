@@ -60,6 +60,7 @@ import {
 	withClosed,
 	withFinding,
 	withFindingText,
+	withMarkVia,
 	withoutCaseComment,
 	withoutFinding,
 	withReopen,
@@ -234,10 +235,18 @@ export function findingWriter(client: ToolCallClient): RelayClient {
  * named on what is sent of it (`via`, DEC-046), while nothing changes after
  * it. A call from no known app (WebMCP) names none.
  */
-export function byApp(value: Case, client: ToolCallClient): Case {
+export function byApp(
+	value: Case,
+	client: ToolCallClient,
+	/** The mark the change is to: the change names the app on that mark. */
+	markId?: string,
+): Case {
 	const { via: _v, ...rest } = value;
-	if (client.kind !== "relay") return rest;
-	return { ...rest, via: { app: findingApp(client), at: value.updatedAt } };
+	const app = client.kind === "relay" ? findingApp(client) : undefined;
+	const marked = markId === undefined ? rest : withMarkVia(rest, markId, app);
+	return app === undefined
+		? marked
+		: { ...marked, via: { app, at: value.updatedAt } };
 }
 
 /** The AI app through the relay, if the caller is one. */
@@ -1377,7 +1386,9 @@ export function createTools(deps: ToolDeps): Tool[] {
 				const was = markStatus(a);
 				const set = (value: Case, said: string) => {
 					result = said;
-					return { value: value === c ? value : byApp(value, client) };
+					return {
+						value: value === c ? value : byApp(value, client, a.id),
+					};
 				};
 				// What the question said it would do (`confirmLines`), decided
 				// again on the mark as it is now.
@@ -1536,6 +1547,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 							now,
 						),
 						client,
+						a.id,
 					),
 				};
 			});
@@ -1579,7 +1591,11 @@ export function createTools(deps: ToolDeps): Tool[] {
 				const { c, a } = caseAndMark(current, caseId, mark, signal);
 				ownFinding(a, finding, writer, me);
 				return {
-					value: byApp(withFindingText(c, a.id, finding, body, now), client),
+					value: byApp(
+						withFindingText(c, a.id, finding, body, now),
+						client,
+						a.id,
+					),
 				};
 			});
 			deps.onChange?.(caseId);
@@ -1610,7 +1626,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 					const { c, a } = caseAndMark(current, caseId, mark, signal);
 					ownFinding(a, finding, writer, me);
 					return {
-						value: byApp(withoutFinding(c, a.id, finding, now), client),
+						value: byApp(withoutFinding(c, a.id, finding, now), client, a.id),
 					};
 				});
 				deps.onChange?.(caseId);
@@ -2051,14 +2067,21 @@ export async function confirmLines(
 	}
 	// A comment, closing and reopening sync with the team: said before the answer.
 	if (
-		["add_comment", "edit_comment", "set_case_status"].includes(
-			request.tool.name,
-		) &&
+		[
+			"add_comment",
+			"edit_comment",
+			"set_case_status",
+			"delete_comment",
+		].includes(request.tool.name) &&
 		typeof caseId === "string"
 	) {
 		const team = await cloud.team?.(caseId).catch(() => undefined);
 		if (team !== undefined)
-			lines.push(`It syncs with the team “${team}”: its members see it.`);
+			lines.push(
+				request.tool.name === "delete_comment"
+					? `It is deleted for the team “${team}” too.`
+					: `It syncs with the team “${team}”: its members see it.`,
+			);
 	}
 	// Deleting a case the team has deletes it for everyone: said before the answer.
 	if (request.tool.name === "delete_case" && typeof caseId === "string") {
