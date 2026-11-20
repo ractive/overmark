@@ -79,10 +79,13 @@ async function caseFiles(
 	c: Case,
 	folder: string,
 ): Promise<CaseFile[]> {
+	// Which app made the last change is this browser's note for its sync
+	// (DEC-046), not part of the case: a file never carries it.
+	const { via: _via, ...written } = c;
 	const files: CaseFile[] = [
 		{
 			name: `${folder}case.json`,
-			data: new Blob([`${JSON.stringify(c, null, "\t")}\n`]),
+			data: new Blob([`${JSON.stringify(written, null, "\t")}\n`]),
 		},
 		{ name: `${folder}case.md`, data: new Blob([caseMarkdown(c)]) },
 	];
@@ -432,14 +435,26 @@ export async function storeImport(
 		parsed.images instanceof Map ? parsed.images : await parsed.images();
 	// `page`, the list and the screenshots are made to agree (DEC-038):
 	// nothing in a file says they do.
+	const { via: _via, ...fromFile } = parsed.case;
 	const c: Case = withPagesAgreed({
-		...parsed.case,
+		...fromFile,
 		...(options.copy
 			? {
 					id: newId("c"),
 					title: `${parsed.case.title.slice(0, MAX_TITLE - COPY.length)}${COPY}`,
 				}
 			: {}),
+		// Who wrote a comment is what the file says (DEC-046). A comment's id
+		// is the server's too, taken there by the original's: a copy's
+		// comments are new ones.
+		...(parsed.case.comments === undefined
+			? {}
+			: {
+					comments: (options.copy
+						? parsed.case.comments.map((k) => ({ ...k, id: newId("k") }))
+						: parsed.case.comments
+					).map((k) => ({ ...k, imported: true as const })),
+				}),
 		page: { ...parsed.case.page, url: plainUrl(parsed.case.page.url) },
 		// The other pages' addresses too (DEC-038): its list's and its screenshots'.
 		...(parsed.case.pages === undefined
@@ -453,7 +468,9 @@ export async function storeImport(
 		shots: parsed.case.shots.map((s) =>
 			s.url === undefined ? s : { ...s, url: plainUrl(s.url) },
 		),
-		annotations: parsed.case.annotations.map((a) => ({
+		// The app that made a mark is the server's record, which a file only
+		// claims (DEC-046): it would be sent as the app's doing.
+		annotations: parsed.case.annotations.map(({ createdVia: _cv, ...a }) => ({
 			...a,
 			...(a.findings === undefined
 				? {}

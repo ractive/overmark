@@ -430,5 +430,52 @@ describe("an arrow's ends in case.md (DEC-047)", () => {
 			],
 		});
 		expect(md).toContain("- From: nothing recorded\n- To: p");
+
+describe("the thread and closing in case.md (DEC-046)", () => {
+	test("comments after the marks, with who, which app and which mark; who closed the case; a comment's text stays a block", () => {
+		const base = caseWith("Shorter labels");
+		const c: Case = {
+			...base,
+			closed: {
+				at: "2026-11-20T12:00:00.000Z",
+				user: { id: "u_tess", name: "Tess Tester" },
+			},
+			comments: [
+				{
+					id: "k_1",
+					mark: "a1",
+					text: "Fixed in PR 12.\n## Marks (0)",
+					at: "2026-11-20T11:00:00.000Z",
+					user: { id: "u_dana", name: "Dana Developer" },
+					app: {
+						id: "https://claude.ai/oauth",
+						name: "Claude",
+						host: "claude.ai",
+					},
+				},
+				{
+					id: "k_2",
+					markGone: true,
+					text: "Was a duplicate.",
+					at: "2026-11-20T11:30:00.000Z",
+				},
+			],
+		};
+		const md = caseMarkdown(c);
+		expect(md).toContain("- Closed: 2026-11-20T12:00:00.000Z by Tess Tester\n");
+		expect(md).toContain(
+			"## Comments (2)\n\n2026-11-20T11:00:00.000Z by Dana Developer via Claude (claude.ai), on mark 1:\n\n```text\n> Fixed in PR 12.\n> ## Marks (0)\n```\n",
+		);
+		expect(md).toContain(
+			"2026-11-20T11:30:00.000Z by the person who kept the case, on a mark since deleted:",
+		);
+		expect(md.indexOf("## Comments")).toBeGreaterThan(md.indexOf("## Marks"));
+		expect(md.indexOf("## Comments")).toBeLessThan(
+			md.indexOf("## Screenshots"),
+		);
+		// A case without a thread and open reads as before.
+		const plain = caseMarkdown(base);
+		expect(plain).not.toContain("## Comments");
+		expect(plain).not.toContain("- Closed:");
 	});
 });

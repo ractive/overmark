@@ -9,6 +9,7 @@ import {
 	type Annotation,
 	CASE_FORMAT,
 	type Case,
+	type CaseComment,
 	type CasePage,
 	casePages,
 	cropImage,
@@ -16,7 +17,9 @@ import {
 	ELEMENT_ATTRIBUTES,
 	type ElementDetails,
 	type Finding,
+	type FindingApp,
 	LANGUAGE,
+	MAX_CASE_COMMENT,
 	MAX_COMMENT,
 	MAX_FINDING,
 	MAX_FINDINGS,
@@ -36,6 +39,7 @@ import {
 	type Resolution,
 	type Shape,
 	type Shot,
+	type Stamp,
 	samePage,
 	shapeBounds,
 	shotImage,
@@ -44,10 +48,12 @@ import {
 } from "../case.ts";
 import { cropRectFor } from "../save.ts";
 import type {
+	AppRef,
 	ImageRef,
 	Op,
 	OpOf,
 	WireCase,
+	WireComment,
 	WireElement,
 	WireFinding,
 	WireMark,
@@ -55,6 +61,7 @@ import type {
 	WireReopen,
 	WireResolution,
 	WireShot,
+	WireStamp,
 } from "./api.ts";
 import type {
 	CaseBook,
@@ -143,6 +150,25 @@ export function markContent(a: Annotation): MarkContent {
 		reopens: a.reopens ?? [],
 		findings: a.findings ?? [],
 	};
+}
+
+/** An AI app as the server takes it (`via`, DEC-046): within its limits. */
+export function appOut(app: FindingApp): AppRef {
+	return {
+		id: app.id.slice(0, 2000),
+		...(app.name ? { name: cutText(app.name, 200) } : {}),
+		host: app.host.slice(0, 255),
+	};
+}
+
+/**
+ * The AI app the case's last change was made through, while it is the last
+ * change (`Case.via`); none: the person's, by hand.
+ */
+export function viaOf(c: Case): { via?: AppRef } {
+	return c.via !== undefined && c.via.at === c.updatedAt
+		? { via: appOut(c.via.app) }
+		: {};
 }
 
 /**
@@ -453,14 +479,23 @@ export function deriveOps(
 	book: CaseBook,
 	image: (path: string) => ImageRef | undefined,
 	newId: (prefix: string) => string,
+	/** Who is signed in: only their own comments are deleted from here. */
+	me?: string,
 ): { ops: Op[]; missing: string[] } {
 	relink(c, book);
 	const ops: Op[] = [];
 	const missing: string[] = [];
 	const shadow = book.shadow;
 	const content = caseContent(c);
+	// An AI app's change names the app (DEC-046); the person's never does.
+	const via = viaOf(c);
 	if (shadow === undefined)
-		ops.push({ opId: newId("o"), type: "case.create", case: newCaseOf(c) });
+		ops.push({
+			opId: newId("o"),
+			type: "case.create",
+			case: newCaseOf(c),
+			...via,
+		});
 	else {
 		const patch = casePatch(content, shadow.case);
 		if (patch !== undefined)
@@ -469,7 +504,12 @@ export function deriveOps(
 				type: "case.patch",
 				caseId: c.id,
 				...patch,
+				...via,
 			});
+		// Open again before any mark goes (a mark sent first would open it
+		// at the server by itself, and the reopen would be a duplicate).
+		if (shadow.closed === true && c.closed === undefined)
+			ops.push({ opId: newId("o"), type: "case.reopen", caseId: c.id, ...via });
 	}
 	const marks = shadow?.marks ?? {};
 	const shots = shadow?.shots ?? {};
@@ -531,6 +571,8 @@ export function deriveOps(
 			type: "mark.create",
 			caseId: c.id,
 			mark: newMarkOf(a, id, shotId, ref, shot?.capturedAt),
+			// Made through an AI app of this browser's: that app.
+			...(a.createdVia === undefined ? {} : { via: appOut(a.createdVia) }),
 		});
 	}
 	for (const a of sorted) {
@@ -544,9 +586,70 @@ export function deriveOps(
 				type: "mark.patch",
 				markId: wire,
 				...patch,
+				...via,
 			});
 	}
+	ops.push(...commentOps(c, book, newId, via, me));
+	// Closed once the marks are there: a new open mark sent after the close
+	// would open it again at the server.
+	if (c.closed !== undefined && shadow?.closed !== true)
+		ops.push({ opId: newId("o"), type: "case.close", caseId: c.id, ...via });
 	return { ops, missing };
+}
+
+/**
+ * The thread's operations (DEC-046): comments not at the server yet, in the
+ * thread's order; changed texts; and deletes of one's own comments the
+ * server still has. A comment about a mark the server does not have yet
+ * waits for it; one about a mark deleted since goes as the case's.
+ */
+function commentOps(
+	c: Case,
+	book: CaseBook,
+	newId: (prefix: string) => string,
+	via: { via?: AppRef },
+	me: string | undefined,
+): Op[] {
+	const ops: Op[] = [];
+	const known = book.shadow?.comments ?? {};
+	const here = new Set((c.comments ?? []).map((k) => k.id));
+	for (const [id, before] of Object.entries(known))
+		if (!here.has(id) && (before.userId === undefined || before.userId === me))
+			ops.push({
+				opId: newId("o"),
+				type: "comment.delete",
+				commentId: id,
+				...via,
+			});
+	for (const k of c.comments ?? []) {
+		const before = known[k.id];
+		if (before === undefined) {
+			const markId = k.mark === undefined ? undefined : book.marks[k.mark];
+			if (k.mark !== undefined && markId === undefined) continue;
+			ops.push({
+				opId: newId("o"),
+				type: "comment.create",
+				caseId: c.id,
+				comment: {
+					id: k.id,
+					text: k.text,
+					...(markId === undefined ? {} : { markId }),
+					at: k.at,
+				},
+				...(k.app === undefined || k.imported ? {} : { via: appOut(k.app) }),
+			});
+		} else if (before.text !== k.text)
+			ops.push({
+				opId: newId("o"),
+				type: "comment.patch",
+				commentId: k.id,
+				text: k.text,
+				...(k.edited?.app === undefined || k.imported
+					? {}
+					: { via: appOut(k.edited.app) }),
+			});
+	}
+	return ops;
 }
 
 /** The case's content as a new case's operation said it. */
@@ -628,6 +731,26 @@ export function applyOp(book: CaseBook, op: Op, number?: number): void {
 		case "mark.delete":
 			dropMark(book, op.markId);
 			return;
+		case "case.close":
+			shadow.closed = true;
+			return;
+		case "case.reopen":
+			shadow.closed = false;
+			return;
+		case "comment.create":
+			shadow.comments = {
+				...shadow.comments,
+				[op.comment.id]: { text: op.comment.text },
+			};
+			return;
+		case "comment.patch": {
+			const before = shadow.comments?.[op.commentId];
+			if (before !== undefined) before.text = op.text;
+			return;
+		}
+		case "comment.delete":
+			if (shadow.comments !== undefined) delete shadow.comments[op.commentId];
+			return;
 		default:
 			return;
 	}
@@ -676,6 +799,33 @@ const appIn = (app: WireResolution["app"]): Pick<Resolution, "app"> =>
 					host: text(app.host, 255),
 				},
 			};
+
+/** When, by whom, through which app, as the server says it (DEC-046). */
+export function stampIn(w: WireStamp): Stamp {
+	return {
+		at: text(w.at, 64),
+		...userIn(w.user),
+		...appIn(w.app),
+	};
+}
+
+/** A comment of the server's, its mark by its id here (`marks`: the server's id to the one here). */
+export function commentIn(
+	w: WireComment,
+	marks: ReadonlyMap<string, string>,
+): CaseComment {
+	const mark = w.markId === null ? undefined : marks.get(w.markId);
+	return {
+		id: w.id,
+		...(mark === undefined ? {} : { mark }),
+		...(w.markId !== null && mark === undefined ? { markGone: true } : {}),
+		text: text(w.text, MAX_CASE_COMMENT) || "…",
+		at: text(w.at, 64),
+		...userIn(w.user),
+		...appIn(w.app),
+		...(w.edited === undefined ? {} : { edited: stampIn(w.edited) }),
+	};
+}
 
 function resolutionIn(r: WireResolution): Resolution {
 	return {
@@ -888,6 +1038,10 @@ export interface Incoming {
 	/** Ids at the server of marks and screenshots it no longer has. */
 	removedMarks: string[];
 	removedShots: string[];
+	/** The thread's new and changed comments (DEC-046); with `whole`, all of them, in the server's order. */
+	comments?: WireComment[];
+	/** Ids of comments the server no longer has. */
+	removedComments?: string[];
 }
 
 /** An image a merge writes: where, and which of the server's. */
@@ -1060,6 +1214,16 @@ export function renumber(
 	return {
 		...c,
 		annotations: annotations.sort((x, y) => x.number - y.number),
+		// A comment follows its mark to its new id (DEC-046).
+		...(c.comments === undefined
+			? {}
+			: {
+					comments: c.comments.map((k) =>
+						k.mark === undefined || !renamed.has(k.mark)
+							? k
+							: { ...k, mark: renamed.get(k.mark) as string },
+					),
+				}),
 		// Never below a mark's number, where the case keeps it.
 		...(c.lastNumber === undefined
 			? {}
@@ -1100,6 +1264,8 @@ export function mergeCase(
 		 */
 		lost?: boolean;
 		now: string;
+		/** Who is signed in: whether what the thread waits to send is all sent. */
+		me?: string;
 	},
 ): Merged | undefined {
 	let book: CaseBook = structuredClone(
@@ -1172,7 +1338,23 @@ export function mergeCase(
 		if (a !== undefined) {
 			out.deleteImages.add(a.crop);
 			emptied.add(a.shot);
-			c = { ...c, annotations: c.annotations.filter((x) => x !== a) };
+			c = {
+				...c,
+				annotations: c.annotations.filter((x) => x !== a),
+				// Its comments stay, about "a deleted mark".
+				...(c.comments === undefined
+					? {}
+					: {
+							comments: c.comments.map((k) =>
+								k.mark === a.id
+									? (({ mark: _m, ...rest }) => ({
+											...rest,
+											markGone: true as const,
+										}))(k)
+									: k,
+							),
+						}),
+			};
 		}
 		delete shadow.marks[wire];
 		if (id !== undefined) delete book.marks[id];
@@ -1222,6 +1404,21 @@ export function mergeCase(
 		const had = given?.shadow?.marks[w.id] !== undefined;
 		const drawn = { shape: shapeIn(w.shape), element: elementIn(w.element) };
 		const creator = userIn(w.createdBy).user;
+		// The server's record of who did what (DEC-046): shown, never compared.
+		const records = (a: Annotation): Annotation => {
+			const { createdVia: _v, commentBy: _b, ...rest } = a;
+			return {
+				...rest,
+				...(w.createdVia === undefined
+					? a.createdVia === undefined
+						? {}
+						: { createdVia: a.createdVia }
+					: { createdVia: appIn(w.createdVia).app as FindingApp }),
+				...(w.commentBy === undefined
+					? {}
+					: { commentBy: stampIn(w.commentBy) }),
+			};
+		};
 		shadow.marks[w.id] = {
 			number: w.number,
 			shotId: w.shotId,
@@ -1235,8 +1432,9 @@ export function mergeCase(
 				a,
 				mergeContent(markContent(a), before?.content, content),
 			);
-			const next: Annotation =
-				creator === undefined ? merged : { ...merged, createdBy: creator };
+			const next: Annotation = records(
+				creator === undefined ? merged : { ...merged, createdBy: creator },
+			);
 			c = {
 				...c,
 				annotations: c.annotations.map((x) => (x === a ? next : x)),
@@ -1258,19 +1456,21 @@ export function mergeCase(
 			wire: w.id,
 			// A crop cut here from a whole-screenshot one (DEC-047), if one was.
 			crop: fetched.get(cutKey(w.id)) ?? need(w.crop),
-			mark: withContent(
-				{
-					id: markId,
-					number: w.number,
-					shot,
-					comment: "",
-					author: "user",
-					shape: drawn.shape,
-					crop: cropImage(markId),
-					element: drawn.element,
-					...(creator === undefined ? {} : { createdBy: creator }),
-				},
-				content,
+			mark: records(
+				withContent(
+					{
+						id: markId,
+						number: w.number,
+						shot,
+						comment: "",
+						author: "user",
+						shape: drawn.shape,
+						crop: cropImage(markId),
+						element: drawn.element,
+						...(creator === undefined ? {} : { createdBy: creator }),
+					},
+					content,
+				),
 			),
 		});
 	}
@@ -1301,6 +1501,8 @@ export function mergeCase(
 				(x, y) => x.number - y.number,
 			),
 		};
+
+	c = mergeComments(c, book, given, incoming, options.whole, options.lost);
 
 	// Screenshots the server no longer has: gone here when no mark is on them.
 	const shotNow = reverse(book.shots);
@@ -1348,6 +1550,26 @@ export function mergeCase(
 		};
 		c = withPagesOf(c, pagesIn(incoming.case.pages ?? []));
 		shadow.case = theirs;
+		// Closed or open (DEC-046): the server's, unless changed here since,
+		// which is sent next. A server before it says nothing of it.
+		const w = incoming.case;
+		if (w.closed !== undefined) {
+			const was = given?.shadow?.closed === true;
+			if ((c.closed !== undefined) === was) {
+				const { closed: _c, ...open } = c;
+				c = w.closed === null ? open : { ...open, closed: stampIn(w.closed) };
+			}
+			shadow.closed = w.closed !== null;
+		}
+		// Who wrote the summary as it reads now: the server's record, unless
+		// the summary was changed here since, which is sent next.
+		if (same(mine.summary, was.summary)) {
+			const { summaryBy: _s, ...unsigned } = c;
+			c =
+				w.summaryBy === undefined
+					? unsigned
+					: { ...unsigned, summaryBy: stampIn(w.summaryBy) };
+		}
 	}
 	for (const path of out.images.keys()) out.deleteImages.delete(path);
 
@@ -1372,7 +1594,7 @@ export function mergeCase(
 	book.mode = "synced";
 	book.teamId = options.teamId;
 	// Nothing left to send: the next look at the case can pass it by.
-	if (isClean(c, book)) {
+	if (isClean(c, book, options.me)) {
 		book.cleanAt = c.updatedAt;
 		// The server and this device agree: what was sent last arrived, and
 		// what it refused before is no longer wanted here either.
@@ -1388,6 +1610,74 @@ export function mergeCase(
 	};
 }
 
+/**
+ * The thread after what came (DEC-046), and the shadow's record of it. A
+ * comment the server no longer has goes; one of the server's that was not
+ * changed here since takes the server's text and record; one changed here
+ * keeps its text, which is sent next; one deleted here stays deleted. New
+ * ones come at the end, in the server's order; a whole read puts the whole
+ * thread in the server's order, with what only this device has after it.
+ */
+function mergeComments(
+	c: Case,
+	book: CaseBook,
+	given: CaseBook | undefined,
+	incoming: Incoming,
+	whole: boolean,
+	lost: boolean | undefined,
+): Case {
+	const shadow = book.shadow as Shadow;
+	const known = { ...shadow.comments };
+	const was = given?.shadow?.comments ?? {};
+	const removed = new Set(incoming.removedComments ?? []);
+	const came = incoming.comments ?? [];
+	if (whole && incoming.comments !== undefined) {
+		const named = new Set(came.map((w) => w.id));
+		for (const id of Object.keys(known))
+			if (!named.has(id)) {
+				if (lost) delete known[id];
+				else removed.add(id);
+			}
+	}
+	if (removed.size === 0 && came.length === 0) return c;
+	let list = (c.comments ?? []).filter((k) => !removed.has(k.id));
+	for (const id of removed) delete known[id];
+	const marks = reverse(book.marks);
+	for (const w of came) {
+		if (removed.has(w.id) || w.caseId !== c.id) continue;
+		const theirs = commentIn(w, marks);
+		const before = was[w.id];
+		known[w.id] = {
+			text: w.text,
+			...(w.user === null ? {} : { userId: w.user.id }),
+		};
+		const at = list.findIndex((k) => k.id === w.id);
+		if (at >= 0) {
+			const mine = list[at] as CaseComment;
+			list[at] =
+				before !== undefined && mine.text !== before.text
+					? {
+							...theirs,
+							text: mine.text,
+							...(mine.edited ? { edited: mine.edited } : {}),
+						}
+					: theirs;
+		} else if (before === undefined) list.push(theirs);
+	}
+	if (whole && incoming.comments !== undefined) {
+		const order = new Map(came.map((w, i) => [w.id, i]));
+		list = [
+			...list
+				.filter((k) => order.has(k.id))
+				.sort((x, y) => (order.get(x.id) ?? 0) - (order.get(y.id) ?? 0)),
+			...list.filter((k) => !order.has(k.id)),
+		];
+	}
+	shadow.comments = known;
+	const { comments: _k, ...rest } = c;
+	return list.length > 0 ? { ...rest, comments: list } : rest;
+}
+
 /** The case without its time, as one text; who did something counts: it shows. */
 const strip = (c: Case) => {
 	const { updatedAt: _u, ...rest } = c;
@@ -1395,7 +1685,7 @@ const strip = (c: Case) => {
 };
 
 /** The case here is what the server has: there is nothing to send. */
-export function isClean(c: Case, book: CaseBook): boolean {
+export function isClean(c: Case, book: CaseBook, me?: string): boolean {
 	const shadow = book.shadow;
 	if (shadow === undefined) return false;
 	if (casePatch(caseContent(c), shadow.case) !== undefined) return false;
@@ -1408,7 +1698,16 @@ export function isClean(c: Case, book: CaseBook): boolean {
 		if (markPatch(markContent(a), before.content) !== undefined) return false;
 		wires.add(wire);
 	}
-	return Object.keys(shadow.marks).every((wire) => wires.has(wire));
+	if (!Object.keys(shadow.marks).every((wire) => wires.has(wire))) return false;
+	if ((c.closed !== undefined) !== (shadow.closed === true)) return false;
+	// The thread: what commentOps would send.
+	const known = shadow.comments ?? {};
+	const here = new Map((c.comments ?? []).map((k) => [k.id, k]));
+	for (const k of here.values()) if (known[k.id]?.text !== k.text) return false;
+	return Object.entries(known).every(
+		([id, before]) =>
+			here.has(id) || (before.userId !== undefined && before.userId !== me),
+	);
 }
 
 /**

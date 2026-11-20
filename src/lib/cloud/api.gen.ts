@@ -45,7 +45,7 @@ export interface paths {
 			path?: never;
 			cookie?: never;
 		};
-		/** One case with its screenshots and marks */
+		/** One case with its screenshots, marks and comments */
 		get: operations["getCase"];
 		put?: never;
 		post?: never;
@@ -84,7 +84,7 @@ export interface paths {
 		};
 		/**
 		 * What changed after a revision
-		 * @description Without since: the team's whole state. Ask again with the returned cursor while more is true.
+		 * @description Without since: the team's whole state, without what was deleted. With since, 0 included: what changed after that revision, deletions too. Ask again with the returned cursor while more is true.
 		 */
 		get: operations["getChanges"];
 		put?: never;
@@ -171,13 +171,27 @@ export interface components {
 			title: string;
 			link: string | null;
 			summary: string | null;
+			summaryBy?: components["schemas"]["Stamp"];
 			pages: components["schemas"]["Page"][];
 			client: components["schemas"]["ClientInfo"];
 			lastNumber: number;
 			importedAt: components["schemas"]["Timestamp"] | null;
+			closed: components["schemas"]["Stamp"] | null;
 			createdBy: components["schemas"]["UserRef"] | null;
 			createdAt: components["schemas"]["Timestamp"];
 			updatedAt: components["schemas"]["Timestamp"];
+			rev: number;
+		};
+		/** @description One comment in a case's thread: what someone (or an AI app for them) says about the case or one of its marks, beside the summary, which stays the reporter's. */
+		CaseComment: {
+			id: components["schemas"]["Id"];
+			caseId: components["schemas"]["Id"];
+			markId: components["schemas"]["Id"] | null;
+			text: string;
+			user: components["schemas"]["UserRef"] | null;
+			app?: components["schemas"]["AppRef"];
+			at: components["schemas"]["Timestamp"];
+			edited?: components["schemas"]["Stamp"];
 			rev: number;
 		};
 		/** @description A case's marks by status group. */
@@ -193,16 +207,19 @@ export interface components {
 			title: string;
 			link: string | null;
 			summary: string | null;
+			summaryBy?: components["schemas"]["Stamp"];
 			pages: components["schemas"]["Page"][];
 			client: components["schemas"]["ClientInfo"];
 			lastNumber: number;
 			importedAt: components["schemas"]["Timestamp"] | null;
+			closed: components["schemas"]["Stamp"] | null;
 			createdBy: components["schemas"]["UserRef"] | null;
 			createdAt: components["schemas"]["Timestamp"];
 			updatedAt: components["schemas"]["Timestamp"];
 			rev: number;
 			shots: components["schemas"]["Shot"][];
 			marks: components["schemas"]["Mark"][];
+			comments: components["schemas"]["CaseComment"][];
 		};
 		CaseList: {
 			cases: components["schemas"]["CaseSummary"][];
@@ -213,10 +230,12 @@ export interface components {
 			title: string;
 			link: string | null;
 			summary: string | null;
+			summaryBy?: components["schemas"]["Stamp"];
 			pages: components["schemas"]["Page"][];
 			client: components["schemas"]["ClientInfo"];
 			lastNumber: number;
 			importedAt: components["schemas"]["Timestamp"] | null;
+			closed: components["schemas"]["Stamp"] | null;
 			createdBy: components["schemas"]["UserRef"] | null;
 			createdAt: components["schemas"]["Timestamp"];
 			updatedAt: components["schemas"]["Timestamp"];
@@ -234,6 +253,7 @@ export interface components {
 			cases: components["schemas"]["Case"][];
 			shots: components["schemas"]["Shot"][];
 			marks: components["schemas"]["Mark"][];
+			comments: components["schemas"]["CaseComment"][];
 			removed: components["schemas"]["Removed"][];
 		};
 		/** @description The browser the case was started in. */
@@ -301,6 +321,8 @@ export interface components {
 			findings: components["schemas"]["Finding"][];
 			status: components["schemas"]["MarkStatus"];
 			createdBy: components["schemas"]["UserRef"] | null;
+			createdVia?: components["schemas"]["AppRef"];
+			commentBy?: components["schemas"]["Stamp"];
 			createdAt: components["schemas"]["Timestamp"];
 			updatedAt: components["schemas"]["Timestamp"];
 			rev: number;
@@ -319,7 +341,7 @@ export interface components {
 			};
 			teams: components["schemas"]["TeamMembership"][];
 		};
-		/** @description One change to a case, a screenshot or a mark. */
+		/** @description One change to a case, a screenshot, a mark or a comment. A server that does not know an operation's type refuses the request; a client sends only the types it knows. */
 		Op:
 			| {
 					opId: components["schemas"]["Id"];
@@ -336,6 +358,7 @@ export interface components {
 						createdAt?: components["schemas"]["Timestamp"];
 						importedAt?: components["schemas"]["Timestamp"] | null;
 					};
+					via?: components["schemas"]["AppRef"];
 			  }
 			| {
 					opId: components["schemas"]["Id"];
@@ -347,6 +370,7 @@ export interface components {
 					summary?: string | null;
 					pages?: components["schemas"]["Page"][];
 					lastNumber?: number;
+					via?: components["schemas"]["AppRef"];
 			  }
 			| {
 					opId: components["schemas"]["Id"];
@@ -399,6 +423,7 @@ export interface components {
 						findings?: components["schemas"]["Finding"][];
 						createdAt?: components["schemas"]["Timestamp"];
 					};
+					via?: components["schemas"]["AppRef"];
 			  }
 			| {
 					opId: components["schemas"]["Id"];
@@ -416,12 +441,55 @@ export interface components {
 						upsert?: components["schemas"]["Finding"][];
 						remove?: components["schemas"]["Id"][];
 					};
+					via?: components["schemas"]["AppRef"];
 			  }
 			| {
 					opId: components["schemas"]["Id"];
 					/** @constant */
 					type: "mark.delete";
 					markId: components["schemas"]["Id"];
+			  }
+			| {
+					opId: components["schemas"]["Id"];
+					/** @constant */
+					type: "case.close";
+					caseId: components["schemas"]["Id"];
+					via?: components["schemas"]["AppRef"];
+			  }
+			| {
+					opId: components["schemas"]["Id"];
+					/** @constant */
+					type: "case.reopen";
+					caseId: components["schemas"]["Id"];
+					via?: components["schemas"]["AppRef"];
+			  }
+			| {
+					opId: components["schemas"]["Id"];
+					/** @constant */
+					type: "comment.create";
+					caseId: components["schemas"]["Id"];
+					comment: {
+						id: components["schemas"]["Id"];
+						text: string;
+						markId?: components["schemas"]["Id"] | null;
+						at?: components["schemas"]["Timestamp"];
+					};
+					via?: components["schemas"]["AppRef"];
+			  }
+			| {
+					opId: components["schemas"]["Id"];
+					/** @constant */
+					type: "comment.patch";
+					commentId: components["schemas"]["Id"];
+					text: string;
+					via?: components["schemas"]["AppRef"];
+			  }
+			| {
+					opId: components["schemas"]["Id"];
+					/** @constant */
+					type: "comment.delete";
+					commentId: components["schemas"]["Id"];
+					via?: components["schemas"]["AppRef"];
 			  };
 		/**
 		 * @description Why an operation was refused. A client treats a code it does not know as invalid.
@@ -470,7 +538,7 @@ export interface components {
 		};
 		Removed: {
 			/** @enum {string} */
-			type: "case" | "shot" | "mark";
+			type: "case" | "shot" | "mark" | "comment";
 			id: components["schemas"]["Id"];
 			caseId?: components["schemas"]["Id"];
 			rev: number;
@@ -537,6 +605,12 @@ export interface components {
 			viewport: components["schemas"]["Viewport"];
 			capturedAt: components["schemas"]["Timestamp"];
 			rev: number;
+		};
+		/** @description Who did something, and when: the person (set by the server from the caller's login, never taken from a client) and the AI app they acted through. Written in words: `Dana via Claude Code`. */
+		Stamp: {
+			at: components["schemas"]["Timestamp"];
+			user?: components["schemas"]["UserRef"];
+			app?: components["schemas"]["AppRef"];
 		};
 		TeamMembership: {
 			id: string;

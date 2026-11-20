@@ -68,7 +68,7 @@
 				<h2 id="files-heading">Files</h2>
 				<div class="row import">
 					<button id="import" type="button" title="Choose a Sitegloss .zip file: one exported case, or a file of all cases. For a case that is here already, Sitegloss asks first whether to replace it or keep both.">Import a case…</button>
-					<button id="export-all" type="button" title="Save every case in one .zip file, a folder per case with its marks, comments, findings, summary and screenshots. Import a case… reads it back, in this browser or another.">Export all cases</button>
+					<button id="export-all" type="button" title="Save every case in one .zip file, a folder per case with its marks, comments, findings, summary, thread and screenshots. Import a case… reads it back, in this browser or another.">Export all cases</button>
 					<input id="import-file" type="file" accept=".zip,application/zip" hidden />
 				</div>
 				<div id="export-all-saved" hidden></div>
@@ -101,7 +101,7 @@
 				<!-- An AI app was just paired: what to do next, and the way back (DEC-045; view.ts). -->
 				<div id="paired-next" class="paired-next" role="status" hidden>
 					<p id="paired-next-text"></p>
-					<p class="meta">Ask it about a case, for example “Look at the Sitegloss case open in my browser and fix its marks”. Before it changes a case, it asks you here, unless you allow all changes below.</p>
+					<p class="meta">Ask it about a case, for example “Look at the Sitegloss case open in my browser, fix its marks and say what you did in a comment”. Before it changes a case, it asks you here, unless you allow all changes below. What it changes shows with its name beside yours.</p>
 					<button id="paired-back" type="button" class="strong"></button>
 				</div>
 				<ul id="pair-grants" class="grants" aria-label="Connected AI apps"></ul>

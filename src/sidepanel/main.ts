@@ -23,10 +23,14 @@ import {
 	type PageInfo,
 	validateCase,
 	viewportAt,
+	withCaseComment,
+	withCaseCommentText,
 	withChoice,
+	withClosed,
 	withComment,
 	withLink,
 	withoutAnnotation,
+	withoutCaseComment,
 	withoutFinding,
 	withReopen,
 	withTitle,
@@ -1254,6 +1258,32 @@ const LINK_TOO_LONG = `A link has at most ${MAX_LINK} characters.`;
  * field removes it. Text that is no http or https address keeps the form
  * open and says so.
  */
+/**
+ * A change to the case's thread or its closing, by hand (DEC-046), in one
+ * transaction; what went wrong is said under the case's buttons.
+ */
+async function changeThread(
+	caseId: string,
+	change: (c: Case, now: string) => Case,
+): Promise<void> {
+	const hint = caseHintWriter();
+	try {
+		const saved = await store.updateCase(caseId, (current) => {
+			if (current === undefined) throw new Error("The case no longer exists.");
+			return {
+				value: validateCase(change(current, new Date().toISOString())),
+			};
+		});
+		update((s) => {
+			if (s.current?.id === caseId) s.current = saved;
+		});
+		announce(caseId);
+		void refreshCases();
+	} catch (error) {
+		hint(`Not saved: ${message(error)}`);
+	}
+}
+
 async function linkCase(caseId: string, text: string): Promise<void> {
 	const link = text.trim() === "" ? undefined : cleanLink(text);
 	if (link === undefined && text.trim() !== "") {
@@ -1737,6 +1767,24 @@ const actions: Actions = {
 	},
 
 	saveLink: (c, text) => void linkCase(c.id, text),
+	addComment: (caseId, text, markId) =>
+		void changeThread(caseId, (c, now) =>
+			withCaseComment(
+				c,
+				{ id: newId("k"), text, ...(markId ? { mark: markId } : {}) },
+				now,
+			),
+		),
+	editComment: (caseId, commentId, text) =>
+		void changeThread(caseId, (c, now) =>
+			withCaseCommentText(c, commentId, text, now),
+		),
+	deleteComment: (caseId, commentId) =>
+		void changeThread(caseId, (c, now) =>
+			withoutCaseComment(c, commentId, now),
+		),
+	setCaseClosed: (caseId, closed) =>
+		void changeThread(caseId, (c, now) => withClosed(c, closed, now)),
 
 	cancelLink: () => update((s) => (s.linking = undefined)),
 
@@ -1972,6 +2020,7 @@ const actions: Actions = {
 		const value = text.trim();
 		void (async () => {
 			try {
+				const now = new Date().toISOString();
 				// One transaction, so marks saved meanwhile are kept.
 				const saved = await store.updateCase(caseId, (current) => {
 					if (current === undefined)
@@ -1980,7 +2029,9 @@ const actions: Actions = {
 						value: validateCase({
 							...current,
 							verdict: value === "" ? null : value,
-							updatedAt: new Date().toISOString(),
+							updatedAt: now,
+							// By hand: the server names the person (DEC-046).
+							summaryBy: { at: now },
 						}),
 					};
 				});

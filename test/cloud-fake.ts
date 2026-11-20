@@ -51,6 +51,7 @@ export function requestProblem(
 import {
 	type Api,
 	ApiFailure,
+	type AppRef,
 	type Changes,
 	type ImageRef,
 	type Me,
@@ -61,6 +62,7 @@ import {
 	sha256Of,
 	type UserRef,
 	type WireCase,
+	type WireComment,
 	type WireFinding,
 	type WireMark,
 	type WireReopen,
@@ -79,6 +81,10 @@ const ALL = [
 	"mark:create",
 	"mark:update",
 	"mark:delete",
+	// DEC-046 (the server's DEC-017, DEC-018).
+	"case:close",
+	"comment:create",
+	"comment:moderate",
 ];
 
 const PERMISSION: Record<Op["type"], string> = {
@@ -90,7 +96,29 @@ const PERMISSION: Record<Op["type"], string> = {
 	"mark.create": "mark:create",
 	"mark.patch": "mark:update",
 	"mark.delete": "mark:delete",
+	"case.close": "case:close",
+	"case.reopen": "case:close",
+	"comment.create": "comment:create",
+	"comment.patch": "comment:create",
+	"comment.delete": "comment:create",
 };
+
+/** An app as the server stores a client's word for it: never verified. */
+const appOf = (via: AppRef | undefined): AppRef | undefined =>
+	via === undefined
+		? undefined
+		: { id: via.id, ...(via.name ? { name: via.name } : {}), host: via.host };
+
+/** When, who, and through which app (the client's word for the app). */
+const stampOf = (at: string, user: UserRef, via: AppRef | undefined) => {
+	const app = appOf(via);
+	return { at, user, ...(app === undefined ? {} : { app }) };
+};
+
+/** A comment row: the comment, and the revision it came at (its place in the thread). */
+interface CommentRow extends Row<WireComment> {
+	createdRev: number;
+}
 
 class Refusal extends Error {
 	constructor(
@@ -130,6 +158,7 @@ export class FakeServer {
 	readonly cases = new Map<string, Row<WireCase>>();
 	readonly shots = new Map<string, Row<WireShot>>();
 	readonly marks = new Map<string, Row<WireMark>>();
+	readonly comments = new Map<string, CommentRow>();
 	readonly blobs = new Map<string, Blob>();
 	readonly applied = new Map<string, OpResult>();
 	/** How many things one answer of changes holds at most. */
@@ -160,6 +189,14 @@ export class FakeServer {
 			.map((s) => s.value);
 	}
 
+	/** A case's thread, in the order the server took it. */
+	commentsOf(caseId: string): WireComment[] {
+		return [...this.comments.values()]
+			.filter((k) => !k.deleted && k.value.caseId === caseId)
+			.sort((a, b) => a.createdRev - b.createdRev)
+			.map((k) => k.value);
+	}
+
 	caseOf(caseId: string): WireCase | undefined {
 		const row = this.cases.get(caseId);
 		return row === undefined || row.deleted ? undefined : row.value;
@@ -172,10 +209,12 @@ export class FakeServer {
 	restore(): void {
 		this.seq = 1;
 		this.applied.clear();
-		for (const table of [this.cases, this.shots, this.marks] as Map<
-			string,
-			Row<{ rev: number }>
-		>[]) {
+		for (const table of [
+			this.cases,
+			this.shots,
+			this.marks,
+			this.comments,
+		] as Map<string, Row<{ rev: number }>>[]) {
 			for (const [id, row] of table) {
 				if (row.deleted) table.delete(id);
 				else {
@@ -369,11 +408,28 @@ export class FakeServer {
 			);
 	}
 
+	/** A comment the caller may change: their own, through the same app; by hand also with moderate. */
+	#writer(
+		row: CommentRow,
+		user: UserRef,
+		via: AppRef | undefined,
+		may: readonly string[],
+	): void {
+		const own = row.value.user?.id === user.id;
+		const ok =
+			via === undefined
+				? own || may.includes("comment:moderate")
+				: own && row.value.app?.id === via.id;
+		if (!ok)
+			throw new Refusal("forbidden", "This comment is not yours to change.");
+	}
+
 	#apply(
 		op: Op,
 		user: UserRef,
 		rev: number,
 		at: string,
+		may: readonly string[] = ALL,
 	): Pick<OpResult, "status" | "number"> {
 		switch (op.type) {
 			case "case.create": {
@@ -395,6 +451,7 @@ export class FakeServer {
 						client: op.case.client ?? {},
 						lastNumber: op.case.lastNumber ?? 0,
 						importedAt: op.case.importedAt ?? null,
+						closed: null,
 						createdBy: user,
 						createdAt: op.case.createdAt ?? at,
 						updatedAt: at,
@@ -413,8 +470,95 @@ export class FakeServer {
 					summary: op.summary === undefined ? v.summary : op.summary,
 					pages: op.pages ?? v.pages,
 					lastNumber: Math.max(v.lastNumber, op.lastNumber ?? 0),
+					// Stamped only on a change of the text.
+					...(op.summary !== undefined &&
+					op.summary !== v.summary &&
+					v.importedAt === null
+						? {
+								summaryBy: stampOf(at, user, op.via),
+							}
+						: {}),
 				};
 				this.#touch(row, rev, at);
+				return { status: "applied" };
+			}
+			case "case.close":
+			case "case.reopen": {
+				const row = this.#live(op.caseId);
+				const closing = op.type === "case.close";
+				if ((row.value.closed !== null) === closing)
+					return { status: "duplicate" };
+				row.value = {
+					...row.value,
+					closed: closing ? stampOf(at, user, op.via) : null,
+				};
+				this.#touch(row, rev, at);
+				return { status: "applied" };
+			}
+			case "comment.create": {
+				const owner = this.#live(op.caseId);
+				const existing = this.comments.get(op.comment.id);
+				if (existing) {
+					if (existing.value.caseId === op.caseId)
+						return { status: "duplicate" };
+					throw new Refusal("conflict", "The comment's id is taken.");
+				}
+				if (op.comment.text.trim() === "")
+					throw new Refusal("invalid", "A comment needs some text.");
+				const markId = op.comment.markId ?? null;
+				if (markId !== null) {
+					const mark = this.marks.get(markId);
+					if (!mark || mark.deleted || mark.value.caseId !== op.caseId)
+						throw new Refusal("invalid", "The mark is not one of this case.");
+				}
+				if (this.commentsOf(op.caseId).length >= 1000)
+					throw new Refusal("limit", "A case holds at most 1000 comments.");
+				this.comments.set(op.comment.id, {
+					deleted: false,
+					rev,
+					createdRev: rev,
+					value: compact({
+						id: op.comment.id,
+						caseId: op.caseId,
+						markId,
+						text: op.comment.text,
+						user,
+						app: appOf(op.via),
+						at:
+							op.comment.at !== undefined && op.comment.at < at
+								? op.comment.at
+								: at,
+						rev,
+					}) as WireComment,
+				});
+				this.#touch(owner, rev, at);
+				return { status: "applied" };
+			}
+			case "comment.patch": {
+				const row = this.comments.get(op.commentId);
+				if (row === undefined || row.deleted)
+					throw new Refusal("not_found", "The comment does not exist.");
+				this.#writer(row, user, op.via, may);
+				if (row.value.text === op.text) return { status: "duplicate" };
+				row.value = compact({
+					...row.value,
+					text: op.text,
+					edited: stampOf(at, user, op.via),
+					rev,
+				}) as WireComment;
+				row.rev = rev;
+				this.#touch(this.#live(row.value.caseId), rev, at);
+				return { status: "applied" };
+			}
+			case "comment.delete": {
+				const row = this.comments.get(op.commentId);
+				if (row === undefined)
+					throw new Refusal("not_found", "The comment does not exist.");
+				if (row.deleted) return { status: "duplicate" };
+				this.#writer(row, user, op.via, may);
+				row.deleted = true;
+				row.rev = rev;
+				this.#touch(this.#live(row.value.caseId), rev, at);
 				return { status: "applied" };
 			}
 			case "case.delete": {
@@ -427,6 +571,8 @@ export class FakeServer {
 					if (mark.value.caseId === op.caseId) this.marks.delete(id);
 				for (const [id, shot] of this.shots)
 					if (shot.value.caseId === op.caseId) this.shots.delete(id);
+				for (const [id, k] of this.comments)
+					if (k.value.caseId === op.caseId) this.comments.delete(id);
 				row.deleted = true;
 				row.value = {
 					...row.value,
@@ -537,14 +683,23 @@ export class FakeServer {
 						),
 						status: statusOf(resolution),
 						createdBy: user,
+						...(op.via === undefined
+							? {}
+							: { createdVia: appOf(op.via) as AppRef }),
 						createdAt: op.mark.createdAt ?? at,
 						updatedAt: at,
 						rev,
 					},
 				});
+				if (op.via !== undefined) {
+					const made = this.marks.get(op.mark.id) as Row<WireMark>;
+					made.value = { ...made.value, author: "ai" };
+				}
 				owner.value = {
 					...owner.value,
 					lastNumber: Math.max(owner.value.lastNumber, number),
+					// New open work opens a closed case again.
+					...(resolution === null ? { closed: null } : {}),
 				};
 				this.#touch(owner, rev, at);
 				return { status: "applied", number };
@@ -557,8 +712,16 @@ export class FakeServer {
 						"The mark does not exist, or was deleted.",
 					);
 				let v = row.value;
+				const wasSettled = v.resolution !== null;
 				if (op.comment !== undefined)
-					v = { ...v, comment: op.comment, author: op.author ?? "user" };
+					v = {
+						...v,
+						comment: op.comment,
+						author: op.via === undefined ? (op.author ?? "user") : "ai",
+						...(op.comment !== row.value.comment
+							? { commentBy: stampOf(at, user, op.via) }
+							: {}),
+					};
 				else if (op.author !== undefined) v = { ...v, author: op.author };
 				const imports = this.#live(v.caseId).value.importedAt !== null;
 				if (op.state !== undefined) {
@@ -595,7 +758,11 @@ export class FakeServer {
 				}
 				row.value = { ...v, updatedAt: at, rev };
 				row.rev = rev;
-				this.#touch(this.#live(v.caseId), rev, at);
+				const owner = this.#live(v.caseId);
+				// Settled to open: a reopen opens a closed case again.
+				if (wasSettled && v.resolution === null)
+					owner.value = { ...owner.value, closed: null };
+				this.#touch(owner, rev, at);
 				return { status: "applied" };
 			}
 			case "mark.delete": {
@@ -641,7 +808,7 @@ export class FakeServer {
 					);
 				if (this.refuseWith?.type === op.type)
 					throw new Refusal(this.refuseWith.code, this.refuseWith.message);
-				const done = this.#apply(structuredClone(op), user, rev, at);
+				const done = this.#apply(structuredClone(op), user, rev, at, may);
 				const result: OpResult = {
 					opId: op.opId,
 					...done,
@@ -675,6 +842,7 @@ export class FakeServer {
 			...this.cases.values(),
 			...this.shots.values(),
 			...this.marks.values(),
+			...this.comments.values(),
 		]
 			.map((r) => r.rev)
 			.filter((r) => r > from)
@@ -689,6 +857,7 @@ export class FakeServer {
 			cases: [] as WireCase[],
 			shots: [] as WireShot[],
 			marks: [] as WireMark[],
+			comments: [] as WireComment[],
 		};
 		const extra = this.future ? { somethingNew: { since: "v1.9" } } : {};
 		for (const [id, row] of this.cases) {
@@ -720,6 +889,15 @@ export class FakeServer {
 						rev: row.rev,
 					});
 			} else out.marks.push({ ...row.value, ...extra });
+		}
+		// Comments in the order they came; a deleted one names no case.
+		for (const [id, row] of [...this.comments].sort(
+			([, a], [, b]) => a.createdRev - b.createdRev,
+		)) {
+			if (!inRange(row)) continue;
+			if (row.deleted) {
+				if (!whole) removed.push({ type: "comment", id, rev: row.rev });
+			} else out.comments.push({ ...row.value });
 		}
 		if (this.future && !whole)
 			removed.push({
@@ -788,6 +966,7 @@ export class FakeServer {
 					...row.value,
 					shots: server.shotsOf(caseId),
 					marks: server.marksOf(caseId),
+					comments: server.commentsOf(caseId),
 				});
 			},
 			async ops(_team, ops) {

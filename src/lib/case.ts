@@ -56,6 +56,12 @@ export const MAX_PAGE_TITLE = 2000;
 /** The most pages a case lists (DEC-038). */
 export const MAX_PAGES = 200;
 
+/** The longest comment in a case's thread, in characters (DEC-046). */
+export const MAX_CASE_COMMENT = 20_000;
+
+/** The most comments a case's thread holds, as the server allows. */
+export const MAX_CASE_COMMENTS = 1000;
+
 export interface Point {
 	x: number;
 	y: number;
@@ -163,6 +169,16 @@ export interface Annotation {
 	/** Who made it, in a case synced with a team (DEC-039). */
 	createdBy?: UserRef;
 	/**
+	 * The AI app it was made through (DEC-046): one paired with this
+	 * browser, or the one a teammate's mark came through, as the server says.
+	 */
+	createdVia?: FindingApp;
+	/**
+	 * Who wrote the comment as it reads now, once it was changed after the
+	 * mark was made: the server's record (DEC-046). Shown, never compared.
+	 */
+	commentBy?: Stamp;
+	/**
 	 * An arrow's, or an open freehand stroke's, elements under its first and
 	 * its last point (DEC-047); none: not such a mark, or drawn before.
 	 * `element` stays the element the mark is about (an arrow's: its head's).
@@ -174,6 +190,43 @@ export interface Annotation {
 export interface MarkEnds {
 	start: ElementDetails | null;
 	end: ElementDetails | null;
+}
+
+/**
+ * When, by whom, and through which AI app something was done (DEC-046):
+ * a case's closing, a comment's change, who wrote a summary. `user` comes
+ * from a team's server only; `app` also from this browser's AI apps.
+ */
+export interface Stamp {
+	at: string;
+	user?: UserRef;
+	app?: FindingApp;
+}
+
+/**
+ * A comment in a case's thread (DEC-046): the team's conversation about the
+ * case, apart from its summary. `mark`: the mark it is about, by its id
+ * here (`a<number>`, which follows the mark when it takes another number);
+ * none: the case. `markGone`: it was about a mark deleted since.
+ */
+export interface CaseComment {
+	/** Of the writer's making, the same everywhere: `k_…`. */
+	id: string;
+	mark?: string;
+	markGone?: true;
+	text: string;
+	at: string;
+	/** Who wrote it, in a case synced with a team. */
+	user?: UserRef;
+	/** The AI app it was written through. */
+	app?: FindingApp;
+	/** Its last change, once it was changed. */
+	edited?: Stamp;
+	/**
+	 * From a file: who wrote it is what the file says. It is no AI app's own,
+	 * and what is sent of it carries no app (DEC-046).
+	 */
+	imported?: true;
 }
 
 /**
@@ -427,6 +480,19 @@ export interface Case {
 	 * screenshots, so no new mark takes its number.
 	 */
 	lastNumber?: number;
+	/** Closed: filed away, not frozen (DEC-046); none: open. */
+	closed?: Stamp;
+	/** The thread, in the order the server took it (DEC-046). */
+	comments?: CaseComment[];
+	/** Who wrote the summary as it reads now: the server's record (DEC-046). */
+	summaryBy?: Stamp;
+	/**
+	 * The last change, if an AI app made it through this browser's AI
+	 * connection (DEC-046): what is sent of it names the app (`via`). Holds
+	 * only while `at` is the case's `updatedAt`: any later change, by hand
+	 * too, ends it.
+	 */
+	via?: { app: FindingApp; at: string };
 }
 
 /** The longest case title. */
@@ -1145,6 +1211,15 @@ export function validateCase(value: unknown): Case {
 			...reopensOf(a["reopens"], `${p}.reopens`),
 			...findingsOf(a["findings"], `${p}.findings`),
 			...createdByOf(a["createdBy"], `${p}.createdBy`),
+			...(a["createdVia"] === undefined
+				? {}
+				: {
+						createdVia: appOf(a["createdVia"], `${p}.createdVia`)
+							.app as FindingApp,
+					}),
+			...(a["commentBy"] === undefined
+				? {}
+				: { commentBy: stampOf(a["commentBy"], `${p}.commentBy`) }),
 		};
 	});
 	const verdict = o["verdict"];
@@ -1179,7 +1254,72 @@ export function validateCase(value: unknown): Case {
 		...(lastNumber === undefined
 			? {}
 			: { lastNumber: highest(lastNumber, annotations) }),
+		...(o["closed"] === undefined || o["closed"] === null
+			? {}
+			: { closed: stampOf(o["closed"], "case.closed") }),
+		...(o["comments"] === undefined
+			? {}
+			: { comments: commentsOf(o["comments"], annotations) }),
+		...(o["summaryBy"] === undefined
+			? {}
+			: { summaryBy: stampOf(o["summaryBy"], "case.summaryBy") }),
+		...(o["via"] === undefined ? {} : { via: viaOf(o["via"]) }),
 	};
+}
+
+/** When, by whom and through which app (DEC-046). */
+function stampOf(value: unknown, path: string): Stamp {
+	const o = obj(value, path);
+	return {
+		at: str(o["at"], `${path}.at`, 64),
+		...userOf(o["user"], `${path}.user`),
+		...appOf(o["app"], `${path}.app`),
+	};
+}
+
+/** The last change's AI app, while it is the last change (`Case.via`). */
+function viaOf(value: unknown): { app: FindingApp; at: string } {
+	const o = obj(value, "case.via");
+	return {
+		app: appOf(o["app"], "case.via.app").app as FindingApp,
+		at: str(o["at"], "case.via.at", 64),
+	};
+}
+
+/**
+ * A case's thread (DEC-046). A comment may name a mark the case no longer
+ * has (deleted since): it stays, about "a deleted mark".
+ */
+function commentsOf(value: unknown, marks: Annotation[]): CaseComment[] {
+	const ids = new Set<string>();
+	const live = new Set(marks.map((a) => a.id));
+	return arr(value, "case.comments", MAX_CASE_COMMENTS).map(
+		(v, i): CaseComment => {
+			const p = `case.comments[${i}]`;
+			const o = obj(v, p);
+			const commentId = id(o["id"], `${p}.id`);
+			if (ids.has(commentId)) fail(`${p}.id`, "is used twice");
+			ids.add(commentId);
+			const text = str(o["text"], `${p}.text`, MAX_CASE_COMMENT);
+			if (text.trim() === "") fail(`${p}.text`, "must say something");
+			const mark =
+				o["mark"] === undefined ? undefined : str(o["mark"], `${p}.mark`, 64);
+			const gone = mark !== undefined && !live.has(mark);
+			return {
+				id: commentId,
+				...(mark === undefined || gone ? {} : { mark }),
+				...(gone || o["markGone"] === true ? { markGone: true } : {}),
+				text,
+				at: str(o["at"], `${p}.at`, 64),
+				...userOf(o["user"], `${p}.user`),
+				...appOf(o["app"], `${p}.app`),
+				...(o["edited"] === undefined
+					? {}
+					: { edited: stampOf(o["edited"], `${p}.edited`) }),
+				...(o["imported"] === true ? { imported: true as const } : {}),
+			};
+		},
+	);
 }
 
 /** A case's list of pages (DEC-038); a page's language may be left out. */
@@ -1682,6 +1822,19 @@ export function withoutAnnotation(
 		value: withPagesOfShots({
 			...c,
 			annotations,
+			// Its comments stay, about "a deleted mark" (DEC-046).
+			...(c.comments === undefined
+				? {}
+				: {
+						comments: c.comments.map((k) =>
+							k.mark === annotationId
+								? (({ mark: _m, ...rest }) => ({
+										...rest,
+										markGone: true as const,
+									}))(k)
+								: k,
+						),
+					}),
 			shots: shotUsed ? c.shots : c.shots.filter((s) => s.id !== gone.shot),
 			lastNumber: Math.max(
 				c.lastNumber ?? 0,
@@ -1802,4 +1955,169 @@ export function withoutFinding(
 		},
 		now,
 	);
+}
+
+// --- the case's thread and its closing (DEC-046) ---------------------------------
+
+/**
+ * The case after a change `app` made through this browser's AI connection:
+ * what is sent of it names the app (`via`) while nothing changes after it.
+ * Without an app, the change is the person's, and an earlier app's ends.
+ */
+function changedBy(c: Case, now: string, app?: FindingApp): Case {
+	const { via: _v, ...rest } = c;
+	return app === undefined
+		? { ...rest, updatedAt: now }
+		: { ...rest, updatedAt: now, via: { app, at: now } };
+}
+
+/** The comments about one mark, or about the case itself (`undefined`). */
+export function commentsOn(c: Case, markId: string | undefined): CaseComment[] {
+	return (c.comments ?? []).filter((k) =>
+		markId === undefined ? k.mark === undefined : k.mark === markId,
+	);
+}
+
+/** The case with a new comment at the end of its thread. */
+export function withCaseComment(
+	c: Case,
+	comment: { id: string; text: string; mark?: string; app?: FindingApp },
+	now: string,
+): Case {
+	const text = comment.text.trim();
+	if (text === "") throw new CaseError("A comment needs some text.");
+	if (textLength(text) > MAX_CASE_COMMENT)
+		throw new CaseError(
+			`A comment holds at most ${MAX_CASE_COMMENT.toLocaleString("en-US")} characters.`,
+		);
+	const comments = c.comments ?? [];
+	if (comments.length >= MAX_CASE_COMMENTS)
+		throw new CaseError(
+			`A case holds at most ${MAX_CASE_COMMENTS} comments: delete one first.`,
+		);
+	if (
+		comment.mark !== undefined &&
+		!c.annotations.some((a) => a.id === comment.mark)
+	)
+		throw new CaseError("The mark no longer exists.");
+	return changedBy(
+		{
+			...c,
+			comments: [
+				...comments,
+				{
+					id: comment.id,
+					...(comment.mark === undefined ? {} : { mark: comment.mark }),
+					text,
+					at: now,
+					...(comment.app === undefined ? {} : { app: comment.app }),
+				},
+			],
+		},
+		now,
+		comment.app,
+	);
+}
+
+/** The case with a comment's text changed; by `app`, when an AI app changed it. */
+export function withCaseCommentText(
+	c: Case,
+	commentId: string,
+	text: string,
+	now: string,
+	app?: FindingApp,
+): Case {
+	const clean = text.trim();
+	if (clean === "") throw new CaseError("A comment needs some text.");
+	if (textLength(clean) > MAX_CASE_COMMENT)
+		throw new CaseError(
+			`A comment holds at most ${MAX_CASE_COMMENT.toLocaleString("en-US")} characters.`,
+		);
+	const comments = c.comments ?? [];
+	if (!comments.some((k) => k.id === commentId))
+		throw new CaseError("The comment no longer exists.");
+	return changedBy(
+		{
+			...c,
+			comments: comments.map((k) =>
+				k.id === commentId && k.text !== clean
+					? {
+							...k,
+							text: clean,
+							edited: { at: now, ...(app === undefined ? {} : { app }) },
+						}
+					: k,
+			),
+		},
+		now,
+		app,
+	);
+}
+
+/** The case without a comment; by `app`, when an AI app deleted it. */
+export function withoutCaseComment(
+	c: Case,
+	commentId: string,
+	now: string,
+	app?: FindingApp,
+): Case {
+	const comments = c.comments ?? [];
+	if (!comments.some((k) => k.id === commentId))
+		throw new CaseError("The comment no longer exists.");
+	const left = comments.filter((k) => k.id !== commentId);
+	const { comments: _k, ...rest } = c;
+	return changedBy(
+		left.length > 0 ? { ...rest, comments: left } : rest,
+		now,
+		app,
+	);
+}
+
+/** The case closed (filed away, not frozen) or open again; by `app`, when an AI app did it. */
+export function withClosed(
+	c: Case,
+	closed: boolean,
+	now: string,
+	app?: FindingApp,
+): Case {
+	if (closed === (c.closed !== undefined)) return c;
+	const { closed: _c, ...rest } = c;
+	return changedBy(
+		closed
+			? { ...rest, closed: { at: now, ...(app === undefined ? {} : { app }) } }
+			: rest,
+		now,
+		app,
+	);
+}
+
+/**
+ * The comment a person or an app may change or delete (DEC-046): one's own;
+ * an app only what it wrote, for the person signed in here. In a case kept
+ * on this device (no user on it), one's own is every comment written here.
+ */
+export function isOwnComment(
+	k: CaseComment,
+	me: string | undefined,
+	appId?: string,
+): boolean {
+	const mine = k.user === undefined || k.user.id === me;
+	if (appId === undefined) return mine;
+	// What a file says of an app proves nothing: no app's own.
+	return mine && k.imported !== true && k.app?.id === appId;
+}
+
+/**
+ * Who did something, in words (DEC-046): "Dana Developer via Claude Code",
+ * the person alone, or the app alone (its name, else its host); none: not
+ * known (done here, by hand).
+ */
+export function byline(
+	user: UserRef | undefined,
+	app: FindingApp | undefined,
+): string | undefined {
+	const appName = app === undefined ? undefined : app.name || app.host;
+	if (user !== undefined && appName !== undefined)
+		return `${user.name} via ${appName}`;
+	return user?.name ?? appName;
 }

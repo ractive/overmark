@@ -164,6 +164,15 @@ user agent. What differs from Chrome and Edge:
    Delete twice).
 6. The case's "Summary for the developer" says what should change overall, as agreed;
    whoever loads the case sees it first. You or the AI app write it.
+   Under the marks, Comments is the case's thread: what was done (a fix, a pull request),
+   a question, a decision, about the case or about one mark (chosen beside Add comment).
+   Each comment says who wrote it and when, "via Claude" when an AI app wrote it for
+   that person, and which mark it is about; a mark with comments says how many in its
+   row. You change and delete your own (Delete asks twice); another's stays. A comment
+   on a mark that is deleted stays, "on a deleted mark".
+   Close case, at the bottom of the case, files a case away: it moves from the list to
+   Closed (folded, under the cases) and stays readable and changeable; Reopen case
+   brings it back. A new open mark, or a mark reopened, opens a closed case by itself.
 7. Export writes `<title>.sitegloss.zip` (`case.json`, `case.md` and the images) to pass
    on; "Import a case…" reads one back, opens it and draws its marks on the tab in
    front. An AI app can read `case.md` and the images without the extension.
@@ -217,7 +226,7 @@ The tools:
 | Tool | What it does |
 |---|---|
 | `list_cases` | The saved cases, with their pages and their marks by status |
-| `get_case` | A case's pages, its summary for the developer and its marks with their page, comments, statuses, reopens, AI findings, element details and crops |
+| `get_case` | A case's pages, its summary for the developer, its marks with their page, comments, statuses, reopens, AI findings, element details and crops, the newest 20 comments of its thread, and whether it is closed |
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
@@ -229,7 +238,16 @@ The tools:
 | `add_finding` | Adds a finding of the AI app to a mark, apart from your comment; asks first |
 | `edit_finding` | Changes one of the app's own findings; asks first |
 | `delete_finding` | Deletes one of the app's own findings; asks first |
+| `list_comments` | A case's thread, oldest first, 50 at a time, each comment with who wrote it and whether it is the app's own |
+| `add_comment` | Adds a comment to the case's thread, about the case or one mark; asks first |
+| `edit_comment` | Changes one of the app's own comments; asks first |
+| `delete_comment` | Deletes one of the app's own comments; asks first |
+| `set_case_status` | Closes a case or opens it again; asks first |
 | `delete_case` | Deletes a case; asks first |
+
+What an AI app changes through these tools carries its name: in a team the change says
+"Dana via Claude" (the person signed in, and the app), here and on the website. What you
+do in the side panel carries only your name.
 
 No tool runs code an AI app sends. Page text in the results comes from web pages, and
 the tools say so to the model. `get_mark_element` sends no form field values, no
@@ -353,8 +371,12 @@ Sitegloss works without an account, and nothing in it asks for one. If your team
 - Two people who change different things of one mark both keep their change; for the
   same thing the later one wins. Two who add a mark at once: the later one gets the next
   number (its pin in the screenshot keeps the number it was drawn with).
-- A resolution, a verification, a reopen and a finding say who made them ("by Dana"),
-  and a mark who added it.
+- A resolution, a verification, a reopen, a finding, a comment, a close and the summary
+  say who made them ("by Dana"), and a mark who added it and who last changed its
+  comment; "by Dana via Claude" when an AI app connected to Sitegloss did it for Dana.
+- The thread and closing sync like the rest: a comment written offline waits and is
+  sent. A Sitegloss before 0.3.1 on the same team keeps syncing its marks and does not
+  see the comments or that a case is closed; a mark it adds opens a closed case again.
 - Deleting a case the team has deletes it for the team; the button says so. A case
   deleted for the team goes here too. What you delete while signed out is not deleted
   for the team: at the next sign-in the team's marks are back, and Sitegloss says so.

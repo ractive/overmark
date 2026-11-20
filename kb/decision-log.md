@@ -2186,6 +2186,76 @@ with them).
   server, before and after, with the stream dropped and the server gone.
 
 
+## DEC-046: A case's thread, closing a case, and the person beside the app
+
+2026-11-20. Extension 0.3.1, with the server of sitegloss.dev 1d50d8c (its DEC-017 to
+DEC-019 and `kb/design/extension-0.3.1-handover.md`). Everything is additive: the file
+stays `sitegloss/1`, and a 0.3.0 browser on the same team keeps working.
+
+- **The thread.** A case has `comments`, oldest first in the server's order of arrival:
+  `{ id, mark?, markGone?, text, at, user?, app?, edited?: { at, user?, app? },
+  imported? }`. A comment is about the case, or about one mark (`mark`, the mark's id in
+  the case, as everything else in a case names a mark; the handover's `markNumber`
+  would break when marks are renumbered). A comment on a mark that is deleted keeps
+  its text and says so (`markGone`). The id is of the writer's making (`k_…`) and is the
+  server's id too, so a comment is the same one on every device without a map; a
+  "Keep both" import gives the copy's comments new ids, as the original's are taken.
+  At most 1,000 comments of at most 20,000 characters, as the server allows.
+- **Whose comment.** One's own is one with no person (written here, never synced) or
+  the person signed in. The panel changes and deletes only one's own, also in a role
+  with `comment:moderate`: moderating is the website's. An AI app changes only a
+  comment of the same person written through the same app (by its id), as the server
+  requires; a comment from a file is no app's own (`imported`, as findings, DEC-019).
+  A comment not one's own that is missing here is never deleted for the team: a lost
+  local copy is not a decision.
+- **Sync.** `comment.create`, `comment.patch` and `comment.delete`, queued and sent like
+  any op. A create waits until its mark has a wire id. A removed comment arrives
+  without a `caseId` (so that 0.3.0 passes it by); the engine finds its case by the
+  comment ids it holds. Read whole, the thread takes the server's order; between whole
+  reads a changed comment keeps its place here.
+- **Closed.** `closed: { at, user?, app? }` on the case: filed away, not frozen. Sent
+  as `case.close` / `case.reopen`, never as a field of `case.patch`. A reopen goes
+  before the run's mark ops and a close after them, so a mark added to a case being
+  closed does not leave it open at the server. A new open mark (saved by hand or by an
+  app) drops `closed` here as the server does there. Closing needs `case:close`; the
+  button is disabled with a reason in a role without it. The panel lists closed cases
+  under "Closed", folded, after the others, and not among the page's own cases.
+- **The person beside the app (`via`).** What a paired AI app changes through the
+  extension's tools carries `via` (the app's id, name and host, as findings send them)
+  on each op it caused; what the person does by hand never does. A mark's app is
+  `createdVia`, a comment's `app`/`edited.app`. For case-level ops the case keeps a
+  note `via: { app, at }`, valid only while `at` is the case's `updatedAt`: any later
+  change, by hand too, ends it. It is this browser's note and never goes into a file.
+  The server's record (`createdVia`, `commentBy`, `summaryBy`, `closed`) is kept beside
+  what the patches compare, never in it. Shown as "Dana via Claude" wherever the panel,
+  case.md and the tools say who did something.
+- **From a file.** A comment keeps its writer as the file says, flagged `imported`, and
+  is sent without `via`; the server then names the person importing it. A mark's
+  `createdVia` from a file is dropped: sent, it would claim the app did it now.
+- **0.3.0.** Reading a file with comments, 0.3.0's `validateCase` drops the fields it
+  does not know (comments, closed, summaryBy, createdVia, commentBy): the case and its
+  marks import as before, without the thread; exporting it again from 0.3.0 loses the
+  thread. On a team, 0.3.0 syncs marks as before, passes by removed comments, and
+  does not see comments or closing; a mark it adds reopens a closed case at the server,
+  which this build follows.
+- **AI tools.** `list_comments`, `add_comment` (also about a mark), `edit_comment`,
+  `delete_comment`, `set_case_status`; `get_case` shows the newest 20 comments with
+  `own`, and `closed`; `list_cases` says `closed: true`. The changing ones ask first
+  under the existing rules, and the confirmation names the comment, whether it is the
+  app's own, and that the team will see it.
+- **Weak.** Case-level changes made by hand and by an app between two syncs go as one
+  `case.patch`: with `via` when the app's came last (the hand change is credited to
+  the app), without when the hand's came last (the app's is credited to the person).
+  Marks and comments carry their own app and are not affected. The thread's order
+  after edits is the local one until the next whole read. Another's comment lost
+  locally comes back only at a whole read.
+- **Tested** in `test/cloud-thread.test.ts` (the thread, closing and `via` against the
+  server in memory, which checks every op against the OpenAPI document),
+  `test/compat-0-3-0.test.ts` (an unchanged copy of 0.3.0's sync in `test/compat/v0.3.0`
+  beside this build on one team; a file of this build read by 0.3.0 and back),
+  `test/tools.test.ts`, `test/view.test.ts`, `test/markdown.test.ts` and
+  `test/export.test.ts`.
+
 ## DEC-047: Crops for marks made at the server, and what a mark records of the page
 
 2026-11-20. Items D and E of the 0.3.1 hand-over. Each capture defect was reproduced

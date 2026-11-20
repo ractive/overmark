@@ -12,7 +12,7 @@ import { summarize } from "../src/lib/element.ts";
 import type { AnnotationMatch } from "../src/lib/messages.ts";
 import { initialState, type PanelState } from "../src/sidepanel/state.ts";
 import type { Actions } from "../src/sidepanel/view.ts";
-import { sampleCase } from "./fixtures.ts";
+import { sampleCase, withOneMark } from "./fixtures.ts";
 
 const window = new Window({ url: "chrome-extension://x/sidepanel/index.html" });
 const globals = globalThis as unknown as Record<string, unknown>;
@@ -2157,7 +2157,7 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		expect(el("paired-next").hidden).toBe(false);
 		expect(el("paired-next-text").textContent).toBe("Claude is connected.");
 		expect(el("paired-next").textContent).toContain(
-			"Look at the Sitegloss case open in my browser and fix its marks",
+			"Look at the Sitegloss case open in my browser, fix its marks and say what you did in a comment",
 		);
 		expect(el("paired-back").textContent).toBe("Back to the cases");
 		el<HTMLButtonElement>("paired-back").click();
@@ -2418,7 +2418,7 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		).toBe(false);
 	});
 
-	test("who did something shows: by Dana, by Claude for Dana, added by Tess", () => {
+	test("who did something shows: by Dana, by Dana via Claude, added by Tess (DEC-046)", () => {
 		const c = sampleCase("c_who");
 		const app = {
 			id: "https://claude.ai/oauth",
@@ -2475,14 +2475,124 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		const history = [...(mark?.querySelectorAll(".history li") ?? [])].map(
 			(li) => li.textContent,
 		);
-		expect(history[0]).toContain("by Claude (claude.ai) for Dana Developer");
+		expect(history[0]).toContain("by Dana Developer via Claude");
 		expect(history[1]).toContain("by Tess Tester");
 		expect(mark?.querySelector(".finding-meta")?.textContent).toContain(
-			"Claude (claude.ai) for Dana Developer",
+			"Dana Developer via Claude",
 		);
 		expect(mark?.querySelector(".mark-by")?.textContent).toBe(
 			"Added by Tess Tester",
 		);
+	});
+});
+
+describe("the thread and closing (DEC-046)", () => {
+	const withThread = (c: Case): Case => ({
+		...c,
+		comments: [
+			{
+				id: "k_1",
+				text: "Looked at both pages.",
+				at: "2026-11-20T10:00:00.000Z",
+				user: { id: "u_tess", name: "Tess Tester" },
+			},
+			{
+				id: "k_2",
+				mark: "a1",
+				text: "Fixed in PR 12.",
+				at: "2026-11-20T11:00:00.000Z",
+				user: { id: "u_dana", name: "Dana Developer" },
+				app: {
+					id: "https://claude.ai/oauth",
+					name: "Claude",
+					host: "claude.ai",
+				},
+			},
+		],
+	});
+
+	test("the case's thread: who wrote each comment, through which app, about which mark; one's own can be changed and deleted", () => {
+		const done: string[] = [];
+		const actions = actionsWith({
+			addComment: (_c, text, mark) => void done.push(`add ${text} ${mark}`),
+			deleteComment: (_c, id) => void done.push(`delete ${id}`),
+		});
+		const c = withThread(withOneMark(sampleCase("c_t")));
+		render(
+			caseState(c, (s) => {
+				s.cloud.account = {
+					name: "Tess Tester",
+					email: "tess@example.com",
+					userId: "u_tess",
+					server: "https://app.sitegloss.dev",
+					teams: [],
+					teamId: undefined,
+					expired: false,
+				};
+			}),
+			actions,
+		);
+		const items = [
+			...window.document.querySelectorAll("#case-thread li[data-comment]"),
+		];
+		expect(
+			items.map((li) => li.querySelector(".comment-meta")?.textContent),
+		).toEqual([
+			expect.stringMatching(/^Tess Tester · /),
+			expect.stringMatching(/^Dana Developer via Claude · .* · on mark 1$/),
+		]);
+		// Tess's own has Edit and Delete; Dana's has none.
+		expect(
+			items[0]?.querySelector('[data-action="comment-delete"]'),
+		).not.toBeNull();
+		expect(
+			items[1]?.querySelector('[data-action="comment-delete"]'),
+		).toBeNull();
+		expect(el("thread-heading").textContent).toBe("Comments 2");
+		// The mark says it has a comment.
+		expect(
+			window.document.querySelector(
+				"[data-annotation] .comments-count, .comments-count",
+			)?.textContent,
+		).toBe("1 comment");
+	});
+
+	test("Close case and Reopen case; a closed case says who closed it, and is filed under Closed, folded", () => {
+		const closed: boolean[] = [];
+		const actions = actionsWith({
+			setCaseClosed: (_c, value) => void closed.push(value),
+		});
+		const c = sampleCase("c_c");
+		render(caseState(c), actions);
+		expect(el("close-case").textContent).toBe("Close case");
+		el<HTMLButtonElement>("close-case").click();
+		expect(closed).toEqual([true]);
+		const shut: Case = {
+			...c,
+			closed: {
+				at: "2026-11-20T12:00:00.000Z",
+				user: { id: "u_tess", name: "Tess Tester" },
+				app: { id: "x", name: "Claude", host: "claude.ai" },
+			},
+		};
+		render(caseState(shut), actions);
+		expect(el("close-case").textContent).toBe("Reopen case");
+		expect(el("case-closed").textContent).toMatch(
+			/^Closed .* by Tess Tester via Claude\.$/,
+		);
+		// Home: the open case in the list, the closed one under Closed, folded.
+		const state = initialState();
+		state.cases = [sampleCase("c_open"), shut];
+		render(state, actions);
+		const group = el<HTMLDetailsElement>("closed-cases");
+		expect(group.open).toBe(false);
+		expect(group.querySelector("summary")?.textContent).toBe("Closed 1");
+		expect(group.querySelectorAll("[data-case]")).toHaveLength(1);
+		expect(
+			window.document.querySelectorAll(
+				'#cases > ul[data-group="other"] [data-case]',
+			),
+		).toHaveLength(1);
 	});
 });
 
