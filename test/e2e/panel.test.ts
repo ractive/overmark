@@ -263,6 +263,52 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 	);
 
 	slowTest(
+		"an armed Delete stays where it was clicked while the marks found on the tab are said above it: a second click in the same place deletes",
+		async () => {
+			await fresh();
+			const marked = await h.open("v1");
+			await marked.page.activate();
+			const panel = await openSidePanel(h);
+			try {
+				// A case made with the toolbar on v1; the side panel shows it.
+				await showToolbar(h, marked.page, marked.tabId);
+				await markElement(marked.page, "[data-truth=submit]", "Too pale");
+				await saveAs(marked.page, "Held in place", panel);
+				const caseId = (await readDb()).cases.find(
+					(c) => c.title === "Held in place",
+				)?.id as string;
+				// Another page in front: the case's mark is not found there.
+				const other = await h.open("long");
+				await other.page.activate();
+				const found = `(${id("case-hint")}?.textContent ?? "").includes("1 of 1 marks found")`;
+				await panel.waitFor(
+					`!(${found}) && !${id("this-tab")}.innerText.includes("Looking for")`,
+					10_000,
+				);
+				// The first click, where the button is; the second goes to the same spot.
+				await panel.click(id("delete-case"));
+				await panel.waitFor(
+					`${id("delete-case")}.hasAttribute("data-armed")`,
+					2000,
+				);
+				const at = await panel.eval<{ x: number; y: number }>(
+					`(() => { const r = ${id("delete-case")}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+				);
+				// Between the two clicks v1 comes to the front: the panel finds
+				// the mark there and says so above the button.
+				await marked.page.activate();
+				await panel.waitFor(found, 3000);
+				// The same place, a second time: the confirmation.
+				await panel.clickAt(at.x, at.y);
+				await panel.waitFor(`!${id("home")}.hidden`, 5000);
+				expect(await storedCase(caseId)).toBeUndefined();
+			} finally {
+				await closeSidePanel(h, panel);
+			}
+		},
+	);
+
+	slowTest(
 		"a verdict not saved comes back with its case, and only there",
 		async () => {
 			await fresh([sampleCase("c_one"), sampleCase("c_two")]);

@@ -840,6 +840,39 @@ interface CaseParts {
 
 let parts: CaseParts | undefined;
 
+/** The armed Delete held in its place (`holdDelete`), and how to let it go. */
+let held: { button: HTMLElement; release: () => void } | undefined;
+
+/**
+ * While a Delete waits for its confirming click, it stays where it was
+ * clicked: what grows above it meanwhile (the marks found on the tab, their
+ * lines) is scrolled away, so a second click in the same place confirms.
+ * Room below is lent while it waits, so a short case can be scrolled too.
+ * `undefined`: none is armed.
+ */
+function holdDelete(button: HTMLElement | undefined): void {
+	if (held?.button === button) return;
+	held?.release();
+	held = undefined;
+	// (A document without layout, as in the unit tests, has nothing to hold.)
+	if (button === undefined || typeof ResizeObserver === "undefined") return;
+	const at = button.getBoundingClientRect().top;
+	const room = caseView.style.paddingBottom;
+	caseView.style.paddingBottom = `${document.documentElement.clientHeight}px`;
+	const watch = new ResizeObserver(() => {
+		const moved = button.getBoundingClientRect().top - at;
+		if (Math.abs(moved) >= 1) document.scrollingElement?.scrollBy(0, moved);
+	});
+	watch.observe(caseView);
+	held = {
+		button,
+		release: () => {
+			watch.disconnect();
+			caseView.style.paddingBottom = room;
+		},
+	};
+}
+
 function createParts(c: Case, actions: Actions): CaseParts {
 	const verdict: HTMLTextAreaElement = h("textarea", {
 		id: "verdict",
@@ -1886,6 +1919,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	const c = state.current;
 	if (c === undefined) {
 		parts = undefined;
+		holdDelete(undefined);
 		caseView.replaceChildren(h("p", { class: "meta" }, "Loading…"));
 		return;
 	}
@@ -1985,6 +2019,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 	p.share.hidden = !sync.mayShare;
 	const armed = state.deleteArmedAt !== undefined;
 	p.deleteButton.toggleAttribute("data-armed", armed);
+	holdDelete(armed && sync.mayDelete ? p.deleteButton : undefined);
 	p.deleteButton.disabled = !sync.mayDelete;
 	p.deleteButton.textContent = !armed
 		? "Delete"
@@ -2603,6 +2638,7 @@ export function render(state: PanelState, actions: Actions): void {
 		renderCase(state, actions);
 	} else {
 		parts = undefined;
+		holdDelete(undefined);
 		caseView.replaceChildren();
 	}
 	// Under an open case and Settings too: Home is as it is when it shows
