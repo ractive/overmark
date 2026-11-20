@@ -21,7 +21,12 @@
  * the real ones, the tests an API in memory that follows the server's rules.
  */
 
-import { type Case, newId as randomId, validateCase } from "../case.ts";
+import {
+	type Case,
+	type Rect,
+	newId as randomId,
+	validateCase,
+} from "../case.ts";
 import type { Kv } from "../kv.ts";
 import { type CaseStore, DELETED_KEPT_MS, type StoredImage } from "../store.ts";
 import {
@@ -63,6 +68,7 @@ import {
 } from "./book.ts";
 import {
 	applyOp,
+	cutKey,
 	deriveOps,
 	differing,
 	fixedOf,
@@ -78,6 +84,8 @@ import {
 	same,
 	settleAnnounced,
 	theirMark,
+	wholeShotCrops,
+	wholeShotMarks,
 } from "./wire.ts";
 
 export interface EngineDeps {
@@ -106,6 +114,17 @@ export interface EngineDeps {
 	 * that were here before": each one is shared here by itself, or not.
 	 */
 	elsewhere?: () => Promise<ReadonlySet<string>>;
+	/**
+	 * Cuts the part `rect` (CSS pixels of a screenshot `viewportWidth` wide)
+	 * out of a screenshot: the crop of a mark an AI app added at the server
+	 * (MCP `add_mark`), whose crop there is the whole screenshot. Not given:
+	 * such a mark keeps the whole screenshot as its crop.
+	 */
+	cutCrop?: (
+		shot: StoredImage,
+		rect: Rect,
+		viewportWidth: number,
+	) => Promise<StoredImage>;
 }
 
 /** What each operation needs the user to be allowed to do in the team. */
@@ -2008,6 +2027,28 @@ export class CloudSync {
 			// Said until a read of the case brings them (it is marked for one).
 			incomplete = `${left === 1 ? "A mark" : `${left} marks`} of the team ${left === 1 ? "is" : "are"} not shown here: ${refused.size === 1 ? "an image" : "images"} the server sent ${refused.size === 1 ? "is" : "are"} not the image named (missing, not a WebP image, too large, or other content).`;
 		}
+		// A mark an AI app added at the server has its whole screenshot as its
+		// crop: a crop of it is cut here, for showing it. Only here: the
+		// server's crop stays as it is (DEC-047).
+		const cut = this.#deps.cutCrop;
+		// The case is read for it only when such a mark is among what came.
+		if (cut !== undefined && wholeShotMarks(incoming, given).length > 0)
+			for (const want of wholeShotCrops(
+				incoming,
+				given,
+				await store.getCase(caseId),
+			)) {
+				const shot = fetched.get(want.sha256);
+				if (shot === undefined) continue;
+				try {
+					fetched.set(
+						cutKey(want.markId),
+						await cut(shot, want.rect, want.viewportWidth),
+					);
+				} catch {
+					// The whole screenshot, then, as before.
+				}
+			}
 		/** Merge with the case as it is; an image it lacks is read and it is tried again. */
 		const attempt = async <T>(work: () => Promise<T>): Promise<T> => {
 			for (let i = 0; ; i++) {

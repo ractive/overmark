@@ -1,10 +1,13 @@
 /**
  * Which page element a mark is about: the element under a point, or for a
- * box or a freehand mark, the element whose box overlaps it best.
+ * box or a freehand mark, the element whose box overlaps it best; for a
+ * drawn mark, the element that means something there rather than a piece of
+ * it (DEC-047).
  */
 
 import type { Rect } from "../lib/case.ts";
-import { shadowOf } from "../lib/shadow.ts";
+import { readableClasses } from "../lib/classes.ts";
+import { closestAcross, parentOf, shadowOf } from "../lib/shadow.ts";
 
 const IGNORED = new Set(["html", "body"]);
 
@@ -95,8 +98,131 @@ export function elementForRect(
 			bestScore = score;
 		}
 	}
-	return (
+	const found =
 		best ??
-		elementAt(rect.x + rect.width / 2, rect.y + rect.height / 2, host, doc)
+		elementAt(rect.x + rect.width / 2, rect.y + rect.height / 2, host, doc);
+	// The picture, not a path of it; the button, not its label (DEC-047).
+	return found === null ? null : usefulElement(found);
+}
+
+/** What can be clicked or chosen: a mark on a piece of it is about all of it. */
+const INTERACTIVE =
+	"a[href], button, label, summary, select, textarea, input, [role=button], [role=link], [role=tab], [role=menuitem], [role=checkbox], [role=radio], [role=option], [role=switch]";
+/** Text formatting: a word in bold is part of the text it is in. */
+const FORMATTING = new Set([
+	"span",
+	"strong",
+	"em",
+	"b",
+	"i",
+	"small",
+	"sub",
+	"sup",
+	"mark",
+	"abbr",
+	"s",
+	"u",
+	"font",
+]);
+
+/**
+ * The element a drawn mark on `el` is about (DEC-047): a whole picture, not a
+ * path of it; the link or button a piece of it is in; the text a bold word or
+ * a span is in, unless that piece has an id, a test id or a readable class of
+ * its own (a badge). `el` otherwise.
+ */
+export function usefulElement(el: Element): Element {
+	let at = el;
+	// An SVG's parts: the picture (the outermost SVG, in its own tree).
+	const svg = at.closest("svg");
+	if (svg !== null) {
+		let outer: Element = svg;
+		for (
+			let up = svg.parentElement?.closest("svg");
+			up;
+			up = up.parentElement?.closest("svg")
+		)
+			outer = up;
+		at = outer;
+	}
+	// Out of a component's shadow root too: an icon inside a link (DEC-047).
+	const control = closestAcross(at, INTERACTIVE);
+	if (control !== null) return control;
+	for (
+		let up = parentOf(at);
+		FORMATTING.has(at.localName) &&
+		!at.id &&
+		!at.hasAttribute("data-testid") &&
+		readableClasses(at.getAttribute("class") ?? "").length === 0 &&
+		up !== null &&
+		!IGNORED.has(up.localName);
+		up = parentOf(at)
+	)
+		at = up;
+	return at;
+}
+
+/** The element under a point a mark is drawn at: a note, an end of an arrow or a stroke. */
+export function markedElementAt(
+	x: number,
+	y: number,
+	host: Element,
+	doc: Document = document,
+): Element | null {
+	const el = elementAt(x, y, host, doc);
+	return el === null ? null : usefulElement(el);
+}
+
+/**
+ * The element a freehand stroke (in window coordinates) is about. A flat
+ * stroke is an underline or a strike-through: the element is the line of
+ * text over it, so the box looked at reaches up a line's height. Otherwise,
+ * as a box around it.
+ */
+export function elementForStroke(
+	bounds: Rect,
+	host: Element,
+	doc: Document = document,
+): Element | null {
+	const rect = isFlatStroke(bounds)
+		? {
+				x: bounds.x,
+				y: bounds.y - 24,
+				width: bounds.width,
+				height: bounds.height + 24,
+			}
+		: bounds;
+	return elementForRect(rect, host, doc);
+}
+
+/** A stroke that is an underline or a strike-through: low and long. */
+export const isFlatStroke = (bounds: Rect) =>
+	bounds.height < 16 && bounds.width >= bounds.height * 3;
+
+/**
+ * Whether a stroke goes from one place to another (a line, a tick), rather
+ * than round something (a circle): then its ends say what it links.
+ */
+export function isOpenStroke(
+	points: readonly { x: number; y: number }[],
+): boolean {
+	const first = points[0];
+	const last = points.at(-1);
+	if (first === undefined || last === undefined || points.length < 2)
+		return false;
+	let minX = first.x;
+	let maxX = first.x;
+	let minY = first.y;
+	let maxY = first.y;
+	for (const p of points) {
+		minX = Math.min(minX, p.x);
+		maxX = Math.max(maxX, p.x);
+		minY = Math.min(minY, p.y);
+		maxY = Math.max(maxY, p.y);
+	}
+	const diagonal = Math.hypot(maxX - minX, maxY - minY);
+	return (
+		diagonal > 0 &&
+		Math.hypot(last.x - first.x, last.y - first.y) > diagonal * 0.4
 	);
 }

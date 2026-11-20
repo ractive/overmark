@@ -100,8 +100,16 @@ export interface ElementDetails {
 	classes: string[];
 	/** `name`, `type`, `href` (path), `src` (file), `placeholder`, `alt`, `title`. */
 	attributes: Record<string, string>;
-	/** The nearest heading before the element. */
+	/**
+	 * The heading it is under: its section's or card's title (DEC-047);
+	 * before, the nearest heading before it.
+	 */
 	heading?: string;
+	/**
+	 * Only on a page's candidates, never stored: the heading by the rule
+	 * before DEC-047, where it differs, to compare marks stored then with.
+	 */
+	headingBefore?: string;
 	/** The landmark around it, e.g. `navigation: Hauptmenü`. */
 	landmark?: string;
 	/** Ancestors, nearest first, e.g. `nav`, `header.Header_root`. */
@@ -154,6 +162,18 @@ export interface Annotation {
 	findings?: Finding[];
 	/** Who made it, in a case synced with a team (DEC-039). */
 	createdBy?: UserRef;
+	/**
+	 * An arrow's, or an open freehand stroke's, elements under its first and
+	 * its last point (DEC-047); none: not such a mark, or drawn before.
+	 * `element` stays the element the mark is about (an arrow's: its head's).
+	 */
+	ends?: MarkEnds;
+}
+
+/** The elements at a mark's two ends, each `null` where there was none. */
+export interface MarkEnds {
+	start: ElementDetails | null;
+	end: ElementDetails | null;
 }
 
 /**
@@ -1105,6 +1125,20 @@ export function validateCase(value: unknown): Case {
 			shape: shape(a["shape"], `${p}.shape`),
 			crop,
 			element: element(a["element"], `${p}.element`),
+			...(a["ends"] === undefined
+				? {}
+				: {
+						ends: {
+							start: element(
+								obj(a["ends"], `${p}.ends`)["start"] ?? null,
+								`${p}.ends.start`,
+							),
+							end: element(
+								obj(a["ends"], `${p}.ends`)["end"] ?? null,
+								`${p}.ends.end`,
+							),
+						},
+					}),
 			...(a["resolution"] === undefined
 				? {}
 				: { resolution: resolution(a["resolution"], `${p}.resolution`) }),

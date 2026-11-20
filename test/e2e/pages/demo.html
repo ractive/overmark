@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Pedal &amp; Pine: Sitegloss demo page</title>
+		<!-- A copy of Sitegloss's demo page (ractive.ch/sitegloss/demo/), with its stylesheet inline, for the capture tests (DEC-047). -->
+		<style>
+/* Sitegloss's demo page (/sitegloss/demo/): a made-up bike rental, Pedal & Pine,
+   with a look of its own (no common.css, src/templates/bare.vto). Linked from
+   nowhere: it is the page the demo video is recorded on. */
+
+/* ───── Pedal & Pine ───── */
+:root {
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.pp {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  margin: 0;
+  background: #f6f5f0;
+  color: #262b28;
+  font: 400 1rem/1.55 system-ui, sans-serif;
+}
+
+.pp main a {
+  color: #2f6b4f;
+}
+
+.pp :focus-visible {
+  outline: 3px solid #2f6b4f;
+  outline-offset: 2px;
+}
+
+.pp h1,
+.pp h2,
+.pp h3 {
+  margin: 0 0 0.5rem;
+  line-height: 1.2;
+}
+
+.pp-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem max(1rem, (100% - 68rem) / 2);
+  background: #fff;
+  border-bottom: 1px solid #e3e1d8;
+}
+
+.pp-brand {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  color: #262b28;
+  font-size: 1.3rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.pp-brand:link,
+.pp-brand:visited {
+  color: #262b28;
+}
+
+.pp-header ul {
+  display: flex;
+  gap: 1.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pp-header nav a {
+  color: #4a524d;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pp-header nav a:hover {
+  color: #2f6b4f;
+}
+
+main#top {
+  flex: 1;
+  width: 100%;
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+}
+
+.pp-hero {
+  padding: 3rem 0 2rem;
+}
+
+.pp-hero h1 {
+  font-size: clamp(2rem, 5vw, 3rem);
+  letter-spacing: -0.01em;
+}
+
+.pp-lead {
+  max-width: 40rem;
+  margin: 0;
+  color: #4a524d;
+  font-size: 1.2rem;
+}
+
+.pp-section {
+  margin-bottom: 2.5rem;
+}
+
+.pp-section h2,
+.pp-summary h2 {
+  font-size: 1.5rem;
+}
+
+/* ───── Bike cards ───── */
+.pp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.pp-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem;
+  background: #fff;
+  border: 1px solid #e3e1d8;
+  border-radius: 12px;
+}
+
+.pp-card-new {
+  border-color: #b9d3c3;
+}
+
+.pp-badge {
+  position: absolute;
+  top: -10px;
+  right: 1rem;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: #2f6b4f;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.pp-bike {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  border-radius: 8px;
+  background: #eef0ea;
+}
+
+.pp-card p {
+  margin: 0 0 0.75rem;
+}
+
+.pp-card > p:not(.pp-price) {
+  min-height: 4.65em;
+  color: #4a524d;
+}
+
+.pp-price strong {
+  font-size: 1.35rem;
+}
+
+/* ───── Buttons ───── */
+.pp-btn {
+  display: inline-block;
+  padding: 0.65rem 1.25rem;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pp .pp-btn-main {
+  background: #f2c230;
+  color: #f5cf58;
+}
+
+.pp .pp-btn-main:hover {
+  background: #e6b31c;
+}
+
+.pp-btn-dark {
+  background: #262b28;
+  color: #fff;
+}
+
+.pp-btn-dark:hover {
+  background: #3a413c;
+}
+
+/* ───── Booking form and price summary ───── */
+.pp-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (width < 48rem) {
+  .pp-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pp-form-box,
+.pp-summary {
+  margin: 0;
+  padding: 1.5rem;
+  background: #fff;
+  border: 1px solid #e3e1d8;
+  border-radius: 12px;
+}
+
+.pp-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 1rem;
+}
+
+.pp-form label {
+  display: grid;
+  gap: 0.3rem;
+  font-weight: 600;
+}
+
+.pp-form input,
+.pp-form select {
+  width: 100%;
+  height: 2.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #b9bdb4;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+}
+
+.pp-form button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.pp-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: 8px;
+  background: #e7f1ea;
+  color: #1f4a36;
+  font-weight: 600;
+}
+
+.pp-summary table {
+  width: 100%;
+  margin-bottom: 1rem;
+  border-collapse: collapse;
+}
+
+.pp-summary th,
+.pp-summary td {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e3e1d8;
+  text-align: left;
+}
+
+.pp-summary td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-summary thead th:last-child {
+  text-align: right;
+}
+
+.pp-summary p {
+  margin: 0;
+  color: #4a524d;
+  font-size: 0.9rem;
+}
+
+.pp-footer {
+  padding: 1.5rem 1rem;
+  background: #262b28;
+  color: #d9ddd6;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.pp-footer a {
+  color: inherit;
+  text-underline-offset: 0.2em;
+}
+
+.pp-footer p {
+  margin: 0.2rem 0;
+}
+
+		</style>
+	</head>
+	<body class="pp">
+  <header class="pp-header" data-testid="site-header">
+    <a class="pp-brand" href="#top" data-testid="brand">
+      <svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true"><path d="M16 3 L25 16 H20 L27 26 H5 L12 16 H7 Z" fill="#2f6b4f"/><rect x="14.5" y="26" width="3" height="4" fill="#6b4a2f"/></svg>
+      Pedal &amp; Pine
+    </a>
+    <nav aria-label="Main" data-testid="main-nav">
+      <ul>
+        <li><a href="#bikes">Bikes</a></li>
+        <li><a href="#prices">Prices</a></li>
+        <li><a href="#book">Book</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="pp-hero" aria-labelledby="hero-title">
+      <h1 id="hero-title" data-testid="hero-title">Bikes for the trails, by the day</h1>
+      <p class="pp-lead" data-testid="hero-line">Ride the forest trails this wekend: pick up a bike at the trailhead from 8 am and bring it back by 6 pm.</p>
+    </section>
+
+    <section id="bikes" class="pp-section" aria-labelledby="bikes-title">
+      <h2 id="bikes-title">Our bikes</h2>
+      <div class="pp-cards">
+        <article class="pp-card" data-testid="card-city">
+          <svg class="pp-bike" viewBox="0 0 120 64" aria-hidden="true"><g fill="none" stroke="#33413a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="26" cy="44" r="16"/><circle cx="94" cy="44" r="16"/><path d="M26 44 L48 20 H80 L94 44 M48 20 L60 44 L80 20 M60 44 H26 M44 14 H54 M80 20 L76 10 H86"/></g></svg>
+          <h3>City bike</h3>
+          <p>Upright, seven gears, a basket and lights. Made for the lake path and a stop at the bakery.</p>
+          <p class="pp-price" data-testid="card-city-price"><strong>CHF 25</strong> per day</p>
+          <a class="pp-btn pp-btn-main" href="#book" data-testid="card-city-book">Book</a>
+        </article>
+        <article class="pp-card" data-testid="card-gravel">
+          <svg class="pp-bike" viewBox="0 -6 120 76" aria-hidden="true"><g fill="none" stroke="#33413a" stroke-linecap="round" stroke-linejoin="round"><circle cx="26" cy="44" r="16" stroke-width="5"/><circle cx="94" cy="44" r="16" stroke-width="5"/><path d="M26 44 L50 22 H82 L94 44 M50 22 L60 44 L82 22 M60 44 H26 M46 16 H56 M82 22 L84 12 Q88 10 90 14" stroke-width="3"/></g></svg>
+          <h3>Gravel bike</h3>
+          <p>Light frame, wide tyres and drop bars. Fast on forest roads, steady on loose stones.</p>
+          <p class="pp-price" data-testid="card-gravel-price"><strong>CHF 35</strong> per day</p>
+          <a class="pp-btn pp-btn-main" href="#book" data-testid="card-gravel-book">Book</a>
+        </article>
+        <article class="pp-card pp-card-new" data-testid="card-ebike">
+          <span class="pp-badge">New</span>
+          <svg class="pp-bike" viewBox="0 6 120 56" aria-hidden="true"><g fill="none" stroke="#33413a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="26" cy="44" r="16"/><circle cx="94" cy="44" r="16"/><path d="M26 44 L48 20 H80 L94 44 M48 20 L60 44 L80 20 M60 44 H26 M44 14 H54 M80 20 L78 10 H88"/></g><rect x="52" y="24" width="18" height="8" rx="2" fill="#2f6b4f"/></svg>
+          <h3>E-bike</h3>
+          <p>Pedal assist for the climb to the ridge, with a battery that lasts the whole day.</p>
+          <p class="pp-price" data-testid="card-ebike-price"><strong>CHF 49</strong> per day</p>
+          <a class="pp-btn pp-btn-main" href="#book" data-testid="card-ebike-book">Book</a>
+        </article>
+      </div>
+    </section>
+
+    <div class="pp-columns">
+      <section id="book" class="pp-section pp-form-box" aria-labelledby="book-title">
+        <h2 id="book-title">Book a bike</h2>
+        <form class="pp-form" data-testid="booking-form" onsubmit="event.preventDefault(); document.getElementById('booking-note').hidden = false;">
+          <label>Pick-up date
+            <input type="date" name="date" required data-testid="booking-date" />
+          </label>
+          <label>Days
+            <input type="number" name="days" min="1" max="14" value="1" required data-testid="booking-days" />
+          </label>
+          <label>Frame size
+            <select name="size" data-testid="booking-size">
+              <option>S (150–165 cm)</option>
+              <option selected>M (165–180 cm)</option>
+              <option>L (180–195 cm)</option>
+            </select>
+          </label>
+          <label>Name
+            <input type="text" name="name" autocomplete="name" required data-testid="booking-name" />
+          </label>
+          <label>Email
+            <input type="email" name="email" autocomplete="email" required data-testid="booking-email" />
+          </label>
+          <button type="submit" class="pp-btn pp-btn-dark" data-testid="booking-submit">Send booking request</button>
+          <p id="booking-note" class="pp-note" role="status" hidden data-testid="booking-note">This is a demo: nothing was sent.</p>
+        </form>
+      </section>
+
+      <aside id="prices" class="pp-summary" aria-labelledby="prices-title" data-testid="price-summary">
+        <h2 id="prices-title">Prices at a glance</h2>
+        <table>
+          <thead>
+            <tr><th scope="col">Bike</th><th scope="col">Per day</th></tr>
+          </thead>
+          <tbody>
+            <tr data-testid="summary-row-city"><th scope="row">City bike</th><td data-testid="summary-price-city">CHF 25</td></tr>
+            <tr data-testid="summary-row-gravel"><th scope="row">Gravel bike</th><td data-testid="summary-price-gravel">CHF 35</td></tr>
+            <tr data-testid="summary-row-ebike"><th scope="row">E-bike</th><td data-testid="summary-price-ebike">CHF 45</td></tr>
+          </tbody>
+        </table>
+        <p>Helmet and lock included. Pay at pick-up, by card or in cash.</p>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="pp-footer" data-testid="site-footer">
+    <p>Pedal &amp; Pine · At the trailhead car park · Open daily 8 am to 6 pm</p>
+    <p>A made-up shop: there is no Pedal &amp; Pine. A page for <a href="/sitegloss/">Sitegloss</a>'s demo.</p>
+  </footer>
+	</body>
+</html>

@@ -13,7 +13,7 @@ import {
 } from "../src/lib/case.ts";
 import type { Api, Me } from "../src/lib/cloud/api.ts";
 import { type CloudStatus, KEYS } from "../src/lib/cloud/book.ts";
-import { CloudSync } from "../src/lib/cloud/engine.ts";
+import { CloudSync, type EngineDeps } from "../src/lib/cloud/engine.ts";
 import { memoryKv } from "../src/lib/kv.ts";
 import { type AnnotationDraft, type Crop, saveCase } from "../src/lib/save.ts";
 import { MemoryStore } from "../src/lib/store.ts";
@@ -47,6 +47,7 @@ export function device<A extends Api>(
 	name: string,
 	api: A,
 	random = false,
+	extra: Partial<EngineDeps> = {},
 ): Device<A> {
 	const store = new MemoryStore();
 	const kv = memoryKv();
@@ -68,6 +69,7 @@ export function device<A extends Api>(
 			: { newId: (prefix: string) => `${prefix}_${tag}_${++ids}` }),
 		onChange: (ids) => changed.push(...ids),
 		onStatus: (status) => statuses.push(status),
+		...extra,
 	});
 	return { name, store, kv, api, engine, changed, statuses, clock };
 }

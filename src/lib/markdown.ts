@@ -11,6 +11,7 @@ import {
 	caseCounts,
 	casePages,
 	cropImage,
+	type ElementDetails,
 	type Finding,
 	type FindingApp,
 	isSafeId,
@@ -194,6 +195,12 @@ function annotation(a: Annotation, page: string | undefined): string {
 		if (a.element.landmark) lines.push(`- In: ${inline(a.element.landmark)}`);
 	} else {
 		lines.push("- Element: none recorded");
+	}
+	// What an arrow or a line links (DEC-047).
+	if (a.ends) {
+		const end = (d: ElementDetails | null) =>
+			d === null ? "nothing recorded" : inline(summarize(d));
+		lines.push(`- From: ${end(a.ends.start)}`, `- To: ${end(a.ends.end)}`);
 	}
 	lines.push(
 		isSafeId(a.shot)

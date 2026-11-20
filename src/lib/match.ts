@@ -116,6 +116,31 @@ function naming(d: ElementDetails, key: Naming): string | undefined {
 	return key === "src" || key === "href" ? d.attributes[key] : d[key];
 }
 
+/**
+ * `candidate` as `stored` can be compared with (DEC-047): a link keeps its
+ * fragment only where it names a place on the page, and only while that
+ * place exists. Where one side has a fragment and the other none (a mark
+ * stored before, or a target rendered later or not yet), their links are
+ * compared without it; two fragments still tell two links apart.
+ */
+function comparable(
+	stored: ElementDetails,
+	candidate: ElementDetails,
+): ElementDetails {
+	const mine = stored.attributes["href"];
+	const theirs = candidate.attributes["href"];
+	if (mine === undefined || theirs === undefined) return candidate;
+	const a = mine.indexOf("#");
+	const b = theirs.indexOf("#");
+	if (a < 0 === b < 0) return candidate;
+	// The candidate's link as the stored one is written: with the stored
+	// fragment where only the candidate lacks one, without its own where
+	// only the stored one lacks one.
+	const href =
+		b >= 0 ? theirs.slice(0, b) : theirs === mine.slice(0, a) ? mine : theirs;
+	return { ...candidate, attributes: { ...candidate.attributes, href } };
+}
+
 const NOTHING_REPEATED: ReadonlySet<Naming> = new Set();
 
 /** Which of the stored element's naming values several candidates have. */
@@ -128,7 +153,8 @@ function repeatedNames(
 		const value = naming(stored, key);
 		if (!value) continue;
 		let count = 0;
-		for (const c of candidates) if (naming(c, key) === value) count++;
+		for (const c of candidates)
+			if (naming(comparable(stored, c), key) === value) count++;
 		if (count > 1) repeated.add(key);
 	}
 	return repeated;
@@ -146,6 +172,7 @@ export function identity(
 	candidate: ElementDetails,
 	repeated: ReadonlySet<Naming> = NOTHING_REPEATED,
 ): number | undefined {
+	candidate = comparable(stored, candidate);
 	const same = (key: Naming) =>
 		!!naming(stored, key) && naming(candidate, key) === naming(stored, key);
 	const names = (key: Naming) => same(key) && !repeated.has(key);
@@ -180,6 +207,7 @@ export function score(
 	candidate: ElementDetails,
 	repeated: ReadonlySet<Naming> = NOTHING_REPEATED,
 ): number {
+	candidate = comparable(stored, candidate);
 	let total = 0;
 	let weight = 0;
 	const add = (w: number, similarity: number) => {
@@ -207,7 +235,14 @@ export function score(
 	if (stored.heading)
 		add(
 			WEIGHTS.heading,
-			textSimilarity(stored.heading, candidate.heading ?? ""),
+			// A mark stored before DEC-047 says the heading by the rule then:
+			// the better of the candidate's heading now and by that rule.
+			Math.max(
+				textSimilarity(stored.heading, candidate.heading ?? ""),
+				candidate.headingBefore === undefined
+					? 0
+					: textSimilarity(stored.heading, candidate.headingBefore),
+			),
 		);
 	if (stored.landmark)
 		add(WEIGHTS.landmark, candidate.landmark === stored.landmark ? 1 : 0);

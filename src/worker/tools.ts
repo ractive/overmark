@@ -376,6 +376,21 @@ function caseView(
 				crop: a.crop,
 				element:
 					compact && a.element !== null ? summarize(a.element) : a.element,
+				// An arrow's or a line's two ends: what it links (DEC-047).
+				...(a.ends === undefined
+					? {}
+					: {
+							ends: {
+								start:
+									compact && a.ends.start !== null
+										? summarize(a.ends.start)
+										: a.ends.start,
+								end:
+									compact && a.ends.end !== null
+										? summarize(a.ends.end)
+										: a.ends.end,
+							},
+						}),
 				// AI apps', never the user's: the comment is the user's.
 				findings: findingsView(a, clientId, compact, me),
 			})),

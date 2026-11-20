@@ -16,8 +16,10 @@ Sitegloss stores in your browser, on your computer:
 - the address, title and language of each page you mark, the window size, and the
   browser's user agent. An address is kept without its query string or fragment (only a
   fragment that is a route of the page stays);
-- for each marked element: its tag, role, name, a short piece of its text, a few
-  attributes, its position, and a CSS selector;
+- for each marked element (for an arrow or a line, also the elements at its two ends):
+  its tag, role, name, a short piece of its text, a few attributes, its position, and a
+  CSS selector. A link's address is kept as its path; a fragment stays only where it
+  names a place on the same page (`#book`) or is a route;
 - screenshots of the visible part of the tab, with the marks on them;
 - its settings, and where it syncs to;
 - if you sign in to sitegloss.dev: your name and e-mail address there, your teams, the

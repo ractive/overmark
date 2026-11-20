@@ -26,6 +26,7 @@ import {
 	MAX_COMMENT,
 	MAX_PAGE_TITLE,
 	MAX_PEN_POINTS,
+	type MarkEnds,
 	newId,
 	type PageInfo,
 	type Point,
@@ -60,7 +61,14 @@ import {
 	type PageActivity,
 	type ShowOptions,
 } from "./activity.ts";
-import { elementAt, elementForRect } from "./anchor.ts";
+import {
+	elementAt,
+	elementForRect,
+	elementForStroke,
+	isFlatStroke,
+	isOpenStroke,
+	markedElementAt,
+} from "./anchor.ts";
 import type { PageBlur } from "./blur.ts";
 import { type IconName, icon, type Overlay, ring } from "./overlay.ts";
 
@@ -82,6 +90,8 @@ interface Draft {
 	element: Element | null;
 	/** Read when the mark was drawn: the element may be gone by saving. */
 	details: ElementDetails | null;
+	/** An arrow's or an open stroke's elements at its two ends (DEC-047). */
+	ends?: MarkEnds;
 	/** The element's box then, in document coordinates. */
 	anchor: Rect | null;
 	/** The page's address then. */
@@ -492,24 +502,44 @@ export class Annotator {
 				break;
 			}
 			case "arrow":
-				if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) >= 12)
-					this.#add(
-						{ kind: "arrow", from: drag.start, to: p },
-						elementAt(e.clientX, e.clientY, host),
+				if (Math.hypot(p.x - drag.start.x, p.y - drag.start.y) >= 12) {
+					// What it points at, and what it points from (DEC-047).
+					const end = markedElementAt(e.clientX, e.clientY, host);
+					const start = markedElementAt(
+						drag.start.x - s.x,
+						drag.start.y - s.y,
+						host,
 					);
+					this.#add({ kind: "arrow", from: drag.start, to: p }, end, {
+						start,
+						end,
+					});
+				}
 				break;
 			case "pen": {
 				const points = thin([...drag.points, p]);
 				const shape: Shape = { kind: "pen", points };
 				const bounds = shapeBounds(shape);
-				if (points.length >= 2 && bounds.width + bounds.height >= 8)
-					this.#add(shape, elementForRect(toWindow(bounds), host));
+				if (points.length >= 2 && bounds.width + bounds.height >= 8) {
+					const first = points[0] as Point;
+					const last = points.at(-1) as Point;
+					// A line from one thing to another says both (DEC-047).
+					// (An underline is open too, but says one thing: no ends.)
+					const ends =
+						isOpenStroke(points) && !isFlatStroke(bounds)
+							? {
+									start: markedElementAt(first.x - s.x, first.y - s.y, host),
+									end: markedElementAt(last.x - s.x, last.y - s.y, host),
+								}
+							: undefined;
+					this.#add(shape, elementForStroke(toWindow(bounds), host), ends);
+				}
 				break;
 			}
 			case "note":
 				this.#add(
 					{ kind: "note", at: p },
-					elementAt(e.clientX, e.clientY, host),
+					markedElementAt(e.clientX, e.clientY, host),
 				);
 				break;
 			case null:
@@ -539,16 +569,23 @@ export class Annotator {
 		return Math.max(first - 1, ...this.#drafts.map((d) => d.number)) + 1;
 	}
 
-	#add(shape: Shape, element: Element | null): void {
+	#add(
+		shape: Shape,
+		element: Element | null,
+		ends?: { start: Element | null; end: Element | null },
+	): void {
+		const context = createContext(this.overlay.doc);
+		const details = (el: Element | null) =>
+			el === null ? null : describeElement(el, context);
 		const draft: Draft = {
 			number: this.#nextNumber(),
 			shape,
 			comment: "",
 			element,
-			details:
-				element === null
-					? null
-					: describeElement(element, createContext(this.overlay.doc)),
+			details: details(element),
+			...(ends === undefined
+				? {}
+				: { ends: { start: details(ends.start), end: details(ends.end) } }),
 			anchor: element === null ? null : documentRect(element, this.#scroll()),
 			url: location.href,
 			scroll: this.#scroll(),
@@ -1311,6 +1348,7 @@ export class Annotator {
 			shape,
 			// Where the shot shows it: loading places the mark relative to it.
 			element: d.details && box ? { ...d.details, rect: box } : d.details,
+			...(d.ends === undefined ? {} : { ends: d.ends }),
 			cropRect: cropRectFor(shapeBounds(shape), view.shot.viewport),
 		};
 	}
