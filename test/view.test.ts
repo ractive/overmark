@@ -18,6 +18,8 @@ const window = new Window({ url: "chrome-extension://x/sidepanel/index.html" });
 const globals = globalThis as unknown as Record<string, unknown>;
 const before = { document: globals["document"] };
 let render: (state: PanelState, actions: Actions) => void;
+let ago: (iso: string, now?: number) => string;
+let webAppNote: (state: PanelState) => string | undefined;
 let ASKING_DOWNLOADS: string;
 let IMPORT_BUSY: string;
 let EXPORT_ALL_BUSY: string;
@@ -39,9 +41,9 @@ beforeAll(async () => {
 		).text(),
 	);
 	globals["document"] = window.document;
-	({ render, ASKING_DOWNLOADS, IMPORT_BUSY, EXPORT_ALL_BUSY } = await import(
-		"../src/sidepanel/view.ts"
-	));
+	({ render, ASKING_DOWNLOADS, IMPORT_BUSY, EXPORT_ALL_BUSY, webAppNote } =
+		await import("../src/sidepanel/view.ts"));
+	({ ago } = await import("../src/sidepanel/cloud-view.ts"));
 });
 
 afterAll(() => {
@@ -1803,7 +1805,19 @@ describe("the account and the sync with a team (DEC-039)", () => {
 	test("signed out: what signing in sends where, in one sentence, and Sign in", () => {
 		const clicked: string[] = [];
 		home({}, actionsWith({ cloudSignIn: () => void clicked.push("in") }));
-		expect(el("cloud-heading").textContent).toBe("Account");
+		expect(el("cloud-heading").textContent).toBe("Team");
+		// Home in the order a newcomer reads it, one level each (DEC-045).
+		expect(
+			[...document.querySelectorAll("#home h2, #home h3")].map(
+				(h) => `${h.tagName} ${h.textContent}`,
+			),
+		).toEqual([
+			"H2 This page",
+			"H2 Cases",
+			"H2 Team",
+			"H2 Files",
+			"H3 Copy to a folder",
+		]);
 		expect(el("cloud").dataset["cloud"]).toBe("off");
 		expect(el("cloud").textContent).toContain(
 			"Sign in to sync with your team.",
@@ -1938,7 +1952,8 @@ describe("the account and the sync with a team (DEC-039)", () => {
 			"Signed in as Tess Tester (tess@example.com)",
 		);
 		expect(el("cloud-team-name").textContent).toBe("Team: Pedal & Pine web");
-		expect(el("cloud-status").textContent).toStartWith("Synced ");
+		// The stream not open yet: when it last synced, and Sync now.
+		expect(el("cloud-status").textContent).toStartWith("Last synced ");
 		expect(el("cloud").dataset["cloud"]).toBe("synced");
 		button("cloud-sync-now")?.click();
 		button("cloud-sign-out")?.click();
@@ -1959,7 +1974,12 @@ describe("the account and the sync with a team (DEC-039)", () => {
 				undecided: 0,
 			}),
 		).toBe(
-			"Offline, will retry. The server cannot be reached. Your changes are kept and sent when it can.",
+			"Offline: changes are kept and sync when the server can be reached.",
+		);
+		expect(
+			at({ state: "offline", problems: [], undecided: 0, waiting: 1 }),
+		).toBe(
+			"Offline: changes are kept and sync when the server can be reached. 1 case waits to be sent.",
 		);
 		// What the server did not take, in its words, by case.
 		at({
@@ -1976,6 +1996,139 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		expect(el("cloud-problems").textContent).toBe(
 			"“Checkout”: A change to a mark was not taken: A mark holds at most 20 findings.",
 		);
+	});
+
+	test("the status line says the state, not a time: up to date while the stream is open and nothing waits; Sync now only when it can do something (DEC-045)", () => {
+		const synced = (more: Partial<NonNullable<Cloud["status"]>> = {}) => ({
+			state: "synced" as const,
+			lastSyncedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+			problems: [],
+			undecided: 0,
+			waiting: 0,
+			...more,
+		});
+		const line = () => el("cloud-status").textContent;
+		home({ account: account(), status: synced(), live: true });
+		expect(line()).toBe("Up to date. Changes sync as you work.");
+		expect(button("cloud-sync-now")).toBeNull();
+		expect(button("cloud-sign-out")).not.toBeNull();
+		// Something waits to be sent: said, and Sync now sends it.
+		home({ account: account(), status: synced({ waiting: 2 }), live: true });
+		expect(line()).toBe("2 cases wait to be sent.");
+		expect(button("cloud-sync-now")).not.toBeNull();
+		// The stream closed for a while: when it last synced, and how the
+		// team's changes come now.
+		home({ account: account(), status: synced(), live: false });
+		expect(line()).toBe(
+			"Last synced 5 minutes ago. The team's changes are not coming in live right now: they come at the next sync, or with Sync now.",
+		);
+		expect(button("cloud-sync-now")).not.toBeNull();
+		// Being opened: when it last synced, no claim about live changes.
+		home({ account: account(), status: synced(), live: undefined });
+		expect(line()).toBe("Last synced 5 minutes ago.");
+		// A refusal: Sync now tries again.
+		home({
+			account: account(),
+			status: {
+				...synced(),
+				state: "problem",
+				text: "Some changes were not taken by the server:",
+				problems: [{ caseId: "c_1", text: "No." }],
+			},
+			live: true,
+		});
+		expect(button("cloud-sync-now")).not.toBeNull();
+		// While it syncs, nothing to press.
+		home({
+			account: account(),
+			status: { ...synced(), state: "syncing" },
+			live: true,
+		});
+		expect(line()).toBe("Syncing…");
+		expect(button("cloud-sync-now")).toBeNull();
+	});
+
+	test("a time said as people say it", () => {
+		const now = Date.parse("2026-11-20T14:08:00.000Z");
+		expect(ago("2026-11-20T14:07:40.000Z", now)).toBe("just now");
+		expect(ago("2026-11-20T14:07:00.000Z", now)).toBe("1 minute ago");
+		expect(ago("2026-11-20T13:08:00.000Z", now)).toBe("1 hour ago");
+		expect(ago("2026-11-18T14:08:00.000Z", now)).toStartWith("on ");
+	});
+
+	test("the tab in front is the team's web app: said in one line, only for the server signed in to (DEC-045)", () => {
+		const tab = (url: string) => ({
+			id: 1,
+			url,
+			title: "Case",
+			size: undefined,
+		});
+		const at = (url: string, more: Partial<Cloud> = {}) => {
+			const state = initialState();
+			Object.assign(state.cloud, { account: account(), ...more });
+			state.tab = tab(url);
+			render(state, noActions);
+			return el("web-app-note");
+		};
+		const note = at("https://app.sitegloss.dev/t/pedal/cases/c_1");
+		expect(note.hidden).toBe(false);
+		expect(note.textContent).toBe(
+			"This tab is your team's web app at app.sitegloss.dev: it shows the same cases as this panel.",
+		);
+		expect(at("https://shop.example/cart").hidden).toBe(true);
+		// Signed out: no team, no web app of one.
+		expect(
+			at("https://app.sitegloss.dev/t/pedal", { account: undefined }).hidden,
+		).toBe(true);
+		// Signed in to the development server: the service's pages are not its web app.
+		expect(
+			at("https://app.sitegloss.dev/t/pedal", {
+				account: account({ server: "https://app.dev.sitegloss.dev" }),
+			}).hidden,
+		).toBe(true);
+		expect(
+			at("https://app.dev.sitegloss.dev/t/pedal", {
+				account: account({ server: "https://app.dev.sitegloss.dev" }),
+			}).hidden,
+		).toBe(false);
+		// In an open case too, where the tab's marks are looked for.
+		const c = sampleCase("c_1");
+		const state = caseState(c, (s) => {
+			s.cloud.account = account();
+			s.tab = tab("https://app.sitegloss.dev/t/pedal/cases/c_1");
+		});
+		render(state, noActions);
+		expect(el("case-web-app").hidden).toBe(false);
+		expect(webAppNote(state)).toContain("your team's web app");
+	});
+
+	test("an AI app just paired: its card says what to ask it and offers the way back (DEC-045)", () => {
+		const closed: string[] = [];
+		const actions = actionsWith({ closeSettings: () => void closed.push("x") });
+		const state = initialState();
+		state.settings = true;
+		state.ai.justPaired = "Claude";
+		render(state, actions);
+		expect(el("paired-next").hidden).toBe(false);
+		expect(el("paired-next-text").textContent).toBe("Claude is connected.");
+		expect(el("paired-next").textContent).toContain(
+			"Look at the Sitegloss case open in my browser and fix its marks",
+		);
+		expect(el("paired-back").textContent).toBe("Back to the cases");
+		el<HTMLButtonElement>("paired-back").click();
+		expect(closed).toEqual(["x"]);
+		// Opened over a case: back to it.
+		const c = sampleCase("c_1");
+		const over = caseState(c, (s) => {
+			s.settings = true;
+			s.ai.justPaired = "Claude";
+		});
+		render(over, actions);
+		expect(el("paired-back").textContent).toBe("Back to the case");
+		// Not in the card's view any more, or nothing paired: nothing said.
+		over.settings = false;
+		render(over, actions);
+		expect(el("paired-next").hidden).toBe(true);
 	});
 
 	test("several teams: a chooser; no team yet: where to make one", () => {
@@ -3818,9 +3971,9 @@ describe("the sync (DEC-021, DEC-025)", () => {
 
 	test("off: what it does, Sync to Downloads first, Choose a folder…, and the note", () => {
 		const box = sync(() => {});
-		expect(box.querySelector(".sync-state")?.textContent).toBe("Sync is off.");
+		expect(box.querySelector(".sync-state")?.textContent).toBe("Off.");
 		expect(buttons(box)).toEqual([
-			["Sync to Downloads", true],
+			["Copy to Downloads", true],
 			["Choose a folder…", true],
 		]);
 		// Ink, not amber: amber is Home's New case for this page alone (DEC-024).
@@ -3849,15 +4002,15 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		let shown = 0;
 		const box = sync(synced, actionsWith({ syncShow: () => shown++ }));
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to Downloads/Sitegloss",
+			"Copying to Downloads/Sitegloss",
 		);
 		expect(box.querySelector(".sync-line")?.textContent).toStartWith(
-			"Last synced ",
+			"Last written ",
 		);
 		expect(buttons(box)).toEqual([
 			["Show in folder", true],
 			["Change…", true],
-			["Stop syncing", true],
+			["Stop copying", true],
 		]);
 		(box.querySelector('[data-action="sync-show"]') as HTMLElement).click();
 		expect(shown).toBe(1);
@@ -3872,12 +4025,12 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			s.status = { folderId: "f", state: "syncing", left: 3 };
 		});
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to “Sitegloss”",
+			"Copying to “Sitegloss”",
 		);
 		expect(box.querySelector(".sync-line")?.textContent).toBe(
 			"Writing 3 cases…",
 		);
-		expect(labels(box)).toEqual(["Change…", "Stop syncing"]);
+		expect(labels(box)).toEqual(["Change…", "Stop copying"]);
 	});
 
 	test("Change…: the Off state's buttons with Cancel, the target still shown", () => {
@@ -3886,10 +4039,10 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			s.changing = true;
 		});
 		expect(box.querySelector(".sync-state")?.textContent).toBe(
-			"Syncing to Downloads/Sitegloss",
+			"Copying to Downloads/Sitegloss",
 		);
 		expect(labels(box)).toEqual([
-			"Sync to Downloads",
+			"Copy to Downloads",
 			"Choose a folder…",
 			"Cancel",
 		]);
@@ -3912,7 +4065,7 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			"Allow access",
 			"Use Downloads instead",
 			"Change…",
-			"Stop syncing",
+			"Stop copying",
 		]);
 		(box.querySelector('[data-action="sync-allow"]') as HTMLElement).click();
 		(
@@ -3930,9 +4083,11 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			expect(b.getAttribute("role")).toBe("status");
 			expect(b.dataset["sync"]).toBe("paused");
 			expect(b.querySelector("p")?.textContent).toBe(
-				"Sync is paused. Chrome needs your OK to write to “iCloud cases” again.",
+				"The copy to a folder is paused. Chrome needs your OK to write to “iCloud cases” again.",
 			);
-			expect(b.querySelector("strong")?.textContent).toBe("Sync is paused.");
+			expect(b.querySelector("strong")?.textContent).toBe(
+				"The copy to a folder is paused.",
+			);
 			expect(labels(b)).toEqual(["Allow access", "Use Downloads instead"]);
 			(b.querySelector('[data-action="sync-allow"]') as HTMLElement).click();
 		}
@@ -3984,7 +4139,7 @@ describe("the sync (DEC-021, DEC-025)", () => {
 			"Paused: Sitegloss may no longer save to your downloads.",
 		);
 		expect(banner().querySelector("p")?.textContent).toBe(
-			"Sync is paused. Sitegloss may no longer save to your downloads.",
+			"The copy to a folder is paused. Sitegloss may no longer save to your downloads.",
 		);
 		expect(labels(banner())).toEqual(["Allow downloads"]);
 		(
@@ -4012,7 +4167,7 @@ describe("the sync (DEC-021, DEC-025)", () => {
 		expect(labels(box)).toContain("Try again");
 		expect(banner().dataset["sync"]).toBe("failed");
 		expect(banner().querySelector("p")?.textContent).toBe(
-			"Sync failed. The folder “Sitegloss” is no longer there.",
+			"The copy to a folder failed. The folder “Sitegloss” is no longer there.",
 		);
 		expect(labels(banner())).toEqual(["Try again"]);
 	});

@@ -31,13 +31,20 @@ import {
 import {
 	type Account,
 	type CaseBook,
+	type CloudStatus,
 	KEYS,
 	type Queue,
 } from "../src/lib/cloud/book.ts";
 import { undoAdd } from "../src/lib/save.ts";
 import type { StoredImage } from "../src/lib/store.ts";
+import { statusLine, syncNowHelps } from "../src/sidepanel/cloud-view.ts";
 import { markAsked } from "../src/sidepanel/picked.ts";
-import { editAfter, heldAfter, type MarkEdit } from "../src/sidepanel/state.ts";
+import {
+	editAfter,
+	heldAfter,
+	type MarkEdit,
+	type PanelState,
+} from "../src/sidepanel/state.ts";
 import type { FakeApi } from "./cloud-fake.ts";
 import { FakeServer, requestProblem, TEAM } from "./cloud-fake.ts";
 import {
@@ -332,6 +339,98 @@ describe("two devices and one team", () => {
 		const before = tess.changed.length;
 		await tess.engine.request();
 		expect(tess.changed).toHaveLength(before);
+	});
+});
+
+describe("the status line, from the engine's real states (DEC-045)", () => {
+	type Cloud = PanelState["cloud"];
+	/** The panel's view of Tess's sync: her account, her engine's status, the stream. */
+	const panelOf = async (
+		d: Device,
+		live: boolean | undefined,
+	): Promise<Cloud> => {
+		const account = (await d.engine.account()) as Account;
+		return {
+			server: account.server,
+			account: {
+				name: account.user.name,
+				email: account.user.email,
+				userId: account.user.id,
+				server: account.server,
+				teams: account.teams.map((t) => ({
+					id: t.id,
+					name: t.name,
+					permissions: [...(t.permissions ?? [])],
+				})),
+				teamId: account.teamId,
+				expired: account.expired === true,
+			},
+			status: status(d),
+			modes: {},
+			signingIn: false,
+			problem: undefined,
+			live,
+			minute: 0,
+		};
+	};
+
+	test("up to date only when nothing waits and the stream is open; offline says what waits; Sync now only when it helps", async () => {
+		await shared();
+		const panel = await panelOf(tess, true);
+		expect(status(tess)?.waiting).toBe(0);
+		expect(statusLine(panel)).toBe("Up to date. Changes sync as you work.");
+		expect(syncNowHelps(panel)).toBe(false);
+		// The stream closed: when it last synced, and Sync now.
+		const closed = await panelOf(tess, false);
+		expect(statusLine(closed, tess.clock.now.getTime())).toStartWith(
+			"Last synced just now.",
+		);
+		expect(syncNowHelps(closed)).toBe(true);
+		// Offline with a change: the change waits, and says so.
+		tess.api.offline = true;
+		await change(tess, "c_flow", (c, now) =>
+			withComment(c, "a1", "Edited offline", now),
+		);
+		await tess.engine.request();
+		const offline = await panelOf(tess, false);
+		expect(status(tess)?.state).toBe("offline");
+		expect(status(tess)?.waiting).toBe(1);
+		expect(statusLine(offline)).toBe(
+			"Offline: changes are kept and sync when the server can be reached. 1 case waits to be sent.",
+		);
+		expect(syncNowHelps(offline)).toBe(true);
+		// A run said "syncing" on its way.
+		tess.api.offline = false;
+		tess.statuses.length = 0;
+		await tess.engine.request();
+		expect(tess.statuses.some((x) => x.state === "syncing")).toBe(true);
+		expect(
+			statusLine({
+				...(await panelOf(tess, true)),
+				status: {
+					...(tess.statuses.find((x) => x.state === "syncing") as CloudStatus),
+				},
+			}),
+		).toStartWith("Syncing");
+		// Sent: up to date again.
+		expect(status(tess)?.waiting).toBe(0);
+		expect(statusLine(await panelOf(tess, true))).toBe(
+			"Up to date. Changes sync as you work.",
+		);
+	});
+
+	test("what is not the team's does not wait: a case kept on this device, one not decided about, one without a mark", async () => {
+		await startCase(tess, "c_old");
+		await addMark(tess, "c_old", "Was here before");
+		await signIn(tess);
+		expect(status(tess)?.undecided).toBe(1);
+		await tess.engine.decide(false);
+		await startCase(tess, "c_empty");
+		await tess.engine.request();
+		expect(status(tess)?.waiting).toBe(0);
+		expect(statusLine(await panelOf(tess, true))).toBe(
+			"Up to date. Changes sync as you work.",
+		);
 	});
 });
 

@@ -66,6 +66,9 @@ export function cloudActions(cloud: () => CloudActions): CloudActions {
 	};
 }
 
+/** How long the stream may be closed before the status line says so. */
+export const STREAM_GAP_MS = 10_000;
+
 /** The panel's cloud; `kv` is the cloud's database (tests pass their own). */
 export function startCloud(
 	update: Update,
@@ -80,6 +83,31 @@ export function startCloud(
 			s.cloud.problem = text;
 		});
 
+	/**
+	 * Whether the stream is open, as the status line says it. A stream the
+	 * server ends (every quarter of an hour) is open again within seconds:
+	 * only one closed for longer counts as closed.
+	 */
+	let closing: ReturnType<typeof setTimeout> | undefined;
+	function live(open: boolean | undefined): void {
+		clearTimeout(closing);
+		if (open === false) {
+			closing = setTimeout(
+				() => update((s) => (s.cloud.live = false)),
+				STREAM_GAP_MS,
+			);
+			return;
+		}
+		update((s) => (s.cloud.live = open));
+	}
+	// "5 minutes ago" is said anew each minute.
+	const ticking = setInterval(
+		() => update((s) => (s.cloud.minute = Math.floor(Date.now() / 60_000))),
+		60_000,
+	) as unknown as { unref?: () => void };
+	// (In tests, under Bun: it holds no run open.)
+	ticking.unref?.();
+
 	/** Listen to the team's changes while there is a team; another team, another stream. */
 	function follow(account: Account | undefined): void {
 		const teamId = account?.expired ? undefined : account?.teamId;
@@ -90,6 +118,7 @@ export function startCloud(
 		if (stream?.key === key) return;
 		stream?.end.abort();
 		stream = undefined;
+		live(undefined);
 		if (account === undefined || teamId === undefined) return;
 		const end = new AbortController();
 		stream = { key, end };
@@ -107,6 +136,9 @@ export function startCloud(
 				return answer.ok ? answer.token : undefined;
 			},
 			onChange: (cursor) => void send({ type: "cloud:run", cursor }),
+			onConnected: (open) => {
+				if (stream?.end === end) live(open);
+			},
 			signal: end.signal,
 		}).then(() => {
 			// It ended by itself (nobody signed in any more): the next news

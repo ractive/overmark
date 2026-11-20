@@ -2117,3 +2117,60 @@ on a yes, fills in its own code there. Typing the code stays the way that always
   test client, since it fetches an AI app's metadata over HTTPS. The test build takes
   the fixture's origin from `siteglossTestFillOrigins` on the worker's global; other
   builds drop that.
+
+## DEC-045: Home in four parts, the sync's state in words, the step after pairing (owner)
+
+2026-11-20. The owner's first test of 0.3.0 against the service: sign-in and live sync
+work; the panel's guidance does not. Four points, settled here (open question 10 (h)
+with them).
+
+- **Home reads in order: This page, Cases, Team, Files.** Each is a section with its
+  own heading of the same level (`h2`), as a newcomer reads them; under Files the
+  copy to a folder has its own `h3`. Before, Files, Account and Sync were small headings
+  under Cases, which read as parts of the case list, and two things were called sync.
+  The account stays on Home, not in Settings: it says what happens to every case, and
+  its status line belongs where the cases are. Its heading is "Team", as that is what
+  it is about (who is signed in, the team, the sync with it). The copy of every case
+  to Downloads or a folder is "Copy to a folder": "Copy to Downloads", "Copying to …",
+  "Last written …", "Stop copying", and its banner and the icon's tooltip say "The copy
+  to a folder is paused/failed". "Sync" now only means the team's.
+- **The status line says the state, not a time.** From the worker's last run (its
+  state, and `waiting`: the cases with changes the team does not have yet and that can
+  go, counted in the engine's status) and from this panel's events stream (open or
+  not, `listen`'s `onConnected`). "Up to date. Changes sync as you work." only while the
+  stream is open and nothing waits; "Syncing…"; "2 cases wait to be sent.";
+  "Offline: changes are kept and sync when the server can be reached." with what
+  waits; "Last synced 5 minutes ago." while the stream is being opened, and with "The
+  team's changes are not coming in live right now: they come at the next sync, or
+  with Sync now." once it has been closed for more than 10 s (the server ends a
+  stream every quarter of an hour and it is open again within seconds, which is no
+  news). A time is relative ("just now", "5 minutes ago", "on <date>" after a day),
+  said anew each minute. "Sync now" is there only when it can do something: something
+  waits, a refusal to try again, no live changes, or no team yet; not while it syncs or
+  is up to date. A server that stops gracefully keeps its open streams: the panel then
+  says up to date until its next run finds it offline, which is true of the stream.
+- **After pairing: what now, and the way back.** When an AI app pairs while the card's
+  pairing box shows (also when the connection drops meanwhile and the app is listed
+  only once it is back), the card says "<app> is connected." with what to ask it ("Look
+  at the Sitegloss case open in my browser and fix its marks") and that it asks before
+  changing a case unless all changes are allowed, and a strong button back: "Back to
+  the cases", or "Back to the case" when the card was opened over one. Said once: it
+  goes when the card is left. The card stays open after pairing rather than going back
+  by itself: what one sets right after pairing (Allow all changes, Disconnect) is
+  there, and a view that changes under the user while they read is the confusion the
+  owner had. The button makes the way back as plain as the confirmation.
+- **The team's web app in front.** When the tab in front is at the origin of the server
+  the account is signed in to, Home's "This page" and an open case's tab section say
+  "This tab is your team's web app at <host>: it shows the same cases as this panel."
+  Only that origin (the service's pages are not the development server's web app), and
+  only where the panel knows the tab's address: with no access to the tab, no
+  permission is asked for this. Nothing else changes there; marking the web app itself
+  stays possible.
+- **Tested** in `test/view.test.ts` (Home's headings in order; the status line's
+  states and Sync now; the web-app line, by origin; the pairing note and its way back),
+  `test/cloud.test.ts` ("the status line, from the engine's real states": up to date,
+  closed stream, offline with one case waiting, syncing, and what does not count as
+  waiting), `test/cloud-auth.test.ts` (the stream says open and closed), and
+  `test/card.test.ts` (`pairedSince`). Seen in the real side panel against a local
+  server, before and after, with the stream dropped and the server gone.
+

@@ -174,28 +174,28 @@ user agent. What differs from Chrome and Edge:
    Sitegloss may manage your downloads (an optional permission): with a yes the side
    panel shows where the file went, with Copy (its full path) and Show in folder; with
    a no the file is saved as before and Chrome asks again only at the next Export.
-8. Sync, under the case list, keeps a copy of every case as a file: each case as its own
+8. Copy to a folder, under Files on Home, keeps a copy of every case as a file: each case as its own
    file, the same `<title>.sitegloss.zip` as Export writes, and again whenever the case
    changes, also when an AI app changed it. The files are a mirror: Sitegloss never reads
    them, and a deleted case keeps its file, so "Import a case…" can bring it back. Two
    cases of the same title get `-2`, `-3`. Where to:
-   - **Sync to Downloads** (the default) writes to a folder `Sitegloss` in Chrome's
+   - **Copy to Downloads** (the default) writes to a folder `Sitegloss` in Chrome's
      downloads folder. Chrome asks once whether Sitegloss may manage your downloads; then
      it writes with the side panel closed too, also after a browser restart. Each write
      shows in Chrome's download list; Sitegloss keeps only its newest entry there, for
      "Show in folder". A case keeps the file name it was first written under, also after
      a rename (nothing can be removed there, so a new name would leave the old file). Files deleted there are written again at their case's next change, or
-     all at once with Change… and Sync to Downloads. The folder is one for every Chrome
-     profile and browser on the computer: two of them syncing to Downloads write into the
+     all at once with Change… and Copy to Downloads. The folder is one for every Chrome
+     profile and browser on the computer: two of them copying to Downloads write into the
      same `Sitegloss` folder, and a case of the same title in each overwrites the other's
      file; give each its own folder with Choose a folder…. With Chrome's "Ask where to save each file before downloading" on, Chrome
-     would ask at every write: the sync then says so and fails until it is off.
+     would ask at every write: the copy then says so and fails until it is off.
    - **Choose a folder…** writes to any folder (one in iCloud Drive or Dropbox, say). A
      renamed case's old file goes there, and a file Sitegloss did not write is never
      overwritten. Chrome lets Sitegloss write to it only while its side panel is open, and
      asks for the folder again after the side panel was closed or the browser restarted.
-   The side panel shows where it syncs with when it last synced, "Change…" and "Stop
-   syncing" (the files stay). When the sync is paused (the folder needs your OK again, or
+   The side panel shows where it copies to with when it last wrote, "Change…" and "Stop
+   copying" (the files stay). When the copy is paused (the folder needs your OK again, or
    the downloads permission was taken back) or has failed, a banner above every view of
    the side panel says so with the button that helps (Allow access, Allow downloads, Try
    again; for a folder also "Use Downloads instead"), and the toolbar icon shows "!"
@@ -295,6 +295,10 @@ Pairings from before Sitegloss used client 0.17 or later (the address `<relay>/a
 not work any more: remove that connector from the AI app, add the new address and pair
 again.
 
+Once an AI app is paired, the card says so with what to ask it next ("Look at the
+Sitegloss case open in my browser and fix its marks") and a button back to the cases or
+the open case.
+
 A tool that changes something (marked "asks first" above) asks first: in the side
 panel when it is open and on screen in the window in front (another extension's panel,
 such as Claude in Chrome's, can cover it), otherwise in a system notification with
@@ -332,7 +336,7 @@ relay with a public HTTPS address that allows Sitegloss's ID, such as the hosted
 ## With a team
 
 Sitegloss works without an account, and nothing in it asks for one. If your team uses
-[sitegloss.dev](https://sitegloss.dev), "Sign in" in the side panel's Account section
+[sitegloss.dev](https://sitegloss.dev), "Sign in" in the side panel's Team section
 (on Home, under the cases) syncs your cases with the team, both ways:
 
 - You sign in on the service's own page, in a window of the browser. With several
@@ -361,18 +365,24 @@ Sitegloss works without an account, and nothing in it asks for one. If your team
   come here, and where both differ the team's text is kept. Sitegloss says so before
   you share, with the number of marks; when it finds out only while sending, it stops
   and asks then, and replaces nothing before you answer.
-- The Account section shows who is signed in, the team, what the sync is at (synced,
-  syncing, offline and trying again, or what the server did not take and why), "Sync
-  now" and "Sign out". Signing out stops the sync and keeps the cases, on this device
+- The Team section shows who is signed in, the team, and what the sync is at, as a
+  state: "Up to date. Changes sync as you work." while the side panel hears the team's
+  changes live and nothing waits to be sent; "Syncing…"; how many cases wait to be
+  sent; "Offline" with what waits; when it last synced, if the team's changes are not
+  coming in live; or what the server did not take and why. "Sync now" is there only
+  when it can do something (something waits, a refusal to try again, no live changes),
+  and "Sign out" always. Signing out stops the sync and keeps the cases, on this device
   only.
 - "Server" there chooses where to sign in, while nobody is signed in: Sitegloss
   itself (app.sitegloss.dev, unless you choose otherwise), its development server, or
   another address (https, or plain http on this computer). When it is not Sitegloss
-  itself, the Account section says so. Each server has its own account, team and
+  itself, the Team section says so. Each server has its own account, team and
   sync: a case synced with one is on this device only as far as another goes, until
   you share it there, and switching back finds everything as it was.
 
-The sync to a folder above is another thing and stays as it is: one way, to files.
+The copy to a folder above is another thing and stays as it is: one way, to files.
+With the tab in front showing the team's web app (the server you are signed in to),
+the side panel says so in one line, as its case pages show the same cases.
 Permission for signing in: `identity` (no install warning).
 
 ## Development

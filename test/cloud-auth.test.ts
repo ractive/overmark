@@ -815,6 +815,30 @@ describe("the events stream", () => {
 		}).toThrow(StreamTooLong);
 	});
 
+	test("it says when the stream is open and when not: open once the server answered and the body flows, closed when it ended or failed (DEC-045)", async () => {
+		const said: boolean[] = [];
+		const end = new AbortController();
+		let calls = 0;
+		await listen({
+			url: "https://app.sitegloss.dev/api/v1/teams/t/events",
+			token: async () => "a",
+			onChange: () => undefined,
+			onConnected: (open) => void said.push(open),
+			signal: end.signal,
+			fetch: async () => {
+				calls++;
+				// A refusal: never open. Then a stream that ends after a line.
+				if (calls === 1) return new Response("no", { status: 503 });
+				return new Response(": still here\n\n");
+			},
+			sleep: async () => {
+				if (calls >= 2) end.abort();
+			},
+		});
+		expect(calls).toBe(2);
+		expect(said).toEqual([true, false]);
+	});
+
 	test("a stream that never ends its line is let go and connected again; one connection has an age", async () => {
 		// A server that sends bytes for ever and never a line end.
 		let pulled = 0;

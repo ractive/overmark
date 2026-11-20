@@ -254,6 +254,14 @@ export interface PanelState {
 		signingIn: boolean;
 		/** What the panel itself could not do (the sign-in, the address). */
 		problem: string | undefined;
+		/**
+		 * The team's events stream, as this panel listens to it: open (what
+		 * the team changes arrives at once), closed for a while, or not
+		 * known yet (`undefined`: it is being opened).
+		 */
+		live: boolean | undefined;
+		/** The minute it is: a time said as "5 minutes ago" is said anew. */
+		minute: number;
 	};
 	ai: {
 		status: string;
@@ -274,6 +282,11 @@ export interface PanelState {
 		/** "Keep AI access on". */
 		keepOn: boolean;
 		lastCall: AiCall | undefined;
+		/**
+		 * The AI app that was just paired, by its name, while the card that
+		 * paired it is open: what to do next is said there (DEC-045).
+		 */
+		justPaired?: string;
 	};
 }
 
@@ -328,6 +341,8 @@ export const initialState = (): PanelState => ({
 		modes: {},
 		signingIn: false,
 		problem: undefined,
+		live: undefined,
+		minute: 0,
 	},
 	ai: {
 		status: "Not connected",

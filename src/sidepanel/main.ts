@@ -1531,7 +1531,12 @@ const actions: Actions = {
 
 	openCase,
 	closeCase: () => void leaveCase(),
-	closeSettings: () => update((s) => (s.settings = false)),
+	closeSettings: () =>
+		update((s) => {
+			s.settings = false;
+			// What to do after pairing is said once, in the card that paired.
+			delete s.ai.justPaired;
+		}),
 
 	loadOntoTab(c) {
 		// Off while Sitegloss may not run on the tab (view.ts): the notice

@@ -272,6 +272,12 @@ export interface CloudStatus {
 	/** Cases that were here before the team was chosen and wait for an answer. */
 	undecided: number;
 	/**
+	 * Cases with changes the team does not have yet and that can go (none
+	 * waits to be read first, none is held back): what "Up to date" means
+	 * there are none of. Unknown from a build before it.
+	 */
+	waiting?: number;
+	/**
 	 * Of the cases not decided about yet: how many the team already has
 	 * (under the same id), and how many of their marks say something else
 	 * there, which "Sync them" replaces with the team's.

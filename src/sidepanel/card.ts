@@ -72,6 +72,19 @@ export function hasNewGrant(known: ReadonlySet<string>, a: AiState): boolean {
 	return a.grants.some((g) => !known.has(g.grantId));
 }
 
+/**
+ * The app paired since the pairing box showed (`before`: the apps paired
+ * then; none: it did not show), by its name: what to do next is said.
+ */
+export function pairedSince(
+	before: ReadonlySet<string> | undefined,
+	a: AiState,
+): string | undefined {
+	if (before === undefined) return undefined;
+	const grant = a.grants.find((g) => !before.has(g.grantId));
+	return grant === undefined ? undefined : grant.name || grant.host;
+}
+
 /** A confirming click this soon after the first one (a double click) counts as nothing. */
 export const CONFIRM_DELAY_MS = 750;
 

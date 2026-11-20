@@ -590,11 +590,26 @@ export class CloudSync {
 						: `${first.text} ${rest.length} more of its changes were not taken either.`,
 			});
 		}
+		// The cases with changes the team does not have yet, and that can go:
+		// what "Up to date" may not hide.
+		let waiting = 0;
+		for (const c of cases) {
+			const book = books.get(c.id);
+			if (book !== undefined && book.mode !== "synced") continue;
+			if (book?.cleanAt === c.updatedAt) continue;
+			// Cannot go as things are (said among the problems), or waits to be
+			// read first, or has no mark yet (not sent until it has one).
+			if (book?.idle?.at === c.updatedAt) continue;
+			if (book?.reread !== undefined && blocks(book.reread)) continue;
+			if (book?.shadow === undefined && c.annotations.length === 0) continue;
+			waiting++;
+		}
 		return {
 			state,
 			problems,
 			...(notes.length > 0 ? { notes } : {}),
 			undecided,
+			waiting,
 			...(joins.cases > 0 ? { joins } : {}),
 			...(before.lastSyncedAt === undefined
 				? {}

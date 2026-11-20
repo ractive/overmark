@@ -196,7 +196,7 @@ export function startSync(
 			update((s) => (s.sync.asking = false));
 			if (!yes) {
 				problem(
-					`${BROWSER} did not allow Sitegloss to save to your downloads. Click Sync to Downloads to ask again${FIREFOX ? "" : ", or choose a folder"}.`,
+					`${BROWSER} did not allow Sitegloss to save to your downloads. Click Copy to Downloads to ask again${FIREFOX ? "" : ", or choose a folder"}.`,
 				);
 				return;
 			}

@@ -48,6 +48,7 @@ import type { AnnotationMatch, CandidateInfo } from "../lib/messages.ts";
 import {
 	type CloudActions,
 	caseSync,
+	hostOf,
 	renderCloudBanner,
 	renderCloudSection,
 } from "./cloud-view.ts";
@@ -593,6 +594,23 @@ function renderImportPrompt(state: PanelState, actions: Actions): void {
 	importPrompt.hidden = false;
 }
 
+/**
+ * The tab in front is the web app of the server the account is signed in
+ * to (DEC-045): its case pages show the same team's cases, marks and all,
+ * as this panel does. Said in one line, where the address is known.
+ */
+export function webAppNote(state: PanelState): string | undefined {
+	const server = state.cloud.account?.server;
+	const url = state.tab?.url;
+	if (server === undefined || !url) return undefined;
+	try {
+		if (new URL(url).origin !== new URL(server).origin) return undefined;
+	} catch {
+		return undefined;
+	}
+	return `This tab is your team's web app at ${hostOf(server)}: it shows the same cases as this panel.`;
+}
+
 function renderHome(state: PanelState, actions: Actions): void {
 	const tab = state.tab;
 	// Under "This page": its address, else its title (Chrome tells the
@@ -601,6 +619,7 @@ function renderHome(state: PanelState, actions: Actions): void {
 	pageText.hidden = pageText.textContent === "";
 	renderAccess(homeAccess, state);
 	setHint(hint, state.hint);
+	setHint(byId<HTMLElement>("web-app-note"), webAppNote(state));
 	const ok = access(state) === "yes";
 	// Always a new case, stored and opened at once (DEC-023, DEC-026).
 	annotate.disabled = !ok;
@@ -815,6 +834,8 @@ interface CaseParts {
 	noneFound: Notice;
 	/** What the tab in front shows of the case, in one line. */
 	tabLine: HTMLElement;
+	/** The tab in front is the team's own web app (`webAppNote`). */
+	webApp: HTMLElement;
 	/** Show, or Hide where the case is loaded on the tab in front. */
 	loadButton: HTMLButtonElement;
 	loadedHere: boolean;
@@ -1127,6 +1148,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			),
 		),
 		tabLine: h("p", { class: "tab-line", id: "tab-line", hidden: true }),
+		webApp: h("p", { class: "meta", id: "case-web-app", hidden: true }),
 		// A button with an edge, not a link: it was overlooked (the owner). It
 		// sits in the marks' bar: the marks are what it shows.
 		loadButton: h("button", {
@@ -1220,6 +1242,7 @@ function createParts(c: Case, actions: Actions): CaseParts {
 			{ class: "this-tab", id: "this-tab" },
 			created.access.el,
 			created.noneFound.el,
+			created.webApp,
 			created.tabLine,
 			created.hint,
 			created.size,
@@ -1985,6 +2008,7 @@ function renderCase(state: PanelState, actions: Actions): void {
 			: "Each mark you draw on the page goes into this case when its comment is done";
 	setHint(p.leaving, leavingText(state.leaving));
 	setHint(p.tabLine, ok ? tabLineText(state, c, p.adding) : undefined);
+	setHint(p.webApp, webAppNote(state));
 	// The search is over and found none of the marks this page should have:
 	// the case is probably for another page (judged per page, DEC-038).
 	const none =
@@ -2550,6 +2574,19 @@ export function aiPill(ai: PanelState["ai"]): {
 	};
 }
 
+/** An AI app was just paired: said in its card, with the way back (DEC-045). */
+function renderPaired(state: PanelState, actions: Actions): void {
+	const box = byId<HTMLElement>("paired-next");
+	const name = state.settings ? state.ai.justPaired : undefined;
+	box.hidden = name === undefined;
+	if (name === undefined) return;
+	byId("paired-next-text").textContent = `${name} is connected.`;
+	const button = byId<HTMLButtonElement>("paired-back");
+	button.textContent =
+		state.view.kind === "case" ? "Back to the case" : "Back to the cases";
+	button.onclick = () => actions.closeSettings();
+}
+
 function renderAi({ ai }: PanelState): void {
 	const pill = aiPill(ai);
 	aiLabel.textContent = pill.label;
@@ -2628,6 +2665,7 @@ export function render(state: PanelState, actions: Actions): void {
 	renderSyncBanner(state, actions);
 	renderCloudBanner(state, actions);
 	renderAi(state);
+	renderPaired(state, actions);
 	renderBack(state, actions);
 	allSites.checked = state.allSites;
 	const onCase = state.view.kind === "case";
