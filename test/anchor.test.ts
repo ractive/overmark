@@ -145,6 +145,21 @@ describe("the element a drawn mark is about (DEC-047)", () => {
 		expect(usefulElement($("article"))).toBe($("article"));
 	});
 
+	test("an icon component's picture inside a link: the link, across the shadow root", () => {
+		doc.body.innerHTML = `<a id="cart" href="/cart"><shop-icon></shop-icon> Cart</a><p id="note">See <x-word></x-word></p>`;
+		const icon = doc.querySelector("shop-icon") as Element;
+		const root = icon.attachShadow({ mode: "open" });
+		root.innerHTML = `<svg><g><path></path></g></svg>`;
+		expect(usefulElement(root.querySelector("path") as Element)).toBe(
+			doc.getElementById("cart") as Element,
+		);
+		// A bare span in a component's root is the text around it, outside.
+		const word = doc.querySelector("x-word") as Element;
+		const inner = word.attachShadow({ mode: "open" });
+		inner.innerHTML = `<span>bold</span>`;
+		expect(usefulElement(inner.querySelector("span") as Element)).toBe(word);
+	});
+
 	test("a line from one place to another is open; a circle round something is not", () => {
 		expect(
 			isOpenStroke([

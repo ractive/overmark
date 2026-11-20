@@ -2201,8 +2201,10 @@ whole card under "Our bikes".
   screenshot's). When such a mark first arrives, the engine cuts a crop from the
   screenshot around the shape, with the margin a drawn mark's crop has
   (`cropRectFor`), and stores that as the mark's crop here (`wholeShotCrops`,
-  `cutCrop` in the worker). Where cutting fails, the whole screenshot stays, as
-  before. **Not sent back.** A mark's crop is sent only in `mark.create`; this
+  `cutCrop` in the worker). Where cutting fails, or the shape is not on its
+  screenshot, or the part would be under 8 CSS px either way, the whole screenshot
+  stays, as before: it at least shows something. The case is read for this only
+  when such a mark is among what came. **Not sent back.** A mark's crop is sent only in `mark.create`; this
   mark's create was the server's, so nothing is sent, and that is right: the crop is
   derived from the screenshot the server has, the web app already shows the region
   with CSS (`isWholeShot`), and an upload would be a write the person never made,
@@ -2211,28 +2213,44 @@ whole card under "Our bikes".
   has the image and the shape). Marks that arrived before this keep the whole
   screenshot until their case is read anew from scratch.
 - **A link's fragment (E1).** `href` keeps the path, as before, and now the fragment
-  where it names a place of the page: a hash route (`#/cart`, as page addresses
-  keep, DEC-038), or `#id` on a link to the page itself when an element with that
-  id exists there (`#book`). Any other fragment is dropped (`#access_token=…`,
+  where it names a place of the page: on a link to the same site, a hash route
+  (`#/cart`, as page addresses keep, DEC-038), or `#id` on a link to the page itself
+  when an element with that id exists there (`#book`). Another site's fragment is
+  dropped, its route too. Any other fragment is dropped (`#access_token=…`,
   `#private`, another page's `#shipping`, which cannot be checked from here): it can
   carry a token, the reason DEC-009 dropped them all. One value, not raw and
   resolved both: the path with the place is the resolved form, and the raw form is
-  in the live HTML `get_mark_element` reads. Matching a mark stored before compares
-  links without their fragment, so old marks are found as well as before; for new
-  ones the fragment tells same-page links apart (the demo's Bikes, Prices and Book).
+  in the live HTML `get_mark_element` reads. Where one side of a comparison has a
+  fragment and the other none (a mark stored before; a target rendered later, or
+  not yet, when one of the two was described), the links are compared without it;
+  two fragments still tell same-page links apart (the demo's Bikes, Prices and
+  Book).
 - **The heading (E2).** Inside a section or card (`article`, `section`, `aside`,
   `nav`, `dialog`, `li`, such roles, or a class naming a card, tile or panel), the
   heading is that part's title: the nearest heading before the element within it,
   skipping the titles of parts inside it that the element is not in; when nothing in
   it comes before (a badge, a picture above the title), its first own heading after
-  the element; then the same for the part around it. Outside any section or card,
-  the nearest heading before it, as before (a footer note after the last section
-  keeps that section's title, as it did).
+  the element (not for a heading itself, whose sub-headings come after it); then the
+  same for the part around it. Outside any section or card, the nearest heading
+  before it, as before (a footer note after the last section keeps that section's
+  title, as it did). The search looks at no more than 64 headings, and remembers the
+  sections and cards around each element for a page's scan; past that it gives the
+  old answer. A whole-page scan checks its deadline while it describes.
+- **Marks stored before (E2).** Their `heading` is the old rule's, often the
+  previous card's title. A page's candidates are described with both (the old
+  answer comes from the same search, as `headingBefore`, never stored), and a
+  stored heading counts with the better of the two. On repeated cards that makes the
+  old mark's own card and the card before tie on the heading; the rest (position,
+  above all) decides, where before the card before won outright. A new mark gets
+  the same better-of-two, so a neighbouring card's old-rule heading can tie with it
+  too: the price of not knowing which rule a stored heading followed, as `element`
+  carries no version.
 - **The element of a drawn mark (E3).** A note, the ends of an arrow, and a box's or
   stroke's best overlap are taken to the element that means something there: the
   whole SVG picture, not a path of it; the link, button, label or other control a
-  piece of it is in; the text a `strong`, `span` or the like is in, unless that piece
-  has an id, a test id or a readable class (a badge) of its own. The Element tool is
+  piece of it is in (also from inside a component's shadow root); the text a
+  `strong`, `span` or the like is in, unless that piece has an id, a test id or a
+  readable class (a badge) of its own. The Element tool is
   unchanged: it marks what its highlight showed. A flat pen stroke (under 16 px high
   and three times as long) is an underline or a strike-through: its element is the
   line of text over it, found by a box reaching 24 px up.
@@ -2251,8 +2269,11 @@ whole card under "Our bikes".
   server need not check the kind. Once the OpenAPI document has it, the extension
   sends it in `mark.create` and reads it back in the merge.
 - **Tested** in `test/e2e/capture.test.ts` (the demo page, in Chromium),
-  `test/element.test.ts` (fragments; headings on the demo page and in nested cards),
-  `test/match.test.ts` (an old mark's link), `test/anchor.test.ts` (the element of a
-  drawn mark, open strokes), `test/cloud-crops.test.ts` (the crop of a mark made at
-  the server; none sent back), `test/case.test.ts` and `test/markdown.test.ts`
-  (`ends`).
+  `test/element.test.ts` (fragments, another site's route; headings on the demo page,
+  in nested cards, of a heading), `test/match.test.ts` (a link with a fragment on one
+  side; an old mark on a badge in repeated cards), `test/candidates.test.ts` (a large
+  page: the heading's cost against the old search; the deadline during a scan),
+  `test/anchor.test.ts` (the element of a drawn mark, across a shadow root; open
+  strokes), `test/cloud-crops.test.ts` (the crop of a mark made at the server; none
+  sent back; a shape off the screenshot; no extra read), `test/case.test.ts` and
+  `test/markdown.test.ts` (`ends`).

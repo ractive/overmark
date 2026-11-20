@@ -6,7 +6,12 @@ import {
 	MAX_CANDIDATES,
 } from "../src/lib/candidates.ts";
 import type { ElementDetails } from "../src/lib/case.ts";
-import { describeElement } from "../src/lib/element.ts";
+import {
+	createContext,
+	describeElement,
+	headingsOf,
+	legacyHeading,
+} from "../src/lib/element.ts";
 
 let doc: Document;
 
@@ -316,5 +321,47 @@ describe("findCandidates", () => {
 			const search = createSearch(doc, { exclude: root.host });
 			expect(findCandidates(search, stored).status).toBe("lost");
 		});
+	});
+});
+
+describe("a large page (DEC-047)", () => {
+	test("hundreds of headings in one card and a long list without any: the heading costs no more than the old rule's search", () => {
+		// Each part's heading is inside a section the list is not in: the
+		// search for the card's title has to pass them all, and gives up.
+		const sections = Array.from(
+			{ length: 300 },
+			(_, i) => `<section><h3>Part ${i}</h3><p>Text ${i}</p></section>`,
+		).join("");
+		const items = Array.from(
+			{ length: 600 },
+			(_, i) => `<li><span>Item ${i}</span></li>`,
+		).join("");
+		doc.body.innerHTML = `<article class="card">${sections}<ul>${items}</ul><h2>Everything</h2></article>`;
+		const all = [...doc.body.querySelectorAll("*")];
+		const context = createContext(doc);
+		let started = performance.now();
+		for (const el of all) legacyHeading(el, context.headings);
+		const old = performance.now() - started;
+		started = performance.now();
+		for (const el of all) headingsOf(el, context.headings, context.containers);
+		const now = performance.now() - started;
+		// The old rule is a binary search; the walk on top of it is bounded.
+		expect(now).toBeLessThan(old * 2 + 100);
+		// And it gave up on the list, with the nearest heading before.
+		expect(headingsOf($("li span"), context.headings).heading).toBe("Part 299");
+	});
+
+	test("the deadline stops a scan while it describes, not only before it", () => {
+		doc.body.innerHTML = `<main>${Array.from({ length: 4000 }, (_, i) => `<p>Text ${i}</p>`).join("")}</main>`;
+		const stored: ElementDetails = {
+			...describeElement($("p")),
+			tag: "x-gone",
+			text: "Nowhere at all",
+		};
+		const search = createSearch(doc, { budgetMs: 5 });
+		const started = performance.now();
+		const found = findCandidates(search, stored);
+		expect(found.truncated).toBe(true);
+		expect(performance.now() - started).toBeLessThan(1500);
 	});
 });

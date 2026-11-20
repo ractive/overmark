@@ -17,7 +17,7 @@
  * | `text` | rendered text without fields, editors, scripts and styles (`pageText`) | 200 |
  * | `classes` | the readable part of each class (classes.ts) | 20 |
  * | `attributes` | `ATTRIBUTE_RULES`: name, type, href (path), src (file name), placeholder, alt, title | 300 each |
- * | `heading` | the text of the nearest heading before it | 200 |
+ * | `heading` | the title of the section or card it is in (DEC-047), else the nearest heading before it | 200 |
  * | `landmark` | role and name of the landmark around it | 200 |
  * | `ancestors` | up to six, also outside a shadow root: tag plus test id or first readable class | 300 each |
  * | `rect`, `page` | position and size, the page's size | |
@@ -64,6 +64,8 @@ export interface DescribeContext {
 	headings: Element[];
 	page: { width: number; height: number };
 	scroll: { x: number; y: number };
+	/** Sections and cards around elements, found once (DEC-047). */
+	containers?: ContainerCache;
 }
 
 /**
@@ -136,6 +138,7 @@ export function createContext(doc: Document): DescribeContext {
 			height: Math.max(root.scrollHeight, root.clientHeight),
 		},
 		scroll: { x: win?.scrollX ?? 0, y: win?.scrollY ?? 0 },
+		containers: new WeakMap(),
 	};
 }
 
@@ -302,36 +305,64 @@ function isContainer(el: Element): boolean {
 	return false;
 }
 
-/** The closest section or card around `el`, not `el`; within the document. */
-function containerOf(el: Element): Element | undefined {
-	for (let at = el.parentElement; at !== null; at = at.parentElement) {
-		if (at.localName === "body" || at.localName === "html") return undefined;
-		if (isContainer(at)) return at;
+/** Sections and cards around elements, found once per page's scan. */
+export type ContainerCache = WeakMap<Element, Element | null>;
+
+/**
+ * The closest section or card at `x` or around it, within the document
+ * (`null`: none, below `body`). Remembered for every element on the way
+ * (DEC-047): a scan of a page asks for the same ones over and over.
+ */
+function containerAt(x: Element | null, cache: ContainerCache): Element | null {
+	const path: Element[] = [];
+	let found: Element | null = null;
+	for (let at = x; at !== null; at = at.parentElement) {
+		if (at.localName === "body" || at.localName === "html") break;
+		const known = cache.get(at);
+		if (known !== undefined) {
+			found = known;
+			break;
+		}
+		if (isContainer(at)) {
+			found = at;
+			cache.set(at, at);
+			break;
+		}
+		path.push(at);
 	}
-	return undefined;
+	for (const at of path) cache.set(at, found);
+	return found;
 }
 
+/** The closest section or card around `el`, not `el`; within the document. */
+const containerOf = (el: Element, cache: ContainerCache) =>
+	containerAt(el.parentElement, cache) ?? undefined;
+
 /** `h` is the title of `scope` itself, not of a part inside it that `at` is not in. */
-function ownedBy(h: Element, at: Element, scope: Element): boolean {
-	for (let x = h.parentElement; x !== null && x !== scope; x = x.parentElement)
-		if (isContainer(x) && !x.contains(at)) return false;
+function ownedBy(
+	h: Element,
+	at: Element,
+	scope: Element,
+	cache: ContainerCache,
+): boolean {
+	for (
+		let x = containerAt(h.parentElement, cache);
+		x !== null && x !== scope;
+		x = containerAt(x.parentElement, cache)
+	)
+		if (!x.contains(at)) return false;
 	return true;
 }
 
 /**
- * The heading `el` is under (DEC-047): the title of the closest section or
- * card around it, before it or, when nothing in it comes before (a badge, a
- * picture), the first after it; up through the sections around that. In
- * a section, a heading of another card or section inside it is not one.
- * Under none, the nearest heading before `el` in document order, as before.
- * Never `el` or one around it.
+ * How many headings the search for a section's title looks at, before and
+ * after the element: on a page of hundreds of headings in one card it gives
+ * up, with the nearest heading before as before (DEC-047).
  */
-export function headingAbove(
-	el: Element,
-	headings: readonly Element[],
-): string | undefined {
-	// Order only holds between elements of the document, not of a shadow root.
-	const at = inDocument(el);
+const HEADING_STEPS = 64;
+
+/** The index of the nearest heading before `at` in document order; -1: none. */
+function headingBefore(at: Element, headings: readonly Element[]): number {
 	let lo = 0;
 	let hi = headings.length - 1;
 	let found = -1;
@@ -349,28 +380,82 @@ export function headingAbove(
 			hi = mid - 1;
 		}
 	}
-	const text = (h: Element | undefined) =>
-		h === undefined ? undefined : normalizeText(pageText(h)) || undefined;
-	let scope = containerOf(at);
+	return found;
+}
+
+const headingText = (h: Element | undefined) =>
+	h === undefined ? undefined : normalizeText(pageText(h)) || undefined;
+
+/**
+ * The heading `el` is under (DEC-047): the title of the closest section or
+ * card around it, before it or, when nothing in it comes before (a badge, a
+ * picture), the first after it (not for a heading, whose sub-headings come
+ * after it); up through the sections around that. In a section, a heading
+ * of another card or section inside it is not one. Under none, or when the
+ * search gives up, the nearest heading before `el` in document order, as
+ * before. Never `el` or one around it.
+ */
+export function headingAbove(
+	el: Element,
+	headings: readonly Element[],
+	cache: ContainerCache = new WeakMap(),
+): string | undefined {
+	return headingsOf(el, headings, cache).heading;
+}
+
+/**
+ * The heading `el` is under now (`headingAbove`), and the heading by the rule
+ * before DEC-047 (the nearest before it in document order), from one search.
+ */
+export function headingsOf(
+	el: Element,
+	headings: readonly Element[],
+	cache: ContainerCache = new WeakMap(),
+): { heading: string | undefined; before: string | undefined } {
+	// Order only holds between elements of the document, not of a shadow root.
+	const at = inDocument(el);
+	const found = headingBefore(at, headings);
+	const before = headingText(headings[found]);
+	const done = (h: Element | undefined) => ({
+		heading: h === headings[found] ? before : headingText(h),
+		before,
+	});
+	const isHeading = at.matches(HEADINGS);
+	let steps = 0;
+	let scope = containerOf(at, cache);
 	let i = found;
 	for (;;) {
-		// Before it, within the scope.
 		// Under no section or card: the nearest heading before it, as ever.
-		if (scope === undefined) return text(headings[i]);
+		if (scope === undefined) return done(headings[i]);
+		// Before it, within the scope.
 		for (; i >= 0; i--) {
+			if (++steps > HEADING_STEPS) return done(headings[found]);
 			const h = headings[i] as Element;
 			if (!scope.contains(h)) break;
-			if (ownedBy(h, at, scope)) return text(h);
+			if (ownedBy(h, at, scope, cache)) return done(h);
 		}
 		// Nothing before it in the scope: the scope's own title after it.
-		for (let j = found + 1; j < headings.length; j++) {
-			const h = headings[j] as Element;
-			if (!scope.contains(h)) break;
-			if (h === at || h.contains(at)) continue;
-			if (ownedBy(h, at, scope)) return text(h);
-		}
-		scope = containerOf(scope);
+		if (!isHeading)
+			for (let j = found + 1; j < headings.length; j++) {
+				if (++steps > HEADING_STEPS) return done(headings[found]);
+				const h = headings[j] as Element;
+				if (!scope.contains(h)) break;
+				if (h === at || h.contains(at)) continue;
+				if (ownedBy(h, at, scope, cache)) return done(h);
+			}
+		scope = containerOf(scope, cache);
 	}
+}
+
+/**
+ * The heading before `el` by the rule before DEC-047 (the nearest before it
+ * in document order): what a mark stored then says, to compare it with.
+ */
+export function legacyHeading(
+	el: Element,
+	headings: readonly Element[],
+): string | undefined {
+	return headingText(headings[headingBefore(inDocument(el), headings)]);
 }
 
 export function landmarkOf(el: Element): string | undefined {
@@ -413,14 +498,16 @@ function url(value: string, el: Element): URL | undefined {
 
 /**
  * The fragment of a link `u` that names a place of this page (DEC-047): a
- * hash route, or the id of an element of the page when the link goes to the
- * page itself (`base`). Otherwise nothing.
+ * hash route of this site, or the id of an element of the page when the
+ * link goes to the page itself (`base`). Otherwise nothing.
  */
 function placeOnPage(u: URL, base: URL | undefined, el: Element): string {
+	// Another site's fragment names no place of this page, a route neither.
+	if (u.hash.length < 2 || base === undefined || u.origin !== base.origin)
+		return "";
 	const route = hashRoute(u.hash);
 	if (route) return route;
-	if (u.hash.length < 2 || base === undefined) return "";
-	if (u.origin !== base.origin || u.pathname !== base.pathname) return "";
+	if (u.pathname !== base.pathname) return "";
 	if (u.search !== base.search) return "";
 	let id: string;
 	try {
@@ -631,11 +718,21 @@ export function describeElement(
 	if (name) details.name = name;
 	const text = editable ? "" : normalizeText(pageText(el));
 	if (text) details.text = text;
-	const heading = headingAbove(el, context.headings);
-	if (heading) details.heading = heading;
+	context.containers ??= new WeakMap();
+	const headings = headingsOf(el, context.headings, context.containers);
+	if (headings.heading) details.heading = headings.heading;
 	const landmark = landmarkOf(el);
 	if (landmark) details.landmark = landmark;
-	return withinLimits(details);
+	const out = withinLimits(details);
+	// A candidate on a page also says the heading by the rule before
+	// DEC-047, for marks stored then (match.ts); never stored.
+	if (
+		options.selector === false &&
+		headings.before !== undefined &&
+		headings.before !== out.heading
+	)
+		out.headingBefore = headings.before;
+	return out;
 }
 
 /** A one-line summary, e.g. `button "Prämien berechnen" · Button_primary · under "Krankenkassen vergleichen"`. */

@@ -120,7 +120,8 @@ describe("describeElement", () => {
 			<a id="to-route" href="#/cart?coupon=x">Cart</a>
 			<a id="to-token" href="#access_token=abc">Back</a>
 			<a id="to-nothing" href="#nowhere">Nowhere</a>
-			<a id="to-other" href="/faq#shipping">FAQ</a>`,
+			<a id="to-other" href="/faq#shipping">FAQ</a>
+			<a id="to-site" href="https://other.example/app#/account/settings">Other app</a>`,
 		);
 		const href = (id: string) =>
 			describeElement($(`#${id}`)).attributes["href"];
@@ -134,6 +135,8 @@ describe("describeElement", () => {
 		expect(href("to-nothing")).toBe(path);
 		// Another page's fragment cannot be checked from here: dropped.
 		expect(href("to-other")).toBe("/faq");
+		// Another site's route names no place of this page.
+		expect(href("to-site")).toBe("other.example/app");
 	});
 
 	test("keeps data URLs and long URLs short", () => {
@@ -524,6 +527,12 @@ describe("the heading of a section or card (DEC-047)", () => {
 		);
 		// Nothing above it on the page: none.
 		expect(heading(page, "[data-testid=brand]")).toBeUndefined();
+	});
+
+	test("a heading is not under its own sub-heading", () => {
+		doc.body.innerHTML = `<h1>Shop</h1><section><h2 id="bikes">Bikes</h2><p>Text</p><h3>City</h3></section>`;
+		const headings = [...doc.querySelectorAll("h1, h2, h3")];
+		expect(headingAbove($("#bikes"), headings)).toBe("Shop");
 	});
 
 	test("a card's own title over a subsection's inside it", () => {

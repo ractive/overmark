@@ -85,6 +85,7 @@ import {
 	settleAnnounced,
 	theirMark,
 	wholeShotCrops,
+	wholeShotMarks,
 } from "./wire.ts";
 
 export interface EngineDeps {
@@ -2030,7 +2031,8 @@ export class CloudSync {
 		// crop: a crop of it is cut here, for showing it. Only here: the
 		// server's crop stays as it is (DEC-047).
 		const cut = this.#deps.cutCrop;
-		if (cut !== undefined)
+		// The case is read for it only when such a mark is among what came.
+		if (cut !== undefined && wholeShotMarks(incoming, given).length > 0)
 			for (const want of wholeShotCrops(
 				incoming,
 				given,

@@ -7,7 +7,7 @@
 
 import type { Rect } from "../lib/case.ts";
 import { readableClasses } from "../lib/classes.ts";
-import { shadowOf } from "../lib/shadow.ts";
+import { closestAcross, parentOf, shadowOf } from "../lib/shadow.ts";
 
 const IGNORED = new Set(["html", "body"]);
 
@@ -133,7 +133,7 @@ const FORMATTING = new Set([
  */
 export function usefulElement(el: Element): Element {
 	let at = el;
-	// An SVG's parts: the picture.
+	// An SVG's parts: the picture (the outermost SVG, in its own tree).
 	const svg = at.closest("svg");
 	if (svg !== null) {
 		let outer: Element = svg;
@@ -145,17 +145,20 @@ export function usefulElement(el: Element): Element {
 			outer = up;
 		at = outer;
 	}
-	const control = at.closest(INTERACTIVE);
+	// Out of a component's shadow root too: an icon inside a link (DEC-047).
+	const control = closestAcross(at, INTERACTIVE);
 	if (control !== null) return control;
-	while (
+	for (
+		let up = parentOf(at);
 		FORMATTING.has(at.localName) &&
 		!at.id &&
 		!at.hasAttribute("data-testid") &&
 		readableClasses(at.getAttribute("class") ?? "").length === 0 &&
-		at.parentElement !== null &&
-		!IGNORED.has(at.parentElement.localName)
+		up !== null &&
+		!IGNORED.has(up.localName);
+		up = parentOf(at)
 	)
-		at = at.parentElement;
+		at = up;
 	return at;
 }
 

@@ -100,8 +100,16 @@ export interface ElementDetails {
 	classes: string[];
 	/** `name`, `type`, `href` (path), `src` (file), `placeholder`, `alt`, `title`. */
 	attributes: Record<string, string>;
-	/** The nearest heading before the element. */
+	/**
+	 * The heading it is under: its section's or card's title (DEC-047);
+	 * before, the nearest heading before it.
+	 */
 	heading?: string;
+	/**
+	 * Only on a page's candidates, never stored: the heading by the rule
+	 * before DEC-047, where it differs, to compare marks stored then with.
+	 */
+	headingBefore?: string;
 	/** The landmark around it, e.g. `navigation: Hauptmenü`. */
 	landmark?: string;
 	/** Ancestors, nearest first, e.g. `nav`, `header.Header_root`. */

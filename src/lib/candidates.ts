@@ -158,10 +158,21 @@ export function findCandidates(
 	let ranked = rank(stored, elements.map(search.describe));
 	if ((ranked[0]?.score ?? 0) < PROBABLE) {
 		// The tag or role may have changed: score the whole page, while there is time.
-		const now = globalThis.performance?.now() ?? Date.now();
-		if (now < search.deadline) {
+		const clock = () => globalThis.performance?.now() ?? Date.now();
+		if (clock() < search.deadline) {
 			({ elements, truncated } = search.all());
-			ranked = rank(stored, elements.map(search.describe));
+			// Describing is what takes the time: the deadline is checked while
+			// it goes on, and what was not reached is left out (DEC-047).
+			const described: ElementDetails[] = [];
+			for (const el of elements) {
+				if (described.length % 100 === 0 && clock() >= search.deadline) {
+					truncated = true;
+					break;
+				}
+				described.push(search.describe(el));
+			}
+			elements = elements.slice(0, described.length);
+			ranked = rank(stored, described);
 		} else {
 			truncated = true;
 		}

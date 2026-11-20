@@ -117,23 +117,28 @@ function naming(d: ElementDetails, key: Naming): string | undefined {
 }
 
 /**
- * `candidate` as `stored` can be compared with: a link's fragment is kept
- * since DEC-047, so a mark stored before compares links without theirs.
+ * `candidate` as `stored` can be compared with (DEC-047): a link keeps its
+ * fragment only where it names a place on the page, and only while that
+ * place exists. Where one side has a fragment and the other none (a mark
+ * stored before, or a target rendered later or not yet), their links are
+ * compared without it; two fragments still tell two links apart.
  */
 function comparable(
 	stored: ElementDetails,
 	candidate: ElementDetails,
 ): ElementDetails {
-	const before = stored.attributes["href"];
-	const href = candidate.attributes["href"];
-	if (before === undefined || before.includes("#") || href === undefined)
-		return candidate;
-	const at = href.indexOf("#");
-	if (at < 0) return candidate;
-	return {
-		...candidate,
-		attributes: { ...candidate.attributes, href: href.slice(0, at) },
-	};
+	const mine = stored.attributes["href"];
+	const theirs = candidate.attributes["href"];
+	if (mine === undefined || theirs === undefined) return candidate;
+	const a = mine.indexOf("#");
+	const b = theirs.indexOf("#");
+	if (a < 0 === b < 0) return candidate;
+	// The candidate's link as the stored one is written: with the stored
+	// fragment where only the candidate lacks one, without its own where
+	// only the stored one lacks one.
+	const href =
+		b >= 0 ? theirs.slice(0, b) : theirs === mine.slice(0, a) ? mine : theirs;
+	return { ...candidate, attributes: { ...candidate.attributes, href } };
 }
 
 const NOTHING_REPEATED: ReadonlySet<Naming> = new Set();
@@ -230,7 +235,14 @@ export function score(
 	if (stored.heading)
 		add(
 			WEIGHTS.heading,
-			textSimilarity(stored.heading, candidate.heading ?? ""),
+			// A mark stored before DEC-047 says the heading by the rule then:
+			// the better of the candidate's heading now and by that rule.
+			Math.max(
+				textSimilarity(stored.heading, candidate.heading ?? ""),
+				candidate.headingBefore === undefined
+					? 0
+					: textSimilarity(stored.heading, candidate.headingBefore),
+			),
 		);
 	if (stored.landmark)
 		add(WEIGHTS.landmark, candidate.landmark === stored.landmark ? 1 : 0);

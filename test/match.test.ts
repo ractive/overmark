@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { Window } from "happy-dom";
 import type { ElementDetails } from "../src/lib/case.ts";
-import { createContext, describeElement } from "../src/lib/element.ts";
+import {
+	createContext,
+	describeElement,
+	legacyHeading,
+} from "../src/lib/element.ts";
 import { classify, rank, score, textSimilarity } from "../src/lib/match.ts";
 
 async function load(page: string): Promise<Document> {
@@ -148,5 +152,68 @@ describe("a link's fragment (DEC-047)", () => {
 		expect(score(old, book as ElementDetails)).toBe(
 			score(book as ElementDetails, book as ElementDetails),
 		);
+	});
+});
+
+describe("a mark stored before the heading rule changed (DEC-047)", () => {
+	test("on a badge in repeated cards, it is found on its own card, not the one before", () => {
+		const window = new Window({ url: "https://shop.example/bikes/" });
+		const doc = window.document as unknown as Document;
+		doc.write(
+			`<main><h2>Our bikes</h2>${["Lakeside", "Mountain", "Harbour"]
+				.map(
+					(title, i) =>
+						`<article class="card" id="card-${i}"><span class="badge">New</span><h3>${title}</h3><a class="btn" href="/book">Book</a></article>`,
+				)
+				.join("")}</main>`,
+		);
+		// Laid out side by side: each card 300 px wide.
+		for (const [i, card] of [...doc.querySelectorAll("article")].entries())
+			for (const el of [card, ...card.querySelectorAll("*")])
+				el.getBoundingClientRect = () =>
+					({ x: i * 300 + 10, y: 100, width: 80, height: 20 }) as DOMRect;
+		const badges = [...doc.querySelectorAll(".badge")];
+		const second = badges[1] as Element;
+		// What 0.3.0 stored for the second card's badge: the heading before it
+		// in document order, the first card's title.
+		// happy-dom has no page size: the one a browser would give.
+		const page = { width: 1000, height: 800 };
+		const old = {
+			...describeElement(second),
+			page,
+			heading: legacyHeading(second, [...doc.querySelectorAll("h2, h3")]),
+		};
+		expect(old.heading).toBe("Lakeside");
+		const context = createContext(doc);
+		const all = badges.map((b) => ({
+			...describeElement(b, context, { selector: false }),
+			page,
+		}));
+		expect(all[1]?.heading).toBe("Mountain");
+		expect(all[1]?.headingBefore).toBe("Lakeside");
+		const [best] = rank(old as ElementDetails, all, 3);
+		expect(best?.index).toBe(1);
+	});
+});
+
+describe("a fragment on one side only (DEC-047)", () => {
+	const link = (href: string): ElementDetails => ({
+		tag: "a",
+		classes: ["pp-btn"],
+		attributes: { href },
+		ancestors: [],
+		rect: { x: 10, y: 10, width: 80, height: 20 },
+		page: { width: 1000, height: 800 },
+		selector: "",
+		text: "Book",
+	});
+	test("stored with it, described without (the target not rendered yet), and the reverse, are the same link", () => {
+		const full = score(link("/demo/"), link("/demo/"));
+		expect(score(link("/demo/#book"), link("/demo/"))).toBe(full);
+		expect(score(link("/demo/"), link("/demo/#book"))).toBe(full);
+		// Two fragments still tell two links apart.
+		expect(score(link("/demo/#book"), link("/demo/#bikes"))).toBeLessThan(full);
+		// Another path is another link, fragment or not.
+		expect(score(link("/demo/#book"), link("/faq/"))).toBeLessThan(full);
 	});
 });

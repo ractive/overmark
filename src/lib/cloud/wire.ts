@@ -1464,18 +1464,39 @@ function adopt(
 /** Where a crop cut here for the server's mark `markId` is handed to the merge. */
 export const cutKey = (markId: string) => `cut:${markId}`;
 
+/** The least a cut crop is, in CSS pixels either way: anything smaller shows nothing. */
+const MIN_CUT = 8;
+
 /**
  * The server's new marks whose crop is their screenshot's own picture: an AI
  * app added them without a live page (MCP `add_mark`, which cuts no images).
- * For each, the part of the screenshot to cut a crop from, as a crop is cut
- * when a mark is drawn (DEC-047).
+ * Known without the case here, so the case is read only when there is one.
+ */
+export function wholeShotMarks(
+	incoming: Incoming,
+	book: CaseBook | undefined,
+): WireMark[] {
+	const known = new Set(Object.values(book?.marks ?? {}));
+	return incoming.marks.filter((m) => {
+		if (known.has(m.id)) return false;
+		const sha =
+			incoming.shots.find((s) => s.id === m.shotId)?.image.sha256 ??
+			book?.shadow?.shots[m.shotId]?.image.sha256;
+		return sha !== undefined && sha === m.crop.sha256;
+	});
+}
+
+/**
+ * For each of `wholeShotMarks`, the part of the screenshot to cut a crop
+ * from, as a crop is cut when a mark is drawn (DEC-047). A mark whose shape
+ * is not on its screenshot, or whose part would be a sliver, keeps the whole
+ * screenshot: that at least shows something.
  */
 export function wholeShotCrops(
 	incoming: Incoming,
 	book: CaseBook | undefined,
 	current: Case | undefined,
 ): { markId: string; sha256: string; rect: Rect; viewportWidth: number }[] {
-	const known = new Set(Object.values(book?.marks ?? {}));
 	const shotHere = reverse(book?.shots ?? {});
 	const out: {
 		markId: string;
@@ -1483,20 +1504,24 @@ export function wholeShotCrops(
 		rect: Rect;
 		viewportWidth: number;
 	}[] = [];
-	for (const m of incoming.marks) {
-		if (known.has(m.id)) continue;
-		const wireShot = incoming.shots.find((s) => s.id === m.shotId);
-		const sha =
-			wireShot?.image.sha256 ?? book?.shadow?.shots[m.shotId]?.image.sha256;
-		if (sha === undefined || sha !== m.crop.sha256) continue;
+	for (const m of wholeShotMarks(incoming, book)) {
 		const viewport =
-			wireShot?.viewport ??
+			incoming.shots.find((s) => s.id === m.shotId)?.viewport ??
 			current?.shots.find((s) => s.id === shotHere.get(m.shotId))?.viewport;
 		if (viewport === undefined || viewport.width <= 0) continue;
+		const bounds = shapeBounds(shapeIn(m.shape));
+		const on =
+			bounds.x <= viewport.width &&
+			bounds.y <= viewport.height &&
+			bounds.x + bounds.width >= 0 &&
+			bounds.y + bounds.height >= 0;
+		if (!on) continue;
+		const rect = cropRectFor(bounds, viewport);
+		if (rect.width < MIN_CUT || rect.height < MIN_CUT) continue;
 		out.push({
 			markId: m.id,
-			sha256: sha,
-			rect: cropRectFor(shapeBounds(shapeIn(m.shape)), viewport),
+			sha256: m.crop.sha256,
+			rect,
 			viewportWidth: viewport.width,
 		});
 	}
