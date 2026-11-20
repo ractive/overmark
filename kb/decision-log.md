@@ -2166,6 +2166,17 @@ with them).
   only where the panel knows the tab's address: with no access to the tab, no
   permission is asked for this. Nothing else changes there; marking the web app itself
   stays possible.
+- **After review of the pull request.** The time's words change in place each minute:
+  the Team section is drawn anew only when what it shows changes, so the focus stays
+  and the live region does not say the section again. The pairing note is held to its
+  app: said only when the pairing ends in the open card, and gone as soon as that app
+  is disconnected or AI access is off. With "Sync now" hidden while up to date, the
+  panel being shown or focused asks the worker to look at the account's teams again
+  when that was more than a minute ago (`cloud:check`): one request, at most once a
+  minute from the panel, nothing on its answer starts another; only a change (a team
+  joined or left, a role) is written, said, and followed by a run. The count of what
+  waits holds a case back exactly as sending does (the same test, with the role's
+  permissions), so a role that allows again says "waits" before it is sent.
 - **Tested** in `test/view.test.ts` (Home's headings in order; the status line's
   states and Sync now; the web-app line, by origin; the pairing note and its way back),
   `test/cloud.test.ts` ("the status line, from the engine's real states": up to date,

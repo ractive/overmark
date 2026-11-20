@@ -428,10 +428,16 @@ export function renderCloudSection(
 		cloud.signingIn,
 		cloud.problem,
 		cloud.live,
-		// "5 minutes ago" only says something while the stream is closed.
-		cloud.live === true ? 0 : cloud.minute,
 	]);
-	if (box.dataset["key"] === key) return;
+	// The time alone ("5 minutes ago", said anew each minute) changes the
+	// line's words in place: nothing is drawn anew, the focus stays where it
+	// is, and the live region does not say the whole section again.
+	if (box.dataset["key"] === key) {
+		const line = document.getElementById("cloud-status");
+		const words = statusLine(cloud);
+		if (line !== null && line.textContent !== words) line.textContent = words;
+		return;
+	}
 	// An address half typed stays: the field is not drawn anew under the caret.
 	const typing = document.activeElement?.id === "cloud-server";
 	if (typing && box.dataset["key"] !== undefined) return;

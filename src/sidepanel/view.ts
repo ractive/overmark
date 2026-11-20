@@ -2577,7 +2577,7 @@ export function aiPill(ai: PanelState["ai"]): {
 /** An AI app was just paired: said in its card, with the way back (DEC-045). */
 function renderPaired(state: PanelState, actions: Actions): void {
 	const box = byId<HTMLElement>("paired-next");
-	const name = state.settings ? state.ai.justPaired : undefined;
+	const name = state.settings ? state.ai.justPaired?.name : undefined;
 	box.hidden = name === undefined;
 	if (name === undefined) return;
 	byId("paired-next-text").textContent = `${name} is connected.`;

@@ -442,6 +442,9 @@ export class Cloud {
 				await engine.share(request.caseId);
 				this.#deps.news();
 				return { ok: true };
+			case "cloud:check":
+				if (await engine.checkAccount()) this.#deps.news();
+				return { ok: true };
 			case "cloud:run": {
 				// The events stream says where the team is: nothing to fetch when
 				// this device is there already.

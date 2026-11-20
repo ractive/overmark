@@ -434,6 +434,74 @@ describe("the status line, from the engine's real states (DEC-045)", () => {
 	});
 });
 
+describe("the account looked at again when the panel is shown (DEC-045)", () => {
+	test("one request, only after a minute; a team joined meanwhile is written, said and synced with", async () => {
+		await signIn(tess);
+		const me = tess.api.me.bind(tess.api);
+		tess.api.calls.length = 0;
+		// Shown at once again: nothing asked.
+		expect(await tess.engine.checkAccount()).toBe(false);
+		expect(tess.api.calls).toEqual([]);
+		// A minute later, nothing changed: one request, no run.
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		expect(await tess.engine.checkAccount()).toBe(false);
+		expect(tess.api.calls).toEqual(["GET me"]);
+		// Another team joined on the web app: written, and a run follows.
+		tess.api.me = async () => {
+			const answer = await me();
+			return {
+				...answer,
+				teams: [
+					...(answer.teams ?? []),
+					{
+						id: "t_other",
+						name: "Other team",
+						slug: "other",
+						role: "contributor",
+						permissions: [],
+					},
+				],
+			};
+		};
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		tess.api.calls.length = 0;
+		expect(await tess.engine.checkAccount()).toBe(true);
+		expect(
+			((await tess.engine.account()) as Account).teams.map((t) => t.name),
+		).toEqual(["Pedal & Pine web", "Other team"]);
+		expect(tess.api.calls[0]).toBe("GET me");
+	});
+
+	test("a role that allows again what it did not: the case that waits is said to wait, as it is about to be sent", async () => {
+		await signIn(tess);
+		tess.api.permissions = tess.api.permissions.filter(
+			(p) => p !== "mark:create" && p !== "case:create",
+		);
+		await tess.engine.retry();
+		await startCase(tess, "c_held");
+		await addMark(tess, "c_held", "Held back");
+		await tess.engine.request();
+		// Held back by the role: not waiting, said as a problem.
+		expect(status(tess)?.waiting).toBe(0);
+		expect(status(tess)?.problems).toHaveLength(1);
+		// The role allows it again, and the panel's look finds that out.
+		tess.api.permissions = [
+			...tess.api.permissions,
+			"mark:create",
+			"case:create",
+		];
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		tess.statuses.length = 0;
+		const later = tess.engine.checkAccount();
+		expect(await later).toBe(true);
+		// Said with the new role, before the run sends it: it waits.
+		expect(tess.statuses[0]?.waiting).toBe(1);
+		await tess.engine.request();
+		expect(server.cases.has("c_held")).toBe(true);
+		expect(status(tess)?.waiting).toBe(0);
+	});
+});
+
 describe("changes that wait", () => {
 	test("offline: every change is kept, said so, and sent when the server is back", async () => {
 		await shared();

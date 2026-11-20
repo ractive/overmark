@@ -74,15 +74,23 @@ export function hasNewGrant(known: ReadonlySet<string>, a: AiState): boolean {
 
 /**
  * The app paired since the pairing box showed (`before`: the apps paired
- * then; none: it did not show), by its name: what to do next is said.
+ * then; none: it did not show), with the name it is said by: what to do
+ * next is said.
  */
 export function pairedSince(
 	before: ReadonlySet<string> | undefined,
 	a: AiState,
-): string | undefined {
+): { grantId: string; name: string } | undefined {
 	if (before === undefined) return undefined;
 	const grant = a.grants.find((g) => !before.has(g.grantId));
-	return grant === undefined ? undefined : grant.name || grant.host;
+	return grant === undefined
+		? undefined
+		: { grantId: grant.grantId, name: grant.name || grant.host };
+}
+
+/** Whether what was said of a pairing still holds: connected, and that app still paired. */
+export function stillPaired(grantId: string, a: AiState): boolean {
+	return a.state === "connected" && a.grants.some((g) => g.grantId === grantId);
 }
 
 /** A confirming click this soon after the first one (a double click) counts as nothing. */

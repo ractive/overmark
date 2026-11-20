@@ -36,6 +36,7 @@ import {
 	pairedSince,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
+	stillPaired,
 	switchShown,
 } from "./card.ts";
 import { byId, h } from "./dom.ts";
@@ -763,10 +764,17 @@ export async function startAi(
 		// (A connection that drops meanwhile does not end that: the app may
 		// be listed only once Sitegloss is connected again.)
 		const paired = pairedSince(beforePairing, a);
-		if (paired !== undefined) {
-			update((s) => (s.ai.justPaired = paired));
-			beforePairing = undefined;
-		} else if (view.pairing)
+		update((s) => {
+			// Only in the card that is open: a pairing done while elsewhere
+			// is no news to come back to.
+			if (paired !== undefined && s.settings) s.ai.justPaired = paired;
+			// Disconnected, or AI access off: no longer said.
+			const said = s.ai.justPaired;
+			if (said !== undefined && !stillPaired(said.grantId, a))
+				delete s.ai.justPaired;
+		});
+		if (paired !== undefined) beforePairing = undefined;
+		else if (view.pairing)
 			beforePairing ??= new Set(a.grants.map((g) => g.grantId));
 		else if (a.state === "connected") beforePairing = undefined;
 		byId("ai-state").dataset["state"] = view.status;

@@ -2048,6 +2048,51 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		expect(button("cloud-sync-now")).toBeNull();
 	});
 
+	test("a minute later only the time's words change in place: nothing drawn anew, the focus stays (DEC-045)", () => {
+		const real = Date.now;
+		const t = Date.parse("2026-11-20T14:08:00.000Z");
+		try {
+			Date.now = () => t;
+			const state = initialState();
+			Object.assign(state.cloud, {
+				account: account(),
+				live: false,
+				minute: 1,
+				status: {
+					state: "synced",
+					lastSyncedAt: new Date(t - 5 * 60_000).toISOString(),
+					problems: [],
+					undecided: 0,
+					waiting: 0,
+				},
+			});
+			render(state, noActions);
+			const first = el("cloud").firstElementChild;
+			button("cloud-sync-now")?.focus();
+			expect(el("cloud-status").textContent).toStartWith(
+				"Last synced 5 minutes ago.",
+			);
+			// The tick, a minute later.
+			Date.now = () => t + 60_000;
+			state.cloud.minute = 2;
+			render(state, noActions);
+			expect(el("cloud-status").textContent).toStartWith(
+				"Last synced 6 minutes ago.",
+			);
+			expect(el("cloud").firstElementChild).toBe(first);
+			expect(window.document.activeElement?.getAttribute("data-action")).toBe(
+				"cloud-sync-now",
+			);
+			// And a tick with the same words changes nothing at all.
+			state.cloud.minute = 3;
+			const line = el("cloud-status");
+			render(state, noActions);
+			expect(el("cloud-status")).toBe(line);
+		} finally {
+			Date.now = real;
+		}
+	});
+
 	test("a time said as people say it", () => {
 		const now = Date.parse("2026-11-20T14:08:00.000Z");
 		expect(ago("2026-11-20T14:07:40.000Z", now)).toBe("just now");
@@ -2107,7 +2152,7 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		const actions = actionsWith({ closeSettings: () => void closed.push("x") });
 		const state = initialState();
 		state.settings = true;
-		state.ai.justPaired = "Claude";
+		state.ai.justPaired = { grantId: "g1", name: "Claude" };
 		render(state, actions);
 		expect(el("paired-next").hidden).toBe(false);
 		expect(el("paired-next-text").textContent).toBe("Claude is connected.");
@@ -2121,7 +2166,7 @@ describe("the account and the sync with a team (DEC-039)", () => {
 		const c = sampleCase("c_1");
 		const over = caseState(c, (s) => {
 			s.settings = true;
-			s.ai.justPaired = "Claude";
+			s.ai.justPaired = { grantId: "g1", name: "Claude" };
 		});
 		render(over, actions);
 		expect(el("paired-back").textContent).toBe("Back to the case");

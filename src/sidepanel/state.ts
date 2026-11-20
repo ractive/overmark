@@ -283,10 +283,11 @@ export interface PanelState {
 		keepOn: boolean;
 		lastCall: AiCall | undefined;
 		/**
-		 * The AI app that was just paired, by its name, while the card that
-		 * paired it is open: what to do next is said there (DEC-045).
+		 * The AI app that was just paired in the open card, while it stays
+		 * connected and the card stays open: what to do next is said there
+		 * (DEC-045).
 		 */
-		justPaired?: string;
+		justPaired?: { grantId: string; name: string };
 	};
 }
 

@@ -51,7 +51,16 @@ async function ask(request: CloudRequest): Promise<CloudAnswer> {
 export interface PanelCloud extends CloudActions {
 	/** Read what the worker wrote down again. */
 	refresh(): Promise<void>;
+	/**
+	 * The panel came into view (shown, or focused): the worker asks for the
+	 * account's teams again if that was more than a minute ago (DEC-045).
+	 * At most once a minute from here, and only on being shown: no loop.
+	 */
+	shown(): void;
 }
+
+/** How long between two looks at the account from the panel being shown. */
+export const SHOWN_CHECK_MS = 60_000;
 
 /** The actions, for `Actions`, before the panel's cloud is started. */
 export function cloudActions(cloud: () => CloudActions): CloudActions {
@@ -244,8 +253,18 @@ export function startCloud(
 	}
 
 	void refresh().then(() => send({ type: "cloud:run" }));
+	let checkedAt = Number.NEGATIVE_INFINITY;
+	function shown(): void {
+		const now = Date.now();
+		if (now - checkedAt < SHOWN_CHECK_MS) return;
+		checkedAt = now;
+		// A change comes back as the worker's news, as any other.
+		void send({ type: "cloud:check" }).catch(() => undefined);
+	}
+
 	return {
 		refresh,
+		shown,
 		cloudSignIn,
 		cloudSignOut: () => void act({ type: "cloud:sign-out" }),
 		cloudTeam: (teamId) => void act({ type: "cloud:team", teamId }),
