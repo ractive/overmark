@@ -631,7 +631,9 @@ export async function startAi(
 									class: "link",
 									"data-focus": `ask-again:${tool}`,
 									"aria-label": `Ask again before ${title}`,
-									title: `Ask you again each time ${app} wants to run ${title}`,
+									title: grant.allowAll
+										? `Ask you again each time ${app} wants to run ${title}; this also turns Allow all changes off`
+										: `Ask you again each time ${app} wants to run ${title}`,
 									onclick: () =>
 										send({ type: "ask-again", grantId: grant.grantId, tool }),
 								},
@@ -886,7 +888,7 @@ export async function startAi(
 		const titles: Record<Answer, string> = {
 			deny: "Refuse this call; nothing changes",
 			allow: "Run this call once; the app asks again next time",
-			always: `Run this call, and from now on ${q.title ?? q.tool} for ${q.app} without asking, until you disconnect it`,
+			always: `Run this call, and from now on ${q.title ?? q.tool} for ${q.app} without asking, until you disconnect it or an update of Sitegloss changes this tool`,
 		};
 		// Three buttons that look alike (DEC-037, as the tab-mcp extension's):
 		// the card does not nudge towards allowing.
@@ -966,7 +968,7 @@ export async function startAi(
 			h(
 				"p",
 				{ class: "meta" },
-				`Always allow: ${q.title ?? q.tool} runs without asking for ${q.app}, until you disconnect it.`,
+				`Always allow: ${q.title ?? q.tool} runs without asking for ${q.app}, until you disconnect it or an update of Sitegloss changes this tool.`,
 			),
 		);
 	}

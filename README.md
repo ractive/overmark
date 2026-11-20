@@ -291,9 +291,12 @@ app is told you did not answer. "Always allow" lets that
 tool run without asking for that AI app from then on; "Allow all changes", a switch
 for each connected app under the side panel's top bar (and under the app in the AI app
 card, in Settings, which the AI pill at the top opens), does so for every tool that
-changes something, deleting a case too. The card lists the tools always allowed for each app, each with
-"Ask again". Both last until you disconnect the app (or all apps), also
-across browser restarts. An AI app can be steered by text on a page it reads, so allow
+changes something, deleting a case too, also tools a later version adds. The card
+lists the tools always allowed for each app, each with "Ask again" ("Ask again" while
+"Allow all changes" is on turns that off too). Both last until the app's pairing ends
+(you disconnect it, or all apps, or the relay lets it expire), also across browser
+restarts; a tool always allowed asks again once an update of Sitegloss changes what it
+says it does. The tab-mcp client library keeps them, beside the connection's secret. An AI app can be steered by text on a page it reads, so allow
 always only what you would not need to check.
 
 Sitegloss needs Chrome 116 or later. The connection's settings and its address secret

@@ -280,8 +280,10 @@ describe("the worker's connection with client 0.18", () => {
 		expect(w.last().grants.map((g) => g.name)).toEqual(
 			listed.filter((name) => name !== "One"),
 		);
-		const kept = (await currentKv?.get("alwaysAllowed")) as object | undefined;
-		expect(Object.keys(kept ?? {})).toEqual([ids["Two"] as string]);
+		// The library's allowances, beside the secret (DEC-043): Two's only.
+		const kept = String(await currentKv?.get(`${secretKey()}#allowed`));
+		expect(kept).toContain(ids["Two"] as string);
+		expect(kept).not.toContain(ids["One"] as string);
 	});
 
 	test("Review of PR 58, 1: with a relay before 0.10.2 (its errors name nothing) the Disconnects go one at a time", async () => {

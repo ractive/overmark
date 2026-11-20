@@ -5,6 +5,9 @@
  * through the relay: a call through the browser's WebMCP (which Sitegloss
  * leaves off) is refused without a question. A question nobody answered in
  * time is `"unanswered"`: the AI app hears that, not that the user declined.
+ * The library checks the same allowances before it asks `onConfirm` at all
+ * (DEC-043), so a call they cover rarely gets here; the check here holds for
+ * one allowed while its question was on its way.
  */
 
 import type { ConfirmAnswer, ConfirmRequest } from "@ractive-ch/tab-mcp-client";
@@ -18,8 +21,6 @@ export interface Decider {
 	ask(request: ConfirmRequest): Promise<Answer | "timeout">;
 	/** The AI app of `grantId` is still connected (the relay lists it). */
 	connected(grantId: string): boolean;
-	/** Always allow could not be kept; the call runs all the same. */
-	notKept(error: unknown): void;
 	/** Always allow was kept: questions it now covers need no answer. */
 	kept(): void;
 	/** A call that is not an AI app's through the relay was refused. */
@@ -42,8 +43,10 @@ export async function decide(
 	const answer = await d.ask(request);
 	// Kept only for an app still connected: one disconnected while the
 	// question was open gets nothing from it.
-	if (answer === "always" && d.connected(grantId))
-		await d.always.addTool(grantId, tool).then(d.kept, d.notKept);
+	if (answer === "always" && d.connected(grantId)) {
+		d.always.addTool(grantId, tool);
+		d.kept();
+	}
 	if (answer === "timeout") return "unanswered";
 	return answer === "allow" || answer === "always";
 }
