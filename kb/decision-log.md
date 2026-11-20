@@ -2185,3 +2185,74 @@ with them).
   `test/card.test.ts` (`pairedSince`). Seen in the real side panel against a local
   server, before and after, with the stream dropped and the server gone.
 
+
+## DEC-047: Crops for marks made at the server, and what a mark records of the page
+
+2026-11-20. Items D and E of the 0.3.1 hand-over. Each capture defect was reproduced
+first on a copy of Sitegloss's demo page (`test/e2e/pages/demo.html`, from
+ractive.ch/sitegloss/demo/): `test/e2e/capture.test.ts` fails on the code before
+this decision with a link's `href` of `/demo` (not `/demo#book`), the e-bike's "New"
+badge and the gravel bike's picture under the previous card's title ("Gravel bike",
+"City bike"), an arrow ending on a bare `strong`, and an underline taken for the
+whole card under "Our bikes".
+
+- **A crop for a mark made at the server (D).** MCP `add_mark` stores a mark with
+  `element: null` and the whole screenshot as its crop (its SHA-256 is the
+  screenshot's). When such a mark first arrives, the engine cuts a crop from the
+  screenshot around the shape, with the margin a drawn mark's crop has
+  (`cropRectFor`), and stores that as the mark's crop here (`wholeShotCrops`,
+  `cutCrop` in the worker). Where cutting fails, the whole screenshot stays, as
+  before. **Not sent back.** A mark's crop is sent only in `mark.create`; this
+  mark's create was the server's, so nothing is sent, and that is right: the crop is
+  derived from the screenshot the server has, the web app already shows the region
+  with CSS (`isWholeShot`), and an upload would be a write the person never made,
+  done by every device that receives the mark, credited to whoever synced first.
+  If a real crop is wanted at the server, the server is the place to cut it (it
+  has the image and the shape). Marks that arrived before this keep the whole
+  screenshot until their case is read anew from scratch.
+- **A link's fragment (E1).** `href` keeps the path, as before, and now the fragment
+  where it names a place of the page: a hash route (`#/cart`, as page addresses
+  keep, DEC-038), or `#id` on a link to the page itself when an element with that
+  id exists there (`#book`). Any other fragment is dropped (`#access_token=…`,
+  `#private`, another page's `#shipping`, which cannot be checked from here): it can
+  carry a token, the reason DEC-009 dropped them all. One value, not raw and
+  resolved both: the path with the place is the resolved form, and the raw form is
+  in the live HTML `get_mark_element` reads. Matching a mark stored before compares
+  links without their fragment, so old marks are found as well as before; for new
+  ones the fragment tells same-page links apart (the demo's Bikes, Prices and Book).
+- **The heading (E2).** Inside a section or card (`article`, `section`, `aside`,
+  `nav`, `dialog`, `li`, such roles, or a class naming a card, tile or panel), the
+  heading is that part's title: the nearest heading before the element within it,
+  skipping the titles of parts inside it that the element is not in; when nothing in
+  it comes before (a badge, a picture above the title), its first own heading after
+  the element; then the same for the part around it. Outside any section or card,
+  the nearest heading before it, as before (a footer note after the last section
+  keeps that section's title, as it did).
+- **The element of a drawn mark (E3).** A note, the ends of an arrow, and a box's or
+  stroke's best overlap are taken to the element that means something there: the
+  whole SVG picture, not a path of it; the link, button, label or other control a
+  piece of it is in; the text a `strong`, `span` or the like is in, unless that piece
+  has an id, a test id or a readable class (a badge) of its own. The Element tool is
+  unchanged: it marks what its highlight showed. A flat pen stroke (under 16 px high
+  and three times as long) is an underline or a strike-through: its element is the
+  line of text over it, found by a box reaching 24 px up.
+- **Both ends (E3).** An arrow, and a pen stroke that goes from one place to another
+  (its ends further apart than 40 % of its diagonal, and not flat), record `ends:
+  { start, end }`: the elements under its first and last point, each `null` where
+  there is none. `element` stays the mark's element (an arrow's: its head's, as
+  before). Optional in `sitegloss/1`: a 0.3.0 import drops it. get_case shows it,
+  case.md says "From:" and "To:". **Not sent** until the server takes it.
+- **Proposed for the server's contract (API v1, additive).** On `Mark` (in `changes`,
+  `getCase`, MCP `get_case`) and on `mark.create`'s `mark`: an optional
+  `ends: { start: Element | null, end: Element | null }`, where `Element` is the
+  schema `element` uses, with the same limits. Part of the drawing like `shape` and
+  `element`: set at create, never patched (not in `mark.patch`), returned as stored;
+  absent for marks that have none (0.3.0's, MCP `add_mark`'s, notes, boxes). The
+  server need not check the kind. Once the OpenAPI document has it, the extension
+  sends it in `mark.create` and reads it back in the merge.
+- **Tested** in `test/e2e/capture.test.ts` (the demo page, in Chromium),
+  `test/element.test.ts` (fragments; headings on the demo page and in nested cards),
+  `test/match.test.ts` (an old mark's link), `test/anchor.test.ts` (the element of a
+  drawn mark, open strokes), `test/cloud-crops.test.ts` (the crop of a mark made at
+  the server; none sent back), `test/case.test.ts` and `test/markdown.test.ts`
+  (`ends`).

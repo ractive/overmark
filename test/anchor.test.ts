@@ -3,7 +3,9 @@ import { Window } from "happy-dom";
 import {
 	elementAt,
 	elementForRect,
+	isOpenStroke,
 	pageElementsAt,
+	usefulElement,
 } from "../src/content/anchor.ts";
 
 let doc: Document;
@@ -116,5 +118,45 @@ describe("elementForRect", () => {
 			],
 			[button],
 		);
+	});
+});
+
+describe("the element a drawn mark is about (DEC-047)", () => {
+	test("the picture, the link or button, the text: not a piece of it", () => {
+		doc.body.innerHTML = `<article class="pp-card">
+			<span class="pp-badge">New</span>
+			<svg class="pp-bike"><g><circle id="wheel"></circle><path></path></g></svg>
+			<p class="pp-price" data-testid="card-price"><strong>CHF 25</strong> per day</p>
+			<a class="pp-btn" href="#book"><span>Book</span></a>
+			<p>Pay <strong data-testid="total">CHF 60</strong></p>
+		</article>`;
+		const $ = (s: string) => doc.querySelector(s) as Element;
+		expect(usefulElement($("circle")).localName).toBe("svg");
+		expect(usefulElement($("path")).localName).toBe("svg");
+		expect(usefulElement($(".pp-price strong"))).toBe($(".pp-price"));
+		expect(usefulElement($(".pp-btn span"))).toBe($(".pp-btn"));
+		// A piece with a test id of its own is what it is.
+		expect(usefulElement($("[data-testid=total]"))).toBe(
+			$("[data-testid=total]"),
+		);
+		// A badge with a class of its own is a thing of its own.
+		expect(usefulElement($(".pp-badge"))).toBe($(".pp-badge"));
+		// Anything else stays.
+		expect(usefulElement($("article"))).toBe($("article"));
+	});
+
+	test("a line from one place to another is open; a circle round something is not", () => {
+		expect(
+			isOpenStroke([
+				{ x: 0, y: 0 },
+				{ x: 50, y: 5 },
+				{ x: 100, y: 10 },
+			]),
+		).toBe(true);
+		const circle = Array.from({ length: 13 }, (_, i) => ({
+			x: 50 + 40 * Math.cos((i / 12) * 2 * Math.PI),
+			y: 50 + 40 * Math.sin((i / 12) * 2 * Math.PI),
+		}));
+		expect(isOpenStroke(circle)).toBe(false);
 	});
 });

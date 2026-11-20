@@ -51,6 +51,7 @@ import {
 	serverOrigin,
 	serverProblem,
 } from "../lib/cloud/servers.ts";
+import { cropImages } from "../lib/images.ts";
 import type { Kv } from "../lib/kv.ts";
 import type { CloudAnswer, CloudRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
@@ -142,6 +143,16 @@ export class Cloud {
 			// The panel's question is answered once the choice is written down.
 			later: (run) => void this.#run(() => run),
 			elsewhere: () => this.#elsewhere(server),
+			// A crop for a mark an AI app added at the server (DEC-047).
+			cutCrop: async (shot, rect, viewportWidth) => {
+				const [crop] = await cropImages(
+					shot.blob,
+					[rect],
+					shot.width / viewportWidth,
+				);
+				if (crop === undefined) throw new Error("no crop");
+				return crop;
+			},
 		});
 		const scope: ServerScope = { server, kv, session, engine };
 		this.#scopes.set(server, scope);

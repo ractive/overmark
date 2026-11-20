@@ -236,6 +236,7 @@ export async function saveCase(
 				shape: draft.shape,
 				crop: cropImage(id),
 				element: draft.element,
+				...(draft.ends === undefined ? {} : { ends: draft.ends }),
 			});
 			const image = crops.get(draft);
 			if (image !== undefined) images.set(cropImage(id), image);

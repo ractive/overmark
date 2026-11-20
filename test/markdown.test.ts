@@ -404,3 +404,31 @@ describe("every value on one line of case.md shows as written and stays there", 
 	});
 	// The page's address: see "addresses and paths" above.
 });
+
+describe("an arrow's ends in case.md (DEC-047)", () => {
+	test("says what it links", () => {
+		const base = caseWith("x");
+		const a = base.annotations[0] as Case["annotations"][number];
+		const element = {
+			tag: "p",
+			classes: ["pp-price"],
+			attributes: {},
+			ancestors: [],
+			rect: { x: 0, y: 0, width: 10, height: 10 },
+			page: { width: 100, height: 100 },
+			selector: "p",
+			text: "CHF 35",
+		};
+		const md = caseMarkdown({
+			...base,
+			annotations: [
+				{
+					...a,
+					shape: { kind: "arrow", from: { x: 0, y: 0 }, to: { x: 5, y: 5 } },
+					ends: { start: null, end: element },
+				},
+			],
+		});
+		expect(md).toContain("- From: nothing recorded\n- To: p");
+	});
+});

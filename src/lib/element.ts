@@ -28,7 +28,12 @@
  * markup could otherwise exceed.
  */
 
-import { ELEMENT_ATTRIBUTES, type ElementDetails, type Rect } from "./case.ts";
+import {
+	ELEMENT_ATTRIBUTES,
+	type ElementDetails,
+	hashRoute,
+	type Rect,
+} from "./case.ts";
 import { isGeneratedId, readableClass, readableClasses } from "./classes.ts";
 import { closestAcross, hostOf, inDocument, parentOf } from "./shadow.ts";
 
@@ -282,7 +287,45 @@ function labelText(label: Element, control: Element): string {
 	return normalizeText(pageText(label, { skip: control }));
 }
 
-/** The nearest heading before `el` in document order (not `el` or one around it). */
+/**
+ * What holds a heading of its own: a section, a card. A heading inside one
+ * is that part's, not the title of what follows the part (DEC-047).
+ */
+const CONTAINERS =
+	"article, section, aside, nav, dialog, li, [role=article], [role=region], [role=dialog], [role=listitem], [role=group]";
+/** A class that names a card, a tile or a panel (`pp-card`, `ProductTile_root`). */
+const CARD_CLASS = /(?:^|[-_])(?:card|tile|panel)(?:$|[-_])/i;
+
+function isContainer(el: Element): boolean {
+	if (el.matches(CONTAINERS)) return true;
+	for (const name of el.classList) if (CARD_CLASS.test(name)) return true;
+	return false;
+}
+
+/** The closest section or card around `el`, not `el`; within the document. */
+function containerOf(el: Element): Element | undefined {
+	for (let at = el.parentElement; at !== null; at = at.parentElement) {
+		if (at.localName === "body" || at.localName === "html") return undefined;
+		if (isContainer(at)) return at;
+	}
+	return undefined;
+}
+
+/** `h` is the title of `scope` itself, not of a part inside it that `at` is not in. */
+function ownedBy(h: Element, at: Element, scope: Element): boolean {
+	for (let x = h.parentElement; x !== null && x !== scope; x = x.parentElement)
+		if (isContainer(x) && !x.contains(at)) return false;
+	return true;
+}
+
+/**
+ * The heading `el` is under (DEC-047): the title of the closest section or
+ * card around it, before it or, when nothing in it comes before (a badge, a
+ * picture), the first after it; up through the sections around that. In
+ * a section, a heading of another card or section inside it is not one.
+ * Under none, the nearest heading before `el` in document order, as before.
+ * Never `el` or one around it.
+ */
 export function headingAbove(
 	el: Element,
 	headings: readonly Element[],
@@ -306,8 +349,28 @@ export function headingAbove(
 			hi = mid - 1;
 		}
 	}
-	const h = headings[found];
-	return h === undefined ? undefined : normalizeText(pageText(h)) || undefined;
+	const text = (h: Element | undefined) =>
+		h === undefined ? undefined : normalizeText(pageText(h)) || undefined;
+	let scope = containerOf(at);
+	let i = found;
+	for (;;) {
+		// Before it, within the scope.
+		// Under no section or card: the nearest heading before it, as ever.
+		if (scope === undefined) return text(headings[i]);
+		for (; i >= 0; i--) {
+			const h = headings[i] as Element;
+			if (!scope.contains(h)) break;
+			if (ownedBy(h, at, scope)) return text(h);
+		}
+		// Nothing before it in the scope: the scope's own title after it.
+		for (let j = found + 1; j < headings.length; j++) {
+			const h = headings[j] as Element;
+			if (!scope.contains(h)) break;
+			if (h === at || h.contains(at)) continue;
+			if (ownedBy(h, at, scope)) return text(h);
+		}
+		scope = containerOf(scope);
+	}
 }
 
 export function landmarkOf(el: Element): string | undefined {
@@ -348,6 +411,26 @@ function url(value: string, el: Element): URL | undefined {
 	}
 }
 
+/**
+ * The fragment of a link `u` that names a place of this page (DEC-047): a
+ * hash route, or the id of an element of the page when the link goes to the
+ * page itself (`base`). Otherwise nothing.
+ */
+function placeOnPage(u: URL, base: URL | undefined, el: Element): string {
+	const route = hashRoute(u.hash);
+	if (route) return route;
+	if (u.hash.length < 2 || base === undefined) return "";
+	if (u.origin !== base.origin || u.pathname !== base.pathname) return "";
+	if (u.search !== base.search) return "";
+	let id: string;
+	try {
+		id = decodeURIComponent(u.hash.slice(1));
+	} catch {
+		return "";
+	}
+	return el.ownerDocument.getElementById(id) === null ? "" : u.hash;
+}
+
 const kept = (value: string) => value;
 
 /**
@@ -363,7 +446,12 @@ export const ATTRIBUTE_RULES: Record<
 	placeholder: kept,
 	alt: kept,
 	title: kept,
-	/** The path (with the host for other sites); never the query or fragment. */
+	/**
+	 * The path (with the host for other sites); never the query. The
+	 * fragment only where it names a place of this page (DEC-047): an element
+	 * of it, by its id (`#book`), on a link to the page itself; or a hash
+	 * route (`#/cart`), up to its parameters. Any other can carry a token.
+	 */
 	href(value, el) {
 		const u = url(value, el);
 		if (u === undefined) return undefined;
@@ -371,8 +459,10 @@ export const ATTRIBUTE_RULES: Record<
 			return `data:${u.pathname.split(/[;,]/)[0] ?? ""}`;
 		if (u.protocol !== "http:" && u.protocol !== "https:")
 			return `${u.protocol}`;
-		const own = url(el.ownerDocument.baseURI, el)?.origin === u.origin;
-		return own ? u.pathname : `${u.host}${u.pathname}`;
+		const base = url(el.ownerDocument.baseURI, el);
+		const own = base?.origin === u.origin;
+		const path = own ? u.pathname : `${u.host}${u.pathname}`;
+		return `${path}${placeOnPage(u, base, el)}`;
 	},
 	/** The file name only. */
 	src(value, el) {

@@ -31,15 +31,18 @@ import {
 	MAX_VERDICT,
 	pageAt,
 	pageKey,
+	type Rect,
 	type Reopen,
 	type Resolution,
 	type Shape,
 	type Shot,
 	samePage,
+	shapeBounds,
 	shotImage,
 	shotUrl,
 	type UserRef,
 } from "../case.ts";
+import { cropRectFor } from "../save.ts";
 import type {
 	ImageRef,
 	Op,
@@ -1253,7 +1256,8 @@ export function mergeCase(
 		const markId = `a${w.number}`;
 		added.push({
 			wire: w.id,
-			crop: need(w.crop),
+			// A crop cut here from a whole-screenshot one (DEC-047), if one was.
+			crop: fetched.get(cutKey(w.id)) ?? need(w.crop),
 			mark: withContent(
 				{
 					id: markId,
@@ -1455,4 +1459,46 @@ function adopt(
 	}
 	if (book.title !== undefined) next.title = book.title;
 	return next;
+}
+
+/** Where a crop cut here for the server's mark `markId` is handed to the merge. */
+export const cutKey = (markId: string) => `cut:${markId}`;
+
+/**
+ * The server's new marks whose crop is their screenshot's own picture: an AI
+ * app added them without a live page (MCP `add_mark`, which cuts no images).
+ * For each, the part of the screenshot to cut a crop from, as a crop is cut
+ * when a mark is drawn (DEC-047).
+ */
+export function wholeShotCrops(
+	incoming: Incoming,
+	book: CaseBook | undefined,
+	current: Case | undefined,
+): { markId: string; sha256: string; rect: Rect; viewportWidth: number }[] {
+	const known = new Set(Object.values(book?.marks ?? {}));
+	const shotHere = reverse(book?.shots ?? {});
+	const out: {
+		markId: string;
+		sha256: string;
+		rect: Rect;
+		viewportWidth: number;
+	}[] = [];
+	for (const m of incoming.marks) {
+		if (known.has(m.id)) continue;
+		const wireShot = incoming.shots.find((s) => s.id === m.shotId);
+		const sha =
+			wireShot?.image.sha256 ?? book?.shadow?.shots[m.shotId]?.image.sha256;
+		if (sha === undefined || sha !== m.crop.sha256) continue;
+		const viewport =
+			wireShot?.viewport ??
+			current?.shots.find((s) => s.id === shotHere.get(m.shotId))?.viewport;
+		if (viewport === undefined || viewport.width <= 0) continue;
+		out.push({
+			markId: m.id,
+			sha256: sha,
+			rect: cropRectFor(shapeBounds(shapeIn(m.shape)), viewport),
+			viewportWidth: viewport.width,
+		});
+	}
+	return out;
 }

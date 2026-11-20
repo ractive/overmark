@@ -154,6 +154,18 @@ export interface Annotation {
 	findings?: Finding[];
 	/** Who made it, in a case synced with a team (DEC-039). */
 	createdBy?: UserRef;
+	/**
+	 * An arrow's, or an open freehand stroke's, elements under its first and
+	 * its last point (DEC-047); none: not such a mark, or drawn before.
+	 * `element` stays the element the mark is about (an arrow's: its head's).
+	 */
+	ends?: MarkEnds;
+}
+
+/** The elements at a mark's two ends, each `null` where there was none. */
+export interface MarkEnds {
+	start: ElementDetails | null;
+	end: ElementDetails | null;
 }
 
 /**
@@ -1105,6 +1117,20 @@ export function validateCase(value: unknown): Case {
 			shape: shape(a["shape"], `${p}.shape`),
 			crop,
 			element: element(a["element"], `${p}.element`),
+			...(a["ends"] === undefined
+				? {}
+				: {
+						ends: {
+							start: element(
+								obj(a["ends"], `${p}.ends`)["start"] ?? null,
+								`${p}.ends.start`,
+							),
+							end: element(
+								obj(a["ends"], `${p}.ends`)["end"] ?? null,
+								`${p}.ends.end`,
+							),
+						},
+					}),
 			...(a["resolution"] === undefined
 				? {}
 				: { resolution: resolution(a["resolution"], `${p}.resolution`) }),

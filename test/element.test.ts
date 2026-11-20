@@ -109,6 +109,33 @@ describe("describeElement", () => {
 		expect(describeElement($("img")).attributes["src"]).toBe("tip.png");
 	});
 
+	test("a link to a part of the same page keeps its fragment, as the demo page's Book buttons (DEC-047)", () => {
+		// The demo page (ractive.ch/sitegloss/demo/): "Book" goes to #book,
+		// "Bikes" to #bikes, on the same page.
+		doc.body.insertAdjacentHTML(
+			"beforeend",
+			`<nav><a id="to-bikes" href="#bikes">Bikes</a></nav>
+			<section id="bikes"><a id="to-book" class="pp-btn" href="#book">Book</a></section>
+			<section id="book"></section>
+			<a id="to-route" href="#/cart?coupon=x">Cart</a>
+			<a id="to-token" href="#access_token=abc">Back</a>
+			<a id="to-nothing" href="#nowhere">Nowhere</a>
+			<a id="to-other" href="/faq#shipping">FAQ</a>`,
+		);
+		const href = (id: string) =>
+			describeElement($(`#${id}`)).attributes["href"];
+		const path = new URL(doc.baseURI).pathname;
+		expect(href("to-book")).toBe(`${path}#book`);
+		expect(href("to-bikes")).toBe(`${path}#bikes`);
+		// A hash route names a page: kept up to its parameters.
+		expect(href("to-route")).toBe(`${path}#/cart`);
+		// What names no element of the page can carry anything: dropped.
+		expect(href("to-token")).toBe(path);
+		expect(href("to-nothing")).toBe(path);
+		// Another page's fragment cannot be checked from here: dropped.
+		expect(href("to-other")).toBe("/faq");
+	});
+
 	test("keeps data URLs and long URLs short", () => {
 		const svg = `data:image/svg+xml,${encodeURIComponent(`<svg>${"<rect/>".repeat(800)}</svg>`)}`;
 		doc.body.insertAdjacentHTML(
@@ -456,5 +483,60 @@ describe("cssSelector", () => {
 		const deep = `${`<${tag}>`.repeat(80)}<span>x</span>${`</${tag}>`.repeat(80)}`;
 		doc.body.innerHTML = `<main>${deep}${deep}</main>`;
 		expect(cssSelector($("span"))).toBe("");
+	});
+});
+
+describe("the heading of a section or card (DEC-047)", () => {
+	/** The demo page (a copy in e2e/pages), as a browser would have it. */
+	async function demo(): Promise<Document> {
+		const html = await Bun.file(
+			new URL("./e2e/pages/demo.html", import.meta.url),
+		).text();
+		const window = new Window({ url: "https://ractive.ch/sitegloss/demo/" });
+		const page = window.document as unknown as Document;
+		page.write(html);
+		return page;
+	}
+	const heading = (page: Document, selector: string) =>
+		describeElement(page.querySelector(selector) as Element).heading;
+
+	test("what comes before a card's title is under that title, not the card before", async () => {
+		const page = await demo();
+		// The e-bike's "New" badge and its picture come before its h3.
+		expect(heading(page, ".pp-card-new .pp-badge")).toBe("E-bike");
+		expect(heading(page, "[data-testid=card-ebike] svg")).toBe("E-bike");
+		expect(heading(page, "[data-testid=card-gravel] svg")).toBe("Gravel bike");
+		expect(heading(page, "[data-testid=card-city] svg")).toBe("City bike");
+	});
+
+	test("what follows a title stays under it, as before", async () => {
+		const page = await demo();
+		expect(heading(page, "[data-testid=card-city-book]")).toBe("City bike");
+		expect(heading(page, "[data-testid=card-gravel-price]")).toBe(
+			"Gravel bike",
+		);
+		expect(heading(page, "[data-testid=booking-name]")).toBe("Book a bike");
+		expect(heading(page, "[data-testid=summary-price-ebike]")).toBe(
+			"Prices at a glance",
+		);
+		expect(heading(page, "[data-testid=hero-line]")).toBe(
+			"Bikes for the trails, by the day",
+		);
+		// Nothing above it on the page: none.
+		expect(heading(page, "[data-testid=brand]")).toBeUndefined();
+	});
+
+	test("a card's own title over a subsection's inside it", () => {
+		doc.body.innerHTML = `<h2>Plans</h2>
+			<ul>
+				<li class="plan"><h3>Basic</h3><div class="specs"><article><h4>Specs</h4><p>5 GB</p></article></div><a id="basic-buy">Buy</a></li>
+				<li class="plan"><span id="pro-tag">Popular</span><h3>Pro</h3></li>
+			</ul>
+			<p id="after">Prices in CHF.</p>`;
+		const headings = [...doc.querySelectorAll("h2, h3, h4")];
+		expect(headingAbove($("#basic-buy"), headings)).toBe("Basic");
+		expect(headingAbove($("#pro-tag"), headings)).toBe("Pro");
+		// Under no section or card: the nearest heading above, as before.
+		expect(headingAbove($("#after"), headings)).toBe("Pro");
 	});
 });

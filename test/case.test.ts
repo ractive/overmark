@@ -41,7 +41,7 @@ import {
 	withTitle,
 	withVerified,
 } from "../src/lib/case.ts";
-import { sampleCase } from "./fixtures.ts";
+import { sampleCase, withOneMark } from "./fixtures.ts";
 
 function withMarks(): Case {
 	const c = sampleCase();
@@ -1221,5 +1221,37 @@ describe("a case's link (DEC-028)", () => {
 		expect(() =>
 			validateCase({ ...sampleCase(), link: "javascript:alert(1)" }),
 		).toThrow("case.link: must be an http or https address");
+	});
+});
+
+describe("a mark's ends (DEC-047)", () => {
+	test("kept through the format's check; an old case has none", () => {
+		const element = {
+			tag: "span",
+			classes: ["pp-badge"],
+			attributes: {},
+			ancestors: ["article.pp-card"],
+			rect: { x: 1, y: 2, width: 3, height: 4 },
+			page: { width: 100, height: 100 },
+			selector: ".pp-badge",
+		};
+		const c = withOneMark(sampleCase());
+		const a = c.annotations[0] as Case["annotations"][number];
+		const back = validateCase(
+			JSON.parse(
+				JSON.stringify({
+					...c,
+					annotations: [{ ...a, ends: { start: element, end: null } }],
+				}),
+			),
+		);
+		expect(back.annotations[0]?.ends).toEqual({ start: element, end: null });
+		expect(validateCase(c).annotations[0]?.ends).toBeUndefined();
+		expect(() =>
+			validateCase({
+				...c,
+				annotations: [{ ...a, ends: { start: { tag: 5 }, end: null } }],
+			}),
+		).toThrow();
 	});
 });

@@ -128,3 +128,25 @@ describe("matching v1 marks on v2", () => {
 		expect(score(stored, moved)).toBeGreaterThan(score(stored, other));
 	});
 });
+
+describe("a link's fragment (DEC-047)", () => {
+	test("a mark stored before links kept their fragment matches the link that now has one", () => {
+		const window = new Window({ url: "https://shop.example/demo/" });
+		const doc = window.document as unknown as Document;
+		doc.write(
+			`<section id="bikes"><a class="pp-btn" href="#book">Book</a><a class="pp-btn" href="#bikes">Bikes</a></section><section id="book"></section>`,
+		);
+		const { all } = details(doc);
+		const book = all.find((d) => d.attributes["href"]?.endsWith("#book"));
+		expect(book).toBeDefined();
+		const old = {
+			...(book as ElementDetails),
+			attributes: { href: "/demo/" },
+		};
+		const now = rank(old, all, 3);
+		expect(all[now[0]?.index ?? -1]?.attributes["href"]).toBe("/demo/#book");
+		expect(score(old, book as ElementDetails)).toBe(
+			score(book as ElementDetails, book as ElementDetails),
+		);
+	});
+});
