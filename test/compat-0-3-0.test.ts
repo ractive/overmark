@@ -9,9 +9,13 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
 	type Case,
+	type Shape,
 	withCaseComment,
 	withClosed,
+	withFinding,
 	withoutCaseComment,
+	withReopen,
+	withResolution,
 } from "../src/lib/case.ts";
 import { CloudSync } from "../src/lib/cloud/engine.ts";
 import { exportCase, readExport, storeImport } from "../src/lib/export.ts";
@@ -238,6 +242,199 @@ describe("0.3.0's data opened by this build", () => {
 		};
 		await engine.request();
 		expect(reads).toBe(0);
+	});
+});
+
+describe("0.3.0's data opened by this build sends nothing nobody did (review of #25)", () => {
+	test("marks of every kind, settled, reopened, with a finding, one renumbered, and an edit left in 0.3.0's queue: only that edit goes, once", async () => {
+		await startCase(tess, "c_rich");
+		// The first a box on an element, as the toolbar draws it; then one of
+		// each other kind.
+		for (const text of ["Element", "Box", "Arrow", "Pen", "Note"])
+			await addMark(tess, "c_rich", text, { element: text === "Element" });
+		const shapes: Record<string, Shape | undefined> = {
+			a1: undefined,
+			a2: { kind: "box", rect: { x: 10, y: 10, width: 80, height: 40 } },
+			a3: { kind: "arrow", from: { x: 5, y: 5 }, to: { x: 60, y: 40 } },
+			a4: {
+				kind: "pen",
+				points: [
+					{ x: 1, y: 1 },
+					{ x: 20, y: 9 },
+					{ x: 40, y: 2 },
+				],
+			},
+			a5: { kind: "note", at: { x: 30, y: 30 } },
+		};
+		await change(tess, "c_rich", (c, now) =>
+			withFinding(
+				withReopen(
+					withResolution(
+						withResolution(
+							{
+								...c,
+								annotations: c.annotations.map((a) => {
+									const shape = shapes[a.id];
+									return shape === undefined ? a : { ...a, shape };
+								}),
+							},
+							"a2",
+							{ kind: "fixed", note: "Padding" },
+							now,
+						),
+						"a3",
+						{ kind: "fixed" },
+						now,
+					),
+					"a3",
+					{ note: "Still off" },
+					now,
+				),
+				"a4",
+				{
+					id: "f_1",
+					text: "The stroke is on the price",
+					app: CLAUDE,
+					at: now,
+				},
+				now,
+			),
+		);
+		await sync();
+		// A sixth mark, made on both at once: the server renumbers 0.3.0's.
+		await addMark(tess, "c_rich", "Tess's sixth");
+		await tess.engine.request();
+		await dana.store.putImage("c_rich", "crops/a6.webp", {
+			blob: webp("crop by 0.3.0", 280, 160),
+			width: 280,
+			height: 160,
+		});
+		await dana.store.updateCase("c_rich", (c) => {
+			const value = c as Case030;
+			const one = value.annotations[0] as Case030["annotations"][number];
+			return {
+				value: {
+					...value,
+					annotations: [
+						...value.annotations,
+						{
+							...one,
+							id: "a6",
+							number: 6,
+							comment: "Dana's sixth",
+							crop: "crops/a6.webp",
+							shape: { kind: "note", at: { x: 8, y: 8 } },
+							element: null,
+						},
+					],
+					updatedAt: new Date(dana.clock.now.getTime() + 60_000).toISOString(),
+				},
+			};
+		});
+		await sync();
+		const marks = server.marksOf("c_rich");
+		expect(marks.map((m) => [m.number, m.comment])).toEqual([
+			[1, "Element"],
+			[2, "Box"],
+			[3, "Arrow"],
+			[4, "Pen"],
+			[5, "Note"],
+			[6, "Tess's sixth"],
+			[7, "Dana's sixth"],
+		]);
+		// 0.3.0 edits a mark; the server takes it, and the reply is lost: the
+		// edit stays in 0.3.0's queue, sent and not known to be.
+		await dana.store.updateCase("c_rich", (c) => ({
+			value: withComment030(
+				c as Case030,
+				"a1",
+				"Element, edited by 0.3.0",
+				new Date(dana.clock.now.getTime() + 120_000).toISOString(),
+			),
+		}));
+		dana.api.loseReplies = 1;
+		await dana.engine.request();
+		const queued = dana.kv.data.get("queue") as
+			| { ops: { opId: string; type: string }[] }
+			| undefined;
+		expect(queued?.ops.map((o) => o.type)).toEqual(["mark.patch"]);
+
+		// This build, on the same database: every request it makes until the
+		// test's own first change.
+		const sent: { opId: string; type: string }[] = [];
+		const ops = dana.api.ops.bind(dana.api);
+		dana.api.ops = async (team, list) => {
+			sent.push(...list.map((o) => ({ opId: o.opId, type: o.type })));
+			return ops(team, list);
+		};
+		const from = dana.api.calls.length;
+		const engine = new CloudSync({
+			store: dana.store as never,
+			kv: dana.kv as never,
+			api: () => dana.api as never,
+		});
+		await engine.request();
+		await engine.request();
+		await engine.request();
+		// Only 0.3.0's edit, as it was queued (the server knows it: once).
+		expect(sent).toEqual(
+			(queued?.ops ?? []).map((o) => ({ opId: o.opId, type: o.type })),
+		);
+		const calls = dana.api.calls.slice(from);
+		expect(calls.filter((c) => c.startsWith("PUT blob"))).toEqual([]);
+		expect(calls.filter((c) => c.startsWith("HEAD blob"))).toEqual([]);
+		expect(server.marksOf("c_rich").find((m) => m.number === 1)?.comment).toBe(
+			"Element, edited by 0.3.0",
+		);
+		expect(server.marksOf("c_rich")).toHaveLength(7);
+		// The case here is the team's, mark for mark.
+		const here = (await dana.store.getCase("c_rich")) as unknown as Case;
+		expect(here.annotations.map((a) => [a.number, a.shape.kind])).toEqual([
+			[1, "box"],
+			[2, "box"],
+			[3, "arrow"],
+			[4, "pen"],
+			[5, "note"],
+			[6, "box"],
+			[7, "note"],
+		]);
+		expect(here.annotations[1]?.resolution?.kind).toBe("fixed");
+		expect(here.annotations[2]?.reopens).toHaveLength(1);
+		expect(here.annotations[3]?.findings?.[0]?.id).toBe("f_1");
+	});
+});
+
+describe("0.3.0's data opened by this build, when the database fails once (review of #25)", () => {
+	test("the look for old books is made again at the next run", async () => {
+		await startCase(tess, "c_fail");
+		await addMark(tess, "c_fail", "Total is cut off");
+		await sync();
+		await change(tess, "c_fail", (c, now) =>
+			withCaseComment(c, { id: "k_fail", text: "Before the upgrade" }, now),
+		);
+		await sync();
+		// The first write of a book after the upgrade fails.
+		let fail = true;
+		const kv = {
+			...dana.kv,
+			set: async (entries: Record<string, unknown>) => {
+				if (fail && Object.keys(entries).some((k) => k.startsWith("case:"))) {
+					fail = false;
+					throw new Error("The database could not be written.");
+				}
+				return dana.kv.set(entries);
+			},
+		};
+		const engine = new CloudSync({
+			store: dana.store as never,
+			kv: kv as never,
+			api: () => dana.api as never,
+		});
+		await engine.request().catch(() => undefined);
+		await engine.request();
+		await engine.request();
+		const here = (await dana.store.getCase("c_fail")) as unknown as Case;
+		expect(here.comments?.map((k) => k.text)).toEqual(["Before the upgrade"]);
 	});
 });
 

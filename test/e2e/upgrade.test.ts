@@ -27,7 +27,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "../../scripts/build.ts";
-import { type Case, withCaseComment, withTitle } from "../../src/lib/case.ts";
+import {
+	type Case,
+	type Shape,
+	withCaseComment,
+	withFinding,
+	withReopen,
+	withResolution,
+	withTitle,
+} from "../../src/lib/case.ts";
 import { exportCase } from "../../src/lib/export.ts";
 import { START_QUIET_MS } from "../../src/worker/cloud.ts";
 import {
@@ -241,6 +249,59 @@ describe.skipIf(
 			await addMark(dana.device, teamCase, "Pay button too pale", {
 				element: true,
 			});
+			for (const text of ["From the badge", "Underlined", "A note"])
+				await addMark(dana.device, teamCase, text);
+			// Each kind of mark, one fixed, one reopened, and an AI finding.
+			const shapes: Record<string, Shape> = {
+				a3: { kind: "arrow", from: { x: 5, y: 5 }, to: { x: 60, y: 40 } },
+				a4: {
+					kind: "pen",
+					points: [
+						{ x: 1, y: 30 },
+						{ x: 60, y: 31 },
+						{ x: 120, y: 33 },
+					],
+				},
+				a5: { kind: "note", at: { x: 30, y: 30 } },
+			};
+			await change(dana.device, teamCase, (c, now) =>
+				withFinding(
+					withReopen(
+						withResolution(
+							withResolution(
+								{
+									...c,
+									annotations: c.annotations.map((a) => {
+										const shape = shapes[a.id];
+										return shape === undefined ? a : { ...a, shape };
+									}),
+								},
+								"a1",
+								{ kind: "fixed", note: "Widened the column" },
+								now,
+							),
+							"a2",
+							{ kind: "fixed" },
+							now,
+						),
+						"a2",
+						{ note: "Still too pale" },
+						now,
+					),
+					"a3",
+					{
+						id: "f_upgrade",
+						text: "The arrow points at the price",
+						app: {
+							id: "https://claude.ai/oauth",
+							name: "Claude",
+							host: "claude.ai",
+						},
+						at: now,
+					},
+					now,
+				),
+			);
 			await dana.device.engine.request();
 			// A case that 0.3.0 sends itself: imported from a file while signed in.
 			const offline = device("file", dana.device.api, true);
@@ -372,7 +433,7 @@ describe.skipIf(
 			expect(after.files).toEqual(sent.files);
 			// The panel shows both cases with their marks and pictures.
 			for (const [title, count] of [
-				[fromTeam, 2],
+				[fromTeam, 5],
 				[fromFile, 2],
 			] as const) {
 				await panel.waitFor(row(title), 15_000);

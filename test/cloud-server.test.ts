@@ -535,10 +535,27 @@ serverTest("a browser's 0.3.0 data, opened by this build", () => {
 		const session = new Session(old.kv as never, (input, init) =>
 			fetch(input, init),
 		);
-		const api = httpApi({
+		const plain = httpApi({
 			server: base,
 			token: (fresh) => session.access(base, fresh),
 		});
+		// Every write it makes, and every question about an image, counted.
+		const writes: string[] = [];
+		const api = {
+			...plain,
+			ops: (team: string, list: Parameters<typeof plain.ops>[1]) => {
+				writes.push(...list.map((o) => o.type));
+				return plain.ops(team, list);
+			},
+			putBlob: (...args: Parameters<typeof plain.putBlob>) => {
+				writes.push("PUT blob");
+				return plain.putBlob(...args);
+			},
+			hasBlob: (...args: Parameters<typeof plain.hasBlob>) => {
+				writes.push("HEAD blob");
+				return plain.hasBlob(...args);
+			},
+		};
 		const statuses: { state: string; problems: unknown[] }[] = [];
 		const engine = new CloudSync({
 			store: old.store as never,
@@ -557,6 +574,9 @@ serverTest("a browser's 0.3.0 data, opened by this build", () => {
 		const here = (await old.store.getCase(caseId)) as unknown as Case;
 		expect(here.comments?.map((k) => k.text)).toEqual(["Before the upgrade"]);
 		expect(here.closed?.user?.name).toBe("Dana Developer");
+		// Up to here (the upgrade, and the case read again) nothing went:
+		// no operation, no image, not even a question about one.
+		expect(writes).toEqual([]);
 		// And it keeps syncing both ways.
 		await old.store.updateCase(caseId, (c) => ({
 			value: withCaseComment(
