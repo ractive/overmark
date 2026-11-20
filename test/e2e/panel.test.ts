@@ -77,8 +77,15 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 
 	/** The panel on an empty store with these cases and no settings. */
 	async function fresh(cases: Case[] = []): Promise<void> {
+		// Made as the extension's store makes it, should this come first (a
+		// test run by itself): opened without a version it would have no
+		// stores, the transaction would throw, and this would wait for ever.
 		await h.control.eval(`new Promise((resolve, reject) => {
-			const open = indexedDB.open("sitegloss");
+			const open = indexedDB.open("sitegloss", 1);
+			open.onupgradeneeded = () => {
+				open.result.createObjectStore("cases", { keyPath: "id" });
+				open.result.createObjectStore("images");
+			};
 			open.onerror = () => reject(open.error);
 			open.onsuccess = () => {
 				const tx = open.result.transaction(["cases", "images"], "readwrite");
@@ -285,20 +292,32 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`!(${found}) && !${id("this-tab")}.innerText.includes("Looking for")`,
 					10_000,
 				);
-				// The first click, where the button is; the second goes to the same spot.
-				await panel.click(id("delete-case"));
+				// The first click arms it (where the button is then does not
+				// matter); the second goes to the spot it was armed at.
+				await panel.eval(`${id("delete-case")}.click()`);
 				await panel.waitFor(
 					`${id("delete-case")}.hasAttribute("data-armed")`,
 					2000,
 				);
+				const armedAt = Date.now();
 				const at = await panel.eval<{ x: number; y: number }>(
 					`(() => { const r = ${id("delete-case")}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
 				);
 				// Between the two clicks v1 comes to the front: the panel finds
 				// the mark there and says so above the button.
 				await marked.page.activate();
-				await panel.waitFor(found, 3000);
-				// The same place, a second time: the confirmation.
+				// Within the 4 s the Delete stays armed (DELETE_ARMED_MS).
+				await panel.waitFor(found, 3500 - (Date.now() - armedAt));
+				// The button is where the first click found it (no click is
+				// aimed until it is: a test is faster than a hand), and the
+				// same place, a second time, confirms.
+				await panel.waitFor(
+					`(() => { const r = ${id("delete-case")}.getBoundingClientRect(); return Math.abs(r.x + r.width / 2 - ${at.x}) < 1 && Math.abs(r.y + r.height / 2 - ${at.y}) < 1 && document.elementFromPoint(${at.x}, ${at.y})?.id === "delete-case"; })()`,
+					3000,
+				);
+				// A confirming click this soon after the first counts as a
+				// double-click and deletes nothing (DELETE_CLICK_GAP_MS).
+				await Bun.sleep(Math.max(0, 600 - (Date.now() - armedAt)));
 				await panel.clickAt(at.x, at.y);
 				await panel.waitFor(`!${id("home")}.hidden`, 5000);
 				expect(await storedCase(caseId)).toBeUndefined();
