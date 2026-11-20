@@ -474,7 +474,7 @@ textarea + .row {
 /*
  * Something stands in the way and there is a way out: Sitegloss may not run on
  * the tab in front, none of the case's marks were found there (DEC-022), a
- * case in a file is here already, the address is in use elsewhere.
+ * case in a file is here already, Sitegloss's connection is in use elsewhere.
  */
 .notice,
 #import-prompt,

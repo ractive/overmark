@@ -231,8 +231,9 @@ and URLs without their query string, fragment or user name and password.
 
 ### A relay on your computer, for Claude Code
 
-The relay must allow Sitegloss's origin, `chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon`.
-Relay 0.7.0 and later take it as a site:
+The relay must allow Sitegloss's origin, `chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon`,
+and be relay 0.12.0 or later (Sitegloss uses `@ractive-ch/tab-mcp-client` 0.18, which
+older relays do not take):
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
@@ -240,13 +241,15 @@ docker run --rm -p 127.0.0.1:8080:8080 \
   -e TAB_MCP_PUBLIC_URL=http://localhost:8080 \
   -e TAB_MCP_STORE=memory \
   -e TAB_MCP_SITES='[{"origin":"chrome-extension://ldmcfigcnobhnbaigehcaodheklibeon","name":"Sitegloss"}]' \
-  ractive/tab-mcp:0.10.3
+  ractive/tab-mcp:0.12.0
 ```
 
 Then, in the side panel's "AI app" card, set the relay to `http://localhost:8080`
 and click "Turn on AI access" (or flip the AI access switch). With no AI app paired yet,
 the card shows the address and a code at once; with apps paired, "+ Add another AI app"
-shows them. Under the address, "How do I add it?" opens the steps for Claude, ChatGPT,
+shows them. The address is `<relay>/s/sitegloss/mcp`, the same for everyone who has
+Sitegloss (the Firefox build's too); the code, 8 letters shown as `XXXX-XXXX`, pairs the
+AI app with this browser's Sitegloss. Under the address, "How do I add it?" opens the steps for Claude, ChatGPT,
 Claude Code and Codex (the tab-mcp client library's, with the address in them), each
 command with its own Copy, and a link to the step-by-step guide. Add the address to
 Claude Code, then run `/mcp` there and choose Authenticate:
@@ -261,6 +264,15 @@ or click "Stop AI access" (either keeps the pairing), the relay's end of an idle
 or reload of the extension (or turning it off) ends it too. "Keep AI access on" connects
 again by itself after all of these but "Stop AI access".
 
+"Disconnect all apps", under the code, disconnects every AI app paired with Sitegloss;
+each one pairs again with a new code, at the same address. With apps paired it asks for a
+second click first. If another tab or program takes Sitegloss's connection over, the card
+says so and offers it too, or "Connect again" to take the connection back.
+
+Pairings from before Sitegloss used client 0.17 or later (the address `<relay>/a/<id>/mcp`) do
+not work any more: remove that connector from the AI app, add the new address and pair
+again.
+
 A tool that changes something (marked "asks first" above) asks first: in the side
 panel when it is open and on screen in the window in front (another extension's panel,
 such as Claude in Chrome's, can cover it), otherwise in a system notification with
@@ -273,7 +285,7 @@ tool run without asking for that AI app from then on; "Allow all changes", a swi
 for each connected app under the side panel's top bar (and under the app in the AI app
 card, in Settings, which the AI pill at the top opens), does so for every tool that
 changes something, deleting a case too. The card lists the tools always allowed for each app, each with
-"Ask again". Both last until you disconnect the app (or make a new address), also
+"Ask again". Both last until you disconnect the app (or all apps), also
 across browser restarts. An AI app can be steered by text on a page it reads, so allow
 always only what you would not need to check.
 

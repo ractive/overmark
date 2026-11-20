@@ -728,7 +728,7 @@ describe("the panel's status line", () => {
 		],
 		[
 			{ replaced: { sibling: false }, problem: "x" },
-			"Not connected: the address is in use elsewhere.",
+			"Not connected: Sitegloss's connection is in use elsewhere.",
 		],
 		[
 			{ relayNote: "The saved relay x cannot be used." },

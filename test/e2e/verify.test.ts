@@ -262,7 +262,7 @@ describe.skipIf(browserBinary === undefined)("Verify with an AI app", () => {
 		await page.activate();
 		panel = await openSidePanel(h);
 		const address = await connectAi(panel, relay.url);
-		claude = await mcpClient(relay.store, address);
+		claude = await mcpClient(relay, address);
 		const item = `document.querySelector('button[data-case="c_v"]')`;
 		await panel.waitFor(item, 10_000);
 		await panel.eval(`${item}.click()`);

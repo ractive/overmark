@@ -1397,3 +1397,50 @@ Not taken over, for the owner to decide:
 - "Not answered in time: <tool> did not run." for 15 s after a question ran out unseen.
 - One notification button only ("Allow once"; tab-mcp's DEC-139: a standing permission
   needs the whole question). Sitegloss's notification has Allow and Always allow.
+
+## DEC-042: One MCP address for every installation, tab-mcp client 0.18 (owner)
+
+2026-11-20. The hosted relay `tab-mcp.ractive.ch` moved to relay 0.12.0, which has one
+fixed MCP address per app and refuses clients before 0.17.0 (tab-mcp's DEC-196 to
+DEC-198): an organisation that allows custom connectors only by one exact URL can then
+allow Sitegloss. Installed copies lose AI access until an update with client 0.17 or
+later ships. The owner asked for the update on the 0.3.0 line, with client 0.18.1.
+(Numbered after DEC-038 to DEC-041, which are on the `cloud-sync` branch, so the
+numbers stay unique once both lines meet.)
+
+- **The address** is `<relay>/s/sitegloss/mcp`, the same for every installation, the
+  Firefox build's too. Sitegloss names its app, `app: "sitegloss"` (`APP_ID` in
+  `src/worker/protocol.ts`), rather than leaving the library to derive it from the
+  server's name, so that renaming the server cannot move the address. The pairing code
+  alone says which installation an AI app is paired with.
+- **The Firefox build shares the app id.** A relay may reserve an app for listed origins
+  (tab-mcp's DEC-197); no list can name one Firefox extension, so on a relay that
+  reserved `sitegloss` for the Chrome origin the Firefox build would be refused
+  (`app_not_allowed`). The hosted relay reserves only its sign-in example's app, so
+  `sitegloss` stays open to the Chrome, Edge and Firefox builds. Should it ever be
+  reserved, the Firefox build needs an id of its own (as tab-mcp's extension has
+  `tab-mcp-extension-firefox`), and its users pair again.
+- **Every pairing from before is gone.** The relay knows an installation by its app id
+  and its secret together and deleted the tokens of the old addresses; the secret
+  itself stays under its key. Users remove the old connector (`<relay>/a/<id>/mcp`)
+  from their AI app, add the new address and pair again. Always allow and Allow all
+  changes go with the old grants (DEC-018).
+- **The code** is 8 letters, shown as the relay sends it, `XXXX-XXXX`; it was shown as
+  two groups of three characters. It is typed with or without the dash. A code has no
+  attempts of its own any more (no `locked`); Sitegloss never showed that reason.
+- **"New address" is "Disconnect all apps"**, as in the library's dialogs and tab-mcp's
+  extension. It still disconnects every AI app and makes a new secret (the library's
+  `newAddress()`, DEC-017); the address stays, and each app pairs again with a new code.
+  The takeover notice and the status say Sitegloss's *connection* is in use elsewhere,
+  not its address, since everyone has that address.
+- **Relays before 0.12.0 do not work** with this version, also as a relay the user
+  entered; the README's local relay is `ractive/tab-mcp:0.12.0`. The worker's handling
+  of relays before 0.10.2 (a revoke's error that names no grant) stays: it is harmless
+  and goes with a later clean-up.
+- **Client 0.18 changes nothing Sitegloss uses yet.** Its allowances of its own
+  (`alwaysAllow`, `allowedTools`, tab-mcp's DEC-200) stay unused: Sitegloss keeps
+  Always allow and Allow all changes itself (DEC-018) and answers every question in
+  its `onConfirm`; with nothing allowed in the library, every call that changes
+  something still reaches it. Moving onto `allowedTools` is later work.
+- Not in this change: filling in the code on the relay's `/authorize` page from the
+  extension after asking the user (tab-mcp's DEC-199).

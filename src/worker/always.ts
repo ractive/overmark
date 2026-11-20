@@ -4,7 +4,7 @@
  * every tool that changes something run without asking. Kept in the
  * worker's settings database (`kv.ts`, DEC-016), so it survives the panel,
  * the worker and the browser closing; an app's entry goes when its grant
- * goes (Disconnect, New address, the relay dropping it), which `keepGrants`
+ * goes (Disconnect, Disconnect all apps, the relay dropping it), which `keepGrants`
  * does with each list of grants the relay sends.
  */
 

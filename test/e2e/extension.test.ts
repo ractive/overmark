@@ -1048,7 +1048,7 @@ describe.skipIf(browserBinary === undefined)(
 
 			// The side panel connects to the test relay ("keep AI access on").
 			const address = await connectAi(panel, relay.url, { keepOn: true });
-			const client = await mcpClient(relay.store, address);
+			const client = await mcpClient(relay, address);
 			try {
 				const cases = await client.callTool({
 					name: "list_cases",
