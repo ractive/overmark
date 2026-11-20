@@ -132,7 +132,10 @@ rules on remote code, and safety).
 extension context. Its WebSocket therefore carries the extension's origin
 `chrome-extension://<id>`, which a website cannot fake. A content script's requests would
 carry the page's origin, so the connection must not live there. The relay must allow the
-extension's origin (relay 0.7.0 and later take it in `TAB_MCP_SITES`). The connection
+extension's origin (relay 0.7.0 and later take it in `TAB_MCP_SITES`) and be relay
+0.12.0 or later (client 0.17 and later; Sitegloss has 0.18). The MCP address names the app, `<relay>/s/sitegloss/mcp`,
+the same for every installation and the Firefox build (DEC-042); the pairing code alone
+says which installation an AI app is paired with. The connection
 stays while the side panel is closed; the panel is a view that talks to it over one named
 port, whose sender the worker checks (the panel's own page, not in a tab). "Keep AI access
 on" connects at every worker start and after an idle session; without it AI access stays

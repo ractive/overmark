@@ -1890,7 +1890,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 		/** A paired MCP client, through the address the card shows (none paired yet). */
 		async function pairedClient(
 			panel: Page,
-			store: Parameters<typeof mcpClient>[0],
+			relay: Parameters<typeof mcpClient>[0],
 		) {
 			await panel.waitFor(
 				`${id("pair-address")}.textContent.endsWith("/mcp")`,
@@ -1899,7 +1899,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 			const address = await panel.eval<string>(
 				`${id("pair-address")}.textContent`,
 			);
-			return mcpClient(store, address);
+			return mcpClient(relay, address);
 		}
 
 		const visible = (page: Page, name: string) =>
@@ -1985,7 +1985,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`${status} === "Waiting for an AI app to pair"`,
 					10_000,
 				);
-				const client = await pairedClient(panel, relay.store);
+				const client = await pairedClient(panel, relay);
 				const list = () =>
 					client.callTool({ name: "list_cases", arguments: {} });
 				try {
@@ -2076,7 +2076,7 @@ describe.skipIf(browserBinary === undefined)("the side panel's page", () => {
 					`${status} === "Waiting for an AI app to pair"`,
 					10_000,
 				);
-				const client = await pairedClient(panel, relay.store);
+				const client = await pairedClient(panel, relay);
 				try {
 					const verdict = client.callTool({
 						name: "set_summary",

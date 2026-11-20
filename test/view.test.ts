@@ -2542,13 +2542,13 @@ describe("the AI app", () => {
 				{
 					...off,
 					problem: "connection",
-					status: "Not connected: the address is in use elsewhere.",
+					status: "Not connected: Sitegloss's connection is in use elsewhere.",
 				},
 				{
 					label: "AI problem",
-					line: "Not connected: the address is in use elsewhere.",
+					line: "Not connected: Sitegloss's connection is in use elsewhere.",
 					title:
-						"Not connected: the address is in use elsewhere. Click for the AI app card.",
+						"Not connected: Sitegloss's connection is in use elsewhere. Click for the AI app card.",
 				},
 			],
 			[

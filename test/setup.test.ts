@@ -10,7 +10,7 @@ let setup: Setup;
 let SELECTED: string;
 let COPIED_MS: number;
 
-const ADDRESS = "https://relay.example/a/AbC_12-x/mcp";
+const ADDRESS = "https://relay.example/s/sitegloss/mcp";
 const el = <T extends HTMLElement>(id: string) =>
 	window.document.getElementById(id) as unknown as T;
 const steps = () => [
@@ -184,19 +184,19 @@ describe("How do I add it?", () => {
 		}
 	});
 
-	test("a new address makes the steps again", () => {
+	test("another address (another relay) makes the steps again", () => {
 		setup.show(ADDRESS);
 		const first = step("codex");
-		const other = "https://relay.example/a/other/mcp";
+		const other = "https://other.example/s/sitegloss/mcp";
 		setup.show(other);
 		expect(step("codex")).not.toBe(first);
 		expect(step("codex")?.querySelector("pre")?.textContent).toContain(other);
 	});
 
 	test.each([
-		"https://relay.example/a/x'y/mcp",
-		"https://relay.example/a/$(id)/mcp",
-		"https://relay.example/a/x y/mcp",
+		"https://relay.example/s/x'y/mcp",
+		"https://relay.example/s/$(id)/mcp",
+		"https://relay.example/s/x y/mcp",
 	])(
 		"an address a shell would not read as plain (%s): no commands",
 		(address) => {
@@ -212,7 +212,7 @@ describe("How do I add it?", () => {
 	);
 
 	test("text only as text: markup in the address stays text", () => {
-		setup.show('https://relay.example/a/<img src=x onerror="1">/mcp');
+		setup.show('https://relay.example/s/<img src=x onerror="1">/mcp');
 		expect(el("setup-steps").querySelector("img")).toBeNull();
 		setup.show("");
 	});

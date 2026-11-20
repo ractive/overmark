@@ -63,7 +63,7 @@ describe.skipIf(browserBinary === undefined)("get_mark_element", () => {
 
 		const panel = await openSidePanel(h);
 		const address = await connectAi(panel, relay.url);
-		const client = await mcpClient(relay.store, address);
+		const client = await mcpClient(relay, address);
 		await v1.page.activate();
 		const read = async (args: Record<string, unknown>): Promise<Read> => {
 			const result = await client.callTool({

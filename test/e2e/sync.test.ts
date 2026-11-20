@@ -146,7 +146,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		panel = await openSidePanel(h);
 		await panel.waitFor(`${SYNC_STATE} === "Sync is off."`, 10_000);
 		const address = await connectAi(panel, relay.url);
-		claude = await mcpClient(relay.store, address);
+		claude = await mcpClient(relay, address);
 	}, 60_000);
 
 	afterAll(async () => {
