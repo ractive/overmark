@@ -425,6 +425,77 @@ serverTest("against a real server", () => {
 	}, 120_000);
 });
 
+serverTest("an arrow's ends at a real server (DEC-047; its DEC-020)", () => {
+	const base = BASE as string;
+
+	test("go with the new mark, come back from the server to another device, and are never patched", async () => {
+		const caseId = `c_en${Date.now().toString(36)}`;
+		const tess = await real(base, "tess", "tess@example.com");
+		const dana = await real(base, "dana", "dana@example.com");
+		await signIn(tess.device);
+		await signIn(dana.device);
+		await startCase(tess.device, caseId);
+		const a = await addMark(
+			tess.device,
+			caseId,
+			"From the badge to the price",
+			{
+				element: true,
+			},
+		);
+		const start = {
+			tag: "span",
+			testId: "badge",
+			classes: ["pp-badge"],
+			attributes: {},
+			ancestors: ["article.pp-card"],
+			rect: { x: 10, y: 20, width: 40, height: 18 },
+			page: { width: 1280, height: 2000 },
+			selector: ".pp-badge",
+		};
+		await change(tess.device, caseId, (c, now) => ({
+			...c,
+			annotations: c.annotations.map((x) =>
+				x.id === a.id
+					? {
+							...x,
+							shape: {
+								kind: "arrow",
+								from: { x: 30, y: 30 },
+								to: { x: 300, y: 200 },
+							},
+							ends: { start, end: null },
+						}
+					: x,
+			),
+			updatedAt: now,
+		}));
+		await tess.device.engine.request();
+		expect(status(tess.device)?.problems).toEqual([]);
+		await dana.device.engine.request();
+		const there = ((await dana.device.store.getCase(caseId)) as Case)
+			.annotations[0];
+		expect(there?.ends?.start?.testId).toBe("badge");
+		expect(there?.ends?.start?.classes).toEqual(["pp-badge"]);
+		expect(there?.ends?.end).toBeNull();
+		// A change to the mark goes as a patch; its ends stay as they were.
+		await change(tess.device, caseId, (c, now) =>
+			withComment(c, a.id, "From the badge to the price, on mobile", now),
+		);
+		await tess.device.engine.request();
+		expect(status(tess.device)?.problems).toEqual([]);
+		await dana.device.engine.request();
+		const after = ((await dana.device.store.getCase(caseId)) as Case)
+			.annotations[0];
+		expect(after?.comment).toBe("From the badge to the price, on mobile");
+		expect(after?.ends?.start?.testId).toBe("badge");
+		await removeCase(tess.device, caseId);
+		await tess.device.engine.request();
+		await tess.session.end(base);
+		await dana.session.end(base);
+	}, 120_000);
+});
+
 serverTest("a browser's 0.3.0 data, opened by this build", () => {
 	const base = BASE as string;
 

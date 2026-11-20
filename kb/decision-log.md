@@ -2275,6 +2275,21 @@ stays `sitegloss/1`, and a 0.3.0 browser on the same team keeps working.
   start; what is here is sent as usual meanwhile, and nothing deleted here is
   forgotten. Tested in `test/compat-0-3-0.test.ts` (0.3.0's sync, then this build on
   the same stores) and against a local server in `test/cloud-server.test.ts`.
+  What a 0.3.0 book is to this code: its fingerprints are computed as 0.3.0 computed
+  them (`fixedOf`, `markContent`, `caseContent`, the patches' comparisons and
+  `canonical` are the same code; shadows of screenshots had `capturedAt` already;
+  `markSignature` is never in a book), and its shadow lacks only `closed` and
+  `comments`, which read as open and as no thread. So it is clean as it is, and the
+  read above writes nothing to the team. `test/e2e/upgrade.test.ts` shows it with the
+  real stores: 0.3.0's build signs in and syncs (a case of the team's and one it
+  sends itself, with marks and screenshots), the build before the thread
+  (`panel-guidance`) runs over the same profile, then this one; the server's own
+  record (`applied_ops`, `blobs`, the team's revision, the images' files) is
+  unchanged by it, the panel shows the cases with their marks, and a comment written
+  afterwards is the one operation it sends. Chrome keeps running the service worker
+  script it cached for an unpacked extension of the same version until the
+  extension is reloaded in chrome://extensions: new files on disk and a restart are
+  not enough (the test drops the worker cache to get there).
 - **AI tools.** `list_comments`, `add_comment` (also about a mark), `edit_comment`,
   `delete_comment`, `set_case_status`; `get_case` shows the newest 20 comments with
   `own`, and `closed`; `list_cases` says `closed: true`. The changing ones ask first
