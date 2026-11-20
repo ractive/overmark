@@ -665,3 +665,62 @@ describe("a file put in place of a synced case (review of DEC-046)", () => {
 		]);
 	});
 });
+
+describe("an arrow's ends (DEC-047; the server's DEC-020)", () => {
+	const element = (tag: string, testId: string) => ({
+		tag,
+		testId,
+		classes: [],
+		attributes: {},
+		ancestors: [],
+		rect: { x: 1, y: 2, width: 30, height: 20 },
+		page: { width: 1280, height: 800 },
+		selector: `[data-testid=${testId}]`,
+	});
+
+	test("go with the new mark, come to the other device, and are never patched", async () => {
+		await signIn(tess);
+		await signIn(dana);
+		await startCase(tess, "c_ends");
+		const a = await addMark(tess, "c_ends", "From the badge to the price");
+		await change(tess, "c_ends", (c, now) => ({
+			...c,
+			annotations: c.annotations.map((x) =>
+				x.id === a.id
+					? {
+							...x,
+							shape: {
+								kind: "arrow",
+								from: { x: 5, y: 5 },
+								to: { x: 50, y: 40 },
+							},
+							ends: { start: element("span", "badge"), end: null },
+						}
+					: x,
+			),
+			updatedAt: now,
+		}));
+		recording(tess);
+		await tess.engine.request();
+		const made = sent(tess, "mark.create")[0];
+		expect(
+			made?.type === "mark.create" ? made.mark.ends?.start?.testId : undefined,
+		).toBe("badge");
+		expect(server.marksOf("c_ends")[0]?.ends?.end).toBeNull();
+		await dana.engine.request();
+		const there = (await caseHere(dana, "c_ends")).annotations[0];
+		expect(there?.ends?.start?.testId).toBe("badge");
+		expect(there?.ends?.end).toBeNull();
+		// A change to the mark: a patch without its ends.
+		await change(tess, "c_ends", (c, now) =>
+			withComment(c, a.id, "Changed", now),
+		);
+		await tess.engine.request();
+		const patch = sent(tess, "mark.patch")[0];
+		expect(patch && "ends" in patch).toBe(false);
+		expect(status(tess)?.problems).toEqual([]);
+		// Nothing waits on either side.
+		await sync(tess, dana);
+		expect(sent(tess, "mark.patch")).toHaveLength(1);
+	});
+});

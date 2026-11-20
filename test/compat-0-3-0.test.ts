@@ -13,6 +13,7 @@ import {
 	withClosed,
 	withoutCaseComment,
 } from "../src/lib/case.ts";
+import { CloudSync } from "../src/lib/cloud/engine.ts";
 import { exportCase, readExport, storeImport } from "../src/lib/export.ts";
 import { MemoryStore } from "../src/lib/store.ts";
 import { readZip } from "../src/lib/zip.ts";
@@ -181,6 +182,62 @@ describe("a 0.3.0 browser on the same team", () => {
 		expect(
 			((await tess.store.getCase("c_flow")) as Case).closed,
 		).toBeUndefined();
+	});
+});
+
+describe("0.3.0's data opened by this build", () => {
+	test("its cases, books and account open as they are, keep syncing, and get the thread and closing 0.3.0 passed by", async () => {
+		await startCase(tess, "c_up");
+		await addMark(tess, "c_up", "Total is cut off");
+		await sync();
+		// What 0.3.0 reads past and does not keep.
+		await change(tess, "c_up", (c, now) =>
+			withClosed(
+				withCaseComment(c, { id: "k_before", text: "Before the upgrade" }, now),
+				true,
+				now,
+			),
+		);
+		await sync();
+		expect(lastStatus()?.state).toBe("synced");
+		// The extension is reloaded with this build: the same database.
+		const statuses: { state: string; problems: unknown[] }[] = [];
+		const engine = new CloudSync({
+			store: dana.store as never,
+			kv: dana.kv as never,
+			api: () => dana.api as never,
+			onStatus: (s) => statuses.push(s),
+		});
+		expect((await engine.account())?.server).toBe(SERVER);
+		await engine.request();
+		await engine.request();
+		expect(statuses.at(-1)?.state).toBe("synced");
+		expect(statuses.at(-1)?.problems).toEqual([]);
+		const here = (await dana.store.getCase("c_up")) as unknown as Case;
+		expect(here.comments?.map((k) => k.text)).toEqual(["Before the upgrade"]);
+		expect(here.closed?.user?.name).toBe("Tess Tester");
+		// And on: a comment of Dana's reaches the team.
+		await dana.store.updateCase("c_up", (c) => ({
+			value: withCaseComment(
+				c as unknown as Case,
+				{ id: "k_after", text: "After the upgrade" },
+				new Date(dana.clock.now.getTime() + 60_000).toISOString(),
+			) as never,
+		}));
+		await engine.request();
+		expect(server.commentsOf("c_up").map((k) => k.text)).toEqual([
+			"Before the upgrade",
+			"After the upgrade",
+		]);
+		// Looked for once: a run after that reads no case anew.
+		let reads = 0;
+		const getCase = dana.api.getCase.bind(dana.api);
+		dana.api.getCase = (team, id) => {
+			reads++;
+			return getCase(team, id);
+		};
+		await engine.request();
+		expect(reads).toBe(0);
 	});
 });
 

@@ -270,6 +270,8 @@ export class CloudSync {
 	#said: CloudStatus | undefined;
 	/** What the running run has to say besides the books' rejections. */
 	#problems: CloudStatus["problems"] = [];
+	/** The team whose books were looked at for ones from before DEC-046. */
+	#threadsChecked: string | undefined;
 	/** And what it has to tell that is no problem (`CloudStatus.notes`). */
 	#notes: NonNullable<CloudStatus["notes"]> = [];
 
@@ -793,6 +795,7 @@ export class CloudSync {
 			}
 			const written = this.#books.writes;
 			this.#read = undefined;
+			await this.#readThreadsOnce(team);
 			await this.#flush(api, team);
 			// What the server has a record of here goes first, then what the
 			// team changed comes. A case this device has no record of at the
@@ -902,6 +905,34 @@ export class CloudSync {
 	// --- sending ----------------------------------------------------------------------
 
 	/** Operations a run before this one wrote down and did not see confirmed. */
+	/**
+	 * A book written by a build before DEC-046 (0.3.0) holds no thread: that
+	 * build read past the team's comments and closings without keeping them.
+	 * Its case is read whole once, which brings them; what is here goes as
+	 * usual meanwhile, and nothing deleted here is forgotten.
+	 */
+	async #readThreadsOnce(team: Team): Promise<void> {
+		// Books from before are this database's from an earlier build: looked
+		// for once per start, not at every run (a run reads the books once).
+		if (this.#threadsChecked === team.id) return;
+		this.#threadsChecked = team.id;
+		const before = [...(await this.#books.all()).values()].filter(
+			(b) =>
+				b.mode === "synced" &&
+				b.teamId === team.id &&
+				b.shadow !== undefined &&
+				b.shadow.comments === undefined &&
+				b.reread === undefined,
+		);
+		if (before.length > 0)
+			await this.#books.put(
+				...before.map((b) => ({
+					...b,
+					reread: { why: "failed" as const, tries: 0, after: 0 },
+				})),
+			);
+	}
+
 	async #flush(api: Api, team: Team): Promise<void> {
 		const queue = (await this.#deps.kv.get(KEYS.queue)) as Queue | undefined;
 		if (queue === undefined) return;

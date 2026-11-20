@@ -23,15 +23,17 @@ import {
 	withoutAnnotation,
 	withoutCaseComment,
 } from "../src/lib/case.ts";
-import { eventsUrl } from "../src/lib/cloud/api.ts";
+import { eventsUrl, httpApi } from "../src/lib/cloud/api.ts";
 import {
 	AuthError,
 	discover,
 	refreshTokens,
+	Session,
 	TOKENS_KEY,
 	type Tokens,
 } from "../src/lib/cloud/auth.ts";
 import type { Account } from "../src/lib/cloud/book.ts";
+import { CloudSync } from "../src/lib/cloud/engine.ts";
 import { listen } from "../src/lib/cloud/sse.ts";
 import {
 	addMark,
@@ -423,6 +425,99 @@ serverTest("against a real server", () => {
 	}, 120_000);
 });
 
+serverTest("a browser's 0.3.0 data, opened by this build", () => {
+	const base = BASE as string;
+
+	test("its cases, books and account open cleanly, keep syncing, and get the thread and closings 0.3.0 passed by", async () => {
+		const caseId = `c_mg${Date.now().toString(36)}`;
+		// Tess on 0.3.0: signed in, the team's cases here, a case of her own.
+		const old = await real030(base, "tess@example.com");
+		await old.engine.signedIn(base, await old.api.me());
+		const dana = await real(base, "dana", "dana@example.com");
+		await signIn(dana.device);
+		await startCase(dana.device, caseId);
+		await addMark(dana.device, caseId, "Total is cut off");
+		await addMark(dana.device, caseId, "Pay button too pale");
+		await dana.device.engine.request();
+		await old.engine.request();
+		expect((await old.store.getCase(caseId))?.annotations).toHaveLength(2);
+		// What 0.3.0 cannot keep: Dana comments and closes the case. 0.3.0
+		// reads past it and moves its cursor on.
+		await change(dana.device, caseId, (c, now) =>
+			withClosed(
+				withCaseComment(
+					c,
+					{ id: `k_${caseId}_1`, text: "Before the upgrade" },
+					now,
+				),
+				true,
+				now,
+			),
+		);
+		await dana.device.engine.request();
+		await old.engine.request();
+		await old.engine.request();
+		expect(old.statuses.at(-1)?.state).toBe("synced");
+		const cases = (await old.store.listCases()).length;
+
+		// The extension is reloaded with this build: the same database.
+		const session = new Session(old.kv as never, (input, init) =>
+			fetch(input, init),
+		);
+		const api = httpApi({
+			server: base,
+			token: (fresh) => session.access(base, fresh),
+		});
+		const statuses: { state: string; problems: unknown[] }[] = [];
+		const engine = new CloudSync({
+			store: old.store as never,
+			kv: old.kv as never,
+			api: () => api,
+			onStatus: (s) => statuses.push(s),
+		});
+		// Signed in still, with the same account; no sign-in asked.
+		expect((await engine.account())?.server).toBe(base);
+		await engine.request();
+		await engine.request();
+		expect(statuses.at(-1)?.state).toBe("synced");
+		expect(statuses.at(-1)?.problems).toEqual([]);
+		expect((await old.store.listCases()).length).toBe(cases);
+		// What 0.3.0 passed by is here now.
+		const here = (await old.store.getCase(caseId)) as unknown as Case;
+		expect(here.comments?.map((k) => k.text)).toEqual(["Before the upgrade"]);
+		expect(here.closed?.user?.name).toBe("Dana Developer");
+		// And it keeps syncing both ways.
+		await old.store.updateCase(caseId, (c) => ({
+			value: withCaseComment(
+				c as unknown as Case,
+				{ id: `k_${caseId}_2`, text: "After the upgrade" },
+				new Date().toISOString(),
+			) as never,
+		}));
+		await engine.request();
+		await dana.device.engine.request();
+		expect(
+			((await dana.device.store.getCase(caseId)) as Case).comments?.map(
+				(k) => k.text,
+			),
+		).toEqual(["Before the upgrade", "After the upgrade"]);
+		await change(dana.device, caseId, (c, now) =>
+			withComment(c, "a1", "Total is cut off on small screens", now),
+		);
+		await dana.device.engine.request();
+		await engine.request();
+		expect(
+			((await old.store.getCase(caseId)) as unknown as Case).annotations[0]
+				?.comment,
+		).toBe("Total is cut off on small screens");
+
+		await removeCase(dana.device, caseId);
+		await dana.device.engine.request();
+		await dana.session.end(base);
+		await session.end(base);
+	}, 120_000);
+});
+
 /** A browser with 0.3.0's sync, signed in at the real server as 0.3.0 signs in. */
 async function real030(base: string, email: string) {
 	const kv = memoryKv030();
@@ -449,11 +544,12 @@ async function real030(base: string, email: string) {
 	});
 	const store = new MemoryStore030();
 	const statuses: { state: string; problems: unknown[] }[] = [];
+	// One database for the account and the sync, as the worker keeps them.
 	const engine = new CloudSync030({
 		store,
-		kv: memoryKv030(),
+		kv,
 		api: () => api,
 		onStatus: (s) => statuses.push(s),
 	});
-	return { api, store, engine, statuses, session };
+	return { api, store, kv, engine, statuses, session };
 }

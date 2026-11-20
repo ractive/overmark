@@ -2266,6 +2266,15 @@ stays `sitegloss/1`, and a 0.3.0 browser on the same team keeps working.
   thread. On a team, 0.3.0 syncs marks as before, passes by removed comments, and
   does not see comments or closing; a mark it adds reopens a closed case at the server,
   which this build follows.
+- **A browser that ran 0.3.0.** Its cases, books and account are read as they are:
+  the stores, the account and the tokens are as 0.3.0 wrote them, and a book only
+  gained optional fields. But 0.3.0 read past the team's comments and closings in
+  `changes` and moved its cursor on, so those would never come. A book whose shadow
+  has no thread (only a book from before this decision: a new case's shadow starts
+  with an empty one) has its case read whole once, at the first run after the
+  start; what is here is sent as usual meanwhile, and nothing deleted here is
+  forgotten. Tested in `test/compat-0-3-0.test.ts` (0.3.0's sync, then this build on
+  the same stores) and against a local server in `test/cloud-server.test.ts`.
 - **AI tools.** `list_comments`, `add_comment` (also about a mark), `edit_comment`,
   `delete_comment`, `set_case_status`; `get_case` shows the newest 20 comments with
   `own`, and `closed`; `list_cases` says `closed: true`. The changing ones ask first
@@ -2365,7 +2374,8 @@ whole card under "Our bikes".
   { start, end }`: the elements under its first and last point, each `null` where
   there is none. `element` stays the mark's element (an arrow's: its head's, as
   before). Optional in `sitegloss/1`: a 0.3.0 import drops it. get_case shows it,
-  case.md says "From:" and "To:". **Not sent** until the server takes it.
+  case.md says "From:" and "To:". Sent with the new mark since the server took the
+  field (below).
 - **Proposed for the server's contract (API v1, additive).** On `Mark` (in `changes`,
   `getCase`, MCP `get_case`) and on `mark.create`'s `mark`: an optional
   `ends: { start: Element | null, end: Element | null }`, where `Element` is the
@@ -2374,6 +2384,12 @@ whole card under "Our bikes".
   absent for marks that have none (0.3.0's, MCP `add_mark`'s, notes, boxes). The
   server need not check the kind. Once the OpenAPI document has it, the extension
   sends it in `mark.create` and reads it back in the merge.
+- **Taken by the server** (sitegloss.dev 5a63313, its DEC-020), and in the extension
+  with the A–C pull request (DEC-046): `ends` goes with `mark.create`, cut as
+  `element` is; it stays out of what `mark.patch` compares and out of `fixedOf` (a
+  mark drawn with `ends` before this was sent without them: in `fixedOf` it would read
+  as another drawing, and be deleted and made again). A mark made on another device
+  takes the server's; one drawn here keeps its own.
 - **Tested** in `test/e2e/capture.test.ts` (the demo page, in Chromium),
   `test/element.test.ts` (fragments, another site's route; headings on the demo page,
   in nested cards, of a heading), `test/match.test.ts` (a link with a fragment on one
