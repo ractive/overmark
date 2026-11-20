@@ -10,7 +10,8 @@
  * reloaded or disabled (all of which clear `chrome.storage.session`). The
  * settings and the address secret are in the worker's own IndexedDB
  * (`kv.ts`, DEC-016), out of content scripts' reach, as is what each AI app
- * may do without asking (`always.ts`, DEC-018).
+ * may do without asking, which the library keeps beside the secret
+ * (`always.ts`, DEC-018, DEC-043).
  */
 
 import {
@@ -29,7 +30,7 @@ import {
 import { cropImages, scaleImage, toWebp } from "../lib/images.ts";
 import type { Broadcast, ContentRequest } from "../lib/messages.ts";
 import type { CaseStore } from "../lib/store.ts";
-import { AlwaysAllowed } from "./always.ts";
+import { AlwaysAllowed, removeOldStore } from "./always.ts";
 import { badge } from "./badge.ts";
 import { decide } from "./decide.ts";
 import { endedProblem, KeepOn } from "./keep-on.ts";
@@ -273,8 +274,6 @@ export class Connection {
 	readonly #questions: Questions;
 	readonly #panels = new Set<Panel>();
 	readonly #keep: KeepOn;
-	/** Always allow and Allow all changes, by AI app (DEC-018). */
-	readonly #always: AlwaysAllowed;
 	/** The tools' titles, by name, for the card's list. */
 	#titles = new Map<string, string>();
 	#settings: Settings;
@@ -308,11 +307,9 @@ export class Connection {
 		storage: CachedSecretStorage,
 		settings: Settings,
 		sessionOn: boolean,
-		always: AlwaysAllowed,
 	) {
 		this.#deps = deps;
 		this.#kv = kv;
-		this.#always = always;
 		this.#tab = workerTab(deps.capture);
 		this.#storage = storage;
 		this.#settings = settings;
@@ -349,11 +346,15 @@ export class Connection {
 		const kv = deps.kv ?? (await openKv());
 		// A previous worker's questions died with it.
 		await clearNotifications();
-		const [storage, settings, session, always] = await Promise.all([
+		// Sitegloss's own Always allow store, from before the library kept
+		// them (DEC-043): nothing in it outlived client 0.17's new addresses.
+		await removeOldStore(kv).catch((error: unknown) =>
+			console.warn("Sitegloss: removing the old Always allow", error),
+		);
+		const [storage, settings, session] = await Promise.all([
 			CachedSecretStorage.load(kv),
 			loadSettings(kv),
 			chrome.storage.session.get([SESSION_ON, SESSION_STOPPED]),
-			AlwaysAllowed.load(kv),
 		]);
 		// A Stop in this browser session holds, whatever was stored before it.
 		const stopped = session[SESSION_STOPPED] === true;
@@ -363,7 +364,6 @@ export class Connection {
 			storage,
 			stopped ? { ...settings, keepOn: false } : settings,
 			!stopped && session[SESSION_ON] === true,
-			always,
 		);
 		connection.#showBadge();
 		connection.keepUp();
@@ -376,8 +376,9 @@ export class Connection {
 
 	/** A connection to `relay`; throws a `TypeError` for an address the library refuses. */
 	#create(relay: string): TabMcp {
-		// The library's own "Always allow" stays off: Sitegloss asks itself, and
-		// keeps Always allow per AI app and tool (DEC-018).
+		// The library's `alwaysAllow` stays unset: its dialogs are not used.
+		// Sitegloss asks itself, and the library keeps what the user allowed
+		// per AI app and tool in `storage` and honours it first (DEC-043).
 		const mcp: TabMcp = new TabMcp({
 			relay,
 			server: {
@@ -415,10 +416,13 @@ export class Connection {
 	}
 
 	/**
-	 * A tool that changes something: runs without asking if the user chose
-	 * Always allow for it, or Allow all changes, for this AI app (DEC-018);
-	 * otherwise asks. The "Last AI call" is recorded either way ("toolcall").
+	 * Always allow and Allow all changes, by AI app (DEC-018): the library's,
+	 * for the connection now (DEC-043).
 	 */
+	get #always(): AlwaysAllowed {
+		return AlwaysAllowed.of(this.#mcp);
+	}
+
 	/** Questions an Always allow given meanwhile covers are allowed. */
 	#allowCovered(): void {
 		this.#questions.allowCovered((grantId, tool) =>
@@ -426,10 +430,16 @@ export class Connection {
 		);
 	}
 
+	/**
+	 * A tool that changes something: runs without asking if the user chose
+	 * Always allow for it, or Allow all changes, for this AI app (DEC-018);
+	 * otherwise asks. The library checks that first and asks only for the
+	 * rest (DEC-043). The "Last AI call" is recorded either way ("toolcall").
+	 */
 	#decide(mcp: TabMcp, request: ConfirmRequest): Promise<ConfirmAnswer> {
 		return decide(
 			{
-				always: this.#always,
+				always: AlwaysAllowed.of(mcp),
 				ask: async (r) => {
 					const lines = await confirmLines(this.#deps.store, this.#tab, r);
 					const front = await tabInFront().catch(() => undefined);
@@ -443,22 +453,9 @@ export class Connection {
 					console.warn(
 						`Sitegloss: refused ${r.tool.name} through WebMCP: only an AI app connected through the relay may change something`,
 					),
-				notKept: (error) => {
-					console.warn("Sitegloss: keeping Always allow", error);
-					this.#problem = `Always allow could not be saved: ${message(error)}`;
-				},
 			},
 			request,
 		).finally(() => this.#changed());
-	}
-
-	/** An app whose grant is gone takes its Always allow with it. */
-	#keepGrants(grants: readonly { grantId: string }[]): void {
-		this.#always.keepGrants(grants.map((g) => g.grantId)).then(
-			() => this.#changed(),
-			(error: unknown) =>
-				console.warn("Sitegloss: forgetting Always allow", error),
-		);
 	}
 
 	#watch(mcp: TabMcp): void {
@@ -468,12 +465,14 @@ export class Connection {
 		const changed = () => this.#changed();
 		for (const type of ["pairingcode", "grantschange"] as const)
 			mcp.addEventListener(type, changed, { signal });
-		// The relay's list of the apps connected to this address: only it, so
-		// a start or a lost connection (no list yet) forgets nothing.
+		// Allowances changed (by a switch, Always allow, an app's grant gone).
+		signal.addEventListener("abort", AlwaysAllowed.of(mcp).onChange(changed));
+		// The relay's list of the apps connected: only it, so a start or a
+		// lost connection (no list yet) forgets nothing. The library forgets
+		// the allowances of an app no longer in it itself (DEC-043).
 		mcp.addEventListener(
 			"grantschange",
 			({ detail: { grants } }) => {
-				this.#keepGrants(grants);
 				for (const id of this.#revokeProblems.keys())
 					if (!grants.some((g) => g.grantId === id))
 						this.#revokeProblems.delete(id);
@@ -805,12 +804,12 @@ export class Connection {
 				// Only for an app the card shows.
 				if (!this.#mcp.grants.some((g) => g.grantId === command.grantId))
 					return;
-				await this.#always.setAll(command.grantId, command.on);
+				this.#always.setAll(command.grantId, command.on);
 				if (command.on) this.#allowCovered();
 				this.#changed();
 				return;
 			case "ask-again":
-				await this.#always.removeTool(command.grantId, command.tool);
+				this.#always.removeTool(command.grantId, command.tool);
 				this.#changed();
 				return;
 			case "new-address":
@@ -867,7 +866,7 @@ export class Connection {
 
 	/**
 	 * Disconnect one AI app (DEC-017). Its Always allow goes with the grant,
-	 * once the library's list no longer has it (`#keepGrants`, DEC-018): also
+	 * once the library's list no longer has it (DEC-018, DEC-043): also
 	 * for a grant the relay does not know (expired), which client 0.16.1
 	 * drops from the list when relay 0.10.2 says so. A relay before 0.10.2
 	 * names no grant in its `unknown_id`: the library rejects, the app stays
@@ -895,7 +894,7 @@ export class Connection {
 					(error as { code?: unknown }).code === "unknown_id" &&
 					!failure.unattributed
 				)
-					this.#keepGrants(mcp.grants.filter((g) => g.grantId !== grantId));
+					AlwaysAllowed.of(mcp).forget(grantId);
 				this.#changed();
 			});
 		});

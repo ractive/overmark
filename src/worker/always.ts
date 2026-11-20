@@ -1,131 +1,95 @@
 /**
- * "Always allow" (DEC-018): per AI app (its grant) either the tools the user
- * answered a question with Always allow, or "Allow all changes", which lets
- * every tool that changes something run without asking. Kept in the
- * worker's settings database (`kv.ts`, DEC-016), so it survives the panel,
- * the worker and the browser closing; an app's entry goes when its grant
- * goes (Disconnect, Disconnect all apps, the relay dropping it), which `keepGrants`
- * does with each list of grants the relay sends.
+ * "Always allow" and "Allow all changes" (DEC-018, DEC-043): per AI app (its
+ * grant), the tools the user answered a question with Always allow, or every
+ * tool that changes something. The tab-mcp client library keeps them
+ * (`allowedTools` of `@ractive-ch/tab-mcp-client/allowed`, its DEC-200) in
+ * the storage Sitegloss passes it, beside the address secret
+ * (`tab-mcp:secret:<relay origin>:sitegloss#allowed`, in the worker's
+ * IndexedDB through `CachedSecretStorage`), and honours them before
+ * Sitegloss's `onConfirm` is asked. They end with the app's grant, as the
+ * relay reports it (Disconnect, Disconnect all apps, an expired grant), and
+ * a tool allowed one by one asks again once its title or description
+ * changed. This is the only store of them: Sitegloss keeps none of its own.
  */
 
+import type { TabMcp } from "@ractive-ch/tab-mcp-client";
+import {
+	type AllowedTools,
+	allowedTools,
+} from "@ractive-ch/tab-mcp-client/allowed";
 import type { Kv } from "./kv.ts";
 
-/** The key in the settings database: one value, by grant. */
-export const ALWAYS_KEY = "alwaysAllowed";
+/**
+ * The key of Sitegloss's own store before DEC-043, in the settings database.
+ * Removed at every worker start: its grants ended with client 0.17's new
+ * addresses, so there is nothing in it to take over.
+ */
+export const OLD_ALWAYS_KEY = "alwaysAllowed";
 
-/** What is kept for one AI app. */
+/** Remove the store from before (DEC-043). */
+export async function removeOldStore(kv: Kv): Promise<void> {
+	await kv.remove(OLD_ALWAYS_KEY);
+}
+
+/** What runs without asking for one AI app. */
 export interface AlwaysEntry {
-	/** "Allow all changes". */
+	/** "Allow all changes": the library's "everything". */
 	all: boolean;
-	/** The tools always allowed, by name, in the order they were added. */
+	/** The tools always allowed one by one, by name, in the order allowed. */
 	tools: string[];
 }
 
-/** By grant id. */
-export type AlwaysData = Map<string, AlwaysEntry>;
-
-/** The stored value, checked: anything malformed is dropped (asks again). */
-export function alwaysOf(value: unknown): AlwaysData {
-	const out: AlwaysData = new Map();
-	if (typeof value !== "object" || value === null || Array.isArray(value))
-		return out;
-	for (const [grantId, raw] of Object.entries(value)) {
-		if (typeof raw !== "object" || raw === null) continue;
-		const { all, tools } = raw as Record<string, unknown>;
-		const names = Array.isArray(tools)
-			? [
-					...new Set(
-						tools.filter((t): t is string => typeof t === "string" && t !== ""),
-					),
-				]
-			: [];
-		if (all === true || names.length > 0)
-			out.set(grantId, { all: all === true, tools: names });
-	}
-	return out;
-}
-
-/** As stored: a plain object (own properties only, whatever the ids). */
-const stored = (data: AlwaysData) => Object.fromEntries(data);
-
+/** The library's allowances of one `TabMcp`, in Sitegloss's words. */
 export class AlwaysAllowed {
-	readonly #kv: Kv;
-	#data: AlwaysData;
-	/** Changes, one after the other: each starts from the one before. */
-	#queue: Promise<void> = Promise.resolve();
+	readonly #allowed: AllowedTools;
 
-	private constructor(kv: Kv, data: AlwaysData) {
-		this.#kv = kv;
-		this.#data = data;
+	constructor(allowed: AllowedTools) {
+		this.#allowed = allowed;
 	}
 
-	static async load(kv: Kv): Promise<AlwaysAllowed> {
-		return new AlwaysAllowed(kv, alwaysOf(await kv.get(ALWAYS_KEY)));
+	/** The allowances of `mcp`: one per `TabMcp`, the library's own object. */
+	static of(mcp: TabMcp): AlwaysAllowed {
+		return new AlwaysAllowed(allowedTools(mcp));
 	}
 
-	/** Whether `tool` runs without asking for grant `grantId`. */
+	/** Whether `tool` runs without asking for `grantId` now (a connected app only). */
 	has(grantId: string, tool: string): boolean {
-		const entry = this.#data.get(grantId);
-		return entry !== undefined && (entry.all || entry.tools.includes(tool));
+		return this.#allowed.has(grantId, tool);
 	}
 
-	/** What is kept for `grantId`. */
+	/** What is allowed for `grantId`. */
 	entry(grantId: string): AlwaysEntry {
-		const entry = this.#data.get(grantId);
-		return { all: entry?.all ?? false, tools: [...(entry?.tools ?? [])] };
+		return {
+			all: this.#allowed.everything(grantId),
+			tools: this.#allowed.list(grantId),
+		};
 	}
 
-	/** Always allow `tool` for `grantId`. */
-	addTool(grantId: string, tool: string): Promise<void> {
-		return this.#change((data) => {
-			const entry = data.get(grantId) ?? { all: false, tools: [] };
-			if (!entry.tools.includes(tool)) entry.tools.push(tool);
-			data.set(grantId, entry);
-		});
-	}
-
-	/** Ask again for `tool` for `grantId`. */
-	removeTool(grantId: string, tool: string): Promise<void> {
-		return this.#change((data) => {
-			const entry = data.get(grantId);
-			if (entry !== undefined)
-				entry.tools = entry.tools.filter((t) => t !== tool);
-		});
-	}
-
-	/** "Allow all changes" for `grantId`, on or off. */
-	setAll(grantId: string, on: boolean): Promise<void> {
-		return this.#change((data) => {
-			data.set(grantId, { all: on, tools: data.get(grantId)?.tools ?? [] });
-		});
-	}
-
-	/** Forget every app not in `grantIds`: the relay's list of grants. */
-	keepGrants(grantIds: Iterable<string>): Promise<void> {
-		const keep = new Set(grantIds);
-		return this.#change((data) => {
-			for (const grantId of [...data.keys()])
-				if (!keep.has(grantId)) data.delete(grantId);
-		});
+	/** Always allow `tool` for `grantId`: nothing for an app not connected. */
+	addTool(grantId: string, tool: string): void {
+		this.#allowed.allow(grantId, tool);
 	}
 
 	/**
-	 * Change a copy, write it, and only then use it: a write that fails
-	 * changes nothing, so what asks and what is stored agree.
+	 * Ask again for `tool` for `grantId`. With Allow all changes on, that goes
+	 * off too (the library's rule: asking again errs towards asking).
 	 */
-	#change(change: (data: AlwaysData) => void): Promise<void> {
-		const run = this.#queue.then(async () => {
-			const next = structuredClone(this.#data);
-			change(next);
-			// Dropped: apps with nothing left.
-			const kept = alwaysOf(stored(next));
-			if (JSON.stringify(stored(kept)) === JSON.stringify(stored(this.#data)))
-				return;
-			if (kept.size === 0) await this.#kv.remove(ALWAYS_KEY);
-			else await this.#kv.set({ [ALWAYS_KEY]: stored(kept) });
-			this.#data = kept;
-		});
-		this.#queue = run.catch(() => {});
-		return run;
+	removeTool(grantId: string, tool: string): void {
+		this.#allowed.ask(grantId, tool);
+	}
+
+	/** Allow all changes for `grantId`, on (a connected app only) or off. */
+	setAll(grantId: string, on: boolean): void {
+		this.#allowed.setEverything(grantId, on);
+	}
+
+	/** Everything of `grantId` asks again. */
+	forget(grantId: string): void {
+		this.#allowed.forget(grantId);
+	}
+
+	/** Called on every change of the allowances or of the tools; returns what stops it. */
+	onChange(listener: () => void): () => void {
+		return this.#allowed.onChange(listener);
 	}
 }

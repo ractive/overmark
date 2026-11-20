@@ -42,7 +42,10 @@ Only in three cases, all started by you:
    without storing it ([its privacy statement](https://ractive.ch/tab-mcp/privacy/)).
    The AI app's provider handles it under its own privacy policy.
 
-   Changes the AI app wants to make are asked first, unless you chose "Always allow".
+   Changes the AI app wants to make are asked first, unless you chose "Always allow"
+   for that change or "Allow all changes" for that AI app; either lasts until that AI
+   app is disconnected. Which ones you chose is kept in the browser, beside the
+   connection's secret, and goes nowhere.
 
    In Firefox, the browser first asks, at the click that turns AI access on, for its own
    data collection consent for website content and browsing activity. Without it AI

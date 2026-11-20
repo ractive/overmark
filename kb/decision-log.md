@@ -1444,3 +1444,43 @@ numbers stay unique once both lines meet.)
   something still reaches it. Moving onto `allowedTools` is later work.
 - Not in this change: filling in the code on the relay's `/authorize` page from the
   extension after asking the user (tab-mcp's DEC-199).
+
+## DEC-043: Always allow and Allow all changes are the library's allowances (owner)
+
+2026-11-20. The owner asked for Sitegloss's own Always allow store (DEC-018) to give way
+to the tab-mcp client library's allowances (`allowedTools` of
+`@ractive-ch/tab-mcp-client/allowed`, client 0.18, tab-mcp's DEC-200), which keep the
+same thing: per AI app (grant) the tools that run without asking, and a switch for
+everything.
+
+- **One store.** The library keeps them in the `storage` Sitegloss already passes it,
+  under the secret's key with `#allowed` (`tab-mcp:secret:<relay origin>:sitegloss#allowed`,
+  in the worker's IndexedDB through `CachedSecretStorage`, out of content scripts'
+  reach as before, DEC-016): grant ids, tool names, the title and description the user
+  saw, a fingerprint of the secret; no arguments. `src/worker/always.ts` is a thin
+  wrapper in Sitegloss's words ("Always allow" is `allow`, "Ask again" `ask`, "Allow
+  all changes" `everything`). Sitegloss's key `alwaysAllowed` is removed at every
+  worker start and nothing in it is taken over: its grants ended with client 0.17's new
+  addresses (DEC-042), so it holds nothing that could still apply.
+- **Honoured first.** The library checks an allowance before it asks `onConfirm`, so an
+  allowed call runs without Sitegloss's question and the "Last AI call" still records
+  it. Every other call that changes something still reaches `onConfirm` and asks, in
+  the panel or a notification; `decide` keeps its own check for a call allowed while
+  its question was on the way, and refuses WebMCP and served ports as before. The
+  library's `alwaysAllow` option stays unset: Sitegloss never shows its dialogs.
+- **Where the library differs, it wins**, and the texts say so:
+  - An allowance ends with its grant as the relay reports it: Disconnect, Disconnect
+    all apps (the new secret ends them all), or the grant expiring. That is what
+    `keepGrants` did; a dropped connection or Stop AI access keeps them, as before.
+  - A tool allowed one by one asks again once its title or description changed, for
+    example after an update of Sitegloss. The question's line and the README say so.
+    "Allow all changes" covers every tool, also changed and later ones.
+  - "Ask again" for one tool while "Allow all changes" is on turns that off too (asking
+    again errs towards asking). Its tooltip says so.
+  - Nothing is kept for an app that is not connected (as `decide` already did for
+    Always allow), and "Allow all changes" cannot be turned on for one either.
+  - A write to the database that fails no longer shows "Always allow could not be
+    saved": the library keeps the allowance in memory and the cache logs the failure.
+- What the user sees is otherwise the same: Always allow in the question and the
+  notification, the card's list with "Ask again", and the switch under the top bar
+  (DEC-036).

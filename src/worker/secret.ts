@@ -1,8 +1,10 @@
 /**
  * The address secret's storage in the service worker, which has no
- * `localStorage` (DEC-015): the library reads and writes it synchronously,
- * so the entries are loaded from the worker's IndexedDB (`kv.ts`, DEC-016)
- * before the connection is made, read from memory and written through.
+ * `localStorage` (DEC-015), and the library's allowances beside it under the
+ * secret's key with `#allowed` (DEC-043): the library reads and writes them
+ * synchronously, so the entries are loaded from the worker's IndexedDB
+ * (`kv.ts`, DEC-016) before the connection is made, read from memory and
+ * written through.
  */
 
 import type { SecretStorage } from "@ractive-ch/tab-mcp-client";
@@ -42,7 +44,7 @@ export class CachedSecretStorage implements SecretStorage {
 		this.written = this.written
 			.then(() => this.#kv.set({ [key]: value }))
 			.catch((error: unknown) =>
-				console.warn("Sitegloss: keeping the address secret", error),
+				console.warn("Sitegloss: keeping the AI connection's storage", error),
 			);
 	}
 }
