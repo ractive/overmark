@@ -42,15 +42,16 @@ export function syncBadge(
 			textColor: SYNC_PAUSED_TEXT,
 			title:
 				status.reason === "downloads"
-					? "Sitegloss: sync is paused. Click to allow downloads."
-					: "Sitegloss: sync is paused. Click to allow access.",
+					? "Sitegloss: the copy to a folder is paused. Click to allow downloads."
+					: "Sitegloss: the copy to a folder is paused. Click to allow access.",
 		};
 	if (status?.state === "failed")
 		return {
 			text: "!",
 			color: SYNC_FAILED_COLOR,
 			textColor: "#ffffff",
-			title: "Sitegloss: sync failed. Click to see why and try again.",
+			title:
+				"Sitegloss: the copy to a folder failed. Click to see why and try again.",
 		};
 	return undefined;
 }

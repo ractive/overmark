@@ -164,6 +164,16 @@ const sentence = (op: Op, code: string, message: string) =>
 const permissionsKey = (team: Team): string =>
 	[...(team.permissions ?? [])].sort().join(" ");
 
+/**
+ * Nothing of the case could go at the last look, nothing changed since, and
+ * the role allows what it allowed then: the case is passed by. The one
+ * test, for sending and for saying what waits.
+ */
+const heldBack = (book: CaseBook | undefined, c: Case, mayKey: string) =>
+	book?.idle !== undefined &&
+	book.idle.at === c.updatedAt &&
+	book.idle.may === mayKey;
+
 /** A book of a case that is on this device only from now on: nothing waits for the server any more. */
 function local(book: CaseBook): CaseBook {
 	const { reread: _r, idle: _i, ...rest } = book;
@@ -178,6 +188,9 @@ const MAX_REJECTED = 50;
 
 /** How long the teams and permissions are taken as last read. */
 export const ACCOUNT_FRESH_MS = 10 * 60_000;
+
+/** How old the account's teams must be before a look of the panel asks again (DEC-045). */
+export const ACCOUNT_CHECK_MS = 60_000;
 
 /** How many images are fetched at once. */
 const FETCHES = 4;
@@ -481,6 +494,53 @@ export class CloudSync {
 		}).then(() => this.#then());
 	}
 
+	/**
+	 * The panel came into view (DEC-045): the user's teams, asked for again
+	 * when that was more than a minute ago. One request; only a change (a
+	 * team joined or left, a role changed) is written, said, and followed by
+	 * a run. Whether anything changed. Nothing here starts another check:
+	 * the panel asks on being shown, and a minute must pass between two.
+	 */
+	checkAccount(): Promise<boolean> {
+		return this.#exclusive(async () => {
+			const account = await this.account();
+			if (account === undefined || account.expired) return false;
+			if (this.#now().getTime() - account.checkedAt < ACCOUNT_CHECK_MS)
+				return false;
+			let next: Account;
+			try {
+				next = await this.#refresh(
+					this.#deps.api(account.server),
+					account,
+					ACCOUNT_CHECK_MS,
+				);
+			} catch (error) {
+				// Not reached, or refused: the next run asks and says it.
+				if (error instanceof ApiFailure) return false;
+				throw error;
+			}
+			const changed =
+				next.teamId !== account.teamId ||
+				JSON.stringify(next.teams) !== JSON.stringify(account.teams);
+			if (!changed) return false;
+			await this.#books.publishModes();
+			const before = await this.status();
+			if (teamOf(next) !== undefined)
+				await this.#say(
+					await this.#status(
+						before.state === "off" || before.state === "syncing"
+							? "synced"
+							: before.state,
+						before.text === undefined ? {} : { text: before.text },
+					),
+				);
+			return true;
+		}).then((changed) => {
+			if (changed) void this.#then();
+			return changed;
+		});
+	}
+
 	/** "Sync now": also what the server refused before is tried again. */
 	retry(): Promise<void> {
 		return this.#exclusive(async () => {
@@ -590,11 +650,28 @@ export class CloudSync {
 						: `${first.text} ${rest.length} more of its changes were not taken either.`,
 			});
 		}
+		// The cases with changes the team does not have yet, and that can go:
+		// what "Up to date" may not hide. Held back as `#push` holds them back.
+		const team = teamOf(await this.account());
+		const mayKey = team === undefined ? undefined : permissionsKey(team);
+		let waiting = 0;
+		for (const c of cases) {
+			const book = books.get(c.id);
+			if (book !== undefined && book.mode !== "synced") continue;
+			if (book?.cleanAt === c.updatedAt) continue;
+			// Cannot go as things are (said among the problems), or waits to be
+			// read first, or has no mark yet (not sent until it has one).
+			if (mayKey !== undefined && heldBack(book, c, mayKey)) continue;
+			if (book?.reread !== undefined && blocks(book.reread)) continue;
+			if (book?.shadow === undefined && c.annotations.length === 0) continue;
+			waiting++;
+		}
 		return {
 			state,
 			problems,
 			...(notes.length > 0 ? { notes } : {}),
 			undecided,
+			waiting,
 			...(joins.cases > 0 ? { joins } : {}),
 			...(before.lastSyncedAt === undefined
 				? {}
@@ -741,9 +818,13 @@ export class CloudSync {
 	}
 
 	/** The user's teams and what they may do there, asked for now and then. */
-	async #refresh(api: Api, account: Account): Promise<Account> {
+	async #refresh(
+		api: Api,
+		account: Account,
+		freshMs = ACCOUNT_FRESH_MS,
+	): Promise<Account> {
 		const now = this.#now().getTime();
-		if (now - account.checkedAt < ACCOUNT_FRESH_MS) return account;
+		if (now - account.checkedAt < freshMs) return account;
 		const me = await api.me();
 		const teams = me.teams ?? [];
 		const { teamId, ...rest } = account;
@@ -814,7 +895,7 @@ export class CloudSync {
 			}
 			if (book.cleanAt === c.updatedAt) continue;
 			// Nothing of it could go at the last look, and nothing changed since.
-			if (book.idle?.at === c.updatedAt && book.idle.may === mayKey) continue;
+			if (heldBack(book, c, mayKey)) continue;
 			// A case without marks is not sent until it has one (as the folder sync).
 			if (book.shadow === undefined && c.annotations.length === 0) continue;
 			if (book.shadow === undefined && !all) {

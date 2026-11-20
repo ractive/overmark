@@ -1,5 +1,5 @@
 /**
- * End to end: the sync (DEC-021, DEC-025). "Sync to Downloads" writes each
+ * End to end: the sync (DEC-021, DEC-025). "Copy to Downloads" writes each
  * case to `Sitegloss/` in the profile's downloads folder (the test build has
  * `downloads`, so Chrome asks nothing), and the worker writes it again after
  * an AI app's change with no extension page open, through its offscreen
@@ -144,7 +144,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		const tab = await h.open("v2");
 		await tab.page.activate();
 		panel = await openSidePanel(h);
-		await panel.waitFor(`${SYNC_STATE} === "Sync is off."`, 10_000);
+		await panel.waitFor(`${SYNC_STATE} === "Off."`, 10_000);
 		const address = await connectAi(panel, relay.url);
 		claude = await mcpClient(relay, address);
 	}, 60_000);
@@ -183,7 +183,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		);
 		expect(written?.id).toBe(caseId);
 		await panel.waitFor(
-			`${SYNC_STATE} === "Syncing to Downloads/Sitegloss" && ${SYNC}.querySelector(".sync-line")?.textContent.startsWith("Last synced ")`,
+			`${SYNC_STATE} === "Copying to Downloads/Sitegloss" && ${SYNC}.querySelector(".sync-line")?.textContent.startsWith("Last written ")`,
 			10_000,
 		);
 		expect(await panel.eval(`Boolean(${IN_SYNC("sync-show")})`)).toBe(true);
@@ -321,7 +321,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		);
 		await panel.waitFor(`!${BANNER}.hidden`, 10_000);
 		expect(await panel.eval(`${BANNER}.querySelector("p").textContent`)).toBe(
-			`Sync is paused. Chrome needs your OK to write to “${FOLDER}” again.`,
+			`The copy to a folder is paused. Chrome needs your OK to write to “${FOLDER}” again.`,
 		);
 		expect(await panel.eval(`${BANNER}.getAttribute("role")`)).toBe("status");
 		expect(await panel.eval(SYNC_STATE)).toBe(
@@ -329,7 +329,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		);
 		await until(badge, (b) => b === "!");
 		expect(await title()).toBe(
-			"Sitegloss: sync is paused. Click to allow access. AI access is on.",
+			"Sitegloss: the copy to a folder is paused. Click to allow access. AI access is on.",
 		);
 
 		await openCase(panel, "Synced case");
@@ -368,7 +368,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await until(badge, (b) => b === "");
 		// Home, in the control page: the section says where it syncs now.
 		await h.control.waitFor(
-			`${SYNC_STATE} === "Syncing to Downloads/Sitegloss"`,
+			`${SYNC_STATE} === "Copying to Downloads/Sitegloss"`,
 			10_000,
 		);
 		expect(await panel.eval<string[]>(FOLDER_FILES)).toContain(FILE);
@@ -393,7 +393,7 @@ describe.skipIf(browserBinary === undefined)("the sync", () => {
 		await h.control.goto(PANEL_PAGE(h));
 		await h.control.waitFor(IN_SYNC("sync-stop"), 10_000);
 		await h.control.click(IN_SYNC("sync-stop"));
-		await h.control.waitFor(`${SYNC_STATE} === "Sync is off."`);
+		await h.control.waitFor(`${SYNC_STATE} === "Off."`);
 		const { page, tabId } = await h.open("v1");
 		await showToolbar(h, page, tabId);
 		await markElement(page, "[data-truth=submit]", "Again");

@@ -296,7 +296,7 @@ describe.skipIf(!firefoxReady)("Firefox: the test build", () => {
 		};
 		// On Home: every case so far gets a file of its own.
 		await toHome(h);
-		await clickButton(h, "Sync to Downloads");
+		await clickButton(h, "Copy to Downloads");
 		await until(() => synced().length === 3, "three synced files", 30_000);
 		const before = new Set(synced());
 

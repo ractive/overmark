@@ -31,13 +31,20 @@ import {
 import {
 	type Account,
 	type CaseBook,
+	type CloudStatus,
 	KEYS,
 	type Queue,
 } from "../src/lib/cloud/book.ts";
 import { undoAdd } from "../src/lib/save.ts";
 import type { StoredImage } from "../src/lib/store.ts";
+import { statusLine, syncNowHelps } from "../src/sidepanel/cloud-view.ts";
 import { markAsked } from "../src/sidepanel/picked.ts";
-import { editAfter, heldAfter, type MarkEdit } from "../src/sidepanel/state.ts";
+import {
+	editAfter,
+	heldAfter,
+	type MarkEdit,
+	type PanelState,
+} from "../src/sidepanel/state.ts";
 import type { FakeApi } from "./cloud-fake.ts";
 import { FakeServer, requestProblem, TEAM } from "./cloud-fake.ts";
 import {
@@ -332,6 +339,166 @@ describe("two devices and one team", () => {
 		const before = tess.changed.length;
 		await tess.engine.request();
 		expect(tess.changed).toHaveLength(before);
+	});
+});
+
+describe("the status line, from the engine's real states (DEC-045)", () => {
+	type Cloud = PanelState["cloud"];
+	/** The panel's view of Tess's sync: her account, her engine's status, the stream. */
+	const panelOf = async (
+		d: Device,
+		live: boolean | undefined,
+	): Promise<Cloud> => {
+		const account = (await d.engine.account()) as Account;
+		return {
+			server: account.server,
+			account: {
+				name: account.user.name,
+				email: account.user.email,
+				userId: account.user.id,
+				server: account.server,
+				teams: account.teams.map((t) => ({
+					id: t.id,
+					name: t.name,
+					permissions: [...(t.permissions ?? [])],
+				})),
+				teamId: account.teamId,
+				expired: account.expired === true,
+			},
+			status: status(d),
+			modes: {},
+			signingIn: false,
+			problem: undefined,
+			live,
+			minute: 0,
+		};
+	};
+
+	test("up to date only when nothing waits and the stream is open; offline says what waits; Sync now only when it helps", async () => {
+		await shared();
+		const panel = await panelOf(tess, true);
+		expect(status(tess)?.waiting).toBe(0);
+		expect(statusLine(panel)).toBe("Up to date. Changes sync as you work.");
+		expect(syncNowHelps(panel)).toBe(false);
+		// The stream closed: when it last synced, and Sync now.
+		const closed = await panelOf(tess, false);
+		expect(statusLine(closed, tess.clock.now.getTime())).toStartWith(
+			"Last synced just now.",
+		);
+		expect(syncNowHelps(closed)).toBe(true);
+		// Offline with a change: the change waits, and says so.
+		tess.api.offline = true;
+		await change(tess, "c_flow", (c, now) =>
+			withComment(c, "a1", "Edited offline", now),
+		);
+		await tess.engine.request();
+		const offline = await panelOf(tess, false);
+		expect(status(tess)?.state).toBe("offline");
+		expect(status(tess)?.waiting).toBe(1);
+		expect(statusLine(offline)).toBe(
+			"Offline: changes are kept and sync when the server can be reached. 1 case waits to be sent.",
+		);
+		expect(syncNowHelps(offline)).toBe(true);
+		// A run said "syncing" on its way.
+		tess.api.offline = false;
+		tess.statuses.length = 0;
+		await tess.engine.request();
+		expect(tess.statuses.some((x) => x.state === "syncing")).toBe(true);
+		expect(
+			statusLine({
+				...(await panelOf(tess, true)),
+				status: {
+					...(tess.statuses.find((x) => x.state === "syncing") as CloudStatus),
+				},
+			}),
+		).toStartWith("Syncing");
+		// Sent: up to date again.
+		expect(status(tess)?.waiting).toBe(0);
+		expect(statusLine(await panelOf(tess, true))).toBe(
+			"Up to date. Changes sync as you work.",
+		);
+	});
+
+	test("what is not the team's does not wait: a case kept on this device, one not decided about, one without a mark", async () => {
+		await startCase(tess, "c_old");
+		await addMark(tess, "c_old", "Was here before");
+		await signIn(tess);
+		expect(status(tess)?.undecided).toBe(1);
+		await tess.engine.decide(false);
+		await startCase(tess, "c_empty");
+		await tess.engine.request();
+		expect(status(tess)?.waiting).toBe(0);
+		expect(statusLine(await panelOf(tess, true))).toBe(
+			"Up to date. Changes sync as you work.",
+		);
+	});
+});
+
+describe("the account looked at again when the panel is shown (DEC-045)", () => {
+	test("one request, only after a minute; a team joined meanwhile is written, said and synced with", async () => {
+		await signIn(tess);
+		const me = tess.api.me.bind(tess.api);
+		tess.api.calls.length = 0;
+		// Shown at once again: nothing asked.
+		expect(await tess.engine.checkAccount()).toBe(false);
+		expect(tess.api.calls).toEqual([]);
+		// A minute later, nothing changed: one request, no run.
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		expect(await tess.engine.checkAccount()).toBe(false);
+		expect(tess.api.calls).toEqual(["GET me"]);
+		// Another team joined on the web app: written, and a run follows.
+		tess.api.me = async () => {
+			const answer = await me();
+			return {
+				...answer,
+				teams: [
+					...(answer.teams ?? []),
+					{
+						id: "t_other",
+						name: "Other team",
+						slug: "other",
+						role: "contributor",
+						permissions: [],
+					},
+				],
+			};
+		};
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		tess.api.calls.length = 0;
+		expect(await tess.engine.checkAccount()).toBe(true);
+		expect(
+			((await tess.engine.account()) as Account).teams.map((t) => t.name),
+		).toEqual(["Pedal & Pine web", "Other team"]);
+		expect(tess.api.calls[0]).toBe("GET me");
+	});
+
+	test("a role that allows again what it did not: the case that waits is said to wait, as it is about to be sent", async () => {
+		await signIn(tess);
+		tess.api.permissions = tess.api.permissions.filter(
+			(p) => p !== "mark:create" && p !== "case:create",
+		);
+		await tess.engine.retry();
+		await startCase(tess, "c_held");
+		await addMark(tess, "c_held", "Held back");
+		await tess.engine.request();
+		// Held back by the role: not waiting, said as a problem.
+		expect(status(tess)?.waiting).toBe(0);
+		expect(status(tess)?.problems).toHaveLength(1);
+		// The role allows it again, and the panel's look finds that out.
+		tess.api.permissions = [
+			...tess.api.permissions,
+			"mark:create",
+			"case:create",
+		];
+		tess.clock.now = new Date(tess.clock.now.getTime() + 61_000);
+		tess.statuses.length = 0;
+		const later = tess.engine.checkAccount();
+		expect(await later).toBe(true);
+		// Said with the new role, before the run sends it: it waits.
+		expect(tess.statuses[0]?.waiting).toBe(1);
+		await tess.engine.request();
+		expect(server.cases.has("c_held")).toBe(true);
+		expect(status(tess)?.waiting).toBe(0);
 	});
 });
 

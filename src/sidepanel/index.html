@@ -45,6 +45,8 @@
 				<h2 id="page-heading">This page</h2>
 				<p id="page" class="page">…</p>
 				<p id="hint" class="hint" hidden></p>
+				<!-- The tab in front is the signed-in server's own web app (DEC-045). -->
+				<p id="web-app-note" class="meta" hidden></p>
 				<!-- The page has a case already: that is said, and opening it is the first thing offered (view.ts). -->
 				<div id="here" class="here" hidden>
 					<p id="here-text" class="here-text"></p>
@@ -56,7 +58,14 @@
 			<section aria-labelledby="cases-heading">
 				<h2 id="cases-heading">Cases</h2>
 				<div id="cases"></div>
-				<h3 class="group-title">Files</h3>
+			</section>
+			<!-- The account at sitegloss.dev and the sync with a team (DEC-039, DEC-045): drawn by cloud-view.ts. -->
+			<section id="cloud-section" class="sync cloud" aria-labelledby="cloud-heading">
+				<h2 id="cloud-heading">Team</h2>
+				<div id="cloud" aria-live="polite"></div>
+			</section>
+			<section aria-labelledby="files-heading">
+				<h2 id="files-heading">Files</h2>
 				<div class="row import">
 					<button id="import" type="button" title="Choose a Sitegloss .zip file: one exported case, or a file of all cases. For a case that is here already, Sitegloss asks first whether to replace it or keep both.">Import a case…</button>
 					<button id="export-all" type="button" title="Save every case in one .zip file, a folder per case with its marks, comments, findings, summary and screenshots. Import a case… reads it back, in this browser or another.">Export all cases</button>
@@ -68,14 +77,9 @@
 					<p id="import-error-text"></p>
 					<button id="import-dismiss" type="button">Dismiss</button>
 				</div>
-				<!-- The account at sitegloss.dev and the sync with a team (DEC-039): drawn by cloud-view.ts. -->
-				<section id="cloud-section" class="sync cloud" aria-labelledby="cloud-heading">
-					<h3 id="cloud-heading" class="group-title">Account</h3>
-					<div id="cloud" aria-live="polite"></div>
-				</section>
-				<!-- The sync to Downloads or a folder (DEC-021, DEC-025): drawn by sync-view.ts. -->
+				<!-- The copy of every case to Downloads or a folder (DEC-021, DEC-025, DEC-045): drawn by sync-view.ts. -->
 				<section id="sync-section" class="sync" aria-labelledby="sync-heading">
-					<h3 id="sync-heading" class="group-title">Sync</h3>
+					<h3 id="sync-heading" class="group-title">Copy to a folder</h3>
 					<div id="sync" aria-live="polite"></div>
 				</section>
 			</section>
@@ -94,6 +98,12 @@
 				<p id="ai-state" class="ai-state" data-state="off" role="status">
 					<span class="dot" aria-hidden="true"></span><span id="ai-state-text">AI access is off · paired apps stay paired</span>
 				</p>
+				<!-- An AI app was just paired: what to do next, and the way back (DEC-045; view.ts). -->
+				<div id="paired-next" class="paired-next" role="status" hidden>
+					<p id="paired-next-text"></p>
+					<p class="meta">Ask it about a case, for example “Look at the Sitegloss case open in my browser and fix its marks”. Before it changes a case, it asks you here, unless you allow all changes below.</p>
+					<button id="paired-back" type="button" class="strong"></button>
+				</div>
 				<ul id="pair-grants" class="grants" aria-label="Connected AI apps"></ul>
 				<p id="pair-problem" class="hint" role="status" hidden></p>
 				<div id="pair-replaced" class="hint" hidden>

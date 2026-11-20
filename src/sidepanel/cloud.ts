@@ -51,7 +51,16 @@ async function ask(request: CloudRequest): Promise<CloudAnswer> {
 export interface PanelCloud extends CloudActions {
 	/** Read what the worker wrote down again. */
 	refresh(): Promise<void>;
+	/**
+	 * The panel came into view (shown, or focused): the worker asks for the
+	 * account's teams again if that was more than a minute ago (DEC-045).
+	 * At most once a minute from here, and only on being shown: no loop.
+	 */
+	shown(): void;
 }
+
+/** How long between two looks at the account from the panel being shown. */
+export const SHOWN_CHECK_MS = 60_000;
 
 /** The actions, for `Actions`, before the panel's cloud is started. */
 export function cloudActions(cloud: () => CloudActions): CloudActions {
@@ -65,6 +74,9 @@ export function cloudActions(cloud: () => CloudActions): CloudActions {
 		cloudServer: (text) => cloud().cloudServer(text),
 	};
 }
+
+/** How long the stream may be closed before the status line says so. */
+export const STREAM_GAP_MS = 10_000;
 
 /** The panel's cloud; `kv` is the cloud's database (tests pass their own). */
 export function startCloud(
@@ -80,6 +92,31 @@ export function startCloud(
 			s.cloud.problem = text;
 		});
 
+	/**
+	 * Whether the stream is open, as the status line says it. A stream the
+	 * server ends (every quarter of an hour) is open again within seconds:
+	 * only one closed for longer counts as closed.
+	 */
+	let closing: ReturnType<typeof setTimeout> | undefined;
+	function live(open: boolean | undefined): void {
+		clearTimeout(closing);
+		if (open === false) {
+			closing = setTimeout(
+				() => update((s) => (s.cloud.live = false)),
+				STREAM_GAP_MS,
+			);
+			return;
+		}
+		update((s) => (s.cloud.live = open));
+	}
+	// "5 minutes ago" is said anew each minute.
+	const ticking = setInterval(
+		() => update((s) => (s.cloud.minute = Math.floor(Date.now() / 60_000))),
+		60_000,
+	) as unknown as { unref?: () => void };
+	// (In tests, under Bun: it holds no run open.)
+	ticking.unref?.();
+
 	/** Listen to the team's changes while there is a team; another team, another stream. */
 	function follow(account: Account | undefined): void {
 		const teamId = account?.expired ? undefined : account?.teamId;
@@ -90,6 +127,7 @@ export function startCloud(
 		if (stream?.key === key) return;
 		stream?.end.abort();
 		stream = undefined;
+		live(undefined);
 		if (account === undefined || teamId === undefined) return;
 		const end = new AbortController();
 		stream = { key, end };
@@ -107,6 +145,9 @@ export function startCloud(
 				return answer.ok ? answer.token : undefined;
 			},
 			onChange: (cursor) => void send({ type: "cloud:run", cursor }),
+			onConnected: (open) => {
+				if (stream?.end === end) live(open);
+			},
 			signal: end.signal,
 		}).then(() => {
 			// It ended by itself (nobody signed in any more): the next news
@@ -212,8 +253,18 @@ export function startCloud(
 	}
 
 	void refresh().then(() => send({ type: "cloud:run" }));
+	let checkedAt = Number.NEGATIVE_INFINITY;
+	function shown(): void {
+		const now = Date.now();
+		if (now - checkedAt < SHOWN_CHECK_MS) return;
+		checkedAt = now;
+		// A change comes back as the worker's news, as any other.
+		void send({ type: "cloud:check" }).catch(() => undefined);
+	}
+
 	return {
 		refresh,
+		shown,
 		cloudSignIn,
 		cloudSignOut: () => void act({ type: "cloud:sign-out" }),
 		cloudTeam: (teamId) => void act({ type: "cloud:team", teamId }),

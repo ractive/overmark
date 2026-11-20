@@ -110,6 +110,11 @@ export interface ListenOptions {
 	token: (fresh: boolean) => Promise<string | undefined>;
 	/** The team is at this revision now. */
 	onChange: (cursor: number) => void;
+	/**
+	 * The stream is open (`true`: the server answered and its body flows),
+	 * or no longer (`false`: it ended or failed, a new one is on its way).
+	 */
+	onConnected?: (open: boolean) => void;
 	signal: AbortSignal;
 	fetch?: (input: string, init?: RequestInit) => Promise<Response>;
 	sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -161,6 +166,7 @@ export async function listen(options: ListenOptions): Promise<void> {
 		// Any byte counts as heard, so a server could hold one connection
 		// for ever: it has an age, after which it is made anew.
 		let aged = false;
+		let open = false;
 		const age = setTimeout(() => {
 			aged = true;
 			stop();
@@ -189,6 +195,8 @@ export async function listen(options: ListenOptions): Promise<void> {
 				backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
 			} else {
 				fresh = false;
+				open = true;
+				options.onConnected?.(true);
 				const parser = new EventParser();
 				const reader = response.body.getReader();
 				const decoder = new TextDecoder();
@@ -215,6 +223,7 @@ export async function listen(options: ListenOptions): Promise<void> {
 			} else backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
 		} finally {
 			// Whatever ended it, the connection is let go.
+			if (open) options.onConnected?.(false);
 			quiet.abort();
 			clearTimeout(timer);
 			clearTimeout(age);

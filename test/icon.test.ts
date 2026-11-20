@@ -151,7 +151,8 @@ describe("the badge (DEC-025)", () => {
 			text: "!",
 			color: "#ffb000",
 			textColor: "#1b2130",
-			title: "Sitegloss: sync is paused. Click to allow access.",
+			title:
+				"Sitegloss: the copy to a folder is paused. Click to allow access.",
 			spark: false,
 		});
 	});
@@ -160,14 +161,14 @@ describe("the badge (DEC-025)", () => {
 		const b = decideBadge(off, paused("downloads"));
 		expect([b.text, b.color]).toEqual(["!", "#ffb000"]);
 		expect(b.title).toBe(
-			"Sitegloss: sync is paused. Click to allow downloads.",
+			"Sitegloss: the copy to a folder is paused. Click to allow downloads.",
 		);
 	});
 
 	test("failed: red “!” with white text", () => {
 		const b = decideBadge(off, failed);
 		expect([b.text, b.color, b.textColor]).toEqual(["!", "#b3261e", "#ffffff"]);
-		expect(b.title).toContain("sync failed");
+		expect(b.title).toContain("the copy to a folder failed");
 	});
 
 	test("syncing, synced or off: no badge", () => {
@@ -194,7 +195,7 @@ describe("the badge (DEC-025)", () => {
 		const b = decideBadge({ questions: 0, ai: "connected" }, paused("access"));
 		expect([b.text, b.spark]).toEqual(["!", true]);
 		expect(b.title).toBe(
-			"Sitegloss: sync is paused. Click to allow access. AI access is on.",
+			"Sitegloss: the copy to a folder is paused. Click to allow access. AI access is on.",
 		);
 	});
 

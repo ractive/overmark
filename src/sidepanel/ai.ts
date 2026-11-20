@@ -33,8 +33,10 @@ import {
 	cardView,
 	confirms,
 	hasNewGrant,
+	pairedSince,
 	SWITCH_WAIT_MS,
 	type SwitchIntent,
+	stillPaired,
 	switchShown,
 } from "./card.ts";
 import { byId, h } from "./dom.ts";
@@ -196,6 +198,8 @@ export async function startAi(
 	let addingApp = false;
 	/** The apps paired when "+ Add another AI app" was clicked. */
 	let knownGrants: ReadonlySet<string> = new Set();
+	/** While the pairing box shows: the apps paired before it did. */
+	let beforePairing: ReadonlySet<string> | undefined;
 	/** Disconnect asks first: the apps whose button was clicked once. */
 	const disconnectArmed = new Map<
 		string,
@@ -756,6 +760,23 @@ export async function startAi(
 		// And with the app being added connecting: the box has done its job.
 		if (addingApp && hasNewGrant(knownGrants, a)) addingApp = false;
 		const view = cardView(a, addingApp);
+		// The pairing box showed and an app is paired since: say what now.
+		// (A connection that drops meanwhile does not end that: the app may
+		// be listed only once Sitegloss is connected again.)
+		const paired = pairedSince(beforePairing, a);
+		update((s) => {
+			// Only in the card that is open: a pairing done while elsewhere
+			// is no news to come back to.
+			if (paired !== undefined && s.settings) s.ai.justPaired = paired;
+			// Disconnected, or AI access off: no longer said.
+			const said = s.ai.justPaired;
+			if (said !== undefined && !stillPaired(said.grantId, a))
+				delete s.ai.justPaired;
+		});
+		if (paired !== undefined) beforePairing = undefined;
+		else if (view.pairing)
+			beforePairing ??= new Set(a.grants.map((g) => g.grantId));
+		else if (a.state === "connected") beforePairing = undefined;
 		byId("ai-state").dataset["state"] = view.status;
 		byId("ai-state-text").textContent = view.stateText;
 		// Also while connecting or retrying, so the user can stop it.

@@ -97,10 +97,10 @@ timestamp: 2026-11-04T17:00:00+01:00
     reached it. Marks made offline on two devices can so list the pages in another
     order than either device had, and `page` (the first page) follows the server's.
     (f) The toolbar icon's badge says nothing about the team sync (a sign-in that ran
-    out, changes the server refused); the panel's banner and Account section do.
+    out, changes the server refused); the panel's banner and Team section do.
     (g) Mark-level actions are not switched off by permission in the panel (only
     sharing a case and deleting a synced one are): with today's roles everyone may do
     them. A change the role does not allow is not sent, stays here and is said.
-    (h) To decide: whether the Account section belongs on Home (where it is, under the
-    files) or in Settings; and whether "Sync" for the folder should be renamed now that
-    there are two.
+    (h) Settled in DEC-045: the account stays on Home, as its own section "Team"
+    after the cases; the copy to a folder is "Copy to a folder", under Files, and
+    "sync" means only the team's.

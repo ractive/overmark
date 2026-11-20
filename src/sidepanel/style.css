@@ -1062,8 +1062,8 @@ ul.cases .title {
 	overflow-wrap: anywhere;
 }
 
-/* The sync to Downloads or a folder (DEC-021, DEC-025). */
-.sync {
+/* The copy to Downloads or a folder (DEC-021, DEC-025), under Files (DEC-045). */
+#sync-section {
 	margin-top: var(--s4);
 }
 
@@ -2334,4 +2334,13 @@ button.copy {
 	.ai-state .dot {
 		forced-color-adjust: none;
 	}
+}
+
+/* An AI app was just paired: what to do next, and the way back (DEC-045). */
+.paired-next {
+	margin: var(--s3) 0;
+	padding: var(--s3);
+	border: 1px solid var(--rule);
+	border-radius: var(--r-control);
+	background: var(--wash);
 }

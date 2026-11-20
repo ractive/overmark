@@ -347,6 +347,11 @@ export type CloudRequest =
 	 */
 	| { type: "cloud:run"; cursor?: number; retry?: boolean }
 	/**
+	 * The panel came into view: the account's teams are asked for again when
+	 * that was more than a minute ago (DEC-045), and a change is said.
+	 */
+	| { type: "cloud:check" }
+	/**
 	 * An access token for the events stream of that team at that server;
 	 * `fresh`: the last was refused. Refused when they are not the account's
 	 * (a stream that outlived its account must not get another server's token).
@@ -368,6 +373,7 @@ const CLOUD_REQUESTS: ReadonlySet<string> = new Set<CloudRequest["type"]>([
 	"cloud:decide",
 	"cloud:share",
 	"cloud:run",
+	"cloud:check",
 	"cloud:token",
 	"cloud:server",
 ]);

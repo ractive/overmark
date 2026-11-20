@@ -12,7 +12,7 @@ import type { PanelState } from "./state.ts";
 
 /** What the user can do about the sync; `sync.ts` carries it out. */
 export interface SyncActions {
-	/** "Sync to Downloads", "Use Downloads instead": Chrome's prompt, in the click. */
+	/** "Copy to Downloads", "Use Downloads instead": Chrome's prompt, in the click. */
 	syncDownloads(): void;
 	/** "Choose a folder…": Chrome's picker, in the click. */
 	syncChoose(): void;
@@ -47,11 +47,11 @@ export const SYNC_DOWNLOADS_TITLE = `Write each case to the folder “${DOWNLOAD
 export const SYNC_CHOOSE_TITLE =
 	"Choose a folder, in iCloud Drive or Dropbox say: Sitegloss writes each case there as its own .zip file, as Export does, and again whenever it changes. A deleted case keeps its file. Nothing is read from the folder.";
 const SYNC_CHANGE_TITLE =
-	"Sync to Downloads or to another folder: the files written so far stay";
-const SYNC_CANCEL_TITLE = "Keep syncing where it syncs now";
+	"Copy to Downloads or to another folder: the files written so far stay";
+const SYNC_CANCEL_TITLE = "Keep copying where it copies now";
 const SYNC_STOP_TITLE = "Stop writing the cases; the files written so far stay";
 const SYNC_SHOW_TITLE =
-	"Open the folder with the synced files in your system's file manager";
+	"Open the folder with the copied files in your system's file manager";
 const SYNC_ALLOW_TITLE = `${BROWSER} asks whether Sitegloss may edit files in the folder again; then the cases changed meanwhile are written`;
 const SYNC_ALLOW_DOWNLOADS_TITLE = `${BROWSER} asks whether Sitegloss may manage your downloads again; then the cases changed meanwhile are written`;
 const SYNC_USE_DOWNLOADS_TITLE = `Write the cases to ${DOWNLOADS_PLACE} from now on, which needs no OK after a restart; the files in the folder stay`;
@@ -64,7 +64,7 @@ export const SYNC_OFF_NOTE = FIREFOX
 	: "Downloads: a folder “Sitegloss” in your downloads, asked once, works with this panel closed. A folder of your choice (iCloud Drive, Dropbox): Chrome asks for access again after each restart.";
 export const SYNC_ASKING_TEXT = `${BROWSER} asks whether Sitegloss may manage your downloads. With a yes, the cases are written to ${DOWNLOADS_PLACE}.`;
 
-/** The banner's text, after its bold "Sync is paused." or "Sync failed.". */
+/** The banner's text, after its bold "The copy to a folder is paused." or "… failed.". */
 export function bannerText(sync: Sync): string | undefined {
 	const status = sync.status;
 	if (sync.target === undefined || status === undefined) return undefined;
@@ -143,27 +143,27 @@ function helpButtons(sync: Sync): HTMLButtonElement[] {
 	];
 }
 
-/** "Syncing to Downloads/Sitegloss", or to “<folder>”. */
+/** "Copying to Downloads/Sitegloss", or to “<folder>”. */
 function place(sync: Sync): HTMLElement {
 	return h(
 		"p",
 		{ class: "sync-state" },
-		"Syncing to ",
+		"Copying to ",
 		sync.target === "downloads"
 			? h("strong", { class: "folder" }, DOWNLOADS_PLACE)
 			: h("strong", { class: "folder" }, `“${sync.folder ?? ""}”`),
 	);
 }
 
-/** "Last synced …", or what the worker is at. */
+/** "Last written …", or what the worker is at. */
 function syncLine(status: Sync["status"]): string {
 	if (status?.state === "syncing")
 		return status.left === 1
 			? "Writing 1 case…"
 			: `Writing ${status.left ?? 0} cases…`;
 	if (status?.lastSyncedAt !== undefined)
-		return `Last synced ${formatDate(status.lastSyncedAt)}`;
-	return status === undefined ? "Starting…" : "Not synced yet";
+		return `Last written ${formatDate(status.lastSyncedAt)}`;
+	return status === undefined ? "Starting…" : "Nothing written yet";
 }
 
 /** The Off state's buttons and its note; with Cancel while changing. */
@@ -175,7 +175,7 @@ function choices(sync: Sync): HTMLElement[] {
 			{ class: "row" },
 			button(
 				"sync-downloads",
-				"Sync to Downloads",
+				"Copy to Downloads",
 				SYNC_DOWNLOADS_TITLE,
 				act((a) => a.syncDownloads()),
 				true,
@@ -216,7 +216,7 @@ function sectionParts(sync: Sync): HTMLElement[] {
 	if (sync.asking) return [h("p", {}, SYNC_ASKING_TEXT), ...problem];
 	if (sync.target === undefined)
 		return [
-			h("p", { class: "sync-state" }, "Sync is off."),
+			h("p", { class: "sync-state" }, "Off."),
 			...choices(sync),
 			...problem,
 		];
@@ -262,7 +262,7 @@ function sectionParts(sync: Sync): HTMLElement[] {
 			),
 			button(
 				"sync-stop",
-				"Stop syncing",
+				"Stop copying",
 				SYNC_STOP_TITLE,
 				act((a) => a.syncStop()),
 			),
@@ -337,7 +337,13 @@ export function renderSyncBanner(
 		h(
 			"p",
 			{ class: "sync-banner-text" },
-			h("strong", {}, failed ? "Sync failed." : "Sync is paused."),
+			h(
+				"strong",
+				{},
+				failed
+					? "The copy to a folder failed."
+					: "The copy to a folder is paused.",
+			),
 			" ",
 			text,
 		),

@@ -102,8 +102,27 @@ export function caseSync(
 	};
 }
 
-/** The line that says what the sync is at. */
-export function statusLine(cloud: Cloud): string {
+/** A time before `now`, as people say it: "just now", "5 minutes ago". */
+export function ago(iso: string, now: number = Date.now()): string {
+	const at = Date.parse(iso);
+	if (Number.isNaN(at)) return "";
+	const minutes = Math.floor((now - at) / 60_000);
+	if (minutes < 1) return "just now";
+	if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+	return `on ${formatDate(iso)}`;
+}
+
+const waits = (n: number) =>
+	`${cases(n)} ${n === 1 ? "waits" : "wait"} to be sent.`;
+
+/**
+ * The line that says what the sync is at (DEC-045): the state, not a time.
+ * From the worker's last run (its state, what waits to be sent) and this
+ * panel's stream (open: what the team changes arrives at once).
+ */
+export function statusLine(cloud: Cloud, now: number = Date.now()): string {
 	const status = cloud.status;
 	if (cloud.account?.expired)
 		return "Signed out by the server: sign in again to go on syncing. Nothing is lost meanwhile.";
@@ -111,22 +130,47 @@ export function statusLine(cloud: Cloud): string {
 		return cloud.account !== undefined && cloud.account.teams.length === 0
 			? `You are in no team yet. Create or join one on ${hostOf(cloud.account.server)}, then click Sync now.`
 			: (status?.text ?? "Choose a team to sync with.");
+	const waiting = status?.waiting ?? 0;
 	switch (status?.state) {
 		case "syncing":
 			return status.left ? `Syncing ${cases(status.left)}…` : "Syncing…";
 		case "offline":
-			return `Offline, will retry. ${status.text ?? ""}`.trim();
+			return `Offline: changes are kept and sync when the server can be reached.${waiting > 0 ? ` ${waits(waiting)}` : ""}`;
 		case "problem":
 			return status.text ?? "Some changes were not taken by the server:";
 		case "signed-out":
 			return status.text ?? "Sign in again to go on syncing.";
-		case "synced":
-			return status.lastSyncedAt
-				? `Synced ${formatDate(status.lastSyncedAt)}`
-				: "Synced";
+		case "synced": {
+			if (waiting > 0) return waits(waiting);
+			if (cloud.live === true) return "Up to date. Changes sync as you work.";
+			const when =
+				status.lastSyncedAt === undefined ? "" : ago(status.lastSyncedAt, now);
+			const synced = when === "" ? "Synced." : `Last synced ${when}.`;
+			// Closed for a while: what the team changes comes with the next look.
+			return cloud.live === false
+				? `${synced} The team's changes are not coming in live right now: they come at the next sync, or with Sync now.`
+				: synced;
+		}
 		default:
 			return "Starting…";
 	}
+}
+
+/**
+ * Whether "Sync now" can do something: not while everything is sent, the
+ * stream is open and nothing was refused.
+ */
+export function syncNowHelps(cloud: Cloud): boolean {
+	const status = cloud.status;
+	if (teamOf(cloud) === undefined) return true;
+	if (status === undefined) return true;
+	if (status.state === "syncing") return false;
+	return !(
+		status.state === "synced" &&
+		cloud.live === true &&
+		(status.waiting ?? 0) === 0 &&
+		status.problems.length === 0
+	);
 }
 
 function button(
@@ -348,14 +392,16 @@ function signedIn(cloud: Cloud): HTMLElement[] {
 							{ strong: true, disabled: cloud.signingIn },
 						),
 					]
-				: [
-						button(
-							"cloud-sync-now",
-							"Sync now",
-							SYNC_NOW_TITLE,
-							act((a) => a.cloudSyncNow()),
-						),
-					]),
+				: syncNowHelps(cloud)
+					? [
+							button(
+								"cloud-sync-now",
+								"Sync now",
+								SYNC_NOW_TITLE,
+								act((a) => a.cloudSyncNow()),
+							),
+						]
+					: []),
 			button(
 				"cloud-sign-out",
 				"Sign out",
@@ -381,8 +427,17 @@ export function renderCloudSection(
 		cloud.status,
 		cloud.signingIn,
 		cloud.problem,
+		cloud.live,
 	]);
-	if (box.dataset["key"] === key) return;
+	// The time alone ("5 minutes ago", said anew each minute) changes the
+	// line's words in place: nothing is drawn anew, the focus stays where it
+	// is, and the live region does not say the whole section again.
+	if (box.dataset["key"] === key) {
+		const line = document.getElementById("cloud-status");
+		const words = statusLine(cloud);
+		if (line !== null && line.textContent !== words) line.textContent = words;
+		return;
+	}
 	// An address half typed stays: the field is not drawn anew under the caret.
 	const typing = document.activeElement?.id === "cloud-server";
 	if (typing && box.dataset["key"] !== undefined) return;

@@ -1531,7 +1531,12 @@ const actions: Actions = {
 
 	openCase,
 	closeCase: () => void leaveCase(),
-	closeSettings: () => update((s) => (s.settings = false)),
+	closeSettings: () =>
+		update((s) => {
+			s.settings = false;
+			// What to do after pairing is said once, in the card that paired.
+			delete s.ai.justPaired;
+		}),
 
 	loadOntoTab(c) {
 		// Off while Sitegloss may not run on the tab (view.ts): the notice
@@ -2072,6 +2077,12 @@ const panelSync = startSync(update);
 
 /** The account at sitegloss.dev and the sync with a team (DEC-039): the worker syncs, the panel asks. */
 const panelCloud = startCloud(update);
+// Shown or focused: a team joined on the web app meanwhile shows here
+// without Sync now (DEC-045).
+window.addEventListener("focus", () => panelCloud.shown());
+document.addEventListener("visibilitychange", () => {
+	if (document.visibilityState === "visible") panelCloud.shown();
+});
 
 // --- settings and import -------------------------------------------------------------
 

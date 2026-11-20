@@ -6,6 +6,8 @@ import {
 	cardView,
 	confirms,
 	hasNewGrant,
+	pairedSince,
+	stillPaired,
 	switchShown,
 } from "../src/sidepanel/card.ts";
 import type { AiState } from "../src/worker/protocol.ts";
@@ -162,5 +164,42 @@ describe("hasNewGrant", () => {
 
 	test("an app disconnected meanwhile is no new one", () => {
 		expect(hasNewGrant(new Set(["g1", "g2"]), connected)).toBe(false);
+	});
+});
+
+describe("pairedSince (DEC-045)", () => {
+	const connected: AiState = { ...base, state: "connected", grants: [claude] };
+
+	test("an app paired while the pairing box showed is named: what to do next is said", () => {
+		expect(pairedSince(new Set(), connected)).toEqual({
+			grantId: "g1",
+			name: "Claude",
+		});
+		const code = { ...claude, grantId: "g2", name: "", host: "localhost:3000" };
+		expect(
+			pairedSince(new Set(["g1"]), { ...connected, grants: [claude, code] }),
+		).toEqual({ grantId: "g2", name: "localhost:3000" });
+	});
+
+	test("nothing new, or no pairing box: nothing is said", () => {
+		expect(pairedSince(new Set(["g1"]), connected)).toBeUndefined();
+		// Apps that were paired before the panel opened are no news.
+		expect(pairedSince(undefined, connected)).toBeUndefined();
+	});
+});
+
+describe("stillPaired (DEC-045)", () => {
+	const connected: AiState = { ...base, state: "connected", grants: [claude] };
+
+	test("said while that app is paired and AI access is connected", () => {
+		expect(stillPaired("g1", connected)).toBe(true);
+	});
+
+	test("disconnected, or the app removed, or AI access off: no longer said", () => {
+		expect(stillPaired("g1", { ...connected, grants: [] })).toBe(false);
+		expect(stillPaired("g1", { ...connected, state: "disconnected" })).toBe(
+			false,
+		);
+		expect(stillPaired("g2", connected)).toBe(false);
 	});
 });
