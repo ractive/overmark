@@ -60,7 +60,9 @@ export type PanelCommand =
 	| { type: "ask-again"; grantId: string; tool: string }
 	| { type: "new-address" }
 	| { type: "set-relay"; relay: string }
-	| { type: "answer"; id: string; answer: Answer };
+	| { type: "answer"; id: string; answer: Answer }
+	/** The answer to "Fill in the code for <app>?" (DEC-044): only a yes fills it in. */
+	| { type: "fill"; id: string; yes: boolean };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -131,6 +133,23 @@ export interface AiState {
 	replaced?: { sibling: boolean };
 	lastCall?: CallView;
 	questions: QuestionView[];
+	/**
+	 * An AI app opened the hosted relay's pairing page in this browser:
+	 * Sitegloss asks whether to fill in its code there (DEC-044). The name
+	 * and host as the page's form gives them.
+	 */
+	fill?: FillView;
+	/** Why the last fill-in did not happen, for a while after it (DEC-044). */
+	fillProblem?: string;
+}
+
+/** The question whether to fill in the code for an AI app (DEC-044). */
+export interface FillView {
+	id: string;
+	/** `data-client-name`: the name the AI app gave itself. */
+	name: string;
+	/** `data-client-host`: its verified host. */
+	host: string;
 }
 
 /** From the service worker. */
@@ -227,6 +246,10 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 					m["answer"] === "deny" ||
 					m["answer"] === "always")
 				? { type: "answer", id: m["id"], answer: m["answer"] }
+				: undefined;
+		case "fill":
+			return isString(m["id"]) && isBoolean(m["yes"])
+				? { type: "fill", id: m["id"], yes: m["yes"] }
 				: undefined;
 		default:
 			return undefined;

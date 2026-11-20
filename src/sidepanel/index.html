@@ -20,6 +20,16 @@
 		</header>
 		<!-- What is wrong with the AI connection, in words, on every view (DEC-024). -->
 		<div id="ai-problem" class="ai-problem" role="status" hidden><p id="ai-problem-text"></p></div>
+		<!-- An AI app opened the relay's pairing page in this browser: fill in the code there? (DEC-044; ai.ts) -->
+		<section id="pair-fill-ask" class="pair-fill-ask" aria-labelledby="pair-fill-ask-text" hidden>
+			<p id="pair-fill-ask-text"></p>
+			<p class="meta">Only if you just started connecting it. Sitegloss then types its pairing code into that page and clicks Connect.</p>
+			<div class="row">
+				<button id="pair-fill-yes" type="button" class="strong" disabled>Fill in the code</button>
+				<button id="pair-fill-no" type="button">No</button>
+			</div>
+		</section>
+		<p id="pair-fill-problem" class="pair-fill-ask hint" role="status" hidden></p>
 		<!-- Each connected AI app's "Allow all changes", on Home and in a case (DEC-036; ai.ts). -->
 		<div id="ai-allow" class="ai-allow" hidden></div>
 		<p id="ai-call" class="meta" hidden></p>
@@ -111,6 +121,8 @@
 						<button id="pair-copy-code" type="button" class="copy" aria-label="Copy code" disabled title="Copy the code, to type it on the AI app's sign-in page">Copy</button>
 					</div>
 					<p class="meta">The code changes every 2 minutes and after each use.</p>
+					<!-- Filling in the code on the hosted relay's page, with the optional access to that one site (DEC-044). -->
+					<p id="pair-fill" class="meta" hidden><span id="pair-fill-text"></span> <button id="pair-fill-allow" type="button" class="link" hidden title="Your browser asks whether Sitegloss may read and change your data on the relay's site; it only ever reads its pairing form and fills in the code there, after asking you">Allow on that site</button></p>
 					<div class="row">
 						<button id="pair-done" type="button" class="strong" hidden title="Hide the address and the code; the paired apps stay connected">Done</button>
 						<button id="pair-new-address" type="button" title="Disconnect every AI app paired with Sitegloss: each one has to pair again with a new code. The address stays the same">Disconnect all apps</button>

@@ -1444,3 +1444,51 @@ numbers stay unique once both lines meet.)
   something still reaches it. Moving onto `allowedTools` is later work.
 - Not in this change: filling in the code on the relay's `/authorize` page from the
   extension after asking the user (tab-mcp's DEC-199).
+
+## DEC-044: Sitegloss fills in its code on the relay's pairing page, after asking (owner)
+
+2026-11-20. The owner asked for tab-mcp's DEC-199 in Sitegloss: when an AI app opens the
+relay's `/authorize` page in the browser Sitegloss runs in, Sitegloss asks its user and,
+on a yes, fills in its own code there. Typing the code stays the way that always works
+(another browser, profile or device, or a user who says no).
+
+- **No new required permission.** A new host permission in the manifest would make
+  Chrome disable the extension on update until the user accepts it. The manifest
+  already has the optional `<all_urls>` (DEC-022); one site of it,
+  `https://tab-mcp.ractive.ch/*`, is asked for by itself with a click on "Allow on that
+  site" under the pairing code (`permissions.request`, as `askForSite` does). Chrome
+  then asks "Read and change your data on tab-mcp.ractive.ch". Without it Sitegloss
+  cannot see the page, and nothing changes. Whoever allowed all sites has it already.
+  `scripting`, `tabs` events and `notifications` were there before.
+- **Only the hosted relay's page.** The tab's URL must have the origin
+  `https://tab-mcp.ractive.ch` exactly and the path `/authorize`, Sitegloss's relay
+  must be the hosted one, AI access must be connected, and the script runs in the
+  tab's top frame only. Of the page it reads only the form's hooks (version 1): exactly
+  one `form[data-tab-mcp-pairing="1"]` with exactly one `data-tab-mcp-field="code"`
+  input and one `data-tab-mcp-action="connect"` button, and its `data-app`, which must
+  be `sitegloss`, `data-client-name` and `data-client-host`. A page not as documented
+  gets no question. The listener is added by the connection while the worker runs, not
+  at its top level, so no page load wakes the worker.
+- **The question is Sitegloss's own**, under the top bar on every view: "<name>
+  (<host>) wants to connect to Sitegloss on the relay's page in this browser. Fill in
+  the code there?", the name and host as the form gives them, escaped as in the
+  questions and set as text. "Fill in the code" counts only once the panel has been in
+  front for 750 ms, as Allow does; "No" ends it. It ends by itself after 2 minutes (a
+  code's life), when the tab leaves the page or closes, when AI access is no longer
+  connected, and when a newer pairing page replaces it. With no panel on screen, a
+  notification says to click the icon and answer in the panel (it has no buttons: an
+  answer is given in the panel only), and the icon counts it as a question ("?").
+- **The fill-in.** On a yes, Sitegloss checks that the tab still shows the pairing page
+  and that the form still names the same app and host, turns pairing on for 2 minutes
+  if no panel had it on, types the current code into the code field (with an `input`
+  event) and clicks Connect. The code is passed only to that script and written only
+  into the field: no attribute, no log, no message. If anything is off, the panel says
+  Sitegloss could not fill in the code and to type it.
+- **Chromium and Firefox** share the code (`tabs.onUpdated`, `scripting.executeScript`,
+  `permissions.request` all exist in Firefox's MV3). The end-to-end test runs in
+  Chromium only: Firefox's suite drives its sidebar through a tab and has no test of it.
+- **Tested** against a fixture with the relay's markup (`test/pair-fill-page.ts`, relay
+  0.12.0's `oauth/server.ts`): the testing package's relay cannot show its form for a
+  test client, since it fetches an AI app's metadata over HTTPS. The test build takes
+  the fixture's origin from `siteglossTestFillOrigins` on the worker's global; other
+  builds drop that.
