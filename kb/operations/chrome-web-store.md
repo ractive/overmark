@@ -216,7 +216,7 @@ in other environments, alone or with an AI app the user connects.
 |---|---|
 | `activeTab` | Add the annotation toolbar to the tab where the user clicked the icon, read the marked elements' details, and take screenshots of that tab. |
 | `alarms` | While the user has the AI app connected, wake the background service worker once a minute, so the connection comes back after the computer slept. |
-| `notifications` | When the connected AI app wants to change something (add a mark, record the summary for the developer, change a mark's status, add, change or delete one of its findings on a mark, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Always allow; closing it is Don't allow. Where the call's arguments do not fit in a notification, it offers only Don't allow and says to answer in the side panel, which shows them all (its question has Don't allow, Allow and Always allow). A tool runs without a question only after the user chose Always allow for that tool, or turned on "Allow all changes", for that AI app, until the app's pairing ends (the user disconnects it, or the relay lets it expire; a tool always allowed one by one also asks again once an update changes what it says it does); otherwise nothing changes without the user's answer. |
+| `notifications` | When the connected AI app wants to change something (add a mark, record the summary for the developer, change a mark's status, add, change or delete one of its findings on a mark, add, change or delete a comment, close or reopen a case, delete a case) and the side panel is not open in front, ask the user in a notification with Allow and Always allow; closing it is Don't allow. Where the call's arguments do not fit in a notification, it offers only Don't allow and says to answer in the side panel, which shows them all (its question has Don't allow, Allow and Always allow). A tool runs without a question only after the user chose Always allow for that tool, or turned on "Allow all changes", for that AI app, until the app's pairing ends (the user disconnects it, or the relay lets it expire; a tool always allowed one by one also asks again once an update changes what it says it does); otherwise nothing changes without the user's answer. |
 | `offscreen` | The sync to Downloads, which the user turns on with "Sync to Downloads": the background service worker cannot make a URL for a case's file (no `URL.createObjectURL`), so while it writes the cases it opens an offscreen document (reason `BLOBS`) that builds one case's export file and makes its blob URL, which the worker downloads; the document closes when the cases are written. |
 | `scripting` | Inject the toolbar and outlines into that tab. |
 | `sidePanel` | The side panel lists cases, loads them onto the tab, and shows the AI app's connection and its questions. |
@@ -257,6 +257,33 @@ in other environments, alone or with an AI app the user connects.
   server's `EXTENSION_REDIRECT_URIS`. An Edge Add-ons build gets another id from that
   store, and so another address (`https://<its id>.chromiumapp.org/`), to add there once
   it is known.
+
+**For version 0.3.1 (DEC-045 to DEC-048), to enter by hand before it is published:**
+
+- **No new permission.** `git diff v0.3.0..origin/main -- scripts/build.ts` is empty:
+  the manifests ask for what 0.3.0's did. Nothing to justify anew, and the update is not
+  held back for users to approve.
+- **Description,** add to the paragraph on working in a team: "Cases have a thread of
+  comments, on the case or on one mark, and a case can be closed once everything is
+  settled; the team sees who did what, and through which AI app."
+- **Notes for the reviewer (Edge: Notes for certification):** a case has a thread of
+  comments and can be closed; they sync with the team, like the marks. When a connected
+  AI app changes a case (a comment, a status, closing), Sitegloss sends the app's name
+  and host with it, so that the team sees "person via app"; a change made by hand is
+  sent without one. Filling in the pairing code on the relay's page is a setting of its
+  own, off by default ("Fill in the code for me" under the code; "Stop filling in the
+  code" turns it off and gives the relay's site back). With it on, the panel asks for
+  each request, naming the host the relay verified; a yes fills in that one request, in
+  that tab, and nothing else. A browser updated from 0.3.0 starts with it off.
+- **Data usage:** the categories stay as they are. Under *Collected*, *Website content*,
+  add that for the marked element itself Sitegloss records, once when the mark is made,
+  how it looked (a fixed list of computed CSS properties, the colour behind it, and the
+  size and position of up to six neighbours, their tag only; no address, no custom
+  property), that this is stored in the browser, and that for a user who signed in it goes
+  to their team with the mark. *User activity* now also holds the comments. For a signed-in
+  user, the names of the AI apps that changed something go to the team too.
+- **Privacy policy:** the page at `ractive.ch/sitegloss/privacy/` has to be the current
+  `PRIVACY.md` (changed 21 November 2026) before the version is submitted.
 
 **Remote code:** No. All code is in the package; the connection to the relay carries
 data only, and no tool runs code an AI app sends. The same holds for sitegloss.dev: the
