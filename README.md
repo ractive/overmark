@@ -306,8 +306,9 @@ or another request than the one it asked about, and never connects without that 
 wrong code brings the relay's page back, and Sitegloss asks again. "Stop filling in the
 code" turns it off and gives the site back (unless Sitegloss may run on all sites).
 Typing the code always works too, also in another browser. With another relay set, there
-is no offer. Upgrading from 0.3.0, where "Allow on that site" turned it on: it is off
-until you click "Fill in the code for me" once (the browser does not ask again).
+is no offer. Upgrading from 0.3.0, where "Allow on that site" turned it on: it is off,
+and the site that button allowed is given back once at the first start (unless
+Sitegloss may run on all sites); "Fill in the code for me" asks for it again.
 
 The connection
 stays when you close the side panel (the icon shows "on"), until you turn the switch off

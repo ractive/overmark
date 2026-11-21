@@ -100,3 +100,25 @@ export async function saveReplaced(
 	if (replaced === undefined) await kv.remove(KEYS.replaced);
 	else await kv.set({ [KEYS.replaced]: { sibling: replaced.sibling } });
 }
+
+/** The hosted relay's site, as "Allow on that site" asked for it in 0.3.0. */
+const OLD_FILL_SITE = { origins: [`${new URL(DEFAULT_RELAY).origin}/*`] };
+
+/**
+ * Once, when "Fill in the code for me" was never stored (an installation
+ * from before it, or a new one): it is stored off, and the relay's site that
+ * 0.3.0's "Allow on that site" may have granted is given back, unless the
+ * user gave access to all sites (DEC-044, after review). The setting is
+ * written first, so this never runs again and never takes a grant the user
+ * gives later (turning it on stores it on).
+ */
+export async function settleFillCode(
+	kv: Kv,
+	permissions: Pick<typeof chrome.permissions, "contains" | "remove">,
+): Promise<void> {
+	if ((await kv.get(KEYS.fillCode)) !== undefined) return;
+	await kv.set({ [KEYS.fillCode]: false });
+	if (await permissions.contains({ origins: ["<all_urls>"] })) return;
+	if (await permissions.contains(OLD_FILL_SITE))
+		await permissions.remove(OLD_FILL_SITE);
+}

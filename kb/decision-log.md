@@ -2128,8 +2128,11 @@ on a yes, fills in its own code there. Typing the code stays the way that always
     question that waits, and gives the relay's site back unless the user gave access to
     all sites, which is not this feature's. Off, no page is read. Kept in the worker's
     IndexedDB (`fillCode`). Access to all sites, or the site allowed in 0.3.0, no longer
-    turns it on: a user upgrading from 0.3.0 finds it off and turns it on with one click
-    (no browser prompt when the site was allowed already).
+    turns it on: a user upgrading from 0.3.0 finds it off. The first start of this version
+    stores the setting off and gives back the relay's site that 0.3.0's "Allow on that
+    site" granted, unless the user gave access to all sites (`settleFillCode`); the
+    setting is written first, so this happens once and never takes a grant given later.
+    Turning it on again asks the browser for the site once more.
   - **Bound to the request.** The form must carry the relay's hidden `request_id`, and a
     yes fills in only the same tab, at the relay's origin and path, with the same app, AI
     app and request id, checked again in the page by the page's function itself (its own
@@ -2141,7 +2144,16 @@ on a yes, fills in its own code there. Typing the code stays the way that always
   - **Withdrawn at once** when AI access is no longer connected (as before), when the
     setting goes off, and when another relay is set (the old connection's events are no
     longer heard then, so the question used to stay). A yes whose code is still on its
-    way fills in nothing once withdrawn or once its tab left the page.
+    way fills in nothing once withdrawn or once its tab left the page (each judged by its
+    own page's origin). Stop AI access, Stop filling in the code and another relay
+    withdraw on receipt, before the panel's queue of commands, and the yes does not hold
+    that queue while it waits for its code (up to 10 s), as Disconnect does not: else
+    the code was typed and the AI app connected before the Stop ran (review of the pull
+    request).
+  - **One page, one question, one fill.** A new document in the question's tab ends the
+    question, also when it gets none (an expired request, a form for another app, the
+    site taken away), and withdraws a fill there that has not started; a reload of the
+    same request asks again and fills once, never twice.
   - **Which code.** The current code when it has 5 s left by this computer's clock (or
     an end it cannot read); else the next one the relay sends; if none comes within
     10 s, the current one after all, so a clock that runs ahead never keeps a code from
@@ -2150,7 +2162,8 @@ on a yes, fills in its own code there. Typing the code stays the way that always
   - **One question at a time, nothing dropped unseen.** A pairing page in another tab
     while one question waits is not asked about; the panel says that it also opened and
     to answer first and reload it, or type the code (it used to replace the waiting
-    question silently). The same tab loading a pairing page again replaces its question
+    question silently), for as long as that question can be answered at most. While only
+    a fill is under way, it says so instead, for 20 s. The same tab loading a pairing page again replaces its question
     with a new id, so the wait before "Fill in the code" counts starts again.
   - **The verified host first.** The question says "An AI app at <host> (it calls itself
     “<name>”) wants to connect…", the notification "Connect an AI app at <host>?": a
@@ -2172,9 +2185,12 @@ on a yes, fills in its own code there. Typing the code stays the way that always
     origin as given.
   - Tested in `test/pair-fill.test.ts` (the page's functions on look-alike origins, ports,
     paths and frames, without a request id or with another; which code, with a clock an
-    hour ahead; `CodeFiller`'s rules), `test/connection.test.ts` (off by default with
-    access to all sites, on and kept, off withdraws and gives the site back, Stop AI
-    access and another relay withdraw, a yes fills in the code the card shows) and
+    hour ahead, the wait timed by that clock; `CodeFiller`'s rules, also the ones from the
+    review of the pull request), `test/connection.test.ts` (off by default with access
+    to all sites, on and kept, off withdraws and gives the site back, Stop AI access and
+    another relay withdraw, a yes fills in the code the card shows; each of Stop AI
+    access, Stop filling in the code and another relay while a yes waits for its code
+    fills in nothing; the upgrade's one give-back, `settleFillCode`),
     `test/e2e/pair-fill.test.ts` (off by default, turned on with the panel's button, the
     verified host first, a second page not asked about and said, turned off), and
     `test/card.test.ts` (`armed`). The

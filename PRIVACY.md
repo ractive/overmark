@@ -65,7 +65,9 @@ Only in four cases, all started by you:
    the relay's id of that request. Only after you say yes in Sitegloss does it type its
    pairing code into that page's field and click Connect. It reads nothing else there,
    and the code goes only into that field. "Stop filling in the code" turns it off and
-   gives the site back.
+   gives the site back. If version 0.3.0 had that site from its "Allow on that site",
+   the first start of this version gives it back once (unless Sitegloss may run on all
+   sites); turning the feature on asks for it again.
 
    In Firefox, the browser first asks, at the click that turns AI access on, for its own
    data collection consent for website content and browsing activity. Without it AI

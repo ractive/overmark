@@ -168,11 +168,17 @@ export const CODE_WAIT_MS = 10_000;
  * relay sends; and when none comes within `waitMs`, the current one after
  * all. A clock that runs ahead makes every code look expired, so the clock
  * alone never keeps a code from being filled in: the relay checks it. With
- * no code at all, the first that comes within `waitMs`.
+ * no code at all, the first that comes within `waitMs`. Once `cancelled`
+ * says so, nothing, at once.
  */
 export async function codeToFill(
 	current: () => CodeNow | undefined,
-	options: { now?: () => number; waitMs?: number; pollMs?: number } = {},
+	options: {
+		now?: () => number;
+		waitMs?: number;
+		pollMs?: number;
+		cancelled?: () => boolean;
+	} = {},
 ): Promise<string | undefined> {
 	const now = options.now ?? Date.now;
 	const first = current();
@@ -180,11 +186,12 @@ export async function codeToFill(
 		const ends = Date.parse(first.expiresAt);
 		if (Number.isNaN(ends) || ends - now() >= CODE_MARGIN_MS) return first.code;
 	}
-	const end = Date.now() + (options.waitMs ?? CODE_WAIT_MS);
+	const end = now() + (options.waitMs ?? CODE_WAIT_MS);
 	for (;;) {
+		if (options.cancelled?.()) return undefined;
 		const code = current()?.code;
 		if (code !== undefined && code !== first?.code) return code;
-		if (Date.now() >= end) return first?.code ?? code;
+		if (now() >= end) return first?.code ?? code;
 		await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 50));
 	}
 }

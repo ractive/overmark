@@ -73,6 +73,7 @@ import {
 	SESSION_STOPPED,
 	type Settings,
 	saveReplaced,
+	settleFillCode,
 } from "./settings.ts";
 import { type Capture, tabInFront, workerTab } from "./tab.ts";
 import {
@@ -380,6 +381,10 @@ export class Connection {
 		// them (DEC-043): nothing in it outlived client 0.17's new addresses.
 		await removeOldStore(kv).catch((error: unknown) =>
 			console.warn("Sitegloss: removing the old Always allow", error),
+		);
+		// Upgraded from 0.3.0: the relay's site it asked for goes back once.
+		await settleFillCode(kv, chrome.permissions).catch((error: unknown) =>
+			console.warn("Sitegloss: giving back the relay's site", error),
 		);
 		const [storage, settings, session] = await Promise.all([
 			CachedSecretStorage.load(kv),
@@ -754,6 +759,10 @@ export class Connection {
 			// the other, so a stop never ends before the connect that came first.
 			const command = parseCommand(raw);
 			if (command === undefined) return;
+			// What ends filling in the code ends it on receipt, not behind
+			// the commands before it: a yes waiting for its code types
+			// nothing once AI access, the setting or the relay goes.
+			if (this.#endsFill(command)) this.#filler.withdraw();
 			this.#commands = this.#commands
 				.then(() => this.#command(panel, command))
 				.catch((error: unknown) => {
@@ -868,12 +877,36 @@ export class Connection {
 				this.#questions.answer(command.id, command.answer);
 				return;
 			case "fill":
-				await this.#filler.answer(command.id, command.yes);
+				// Not awaited: the commands after it (a Stop, turning it off,
+				// another relay) must not wait for the code, up to 10 s.
+				void this.#filler
+					.answer(command.id, command.yes)
+					.catch((error: unknown) => {
+						this.#problem = message(error);
+						this.#changed();
+					});
 				return;
 			case "fill-code":
 				await this.#setFillCode(command.on);
 				this.#changed();
 				return;
+		}
+	}
+
+	/** Whether `command` ends filling in the code: Stop, turning it off, another relay. */
+	#endsFill(command: PanelCommand): boolean {
+		switch (command.type) {
+			case "stop":
+				return true;
+			case "fill-code":
+				return !command.on;
+			case "set-relay":
+				return (
+					relayProblem(command.relay) === undefined &&
+					command.relay !== this.#relay
+				);
+			default:
+				return false;
 		}
 	}
 
@@ -1008,9 +1041,9 @@ export class Connection {
 				});
 				return result?.result === true;
 			},
-			code: () => {
+			code: (cancelled: () => boolean) => {
 				const mcp = this.#mcp;
-				return codeToFill(() => mcp.pairingCode);
+				return codeToFill(() => mcp.pairingCode, { cancelled });
 			},
 			hold: (on: boolean) => {
 				this.#fillPairing = on;

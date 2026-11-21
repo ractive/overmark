@@ -55,8 +55,11 @@ export interface FillHost {
 		form: PairingForm,
 		origin: string,
 	): Promise<boolean>;
-	/** The code to fill in, once pairing is held on (`hold(true)`). */
-	code(): Promise<string | undefined>;
+	/**
+	 * The code to fill in, once pairing is held on (`hold(true)`); stops
+	 * waiting with nothing once `cancelled` says so.
+	 */
+	code(cancelled: () => boolean): Promise<string | undefined>;
 	/** Hold pairing on for a fill, or let it go. */
 	hold(on: boolean): void;
 	/** Tell the user with no panel on screen; `undefined`: the question went. */
@@ -77,6 +80,8 @@ interface Question {
 /** A yes on its way to the page: withdrawn before the fill, it fills in nothing. */
 interface Filling {
 	tabId: number;
+	/** The relay origin of the page it fills in. */
+	origin: string;
 	withdrawn: boolean;
 	/** The fill was started: the page's own post may be on its way. */
 	started: boolean;
@@ -86,6 +91,7 @@ export class CodeFiller {
 	readonly #host: FillHost;
 	readonly #holdMs: number;
 	readonly #askMs: number;
+	readonly #problemMs: number;
 	#question: Question | undefined;
 	#filling: Filling | undefined;
 	#problem: { text: string; timer: ReturnType<typeof setTimeout> } | undefined;
@@ -94,11 +100,12 @@ export class CodeFiller {
 
 	constructor(
 		host: FillHost,
-		options: { holdMs?: number; askMs?: number } = {},
+		options: { holdMs?: number; askMs?: number; problemMs?: number } = {},
 	) {
 		this.#host = host;
 		this.#holdMs = options.holdMs ?? FILL_HOLD_MS;
 		this.#askMs = options.askMs ?? FILL_ASK_MS;
+		this.#problemMs = options.problemMs ?? FILL_PROBLEM_MS;
 	}
 
 	/** The question that waits, for the panel. */
@@ -124,6 +131,11 @@ export class CodeFiller {
 	 */
 	async page(tabId: number, url: string | undefined): Promise<void> {
 		const host = this.#host;
+		// A new document in the tab: the page a question or an unstarted fill
+		// was about is gone. If this one is a pairing page that can be asked
+		// about, it gets a question of its own; never a second fill into one
+		// request while the first waits for its code.
+		this.#tabChanged(tabId);
 		if (!isPairingPage(url, host.origins()) || !host.ready()) return;
 		const origin = new URL(url as string).origin;
 		if (!(await host.hasSite(origin).catch(() => false))) return;
@@ -139,13 +151,17 @@ export class CodeFiller {
 			host: host.visible(form.clientHost),
 		};
 		const waiting = this.#question;
-		if (
-			(waiting !== undefined && waiting.tabId !== tabId) ||
-			(this.#filling !== undefined && this.#filling.tabId !== tabId)
-		) {
+		if (waiting !== undefined && waiting.tabId !== tabId) {
+			// Shown while that question can still be answered, at most.
 			this.#setProblem(
 				`${fillAppLabel(view)} also opened the relay's page. Sitegloss asks about one at a time: answer the question above first, then reload that page; or type the code there.`,
 				this.#askMs,
+			);
+			return;
+		}
+		if (this.#filling !== undefined && this.#filling.tabId !== tabId) {
+			this.#setProblem(
+				`${fillAppLabel(view)} also opened the relay's page while Sitegloss was filling in the code on another one. Reload that page in a moment to be asked, or type the code there.`,
 			);
 			return;
 		}
@@ -166,16 +182,30 @@ export class CodeFiller {
 		host.changed();
 	}
 
-	/** The tab went (`url` none), or loaded `url`: off the pairing page, its question goes. */
+	/**
+	 * The tab went (`url` none), or started loading `url`: off the pairing
+	 * page, its question goes, and so does a fill that has not started. Each
+	 * is judged by its own page's origin.
+	 */
 	tabLeft(tabId: number, url?: string): void {
-		const off =
-			url === undefined ||
-			!isPairingPage(url, this.#question ? [this.#question.origin] : []);
+		const off = (origin: string) =>
+			url === undefined || !isPairingPage(url, [origin]);
+		const filling = this.#filling;
 		// Not once the fill started: Connect's own post leaves the page, and
 		// pairing must stay on for the relay to check the code.
-		if (this.#filling?.tabId === tabId && off && !this.#filling.started)
-			this.#filling.withdrawn = true;
-		if (this.#question?.tabId !== tabId || !off) return;
+		if (filling?.tabId === tabId && !filling.started && off(filling.origin))
+			filling.withdrawn = true;
+		const q = this.#question;
+		if (q?.tabId !== tabId || !off(q.origin)) return;
+		this.#end();
+		this.#host.changed();
+	}
+
+	/** Tab `tabId` has a new document: its question and its unstarted fill go. */
+	#tabChanged(tabId: number): void {
+		const filling = this.#filling;
+		if (filling?.tabId === tabId && !filling.started) filling.withdrawn = true;
+		if (this.#question?.tabId !== tabId) return;
 		this.#end();
 		this.#host.changed();
 	}
@@ -205,6 +235,7 @@ export class CodeFiller {
 		if (!yes) return;
 		const filling: Filling = {
 			tabId: q.tabId,
+			origin: q.origin,
 			withdrawn: false,
 			started: false,
 		};
@@ -227,7 +258,7 @@ export class CodeFiller {
 		let placed = false;
 		try {
 			if (!(await still())) return filling.withdrawn ? undefined : failed();
-			const code = await host.code();
+			const code = await host.code(() => filling.withdrawn);
 			if (filling.withdrawn) return;
 			if (!isCode(code) || !(await still())) return failed();
 			filling.started = true;
@@ -261,7 +292,7 @@ export class CodeFiller {
 		this.#host.hold(false);
 	}
 
-	#setProblem(text: string | undefined, ms = FILL_PROBLEM_MS): void {
+	#setProblem(text: string | undefined, ms = this.#problemMs): void {
 		clearTimeout(this.#problem?.timer);
 		this.#problem =
 			text === undefined

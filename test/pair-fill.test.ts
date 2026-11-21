@@ -250,14 +250,20 @@ describe("Review 4: which code is filled in", () => {
 		expect(code).toBe("BBBB-BBBB");
 	});
 
-	test("a clock that runs ahead (every code looks expired): when no fresh code comes, the current one after all", async () => {
+	test("a clock that runs ahead (every code looks expired): when no fresh code comes within the wait by that clock, the current one after all", async () => {
+		// An hour ahead, and it moves past the wait's end at once: the
+		// wait is by this clock, so the test ends long before 10 s.
+		const ahead = Date.now() + 3_600_000;
+		let clock = ahead;
+		setTimeout(() => {
+			clock = ahead + 20_000;
+		}, 20);
 		const code = await codeToFill(
 			() => ({ code: "AAAA-AAAA", expiresAt: at(Date.now() + 60_000) }),
-			// An hour ahead.
-			{ now: () => Date.now() + 3_600_000, waitMs: 50, pollMs: 5 },
+			{ now: () => clock, waitMs: 10_000, pollMs: 5 },
 		);
 		expect(code).toBe("AAAA-AAAA");
-	});
+	}, 1000);
 
 	test("no code yet: the first that comes; none: nothing", async () => {
 		let current: CodeNow | undefined;
@@ -272,6 +278,20 @@ describe("Review 4: which code is filled in", () => {
 		).toBeUndefined();
 	});
 
+	test("cancelled (the fill withdrawn): nothing, at once", async () => {
+		let cancelled = false;
+		setTimeout(() => {
+			cancelled = true;
+		}, 20);
+		expect(
+			await codeToFill(() => undefined, {
+				waitMs: 10_000,
+				pollMs: 5,
+				cancelled: () => cancelled,
+			}),
+		).toBeUndefined();
+	}, 1000);
+
 	test("an end it cannot read: the current one", async () => {
 		expect(
 			await codeToFill(() => ({ code: "AAAA-AAAA", expiresAt: "?" }), {
@@ -282,12 +302,16 @@ describe("Review 4: which code is filled in", () => {
 });
 
 /** A fake browser and library around a `CodeFiller`. */
-function setup(options: { holdMs?: number; askMs?: number } = {}) {
+function setup(
+	options: { holdMs?: number; askMs?: number; problemMs?: number } = {},
+) {
 	const tabs = new Map<number, Tab>();
 	const holds: boolean[] = [];
 	const notices: (string | undefined)[] = [];
 	const reads: number[] = [];
 	let code: () => Promise<string | undefined> = async () => "BCDF-GHJK";
+	/** Called as the fill starts, before the page's function runs. */
+	let duringFill = () => {};
 	const state = {
 		ready: true,
 		origins: [HOSTED_ORIGIN] as string[],
@@ -305,6 +329,7 @@ function setup(options: { holdMs?: number; askMs?: number } = {}) {
 			return t ? inPage(t, () => readPairingForm(origin)) : undefined;
 		},
 		fill: async (id, value, form, origin) => {
+			duringFill();
 			const t = tabs.get(id);
 			return t ? inPage(t, () => fillPairingForm(value, form, origin)) : false;
 		},
@@ -340,6 +365,9 @@ function setup(options: { holdMs?: number; askMs?: number } = {}) {
 		},
 		setCode(f: () => Promise<string | undefined>) {
 			code = f;
+		},
+		onFill(f: () => void) {
+			duringFill = f;
 		},
 	};
 }
@@ -442,19 +470,106 @@ describe("the question and the fill (CodeFiller)", () => {
 		expect(f.holds).toEqual([true, false]);
 	});
 
-	test("Review 2: the tab leaving the page while the code is on its way: nothing filled in", async () => {
+	test("Review 2: the tab leaving the page while the code is on its way: nothing filled in, also when it is back on the same request by then", async () => {
 		const f = setup();
 		await f.load(1, PAGE, pairingPage());
 		const code = later<string | undefined>();
 		f.setCode(() => code.promise);
 		const answered = f.filler.answer(f.filler.question?.id as string, true);
 		await Bun.sleep(10);
-		// The AI app's page sends the tab elsewhere, with a look-alike form.
-		const evil = f.swap(1, "https://evil.example/authorize", pairingPage());
-		f.filler.tabLeft(1, "https://evil.example/authorize");
+		// The tab goes elsewhere and comes back to the same request before
+		// Chrome says it is complete: only the withdrawal stops the fill.
+		f.filler.tabLeft(1, `${HOSTED_ORIGIN}/elsewhere`);
+		const back = f.swap(1, PAGE, pairingPage());
 		code.resolve("BCDF-GHJK");
 		await answered;
-		expect(evil.submitted).toEqual([]);
+		expect(back.submitted).toEqual([]);
+		expect(f.holds).toEqual([true, false]);
+	});
+
+	test("Review of #27, 2: the tab reloading the same request while the first yes waits for its code: one fill, not two", async () => {
+		const f = setup();
+		await f.load(1, PAGE, pairingPage());
+		const first = later<string | undefined>();
+		f.setCode(() => first.promise);
+		const answered = f.filler.answer(f.filler.question?.id as string, true);
+		await Bun.sleep(10);
+		// Reloaded: the same address and request, a new document (Chrome
+		// sends no new address for a reload).
+		const again = await f.load(1, PAGE, pairingPage());
+		expect(f.filler.question).toBeDefined();
+		f.setCode(async () => "BCDF-GHJK");
+		await f.filler.answer(f.filler.question?.id as string, true);
+		first.resolve("BCDF-GHJK");
+		await answered;
+		expect(again.submitted).toEqual(["BCDF-GHJK"]);
+	});
+
+	test("Review of #27, 3: the question's tab loading a relay page that cannot be asked about ends the question", async () => {
+		const f = setup();
+		await f.load(1, PAGE, pairingPage());
+		await f.load(
+			1,
+			PAGE,
+			"<!doctype html><p>This connection request has expired.</p>",
+		);
+		expect(f.filler.question).toBeUndefined();
+		await f.load(1, PAGE, pairingPage());
+		await f.load(1, PAGE, pairingPage({ app: "tab-mcp-extension" }));
+		expect(f.filler.question).toBeUndefined();
+		await f.load(1, PAGE, pairingPage());
+		f.state.sites = [];
+		await f.load(1, PAGE, pairingPage());
+		expect(f.filler.question).toBeUndefined();
+	});
+
+	test("Review of #27, 4: a page while only a fill is on its way says so, not 'answer the question above', and not for long", async () => {
+		const f = setup({ problemMs: 40 });
+		await f.load(1, PAGE, pairingPage());
+		const code = later<string | undefined>();
+		f.setCode(() => code.promise);
+		const answered = f.filler.answer(f.filler.question?.id as string, true);
+		await Bun.sleep(10);
+		expect(f.filler.question).toBeUndefined();
+		await f.load(2, PAGE, pairingPage({ host: "second.example" }));
+		expect(f.filler.problem).toBe(
+			"An AI app at second.example (it calls itself “Claude”) also opened the relay's page while Sitegloss was filling in the code on another one. Reload that page in a moment to be asked, or type the code there.",
+		);
+		code.resolve(undefined);
+		await answered;
+		await Bun.sleep(80);
+		expect(f.filler.problem).toBeUndefined();
+	});
+
+	test("Review of #27, 5: with two relay origins, a fill's tab is judged by its own page's origin", async () => {
+		const OTHER = "https://other-relay.example";
+		const OTHER_PAGE = `${OTHER}/authorize?x=1`;
+		const fillWith = async () => {
+			const f = setup();
+			f.state.origins = [HOSTED_ORIGIN, OTHER];
+			f.state.sites = [HOSTED_ORIGIN, OTHER];
+			await f.load(1, OTHER_PAGE, pairingPage());
+			const code = later<string | undefined>();
+			f.setCode(() => code.promise);
+			const answered = f.filler.answer(f.filler.question?.id as string, true);
+			await Bun.sleep(10);
+			return { f, code, answered };
+		};
+		// To the other origin's own pairing page (the same request): it stays.
+		const own = await fillWith();
+		own.f.filler.tabLeft(1, `${OTHER}/authorize?y=2`);
+		const same = own.f.swap(1, `${OTHER}/authorize?y=2`, pairingPage());
+		own.code.resolve("BCDF-GHJK");
+		await own.answered;
+		expect(same.submitted).toEqual(["BCDF-GHJK"]);
+		// To the hosted relay's pairing page, which is not its own: withdrawn,
+		// also when the tab is back on its request by the time the code comes.
+		const away = await fillWith();
+		away.f.filler.tabLeft(1, `${HOSTED_ORIGIN}/authorize`);
+		const back = away.f.swap(1, OTHER_PAGE, pairingPage());
+		away.code.resolve("BCDF-GHJK");
+		await away.answered;
+		expect(back.submitted).toEqual([]);
 	});
 
 	test("Review 3: not turned on (or AI access not connected): no page is read and nothing is asked, also with the site allowed", async () => {
@@ -494,10 +609,11 @@ describe("the question and the fill (CodeFiller)", () => {
 
 	test("Review 6: pairing is held on from the yes until a while after the fill, also when Connect's post leaves the page", async () => {
 		const f = setup({ holdMs: 40 });
-		await f.load(1, PAGE, pairingPage());
+		const t = await f.load(1, PAGE, pairingPage());
+		// Connect's own post leaves the page while the fill is under way.
+		f.onFill(() => f.filler.tabLeft(1, `${HOSTED_ORIGIN}/callback`));
 		await f.filler.answer(f.filler.question?.id as string, true);
-		// Connect's own post: the tab navigates.
-		f.filler.tabLeft(1, `${HOSTED_ORIGIN}/callback`);
+		expect(t.submitted).toEqual(["BCDF-GHJK"]);
 		expect(f.holds).toEqual([true]);
 		await Bun.sleep(80);
 		expect(f.holds).toEqual([true, false]);
