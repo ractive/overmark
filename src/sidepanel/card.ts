@@ -101,6 +101,27 @@ export function confirms(armedAt: number, now: number): boolean {
 	return now - armedAt >= CONFIRM_DELAY_MS;
 }
 
+/** How long the panel must be visible and focused, with a question shown, before a yes counts. */
+export const ALLOW_DELAY_MS = 750;
+
+/**
+ * Whether a yes to a question shown at `shownAt` counts at `now`: the panel
+ * has been visible and focused since `focusedSince` (`undefined`: it is not)
+ * and the question shown, both for ALLOW_DELAY_MS. Leaving the panel starts
+ * the wait again, so a click meant for the page cannot land on a yes the
+ * moment the panel comes in front.
+ */
+export function armed(
+	shownAt: number,
+	focusedSince: number | undefined,
+	now: number,
+): boolean {
+	return (
+		focusedSince !== undefined &&
+		now - Math.max(shownAt, focusedSince) >= ALLOW_DELAY_MS
+	);
+}
+
 /** How long the switch shows the user's flip while waiting for the worker. */
 export const SWITCH_WAIT_MS = 10_000;
 

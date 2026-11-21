@@ -1,7 +1,9 @@
 /**
  * End to end, in Chromium: an AI app opens the relay's pairing page in this
  * browser, Sitegloss asks in its side panel, and only a yes fills in its
- * code and clicks Connect (DEC-044). The page is a fixture with the relay's
+ * code and clicks Connect (DEC-044). Off until "Fill in the code for me"
+ * (the review of DEC-044), also with access to all sites, which a test build
+ * has. The page is a fixture with the relay's
  * markup (`pairingPage`, as the unit tests use it) served on a port of its own:
  * the testing package's relay cannot show its form for a test client. The
  * test build takes that origin through `siteglossTestFillOrigins`; other
@@ -40,7 +42,8 @@ describe.skipIf(browserBinary === undefined)(
 					pairingPage({
 						app: url.searchParams.get("app") ?? "sitegloss",
 						name: "Test AI",
-						host: "client.example",
+						host: url.searchParams.get("host") ?? "client.example",
+						requestId: url.searchParams.get("r") ?? "r_1",
 					}),
 					{ headers: { "content-type": "text/html" } },
 				);
@@ -48,17 +51,18 @@ describe.skipIf(browserBinary === undefined)(
 		});
 		const origin = `http://127.0.0.1:${fixture.port}`;
 		const ASK = byId("pair-fill-ask");
+		const PROBLEM = byId("pair-fill-problem");
 		const close = (page: Page) =>
 			h.browser.send("Target.closeTarget", { targetId: page.targetId });
 
 		beforeAll(async () => {
 			h = await startHarness(browserBinary as string);
-			panel = await openSidePanel(h);
-			await connectAi(panel, relay.url);
 			const w = await worker(h);
 			await w.eval(
 				`globalThis.siteglossTestFillOrigins = [${JSON.stringify(origin)}]`,
 			);
+			panel = await openSidePanel(h);
+			await connectAi(panel, relay.url);
 			await panel.send("Emulation.setFocusEmulationEnabled", {
 				enabled: true,
 			});
@@ -70,13 +74,30 @@ describe.skipIf(browserBinary === undefined)(
 			await fixture.stop(true);
 		});
 
-		test("a form for Sitegloss: the panel asks, naming the app as the form does; Fill in the code types the code and clicks Connect", async () => {
+		test("off by default, also with access to all sites: a pairing page gets no question; Fill in the code for me turns it on", async () => {
+			const tab = await h.browser.newPage(`${origin}/authorize?r=0`);
+			await Bun.sleep(1500);
+			expect(await panel.eval(`${ASK}.hidden`)).toBe(true);
+			await close(tab);
+			await panel.waitFor(`!${byId("pair-fill")}.hidden`, 10_000);
+			expect(await panel.eval(`${byId("pair-fill-off")}.hidden`)).toBe(true);
+			await panel.eval(`${byId("pair-fill-on")}.click()`);
+			await panel.waitFor(`${byId("pair-fill-on")}.hidden`, 10_000);
+			expect(await panel.eval(`${byId("pair-fill-off")}.hidden`)).toBe(false);
+			expect(
+				await panel.eval<string>(`${byId("pair-fill-text")}.textContent`),
+			).toBe(
+				"When an AI app opens tab-mcp.ractive.ch's pairing page in this browser, Sitegloss asks you, then fills in the code.",
+			);
+		});
+
+		test("a form for Sitegloss: the panel asks, naming the verified host first; Fill in the code types the code and clicks Connect", async () => {
 			const tab = await h.browser.newPage(`${origin}/authorize?r=1`);
 			await panel.waitFor(`!${ASK}.hidden`, 10_000);
 			expect(
 				await panel.eval<string>(`${byId("pair-fill-ask-text")}.textContent`),
 			).toBe(
-				"Test AI (client.example) wants to connect to Sitegloss on the relay's page in this browser. Fill in the code there?",
+				"An AI app at client.example (it calls itself “Test AI”) wants to connect to Sitegloss on the relay's page in this browser. Fill in the code there?",
 			);
 			// The code is shown by the card (no app paired: the pairing view is open).
 			await panel.waitFor(
@@ -116,6 +137,26 @@ describe.skipIf(browserBinary === undefined)(
 			await close(tab);
 		});
 
+		test("a second pairing page while a question waits: not asked about, and the panel says so", async () => {
+			const first = await h.browser.newPage(`${origin}/authorize?r=3`);
+			await panel.waitFor(`!${ASK}.hidden`, 10_000);
+			const second = await h.browser.newPage(
+				`${origin}/authorize?r=4&host=second.example`,
+			);
+			await panel.waitFor(`!${PROBLEM}.hidden`, 10_000);
+			expect(await panel.eval<string>(`${PROBLEM}.textContent`)).toContain(
+				"An AI app at second.example (it calls itself “Test AI”) also opened the relay's page.",
+			);
+			expect(
+				await panel.eval<string>(`${byId("pair-fill-ask-text")}.textContent`),
+			).toContain("client.example");
+			await panel.eval(`${byId("pair-fill-no")}.click()`);
+			await panel.waitFor(`${ASK}.hidden`, 10_000);
+			expect(posted).toHaveLength(1);
+			await close(first);
+			await close(second);
+		});
+
 		test("a form for another app, or a page of another origin: no question", async () => {
 			const other = await h.browser.newPage(`${origin}/authorize?app=other`);
 			const elsewhere = await h.browser.newPage(`${h.base}/v1?/authorize`);
@@ -124,6 +165,15 @@ describe.skipIf(browserBinary === undefined)(
 			expect(posted).toHaveLength(1);
 			await close(other);
 			await close(elsewhere);
+		});
+
+		test("Stop filling in the code: no question any more", async () => {
+			await panel.eval(`${byId("pair-fill-off")}.click()`);
+			await panel.waitFor(`!${byId("pair-fill-on")}.hidden`, 10_000);
+			const tab = await h.browser.newPage(`${origin}/authorize?r=5`);
+			await Bun.sleep(1500);
+			expect(await panel.eval(`${ASK}.hidden`)).toBe(true);
+			await close(tab);
 		});
 	},
 );

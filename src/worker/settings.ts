@@ -1,8 +1,9 @@
 /**
  * The AI connection's settings, kept by the service worker in its own
  * IndexedDB (`kv.ts`, DEC-016): the relay, "Keep AI access on", "Blur form
- * fields in screenshots" and a takeover of the connection. Whether AI access
- * is on for this browser session is in `chrome.storage.session`.
+ * fields in screenshots", "Fill in the code for me" and a takeover of the
+ * connection. Whether AI access is on for this browser session is in
+ * `chrome.storage.session`.
  */
 
 import type { Kv } from "./kv.ts";
@@ -38,6 +39,7 @@ export const KEYS = {
 	keepOn: "keepAiOn",
 	blurForms: "blurForms",
 	replaced: "replaced",
+	fillCode: "fillCode",
 } as const;
 
 /**
@@ -67,6 +69,8 @@ export interface Settings {
 	keepOn: boolean;
 	blurForms: boolean;
 	replaced: Replaced | undefined;
+	/** "Fill in the code for me" on the hosted relay's pairing page (DEC-044): off by default. */
+	fillCode: boolean;
 }
 
 function replacedOf(value: unknown): Replaced | undefined {
@@ -85,6 +89,7 @@ export async function loadSettings(kv: Kv): Promise<Settings> {
 		keepOn: s[KEYS.keepOn] === true,
 		blurForms: s[KEYS.blurForms] === true,
 		replaced: replacedOf(s[KEYS.replaced]),
+		fillCode: s[KEYS.fillCode] === true,
 	};
 }
 

@@ -14,6 +14,7 @@
 
 import {
 	askDataConsent,
+	BROWSER,
 	FIREFOX,
 	PANEL,
 	requestPermissions,
@@ -22,6 +23,7 @@ import { HOSTED_ORIGIN, PAIR_FILL_SITE } from "../worker/pair-fill.ts";
 import {
 	type AiState,
 	type Answer,
+	fillAppLabel,
 	PANEL_PORT,
 	type PanelCommand,
 	QUESTION_TIMEOUT_MS,
@@ -30,6 +32,8 @@ import {
 } from "../worker/protocol.ts";
 import { DEFAULT_RELAY, relayProblem } from "../worker/settings.ts";
 import {
+	ALLOW_DELAY_MS,
+	armed,
 	cardView,
 	confirms,
 	hasNewGrant,
@@ -51,8 +55,6 @@ export const NO_CONSENT_ANSWER =
 declare const SITEGLOSS_TEST_BUILD: boolean | undefined;
 declare const SITEGLOSS_FIREFOX: boolean | undefined;
 
-/** How long the panel must be visible and focused before Allow and Always allow count. */
-const ALLOW_DELAY_MS = 750;
 /** After a first click on Disconnect all apps with apps connected: the second does it. */
 const NEW_ADDRESS_ARMED_MS = 4000;
 /** The pairing code's place while there is none: as long as a code, `XXXX-XXXX`. */
@@ -359,26 +361,35 @@ export async function startAi(
 			fillShown = { id: ask.id, at: Date.now() };
 			// As text: the names come from a web page.
 			byId("pair-fill-ask-text").textContent =
-				`${ask.name} (${ask.host}) wants to connect to Sitegloss on the relay's page in this browser. Fill in the code there?`;
+				`${fillAppLabel(ask)} wants to connect to Sitegloss on the relay's page in this browser. Fill in the code there?`;
 			fillYes.disabled = true;
 		}
-		// Under the code: the offer to fill it in, on the hosted relay only.
-		const hosted = new URL(a.relay).origin === HOSTED_ORIGIN;
+		// Under the code: "Fill in the code for me", a setting of its own, off
+		// by default, on the hosted relay only (the worker says, `fillHere`).
 		const host = new URL(HOSTED_ORIGIN).host;
-		byId("pair-fill").hidden = !hosted || fillAllowed === undefined;
-		byId("pair-fill-allow").hidden = fillAllowed !== false;
-		byId("pair-fill-text").textContent = fillAllowed
-			? `Pairing in this browser? When the AI app opens ${host}'s page, Sitegloss asks you, then fills in the code.`
-			: `Pairing in this browser? Sitegloss can fill in the code on ${host}'s page for you, after asking.`;
+		const working = a.fillCode && fillAllowed === true;
+		byId("pair-fill").hidden = !a.fillHere || fillAllowed === undefined;
+		byId("pair-fill-on").hidden = working;
+		// On, also when the site was taken away in the browser's settings.
+		byId("pair-fill-off").hidden = !a.fillCode;
+		byId("pair-fill-text").textContent = working
+			? `When an AI app opens ${host}'s pairing page in this browser, Sitegloss asks you, then fills in the code.`
+			: `Pairing in this browser? Sitegloss can fill in the code on ${host}'s page for you, after asking.${fillAllowed ? "" : ` ${BROWSER} asks you first.`}`;
 	}
 
-	/** Fill in the code counts once the panel has been in front a moment, as Allow does. */
+	/**
+	 * Fill in the code counts once the panel has been in front a moment with
+	 * the question shown, as Allow does: leaving the panel starts the wait
+	 * again.
+	 */
+	let fillFocusedSince: number | undefined;
 	setInterval(() => {
+		const now = Date.now();
+		if (document.visibilityState === "visible" && document.hasFocus())
+			fillFocusedSince ??= now;
+		else fillFocusedSince = undefined;
 		if (fillShown === undefined) return;
-		const ready =
-			document.visibilityState === "visible" &&
-			document.hasFocus() &&
-			Date.now() - fillShown.at >= ALLOW_DELAY_MS;
+		const ready = armed(fillShown.at, fillFocusedSince, now);
 		if (fillYes.disabled === ready) fillYes.disabled = !ready;
 	}, 100);
 	for (const [button, yes] of [
@@ -389,13 +400,20 @@ export async function startAi(
 			if (fillShown === undefined || button.disabled) return;
 			send({ type: "fill", id: fillShown.id, yes });
 		});
-	byId<HTMLButtonElement>("pair-fill-allow").addEventListener("click", () => {
-		// In the click: the browser asks only during one.
+	byId<HTMLButtonElement>("pair-fill-on").addEventListener("click", () => {
+		// In the click: the browser asks only during one (and answers at once
+		// when Sitegloss has the site already).
 		void requestPermissions(PAIR_FILL_SITE).then(
-			() => checkFillAllowed(),
+			(granted) => {
+				if (granted) send({ type: "fill-code", on: true });
+				return checkFillAllowed();
+			},
 			() => checkFillAllowed(),
 		);
 	});
+	byId<HTMLButtonElement>("pair-fill-off").addEventListener("click", () =>
+		send({ type: "fill-code", on: false }),
+	);
 
 	// --- Commands ---
 
@@ -1127,9 +1145,7 @@ export async function startAi(
 			focusedSince ??= now;
 		else focusedSince = undefined;
 		for (const { card, shownAt } of cards.values()) {
-			const ready =
-				focusedSince !== undefined &&
-				now - Math.max(shownAt, focusedSince) >= ALLOW_DELAY_MS;
+			const ready = armed(shownAt, focusedSince, now);
 			for (const b of card.querySelectorAll<HTMLButtonElement>(
 				'button[data-answer="allow"], button[data-answer="always"]',
 			))

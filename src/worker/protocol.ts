@@ -62,7 +62,9 @@ export type PanelCommand =
 	| { type: "set-relay"; relay: string }
 	| { type: "answer"; id: string; answer: Answer }
 	/** The answer to "Fill in the code for <app>?" (DEC-044): only a yes fills it in. */
-	| { type: "fill"; id: string; yes: boolean };
+	| { type: "fill"; id: string; yes: boolean }
+	/** "Fill in the code for me" (on) or "Stop filling in the code" (DEC-044). */
+	| { type: "fill-code"; on: boolean };
 
 /** A connected AI app. */
 export interface GrantView {
@@ -133,6 +135,10 @@ export interface AiState {
 	replaced?: { sibling: boolean };
 	lastCall?: CallView;
 	questions: QuestionView[];
+	/** "Fill in the code for me": on (DEC-044); off by default. */
+	fillCode: boolean;
+	/** The relay in use is one whose pairing page Sitegloss fills in (the hosted one). */
+	fillHere: boolean;
 	/**
 	 * An AI app opened the hosted relay's pairing page in this browser:
 	 * Sitegloss asks whether to fill in its code there (DEC-044). The name
@@ -150,6 +156,17 @@ export interface FillView {
 	name: string;
 	/** `data-client-host`: its verified host. */
 	host: string;
+}
+
+/**
+ * The AI app as the fill-in question names it: the verified host first, its
+ * own name for itself apart (a name can be anything, "Claude (claude.ai)"
+ * too).
+ */
+export function fillAppLabel(view: Pick<FillView, "name" | "host">): string {
+	return view.name
+		? `An AI app at ${view.host} (it calls itself “${view.name}”)`
+		: `An AI app at ${view.host}`;
 }
 
 /** From the service worker. */
@@ -223,6 +240,7 @@ export function parseCommand(message: unknown): PanelCommand | undefined {
 		case "keep-on":
 		case "blur-forms":
 		case "pair":
+		case "fill-code":
 			return isBoolean(m["on"]) ? { type: m["type"], on: m["on"] } : undefined;
 		case "revoke":
 			return isString(m["grantId"])

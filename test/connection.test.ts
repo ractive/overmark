@@ -99,10 +99,57 @@ beforeAll(() => {
 			sendMessage: async () => {},
 			getURL: (path: string) => `chrome-extension://x/${path}`,
 		},
-		tabs: { query: async () => [], sendMessage: async () => {} },
+		tabs: {
+			query: async () => [],
+			sendMessage: async () => {},
+			get: async (id: number) => {
+				const url = fake.tabs.get(id);
+				if (url === undefined) throw new Error("No tab");
+				return { id, url };
+			},
+		},
 		windows: { get: async () => ({ focused: false }) },
+		permissions: {
+			contains: async (p: { origins: string[] }) =>
+				p.origins.every((o) => fake.granted.has(o)),
+			remove: async (p: { origins: string[] }) => {
+				fake.removed.push(...p.origins);
+				for (const o of p.origins) fake.granted.delete(o);
+				return true;
+			},
+		},
+		// The pairing page's functions, as the page would answer them.
+		scripting: {
+			executeScript: async (injection: {
+				func: { name: string };
+				args?: unknown[];
+			}) => {
+				if (injection.func.name === "readPairingForm")
+					return [{ result: fake.form }];
+				fake.filled.push(String(injection.args?.[0]));
+				return [{ result: true }];
+			},
+		},
 	};
 });
+
+/** The browser around the pairing page, as the fake Chrome above answers it. */
+const fake = {
+	/** Tab ids and their addresses. */
+	tabs: new Map<number, string>(),
+	/** Host patterns Sitegloss has. */
+	granted: new Set<string>(),
+	/** What `permissions.remove` was asked for. */
+	removed: [] as string[],
+	form: {
+		app: "sitegloss",
+		clientName: "Claude",
+		clientHost: "claude.ai",
+		requestId: "r_1",
+	},
+	/** The codes filled in. */
+	filled: [] as string[],
+};
 
 afterAll(() => {
 	warnSpy.mockRestore();
@@ -162,7 +209,9 @@ interface Worker {
 }
 
 /** A worker as Chrome starts it, on `kv`, with one side panel open. */
-async function startWorker(kv: Kv): Promise<Worker> {
+async function startWorker(
+	kv: Kv,
+): Promise<Worker & { connection: Connection }> {
 	const connection = await Connection.start({
 		store: {} as CaseStore,
 		capture: (async () => {
@@ -178,6 +227,7 @@ async function startWorker(kv: Kv): Promise<Worker> {
 		onDisconnect: { addListener: () => {} },
 	} as unknown as chrome.runtime.Port);
 	return {
+		connection,
 		states,
 		last: () => states.at(-1) as AiState,
 		send: (command) => receive(command),
@@ -491,5 +541,111 @@ describe("the worker's connection with client 0.18", () => {
 		} finally {
 			other.disconnect();
 		}
+	});
+});
+
+describe("filling in the code on the relay's pairing page, in the worker (DEC-044, its review)", () => {
+	const relay = startTestRelay({ maxSessionsPerIp: 50 });
+	/** The pairing page's origin: a test build fills in the origins it is given. */
+	const PAGE_ORIGIN = "https://pair.example";
+	const PAGE = `${PAGE_ORIGIN}/authorize?x=1`;
+	const workers: Worker[] = [];
+	beforeAll(() => {
+		globals["SITEGLOSS_TEST_BUILD"] = true;
+		globals["siteglossTestFillOrigins"] = [PAGE_ORIGIN];
+	});
+	afterAll(async () => {
+		delete globals["SITEGLOSS_TEST_BUILD"];
+		delete globals["siteglossTestFillOrigins"];
+		for (const w of workers) w.send({ type: "stop" });
+		await Bun.sleep(50);
+		await relay.stop();
+	});
+
+	/** A connected worker on `stored` settings, every site allowed unless `granted` says otherwise. */
+	async function connected(
+		stored: Record<string, unknown> = {},
+		granted = ["<all_urls>", `${PAGE_ORIGIN}/*`],
+	) {
+		session.clear();
+		alarms.clear();
+		fake.tabs.clear();
+		fake.granted = new Set(granted);
+		fake.removed = [];
+		fake.filled = [];
+		const kv = memoryKv({ relay: relay.url, ...stored });
+		const w = await startWorker(kv);
+		workers.push(w);
+		w.send({ type: "connect" });
+		await until(() => w.last()?.state === "connected");
+		fake.tabs.set(7, PAGE);
+		return { w, kv };
+	}
+
+	test("Review 3: off by default, also with access to every site: a pairing page gets no question; Fill in the code for me turns it on and is kept", async () => {
+		const { w, kv } = await connected();
+		await w.connection.pairingPage(7, PAGE);
+		await Bun.sleep(20);
+		expect(w.last().fill).toBeUndefined();
+		expect(w.last().fillCode).toBe(false);
+		expect(w.last().fillHere).toBe(true);
+		w.send({ type: "fill-code", on: true });
+		await until(() => w.last().fillCode);
+		expect(await kv.get("fillCode")).toBe(true);
+		await w.connection.pairingPage(7, PAGE);
+		await until(() => w.last().fill !== undefined);
+		expect(w.last().fill).toMatchObject({ name: "Claude", host: "claude.ai" });
+	});
+
+	test("Review 3: Stop filling in the code withdraws a waiting question and gives the relay's site back; with access to all sites it keeps that", async () => {
+		const { w, kv } = await connected({ fillCode: true }, [`${PAGE_ORIGIN}/*`]);
+		await w.connection.pairingPage(7, PAGE);
+		await until(() => w.last().fill !== undefined);
+		w.send({ type: "fill-code", on: false });
+		await until(() => !w.last().fillCode);
+		expect(w.last().fill).toBeUndefined();
+		expect(await kv.get("fillCode")).toBe(false);
+		expect(fake.removed).toEqual(["https://tab-mcp.ractive.ch/*"]);
+
+		const all = await connected({ fillCode: true });
+		all.w.send({ type: "fill-code", on: false });
+		await until(() => !all.w.last().fillCode);
+		expect(fake.removed).toEqual([]);
+	});
+
+	test("Review 2: Stop AI access withdraws a waiting question at once", async () => {
+		const { w } = await connected({ fillCode: true });
+		await w.connection.pairingPage(7, PAGE);
+		await until(() => w.last().fill !== undefined);
+		expect(w.last().questions).toEqual([]);
+		w.send({ type: "stop" });
+		await until(() => w.last().state === "disconnected");
+		expect(w.last().fill).toBeUndefined();
+		// A yes for it now does nothing.
+		await Bun.sleep(20);
+		expect(fake.filled).toEqual([]);
+	});
+
+	test("Review 2: another relay withdraws a waiting question", async () => {
+		const { w } = await connected({ fillCode: true });
+		await w.connection.pairingPage(7, PAGE);
+		await until(() => w.last().fill !== undefined);
+		const id = w.last().fill?.id;
+		w.send({ type: "set-relay", relay: "http://127.0.0.1:9/" });
+		await until(() => w.last().relay === "http://127.0.0.1:9/");
+		expect(w.last().fill).toBeUndefined();
+		w.send({ type: "fill", id, yes: true });
+		await Bun.sleep(50);
+		expect(fake.filled).toEqual([]);
+	});
+
+	test("a yes fills in the code the card shows", async () => {
+		const { w } = await connected({ fillCode: true });
+		await w.connection.pairingPage(7, PAGE);
+		await until(() => w.last().fill !== undefined);
+		w.send({ type: "fill", id: w.last().fill?.id, yes: true });
+		await until(() => fake.filled.length > 0, 15_000);
+		expect(fake.filled).toEqual([w.last().code as string]);
+		expect(w.last().fill).toBeUndefined();
 	});
 });

@@ -289,17 +289,25 @@ claude mcp add --transport http sitegloss <address>
 Your browser opens the relay's page; type the code from the side panel.
 
 If that page opens in the browser Sitegloss runs in, Sitegloss can fill in the code for
-you. Under the code, "Allow on that site" asks the browser for Sitegloss's access to
-`tab-mcp.ractive.ch` (optional, only that site; Chrome says "Read and change your data on
-tab-mcp.ractive.ch"). From then on, when an AI app opens the hosted relay's pairing page
-for Sitegloss in this browser while AI access is on, the side panel asks "<app> (<host>)
-wants to connect to Sitegloss on the relay's page in this browser. Fill in the code
-there?", naming the app as the page does. "Fill in the code" (it waits a moment, as Allow
-does) types Sitegloss's code into the page's field and clicks Connect; "No" leaves the
-page as it is. With the side panel closed, a notification says to open it. Sitegloss
-never fills in a page of another site or one that is not for Sitegloss, and never
-connects without that yes. Typing the code always works too, also in another browser.
-With another relay set, there is no offer.
+you. It is off until you turn it on, also if you allowed Sitegloss on all sites: under
+the code, "Fill in the code for me" turns it on and, when Sitegloss does not have it yet,
+asks the browser for Sitegloss's access to `tab-mcp.ractive.ch` (optional, only that
+site; Chrome says "Read and change your data on tab-mcp.ractive.ch"). From then on, when
+an AI app opens the hosted relay's pairing page for Sitegloss in this browser while AI
+access is on, the side panel asks "An AI app at <host> (it calls itself “<name>”) wants
+to connect to Sitegloss on the relay's page in this browser. Fill in the code there?",
+the host as the relay verified it, the name as the app gave it. "Fill in the code" (it
+waits a moment, as Allow does) types Sitegloss's code into that page's field and clicks
+Connect; "No" leaves the page as it is. With the side panel closed, a notification says
+to open it. Sitegloss asks about one page at a time: a second one while a question waits
+is not asked about, and the panel says to answer first and reload it, or type the code
+there. Sitegloss never fills in a page of another site, one that is not for Sitegloss,
+or another request than the one it asked about, and never connects without that yes; a
+wrong code brings the relay's page back, and Sitegloss asks again. "Stop filling in the
+code" turns it off and gives the site back (unless Sitegloss may run on all sites).
+Typing the code always works too, also in another browser. With another relay set, there
+is no offer. Upgrading from 0.3.0, where "Allow on that site" turned it on: it is off
+until you click "Fill in the code for me" once (the browser does not ask again).
 
 The connection
 stays when you close the side panel (the icon shows "on"), until you turn the switch off
