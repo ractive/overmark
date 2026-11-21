@@ -433,6 +433,44 @@ describe("an arrow's ends in case.md (DEC-047)", () => {
 	});
 });
 
+describe("an element's look in case.md (DEC-048)", () => {
+	test("says the few values an AI reads first; nothing for a mark without", () => {
+		const base = caseWith("x");
+		const a = base.annotations[0] as Case["annotations"][number];
+		const element = {
+			tag: "a",
+			classes: ["pp-btn"],
+			attributes: {},
+			ancestors: [],
+			rect: { x: 0, y: 0, width: 10, height: 10 },
+			page: { width: 100, height: 100 },
+			selector: "a.pp-btn",
+			styles: { color: "rgb(245, 207, 88)", "font-weight": "700" },
+			backdrop: { color: "rgb(242, 194, 48)", depth: 0 },
+		};
+		const md = caseMarkdown({
+			...base,
+			annotations: [{ ...a, element }],
+		});
+		expect(md).toContain(
+			"- Look: rgb(245, 207, 88) on rgb(242, 194, 48), contrast 1.11:1 · 700\n",
+		);
+		expect(
+			caseMarkdown({
+				...base,
+				annotations: [
+					{
+						...a,
+						element: (({ styles: _s, backdrop: _b, ...plain }) => plain)(
+							element,
+						),
+					},
+				],
+			}),
+		).not.toContain("- Look:");
+	});
+});
+
 describe("the thread and closing in case.md (DEC-046)", () => {
 	test("comments after the marks, with who, which app and which mark; who closed the case; a comment's text stays a block", () => {
 		const base = caseWith("Shorter labels");

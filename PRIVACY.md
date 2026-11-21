@@ -21,6 +21,10 @@ Sitegloss stores in your browser, on your computer:
   its tag, role, name, a short piece of its text, a few attributes, its position, and a
   CSS selector. A link's address is kept as its path; a fragment stays only where it
   names a place on the same page (`#book`) or is a route;
+- for the marked element itself, once when you mark it: how it looked, from a fixed list
+  of computed CSS properties (colours, font, size, spacing, border, alignment, overflow;
+  none that can hold an address, no custom properties), the colour behind it, and the
+  position and size of up to six neighbouring elements (their tag only);
 - screenshots of the visible part of the tab, with the marks on them;
 - its settings, and where it syncs to;
 - if you sign in to sitegloss.dev: your name and e-mail address there, your teams, the
@@ -70,10 +74,11 @@ Only in four cases, all started by you:
    Sitegloss's developer, and fetches your team's: titles, links, summaries, the
    addresses, titles and languages of the pages, the window size and the browser's user
    agent, the marks with their comments, statuses, notes, element details (an arrow's
-   two ends too) and AI findings, the case's thread of comments and whether it is
-   closed, and the screenshots and crops. The members of the team you choose can see
-   and change them, in the extension and on the website; the service keeps them until
-   they are deleted, with who made or changed what, and under
+   two ends too; for the marked element also how it looked: its computed styles, the
+   colour behind it and its neighbours' boxes) and AI findings, the case's thread of
+   comments and whether it is closed, and the screenshots and crops. The members of the
+   team you choose can see and change them, in the extension and on the website; the
+   service keeps them until they are deleted, with who made or changed what, and under
    [its own privacy policy](https://sitegloss.dev/privacy/).
 
    When a connected AI app changes a case through Sitegloss (a comment, a mark, a
@@ -169,4 +174,4 @@ at most 30 days.
 Jean-Pierre Bergamin, <https://ractive.ch>, james@ractive.ch.
 Source code: <https://github.com/ractive/sitegloss>.
 
-Last changed: 19 November 2026.
+Last changed: 21 November 2026.

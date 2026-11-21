@@ -126,6 +126,203 @@ export interface ElementDetails {
 	page: { width: number; height: number };
 	/** A best-effort CSS selector (W3C Web Annotation `CssSelector`). */
 	selector: string;
+	/**
+	 * Computed CSS when the mark was made (DEC-048): property name to value,
+	 * at most 40, never one that names a URL. Only on a mark's own element,
+	 * recorded once; never on a page's candidates, never matched, never in
+	 * the sync's fingerprint (`fixedOf`).
+	 */
+	styles?: Record<string, string>;
+	/** The colour behind the element when the mark was made (DEC-048). */
+	backdrop?: Backdrop;
+	/** The boxes of up to six nearest element siblings when the mark was made (DEC-048). */
+	siblings?: SiblingBox[];
+}
+
+/**
+ * The colour that shows behind an element: its own background colour, or,
+ * while that is transparent or translucent, composited over its ancestors'
+ * until an opaque one (DEC-048).
+ */
+export interface Backdrop {
+	/** As computed (`rgb(255, 255, 255)`); never a URL. */
+	color: string;
+	/** How many steps up the opaque background is (0: the element itself); none: the page's canvas. */
+	depth?: number;
+	/** A background image or gradient on the way may show instead of the colour. */
+	image?: boolean;
+}
+
+/** The box of one of an element's nearest element siblings (DEC-048). */
+export interface SiblingBox {
+	/** Its place relative to the element: -1 right before it, 1 right after; never 0. */
+	offset: number;
+	tag: string;
+	/** In document coordinates, as the element's `rect`. */
+	rect: Rect;
+}
+
+/** The most computed styles an element keeps, and their names' and values' lengths: what the server keeps (its DEC-021). */
+export const MAX_STYLES = 40;
+export const MAX_STYLE_NAME = 60;
+export const MAX_STYLE_VALUE = 300;
+export const MAX_SIBLINGS = 6;
+/** A property, or a vendor-prefixed one; never a custom property (`--x`), whose value is the author's own text. */
+const STYLE_NAME = /^-?[a-z][a-z0-9-]*$/;
+/** An element's name, as the server keeps a sibling's. */
+const TAG = /^[A-Za-z][A-Za-z0-9_.:-]*$/;
+
+/** CSS functions that fetch something, with or without a vendor prefix. */
+const FETCHES = /\b(?:url|image|image-set|cross-fade|element|src|paint)\s*\(/i;
+const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
+
+/** CSS text as a browser reads it: comments out, escapes decoded. */
+function decodedCss(css: string): string {
+	return css
+		.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, "")
+		.replace(
+			/\\(?:([0-9a-fA-F]{1,6})[ \t\n\r\f]?|\r\n|([\s\S]))/g,
+			(_all, hex: string | undefined, char: string | undefined) => {
+				if (hex !== undefined) {
+					const code = Number.parseInt(hex, 16);
+					return code === 0 ||
+						code > 0x10ffff ||
+						(code >= 0xd800 && code <= 0xdfff)
+						? "�"
+						: String.fromCodePoint(code);
+				}
+				return char === undefined || /[\n\r\f]/.test(char) ? "" : char;
+			},
+		);
+}
+
+/**
+ * A CSS value that names a URL (a fetching function, `://`, a quoted path
+ * or query), also behind comments or escapes: it can carry a query or a
+ * token, which nothing recorded about an element does (DEC-009). The
+ * server drops such a value too; the fixed list of properties (look.ts) is
+ * what keeps them out in the first place.
+ */
+export function namesUrl(value: string): boolean {
+	for (const text of [value, decodedCss(value)])
+		if (
+			FETCHES.test(text) ||
+			text.includes("://") ||
+			(text.match(QUOTED) ?? []).some((quoted) => /[/?]/.test(quoted))
+		)
+			return true;
+	return false;
+}
+
+const keptValue = (value: unknown): value is string =>
+	typeof value === "string" &&
+	value.trim() !== "" &&
+	value.length <= MAX_STYLE_VALUE &&
+	!namesUrl(value);
+
+const isFiniteNumber = (v: unknown): v is number =>
+	typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Computed styles within what the server keeps: a name of its form, a
+ * value of at most 300 characters that names no URL, at most 40. What does
+ * not fit is left out, not failed: these are extras.
+ */
+export function stylesWithin(v: unknown): Record<string, string> | undefined {
+	if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+	const out: Record<string, string> = {};
+	let count = 0;
+	for (const [name, value] of Object.entries(v)) {
+		if (count >= MAX_STYLES) break;
+		if (
+			name.length > MAX_STYLE_NAME ||
+			!STYLE_NAME.test(name) ||
+			!keptValue(value)
+		)
+			continue;
+		out[name] = value;
+		count++;
+	}
+	return count > 0 ? out : undefined;
+}
+
+/** A backdrop within what the server keeps, or none. */
+export function backdropWithin(v: unknown): Backdrop | undefined {
+	if (typeof v !== "object" || v === null) return undefined;
+	const o = v as Record<string, unknown>;
+	const color = o["color"];
+	if (!keptValue(color)) return undefined;
+	const depth = o["depth"];
+	return {
+		color,
+		...(Number.isInteger(depth) &&
+		(depth as number) >= 0 &&
+		(depth as number) <= 1000
+			? { depth: depth as number }
+			: {}),
+		...(o["image"] === true ? { image: true } : {}),
+	};
+}
+
+/** Siblings' boxes within what a case and the server take, or none. */
+export function siblingsWithin(v: unknown): SiblingBox[] | undefined {
+	if (!Array.isArray(v)) return undefined;
+	const out: SiblingBox[] = [];
+	for (const s of v) {
+		if (out.length >= MAX_SIBLINGS) break;
+		if (typeof s !== "object" || s === null) continue;
+		const o = s as Record<string, unknown>;
+		const r = o["rect"] as Record<string, unknown> | null | undefined;
+		const offset = o["offset"];
+		if (
+			!Number.isInteger(offset) ||
+			offset === 0 ||
+			Math.abs(offset as number) > 100 ||
+			typeof o["tag"] !== "string" ||
+			o["tag"].length > 100 ||
+			!TAG.test(o["tag"]) ||
+			typeof r !== "object" ||
+			r === null ||
+			![r["x"], r["y"], r["width"], r["height"]].every(isFiniteNumber)
+		)
+			continue;
+		out.push({
+			offset: offset as number,
+			tag: o["tag"],
+			rect: {
+				x: r["x"] as number,
+				y: r["y"] as number,
+				width: r["width"] as number,
+				height: r["height"] as number,
+			},
+		});
+	}
+	return out.length > 0 ? out : undefined;
+}
+
+/**
+ * An element's computed styles, backdrop and siblings (DEC-048), each within
+ * what a case and the server take; left out where none.
+ */
+export function lookOf(o: {
+	styles?: unknown;
+	backdrop?: unknown;
+	siblings?: unknown;
+}): Pick<ElementDetails, "styles" | "backdrop" | "siblings"> {
+	const styles = stylesWithin(o.styles);
+	const backdrop = backdropWithin(o.backdrop);
+	const siblings = siblingsWithin(o.siblings);
+	return {
+		...(styles === undefined ? {} : { styles }),
+		...(backdrop === undefined ? {} : { backdrop }),
+		...(siblings === undefined ? {} : { siblings }),
+	};
+}
+
+/** The element without its computed styles, backdrop and siblings: what is matched and fingerprinted. */
+export function withoutLook(details: ElementDetails): ElementDetails {
+	const { styles: _s, backdrop: _b, siblings: _i, ...rest } = details;
+	return rest;
 }
 
 export interface Shot {
@@ -1118,6 +1315,8 @@ function element(v: unknown, path: string): ElementDetails | null {
 		"landmark",
 	])
 		optionalString(o, key, path, out);
+	// Optional extras (DEC-048): kept where within the rules, else left out.
+	Object.assign(out, lookOf(o));
 	return out as unknown as ElementDetails;
 }
 

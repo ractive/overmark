@@ -91,7 +91,10 @@ user agent. What differs from Chrome and Edge:
 2. "New case for this page" creates a case at once, named after the page's title, opens it
    in the side panel and shows the toolbar on the page: Element (click one), Box, Arrow,
    Pen and Note, each followed by a comment. Sitegloss takes screenshots with the marks
-   on them and records each marked element's details. "Rename" beside the case's title
+   on them and records each marked element's details (tag, role, name, text, readable
+   classes, test id, the heading it is under, a selector, its position) and, once, how
+   it looked: its computed styles, the colour behind it and its neighbours' boxes, for
+   contrast and alignment questions. "Rename" beside the case's title
    changes it (Enter saves, Escape cancels). "Add a link" under it attaches a link to
    the case, a ticket or a design, which then opens with a click ("Edit" changes it,
    an empty field removes it). There is no save step: everything is
@@ -226,11 +229,11 @@ The tools:
 | Tool | What it does |
 |---|---|
 | `list_cases` | The saved cases, with their pages and their marks by status |
-| `get_case` | A case's pages, its summary for the developer, its marks with their page, comments, statuses, reopens, AI findings, element details and crops, the newest 20 comments of its thread, and whether it is closed |
+| `get_case` | A case's pages, its summary for the developer, its marks with their page, comments, statuses, reopens, AI findings, element details (with how the element looked when marked: computed styles, the colour behind it and the contrast, its neighbours' boxes) and crops, the newest 20 comments of its thread, and whether it is closed |
 | `get_image` | One screenshot or crop |
 | `load_case` | Finds the marks' elements on the tab in front and draws the marks there |
 | `highlight` | Scrolls to one mark's element (or another candidate) |
-| `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children; a CSS selector reads one of its ancestors or an element inside it instead (for a mark without an element, an element of the mark's page) |
+| `get_mark_element` | A mark's element on the tab in front, read from the live page: trimmed HTML, box and window size, computed styles, matching CSS rules, ancestors and children, beside the styles recorded when the mark was made; a CSS selector reads one of its ancestors or an element inside it instead (for a mark without an element, an element of the mark's page) |
 | `capture` | A screenshot of the tab in front |
 | `add_annotation` | Adds a mark on an element (by CSS selector); asks first |
 | `set_summary` | Records the summary for the developer: what should change overall, as agreed; asks first |

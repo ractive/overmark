@@ -438,6 +438,69 @@ describe("0.3.0's data opened by this build, when the database fails once (revie
 	});
 });
 
+describe("a mark's look (DEC-048) beside 0.3.0", () => {
+	test("goes out once with mark.create; 0.3.0 takes the mark without it, and neither sends anything more", async () => {
+		const sent: { type: string; element?: unknown }[] = [];
+		const ops = tess.api.ops.bind(tess.api);
+		tess.api.ops = async (team, list) => {
+			sent.push(
+				...list.map((o) => ({
+					type: o.type,
+					...(o.type === "mark.create" ? { element: o.mark.element } : {}),
+				})),
+			);
+			return ops(team, list);
+		};
+		const danaSent: string[] = [];
+		const danaOps = dana.api.ops.bind(dana.api);
+		dana.api.ops = async (team, list) => {
+			danaSent.push(...list.map((o) => o.type));
+			return danaOps(team, list);
+		};
+		await startCase(tess, "c_look");
+		await addMark(tess, "c_look", "Book is hard to read", { element: true });
+		const look = {
+			styles: {
+				color: "rgb(245, 207, 88)",
+				"background-color": "rgb(242, 194, 48)",
+				"font-weight": "700",
+			},
+			backdrop: { color: "rgb(242, 194, 48)", depth: 0 },
+			siblings: [
+				{ offset: -1, tag: "p", rect: { x: 1, y: 2, width: 3, height: 4 } },
+			],
+		};
+		// As the toolbar records it with the mark, before the first sync.
+		await change(tess, "c_look", (c) => ({
+			...c,
+			annotations: c.annotations.map((a) =>
+				a.element === null ? a : { ...a, element: { ...a.element, ...look } },
+			),
+		}));
+		await sync();
+		await sync();
+		const creates = sent.filter((o) => o.type === "mark.create");
+		expect(creates).toHaveLength(1);
+		expect(creates[0]?.element).toMatchObject(look);
+		expect(sent.filter((o) => o.type.startsWith("mark."))).toHaveLength(1);
+		// The team has it.
+		expect(server.marksOf("c_look")[0]?.element).toMatchObject(look);
+		// 0.3.0 has the mark, without what it does not know, and sent nothing.
+		const old = (await dana.store.getCase("c_look")) as Case030;
+		const element = old.annotations[0]?.element as unknown as Record<
+			string,
+			unknown
+		>;
+		expect(element["selector"]).toBe("form > button");
+		expect("styles" in element || "backdrop" in element).toBe(false);
+		expect(danaSent).toEqual([]);
+		expect(lastStatus()?.state).toBe("synced");
+		// This build, read back from the server: the same mark, nothing to send.
+		const here = (await tess.store.getCase("c_look")) as Case;
+		expect(here.annotations[0]?.element).toMatchObject(look);
+	});
+});
+
 describe("a file this build writes", () => {
 	test("0.3.0 reads it, without what it does not know; this build reads it back whole, without this browser's notes", async () => {
 		await startCase(tess, "c_file");
@@ -494,5 +557,41 @@ describe("a file this build writes", () => {
 		expect(back.annotations[0]?.createdVia).toBeUndefined();
 		expect(back.via).toBeUndefined();
 		expect(back.createdVia).toBeUndefined();
+	});
+	test("an element's look (DEC-048): 0.3.0 reads the file without it; this build reads it back", async () => {
+		await startCase(tess, "c_file_look");
+		await addMark(tess, "c_file_look", "Book is hard to read", {
+			element: true,
+		});
+		const look = {
+			styles: { color: "rgb(245, 207, 88)", "font-size": "16px" },
+			backdrop: { color: "rgb(242, 194, 48)", depth: 0, image: true },
+			siblings: [
+				{ offset: 1, tag: "a", rect: { x: 1, y: 2, width: 3, height: 4 } },
+			],
+		};
+		const c = await change(tess, "c_file_look", (k) => ({
+			...k,
+			annotations: k.annotations.map((a) =>
+				a.element === null ? a : { ...a, element: { ...a.element, ...look } },
+			),
+		}));
+		const zip = await exportCase(tess.store, c);
+		const json = JSON.parse(
+			new TextDecoder().decode(
+				(await readZip(zip)).get("case.json") as Uint8Array,
+			),
+		);
+		expect(json.annotations[0]?.element).toMatchObject(look);
+		const old = validateCase030(json);
+		const element = old.annotations[0]?.element as unknown as Record<
+			string,
+			unknown
+		>;
+		expect(element["selector"]).toBe("form > button");
+		for (const key of ["styles", "backdrop", "siblings"])
+			expect(key in element).toBe(false);
+		const back = await storeImport(new MemoryStore(), await readExport(zip));
+		expect(back.annotations[0]?.element).toMatchObject(look);
 	});
 });

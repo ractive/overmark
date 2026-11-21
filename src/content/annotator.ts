@@ -34,6 +34,7 @@ import {
 	type Rect,
 	type Shape,
 	type Shot,
+	type SiblingBox,
 	shapeBounds,
 	translateShape,
 } from "../lib/case.ts";
@@ -42,6 +43,7 @@ import {
 	describeElement,
 	documentRect,
 } from "../lib/element.ts";
+import { atShot, siblingsOf, withLook } from "../lib/look.ts";
 import type {
 	AnnotateTarget,
 	CaptureResult,
@@ -99,8 +101,11 @@ interface Draft {
 	/** The window's scroll position then. */
 	scroll: Point;
 	/** Its screenshot and its place on it, once taken. */
-	/** `box`: the element in the document at the shot, if it moved since `details`. */
-	shot?: { view: View; shape: Shape; box?: Rect };
+	/**
+	 * `box`: the element in the document at the shot, if it moved since
+	 * `details`; `siblings`: its neighbours' boxes measured then (DEC-048).
+	 */
+	shot?: { view: View; shape: Shape; box?: Rect; siblings?: SiblingBox[] };
 	/** The case it was queued for: it never goes into another one unasked. */
 	queuedFor?: { caseId: string; title: string };
 	/** Why its screenshot could not be taken, if it could not. */
@@ -582,7 +587,16 @@ export class Annotator {
 			shape,
 			comment: "",
 			element,
-			details: details(element),
+			// How the mark's own element looks, once, now (DEC-048); not its ends'.
+			details:
+				element === null
+					? null
+					: withLook(
+							describeElement(element, context),
+							element,
+							this.#scroll(),
+							this.overlay.host,
+						),
 			...(ends === undefined
 				? {}
 				: { ends: { start: details(ends.start), end: details(ends.end) } }),
@@ -1213,6 +1227,7 @@ export class Annotator {
 			let image: CaptureResult;
 			let shape: Shape;
 			let box: Rect | undefined;
+			let siblings: SiblingBox[] | undefined;
 			let scroll: Point;
 			let viewport: PageInfo["viewport"];
 			try {
@@ -1222,6 +1237,9 @@ export class Annotator {
 				shape = this.#onWindow(draft);
 				scroll = this.#scroll();
 				box = this.#boxOn(draft, scroll);
+				// The neighbours at the same moment as the box (DEC-048).
+				if (box !== undefined && draft.element !== null)
+					siblings = siblingsOf(draft.element, scroll, this.overlay.host);
 				viewport = {
 					width: win.innerWidth,
 					height: win.innerHeight,
@@ -1249,7 +1267,12 @@ export class Annotator {
 			this.#shown = view;
 			// The one shown before may be needed no longer.
 			this.#retire();
-			draft.shot = { view, shape, ...(box ? { box } : {}) };
+			draft.shot = {
+				view,
+				shape,
+				...(box ? { box } : {}),
+				...(siblings ? { siblings } : {}),
+			};
 			// Undone while it was being taken.
 			if (!this.#drafts.includes(draft)) this.#forget(draft);
 		} finally {
@@ -1338,7 +1361,7 @@ export class Annotator {
 
 	/** What the case stores for a draft that has its screenshot. */
 	#annotationOf(d: Draft): AnnotationDraft {
-		const { view, shape, box } = d.shot as NonNullable<Draft["shot"]>;
+		const { view, shape, box, siblings } = d.shot as NonNullable<Draft["shot"]>;
 		return {
 			id: `a${d.number}`,
 			number: d.number,
@@ -1346,8 +1369,9 @@ export class Annotator {
 			comment: d.comment,
 			author: "user",
 			shape,
-			// Where the shot shows it: loading places the mark relative to it.
-			element: d.details && box ? { ...d.details, rect: box } : d.details,
+			// Where the shot shows it: loading places the mark relative to it;
+			// its neighbours as they were then, not when it was drawn (DEC-048).
+			element: d.details && box ? atShot(d.details, box, siblings) : d.details,
 			...(d.ends === undefined ? {} : { ends: d.ends }),
 			cropRect: cropRectFor(shapeBounds(shape), view.shot.viewport),
 		};

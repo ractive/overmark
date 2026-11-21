@@ -496,6 +496,63 @@ serverTest("an arrow's ends at a real server (DEC-047; its DEC-020)", () => {
 	}, 120_000);
 });
 
+serverTest("a mark's look at a real server (DEC-048; its DEC-021)", () => {
+	const base = BASE as string;
+
+	test("goes with the new mark, comes back to another device, and nothing more is sent", async () => {
+		const caseId = `c_lk${Date.now().toString(36)}`;
+		const tess = await real(base, "tess", "tess@example.com");
+		const dana = await real(base, "dana", "dana@example.com");
+		await signIn(tess.device);
+		await signIn(dana.device);
+		await startCase(tess.device, caseId);
+		const a = await addMark(tess.device, caseId, "Book is hard to read", {
+			element: true,
+		});
+		const look = {
+			styles: {
+				color: "rgb(245, 207, 88)",
+				"background-color": "rgb(242, 194, 48)",
+				"font-family": '"Inter", system-ui',
+			},
+			backdrop: { color: "rgb(242, 194, 48)", depth: 0 },
+			siblings: [
+				{ offset: -1, tag: "p", rect: { x: 1, y: 2, width: 30, height: 40 } },
+			],
+		};
+		await change(tess.device, caseId, (c, now) => ({
+			...c,
+			annotations: c.annotations.map((x) =>
+				x.id === a.id && x.element !== null
+					? { ...x, element: { ...x.element, ...look } }
+					: x,
+			),
+			updatedAt: now,
+		}));
+		await tess.device.engine.request();
+		expect(status(tess.device)?.problems).toEqual([]);
+		await dana.device.engine.request();
+		const there = ((await dana.device.store.getCase(caseId)) as Case)
+			.annotations[0];
+		expect(there?.element).toMatchObject(look);
+		// Both again: neither has anything to send.
+		const sent: string[] = [];
+		for (const d of [tess.device, dana.device]) {
+			const ops = d.api.ops.bind(d.api);
+			d.api.ops = async (team, list) => {
+				sent.push(...list.map((o) => o.type));
+				return ops(team, list);
+			};
+			await d.engine.request();
+		}
+		expect(sent).toEqual([]);
+		await removeCase(tess.device, caseId);
+		await tess.device.engine.request();
+		await tess.session.end(base);
+		await dana.session.end(base);
+	}, 120_000);
+});
+
 serverTest("a browser's 0.3.0 data, opened by this build", () => {
 	const base = BASE as string;
 

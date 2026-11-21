@@ -158,6 +158,12 @@ export interface components {
 			/** @constant */
 			verified?: true;
 		};
+		/** @description The colour that shows behind the element: its own background colour or, while that is transparent or translucent, composited over its ancestors' until an opaque one. color: as computed. depth: how many steps up the opaque background is (0: the element itself), an integer of at most 1,000; absent when none was and the page's canvas is under it. image: true when a background image or gradient on the way may show instead of the colour. The server drops the whole backdrop when color is empty, longer than 300 characters or names a URL (as a style value), and depth when it is not such an integer; not refused. Hard bound: color of at most 2,000 characters. */
+		Backdrop: {
+			color: string;
+			depth?: number;
+			image?: boolean;
+		};
 		BlobInfo: {
 			sha256: string;
 			bytes: number;
@@ -283,6 +289,13 @@ export interface components {
 				height: number;
 			};
 			selector: string;
+			styles?: components["schemas"]["ElementStyles"];
+			backdrop?: components["schemas"]["Backdrop"];
+			siblings?: components["schemas"]["SiblingBox"][];
+		};
+		/** @description Computed CSS of the element when the mark was made: property name to its value as the browser computed it. Data, shown as text only. Which properties is the client's choice. The server keeps at most 40 entries (the first ones), each with a name of a-z, digits and - (a vendor prefix allowed, never a custom property `--x`) of at most 60 characters and a value of at most 300 characters that names no URL (url(, image(, image-set(, cross-fade(, element(, src(, paint(, :// or a quoted path, also behind CSS escapes or comments); what does not fit is dropped, not refused. Hard bounds, which make the request invalid: at most 200 entries, names of 200 and values of 2,000 characters. */
+		ElementStyles: {
+			[key: string]: string;
 		};
 		/** @description What an AI app found out about a mark. */
 		Finding: {
@@ -612,6 +625,12 @@ export interface components {
 			viewport: components["schemas"]["Viewport"];
 			capturedAt: components["schemas"]["Timestamp"];
 			rev: number;
+		};
+		/** @description The box of one of the element's nearest element siblings. offset: its place relative to the element, an integer from -100 to 100, never 0 (-1 the sibling right before it, 1 the one right after). tag: the element's name (a letter, then letters, digits, -, _, . or :; at most 100). rect: in the same document CSS pixels as the element's rect. The server drops a sibling whose offset or tag is not so, and keeps the first 6; not refused. */
+		SiblingBox: {
+			offset: number;
+			tag: string;
+			rect: components["schemas"]["Rect"];
 		};
 		/** @description Who did something, and when: the person (set by the server from the caller's login, never taken from a client) and the AI app they acted through. Written in words: `Dana via Claude Code`. */
 		Stamp: {

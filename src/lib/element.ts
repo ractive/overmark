@@ -22,6 +22,7 @@
  * | `ancestors` | up to six, also outside a shadow root: tag plus test id or first readable class | 300 each |
  * | `rect`, `page` | position and size, the page's size | |
  * | `selector` | a CSS selector built from the above; empty when none finds exactly this element (inside a shadow root, or too long) | 2000 |
+ * | `styles`, `backdrop`, `siblings` | a mark's own element only, once when it is made (look.ts, DEC-048): a fixed list of computed properties, the colour behind it, up to six neighbours' boxes; never on a page's candidates | 40 styles of 300 |
  *
  * The text of an editable element itself is not recorded either, and neither
  * its name from content. `withinLimits` applies the limits that the page's
@@ -29,12 +30,15 @@
  */
 
 import {
+	type Backdrop,
 	ELEMENT_ATTRIBUTES,
 	type ElementDetails,
 	hashRoute,
 	type Rect,
+	type SiblingBox,
 } from "./case.ts";
 import { isGeneratedId, readableClass, readableClasses } from "./classes.ts";
+import { contrastRatio, parseColor } from "./colour.ts";
 import { closestAcross, hostOf, inDocument, parentOf } from "./shadow.ts";
 
 export const TEST_ID_ATTRIBUTES = [
@@ -749,4 +753,95 @@ export function summarize(details: ElementDetails): string {
 		parts.push(details.classes.slice(0, 3).join(" "));
 	if (details.heading) parts.push(`under "${details.heading.slice(0, 50)}"`);
 	return parts.join(" · ");
+}
+
+const cutText = (value: string, max: number): string =>
+	value.length <= max ? value : `${value.slice(0, max)}…`;
+
+/** A mark's recorded computed styles in one line (DEC-048): `color: rgb(…); font-size: 14px`. */
+export function stylesLine(styles: Record<string, string>): string {
+	return cutText(
+		Object.entries(styles)
+			.map(([name, value]) => `${name}: ${cutText(value, 120)}`)
+			.join("; "),
+		2000,
+	);
+}
+
+/** The colour behind an element in words (DEC-048): `rgb(255, 255, 255), 2 up`. */
+export function backdropLine(backdrop: Backdrop): string {
+	const where =
+		backdrop.depth !== undefined
+			? backdrop.depth === 0
+				? "the element's own"
+				: `${backdrop.depth} up`
+			: parseColor(backdrop.color) === undefined
+				? "as the browser gives it, not composited"
+				: "no opaque background up to the page: over its canvas, as its colour scheme gives it";
+	return `${backdrop.color}, ${where}${backdrop.image ? "; a background image or gradient on the way may show instead" : ""}`;
+}
+
+const rounded = (v: number) => Math.round(v * 100) / 100;
+
+/** A sibling's box in a line (DEC-048): `-1 button 96×40 at 24, 310`. */
+export function siblingLine(sibling: SiblingBox): string {
+	const r = sibling.rect;
+	return `${sibling.offset > 0 ? "+" : ""}${sibling.offset} ${sibling.tag} ${rounded(r.width)}×${rounded(r.height)} at ${rounded(r.x)}, ${rounded(r.y)}`;
+}
+
+/**
+ * The text colour on the colour behind, with their WCAG contrast where it
+ * holds, else why there is none (DEC-048). Never a ratio known not to hold:
+ * none at the element's own opacity below 1 (what is recorded does not
+ * keep its own background apart from what lies behind it, so the blend
+ * cannot be worked out), none without an opaque background found (the
+ * canvas colour is the browser's, not reported), none for a colour this
+ * does not read, none when the walk found a filter, a blend mode or an
+ * ancestor's opacity (then no backdrop is recorded).
+ */
+function colours(details: ElementDetails): string | undefined {
+	const s = details.styles ?? {};
+	const color = s["color"];
+	const backdrop = details.backdrop;
+	if (color === undefined && backdrop === undefined) return undefined;
+	if (backdrop === undefined)
+		return `${color}; no contrast ratio: the colour behind it is not known (a filter, a blend mode or an ancestor's opacity changes what shows, which is not worked out)`;
+	if (color === undefined) return `on ${backdrop.color}`;
+	const pair = `${color} on ${backdrop.color}`;
+	const opacity = Number.parseFloat(s["opacity"] ?? "1");
+	if (Number.isFinite(opacity) && opacity < 1)
+		return `${pair}; no contrast ratio: the element is drawn at opacity ${s["opacity"]}, paler than these colours, and what lies behind its own background is not recorded`;
+	if (
+		parseColor(color) === undefined ||
+		parseColor(backdrop.color) === undefined
+	)
+		return `${pair}; no contrast ratio: a colour in a form this does not work out`;
+	if (backdrop.depth === undefined)
+		return `${pair}; no contrast ratio: no opaque background up to the page, and the canvas colour is the browser's (taken from the page's colour scheme, not reported)`;
+	const ratio = contrastRatio(color, backdrop.color);
+	if (ratio === undefined) return pair;
+	return `${pair}, contrast ${ratio.toFixed(2)}:1${backdrop.image ? " (a background image or gradient may show instead)" : ""}`;
+}
+
+/**
+ * The few values of a mark's look an AI reads first (DEC-048), in a line:
+ * `rgb(170, 170, 170) on rgb(255, 255, 255), contrast 2.32:1 · 14px/20px 600 "Inter" · inline-flex`.
+ * Undefined when nothing was recorded.
+ */
+export function lookSummary(details: ElementDetails): string | undefined {
+	const s = details.styles ?? {};
+	const parts: string[] = [];
+	const pair = colours(details);
+	if (pair !== undefined) parts.push(pair);
+	const size = s["font-size"];
+	const font = [
+		size === undefined
+			? undefined
+			: `${size}${s["line-height"] === undefined ? "" : `/${s["line-height"]}`}`,
+		s["font-weight"],
+		s["font-family"]?.split(",")[0]?.trim(),
+	].filter((v): v is string => v !== undefined && v !== "");
+	if (font.length > 0) parts.push(font.join(" "));
+	if (s["display"] !== undefined) parts.push(s["display"]);
+	return parts.length > 0 ? cutText(parts.join(" · "), 400) : undefined;
 }

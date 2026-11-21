@@ -29,7 +29,7 @@ import {
 	shotUrl,
 	type UserRef,
 } from "./case.ts";
-import { summarize } from "./element.ts";
+import { lookSummary, summarize } from "./element.ts";
 
 const KIND: Record<ShapeKind, string> = {
 	element: "element",
@@ -222,6 +222,9 @@ function annotation(a: Annotation, page: string | undefined): string {
 		if (a.element.selector)
 			lines.push(`- Selector: ${code(a.element.selector)}`);
 		if (a.element.landmark) lines.push(`- In: ${inline(a.element.landmark)}`);
+		// How it looked when marked: the few values an AI reads first (DEC-048).
+		const look = lookSummary(a.element);
+		if (look !== undefined) lines.push(`- Look: ${inline(look)}`);
 	} else {
 		lines.push("- Element: none recorded");
 	}
