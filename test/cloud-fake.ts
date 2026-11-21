@@ -670,6 +670,8 @@ export class FakeServer {
 						shape: op.mark.shape,
 						crop: op.mark.crop,
 						element: op.mark.element,
+						// Set with the mark, never patched (the server's DEC-020).
+						...(op.mark.ends === undefined ? {} : { ends: op.mark.ends }),
 						resolution,
 						reopens: this.#stampReopens(
 							user,

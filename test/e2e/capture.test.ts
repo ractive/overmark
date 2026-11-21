@@ -71,14 +71,28 @@ describe.skipIf(browserBinary === undefined)(
 			// 3. An arrow from that badge to the gravel bike's price, ending on
 			// its bold amount.
 			await tool(page, "arrow");
-			// Measured again: the comment's field may have scrolled the page.
+			// The cards in the middle of the window, and measured again: the
+			// comment's field may have scrolled the page so that the badge is
+			// at the top, under the bar Sitegloss shows there once the marks
+			// are in the case (a press on it draws nothing; it failed so in CI).
+			await page.eval(
+				`document.querySelector(".pp-card-new").scrollIntoView({ block: "center" })`,
+			);
+			await page.eval(
+				"new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))",
+			);
 			const from = await boxOf(page, ".pp-card-new .pp-badge");
 			const amount = await boxOf(
 				page,
 				"[data-testid=card-gravel-price] strong",
 			);
+			// From the badge's left end, not its middle: the note's pin is
+			// there, and a press on a mark's pin opens that mark instead of
+			// drawing (DEC-027), once the note is in the case.
+			const left = from.x + 3;
+			expect(from.x + from.width / 2 - left).toBeGreaterThan(14);
 			await page.drag(
-				{ x: from.x + from.width / 2, y: from.y + from.height / 2 },
+				{ x: left, y: from.y + from.height / 2 },
 				{ x: amount.x + amount.width / 2, y: amount.y + amount.height / 2 },
 			);
 			await comment(page, "Arrow");
@@ -96,8 +110,11 @@ describe.skipIf(browserBinary === undefined)(
 			const words = await page.eval<Box>(
 				`(() => { const r = document.createRange(); r.selectNodeContents(document.querySelector("[data-testid=card-city-price]")); const { x, y, width, height } = r.getBoundingClientRect(); return { x, y, width, height }; })()`,
 			);
+			// Not from the price's first letter: the Book link's mark (1) has its
+			// pin at the link's corner just below, and a press on a pin opens
+			// that mark, once it is in the case (DEC-027).
 			await page.drag(
-				{ x: words.x, y: price.y + price.height + 2 },
+				{ x: words.x + 24, y: price.y + price.height + 2 },
 				{ x: words.x + words.width, y: price.y + price.height + 4 },
 			);
 			await comment(page, "Underline");

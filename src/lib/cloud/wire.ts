@@ -33,6 +33,7 @@ import {
 	MAX_TITLE,
 	MAX_URL,
 	MAX_VERDICT,
+	type MarkEnds,
 	markSignature,
 	pageAt,
 	pageKey,
@@ -308,6 +309,16 @@ export function newMarkOf(
 		reopens: content.reopens,
 		findings: content.findings,
 		...(created ? { createdAt: created } : {}),
+		// An arrow's or an open stroke's ends (DEC-047; the server's DEC-020):
+		// with the new mark only, cut as `element` is.
+		...(a.ends === undefined
+			? {}
+			: {
+					ends: {
+						start: elementOut(a.ends.start),
+						end: elementOut(a.ends.end),
+					},
+				}),
 	};
 }
 
@@ -710,7 +721,14 @@ const contentOfNew = (n: OpOf<"case.create">["case"]): CaseContent => ({
  */
 export function applyOp(book: CaseBook, op: Op, number?: number): void {
 	if (op.type === "case.create") {
-		book.shadow = { case: contentOfNew(op.case), shots: {}, marks: {} };
+		// A new case's thread is empty at the server: known as such (a shadow
+		// without one is a book from before DEC-046, read again once).
+		book.shadow = {
+			case: contentOfNew(op.case),
+			shots: {},
+			marks: {},
+			comments: {},
+		};
 		return;
 	}
 	const shadow = book.shadow;
@@ -935,6 +953,11 @@ export function contentIn(m: WireMark): MarkContent {
 		reopens: (m.reopens ?? []).slice(-MAX_REOPENS).map(reopenIn),
 		findings: (m.findings ?? []).slice(0, MAX_FINDINGS).map(findingIn),
 	};
+}
+
+/** A mark's ends as the server sends them (DEC-047; the server's DEC-020). */
+function endsIn(e: NonNullable<WireMark["ends"]>): MarkEnds {
+	return { start: elementIn(e.start), end: elementIn(e.end) };
 }
 
 function elementIn(e: WireElement | null | undefined): ElementDetails | null {
@@ -1474,10 +1497,16 @@ export function mergeCase(
 		const id = markHere.get(w.id);
 		const a = c.annotations.find((x) => x.id === id);
 		if (a !== undefined) {
-			const merged = withContent(
+			const kept = withContent(
 				a,
 				mergeContent(markContent(a), before?.content, content),
 			);
+			// Its ends are set once: what this device drew stays; one drawn
+			// elsewhere comes from the server.
+			const merged =
+				kept.ends === undefined && w.ends !== undefined
+					? { ...kept, ends: endsIn(w.ends) }
+					: kept;
 			const next: Annotation = records(
 				creator === undefined ? merged : { ...merged, createdBy: creator },
 			);
@@ -1514,6 +1543,7 @@ export function mergeCase(
 						crop: cropImage(markId),
 						element: drawn.element,
 						...(creator === undefined ? {} : { createdBy: creator }),
+						...(w.ends === undefined ? {} : { ends: endsIn(w.ends) }),
 					},
 					content,
 				),
@@ -1820,7 +1850,7 @@ function adopt(
 		teamId,
 		marks: {},
 		shots: {},
-		shadow: { case: caseContent(c), shots: {}, marks: {} },
+		shadow: { case: caseContent(c), shots: {}, marks: {}, comments: {} },
 	};
 	const shadow = next.shadow as Shadow;
 	const shotOf = new Map<string, string>();

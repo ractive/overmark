@@ -114,12 +114,21 @@ describe.skipIf(SERVER === undefined || browserBinary === undefined)(
 			await until(
 				async () => {
 					const allow = `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Allow")`;
-					const asks = await sign
-						.eval<boolean>(
-							`location.pathname.startsWith("/consent") && !!${allow}`,
-						)
-						.catch(() => false);
-					if (asks) await sign.click(allow).catch(() => undefined);
+					// The window closes by itself once it is done: a command sent to
+					// it then is never answered, so none is waited for long.
+					const asks = await Promise.race([
+						sign
+							.eval<boolean>(
+								`location.pathname.startsWith("/consent") && !!${allow}`,
+							)
+							.catch(() => false),
+						Bun.sleep(2000).then(() => false),
+					]);
+					if (asks)
+						await Promise.race([
+							sign.click(allow).catch(() => undefined),
+							Bun.sleep(2000),
+						]);
 					return (await h.browser.targets()).some(
 						(t) => t.targetId === opened?.targetId,
 					);

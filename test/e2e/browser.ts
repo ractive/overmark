@@ -118,7 +118,7 @@ const pipe =
  * `downloads` API names its files only that way, not under CDP's
  * `Browser.setDownloadBehavior` "allow".
  */
-function newProfile(): string {
+export function newProfile(): string {
 	const profile = mkdtempSync(join(tmpdir(), "sitegloss-chrome-"));
 	mkdirSync(join(profile, "Default"));
 	writeFileSync(
@@ -279,6 +279,8 @@ export class Browser {
 	readonly #pending = new Map<number, Pending>();
 	readonly #listeners = new Set<Listener>();
 	#nextId = 0;
+	/** The profile outlives this browser (`launchIn`). */
+	#keep = false;
 
 	/** Where Chrome's own settings save downloads (see `newProfile`). */
 	get downloads(): string {
@@ -307,6 +309,44 @@ export class Browser {
 					l(msg.method, msg.params ?? {}, msg.sessionId);
 			}
 		});
+	}
+
+	/**
+	 * Launch on the profile in `profile` with the unpacked extension in
+	 * `extensionDir`, and leave the profile where it is on close: for loading
+	 * another build over the data an earlier one left (an upgrade). Chrome
+	 * keeps running the worker script it cached for an extension of the same
+	 * version until it is reloaded (chrome://extensions, `reloadExtension`).
+	 */
+	static async launchIn(
+		binary: string,
+		extensionDir: string,
+		profile: string,
+	): Promise<Browser> {
+		// Killed with the tests, like any other (the profile then goes too).
+		const proc = started(
+			Bun.spawn(
+				[
+					binary,
+					...chromeArguments(profile),
+					"--remote-debugging-port=0",
+					`--disable-extensions-except=${extensionDir}`,
+					`--load-extension=${extensionDir}`,
+					"about:blank",
+				],
+				{ stdin: "ignore", stdout: "ignore", stderr: "pipe" },
+			),
+			profile,
+		);
+		try {
+			const browser = new Browser(proc, profile, await connectTo(proc));
+			browser.#keep = true;
+			return browser;
+		} catch (e) {
+			proc.kill("SIGKILL");
+			await proc.exited;
+			throw e;
+		}
 	}
 
 	static async launch(binary: string, extensionDir: string): Promise<Browser> {
@@ -492,7 +532,7 @@ export class Browser {
 		this.#transport.close();
 		if (this.#proc.exitCode === null) this.#proc.kill("SIGKILL");
 		await this.#proc.exited;
-		rmSync(this.#profile, { recursive: true, force: true });
+		if (!this.#keep) rmSync(this.#profile, { recursive: true, force: true });
 	}
 }
 

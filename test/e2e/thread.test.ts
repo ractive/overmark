@@ -19,8 +19,9 @@ import {
 	signIn,
 	startCase,
 } from "../cloud-helpers.ts";
-import { PASSWORD, real, SERVER } from "../cloud-real.ts";
+import { real, SERVER } from "../cloud-real.ts";
 import type { Page } from "./browser.ts";
+import { signInPanel } from "./cloud-steps.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import { type Db, openCase, panelHome, READ_DB, until } from "./steps.ts";
 
@@ -55,52 +56,6 @@ async function shot(
 	}
 }
 
-/** Sign Tess in at `base` in the panel, as a user does. */
-async function signInPanel(h: Harness, panel: Page, base: string) {
-	await panel.waitFor(`${id("cloud")}?.dataset.cloud === "off"`);
-	await panel.eval(
-		`(() => { document.querySelector(".cloud-server").open = true; const choice = ${id("cloud-server-choice")}; choice.value = "other"; choice.dispatchEvent(new Event("change")); const field = ${id("cloud-server")}; field.value = ${JSON.stringify(base)}; field.dispatchEvent(new Event("change")); field.blur(); return true; })()`,
-	);
-	await panel.waitFor(
-		`${text("cloud")}.includes(${JSON.stringify(new URL(base).host)})`,
-	);
-	const before = new Set((await h.browser.targets()).map((t) => t.targetId));
-	await panel.click(
-		`${id("cloud")}.querySelector('[data-action="cloud-sign-in"]')`,
-	);
-	const opened = (
-		await until(
-			() => h.browser.targets(),
-			(now) =>
-				now.some((t) => !before.has(t.targetId) && t.url.startsWith(base)),
-			20_000,
-		)
-	).find((t) => !before.has(t.targetId) && t.url.startsWith(base));
-	const sign = await h.browser.attachPage(opened?.targetId as string);
-	await sign.waitFor(`document.querySelector('input[type="email"]')`, 20_000);
-	await sign.click(`document.querySelector('input[type="email"]')`);
-	await sign.type("tess@example.com");
-	await sign.click(`document.querySelector('input[type="password"]')`);
-	await sign.type(PASSWORD);
-	await sign.click(`document.querySelector('button[type="submit"]')`);
-	await until(
-		async () => {
-			const allow = `[...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Allow")`;
-			const asks = await sign
-				.eval<boolean>(`location.pathname.startsWith("/consent") && !!${allow}`)
-				.catch(() => false);
-			if (asks) await sign.click(allow).catch(() => undefined);
-			return (await h.browser.targets()).some(
-				(t) => t.targetId === opened?.targetId,
-			);
-		},
-		(open) => !open,
-		30_000,
-	);
-	await panel.waitFor(`${text("cloud-who")}.includes("Tess Tester")`, 20_000);
-	await panel.waitFor(`${text("cloud-status")}.length > 0`, 30_000);
-}
-
 describe.skipIf(SERVER === undefined || browserBinary === undefined)(
 	"the thread and closing in the side panel, against a real server",
 	() => {
@@ -117,7 +72,7 @@ describe.skipIf(SERVER === undefined || browserBinary === undefined)(
 
 		test("comment by hand and through an app, edit and delete one's own, close, filed under Closed, a new mark opens it again", async () => {
 			const panel = await panelHome(h);
-			await signInPanel(h, panel, base);
+			await signInPanel(h.browser, panel, base);
 			const CLAUDE = {
 				id: "https://claude.ai/oauth",
 				name: "Claude",

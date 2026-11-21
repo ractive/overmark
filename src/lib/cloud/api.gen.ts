@@ -316,6 +316,7 @@ export interface components {
 			shape: components["schemas"]["Shape"];
 			crop: components["schemas"]["ImageRef"];
 			element: components["schemas"]["ElementDetails"] | null;
+			ends?: components["schemas"]["MarkEnds"];
 			resolution: components["schemas"]["Resolution"] | null;
 			reopens: components["schemas"]["Reopen"][];
 			findings: components["schemas"]["Finding"][];
@@ -326,6 +327,11 @@ export interface components {
 			createdAt: components["schemas"]["Timestamp"];
 			updatedAt: components["schemas"]["Timestamp"];
 			rev: number;
+		};
+		/** @description The page elements at the two ends of a stroke (an arrow, an open pen stroke), as the extension recorded them when the mark was made. Set with the mark, never changed afterwards. */
+		MarkEnds: {
+			start: components["schemas"]["ElementDetails"] | null;
+			end: components["schemas"]["ElementDetails"] | null;
 		};
 		/**
 		 * @description Derived from the resolution, never stored.
@@ -418,6 +424,7 @@ export interface components {
 						shape: components["schemas"]["Shape"];
 						crop: components["schemas"]["ImageRef"];
 						element: components["schemas"]["ElementDetails"] | null;
+						ends?: components["schemas"]["MarkEnds"];
 						resolution?: components["schemas"]["Resolution"] | null;
 						reopens?: components["schemas"]["Reopen"][];
 						findings?: components["schemas"]["Finding"][];
