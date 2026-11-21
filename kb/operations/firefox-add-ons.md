@@ -107,6 +107,20 @@ To enter or check by hand before that version is published:
 - **Listing:** the texts as in the Chrome Web Store runbook, with "sidebar".
 - **Privacy policy:** the new `PRIVACY.md`.
 
+## For version 0.3.1 (DEC-045 to DEC-048)
+
+- **No new permission, and the manifest's data collection declaration is unchanged**
+  (nothing required; website content and browsing activity optional). What is new falls
+  under those: a mark's recorded look (computed styles, the colour behind the element,
+  the boxes of up to six neighbours) is website content; comments on a case and the names
+  of AI apps (sent to the team beside what they changed) go with the cases the user
+  chose to sync, after the same consent at "Sign in".
+- **Notes to the reviewers,** add: a case has a thread of comments and can be closed;
+  both sync with the team; a change made through a connected AI app is sent with the
+  app's name and host, so that the team sees "person via app".
+- **Listing and privacy policy:** as in the Chrome Web Store runbook (the new
+  `PRIVACY.md`, changed 21 November 2026).
+
 # Citations
 
 - [Extension Workshop: Source code submission](https://extensionworkshop.com/documentation/publish/source-code-submission/)
