@@ -64,7 +64,9 @@ is what a case is about, and finding the element again is a best-effort extra:
 - Each annotation also stores the details of its element (tag, role, accessible name,
   text, test id, the readable part of its classes, the heading above it, its landmark,
   its ancestors, its position). They are hints for the AI app and the dev to find the
-  code, and the input of the matching below.
+  code, and the input of the matching below. A mark's own element also keeps how it
+  looked when the mark was made: computed styles, the colour behind it, its neighbours'
+  boxes (DEC-048), for contrast and alignment questions; matching never reads them.
 - Opening a case in the side panel draws its marks on the tab in front, whatever page
   that is, and highlights each annotation's element where it can be found ("found",
   "probable", "ambiguous" with candidates, or "not found"). While the case is open the

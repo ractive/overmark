@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { Annotation, Case } from "../src/lib/case.ts";
+import type { Annotation, Case, ElementDetails } from "../src/lib/case.ts";
 import type { Op, WireMark, WireShot } from "../src/lib/cloud/api.ts";
 import { type CaseBook, emptyBook } from "../src/lib/cloud/book.ts";
 import {
@@ -512,5 +512,127 @@ describe("a case that is here and at the server, with no record of what the serv
 			// Not its pages: the server keeps that list, from the screenshots.
 			lastNumber: 2,
 		});
+	});
+});
+
+describe("a mark's look: computed styles, backdrop, siblings (DEC-048)", () => {
+	const button: ElementDetails = {
+		tag: "button",
+		name: "Book now",
+		classes: ["Button_ghost"],
+		attributes: { type: "button" },
+		ancestors: ["div.Hero"],
+		rect: { x: 24, y: 310, width: 96, height: 40 },
+		page: { width: 1280, height: 3000 },
+		selector: "button.Button_ghost",
+		heading: "Book a ride",
+	};
+	const link: ElementDetails = {
+		tag: "a",
+		role: "link",
+		text: "Prices",
+		classes: [],
+		attributes: { href: "/demo#prices" },
+		ancestors: ["nav"],
+		rect: { x: 400, y: 10, width: 60, height: 20 },
+		page: { width: 1280, height: 3000 },
+		selector: "nav > a:nth-of-type(2)",
+	};
+	const look = {
+		styles: {
+			color: "rgb(245, 207, 88)",
+			"background-color": "rgb(242, 194, 48)",
+			"font-size": "16px",
+			display: "inline-block",
+		},
+		backdrop: { color: "rgb(242, 194, 48)", depth: 0 },
+		siblings: [
+			{ offset: -1, tag: "p", rect: { x: 24, y: 260, width: 300, height: 40 } },
+		],
+	};
+
+	test("is no part of a mark's fingerprint: the build before this one computed the same", () => {
+		// fixedOf of these three drawings, computed by the extension's main
+		// (c4e97c9) before this change: a book that build wrote holds them.
+		const before = {
+			element: "1h9cbfikwf9",
+			arrow: "1s41a021xzz",
+			box: "1yh3r7b9ryr",
+		};
+		const drawings: Record<
+			keyof typeof before,
+			Pick<Annotation, "shape" | "element">
+		> = {
+			element: {
+				shape: { kind: "element", rect: button.rect },
+				element: button,
+			},
+			arrow: {
+				shape: {
+					kind: "arrow",
+					from: { x: 30, y: 320 },
+					to: { x: 410, y: 15 },
+				},
+				element: link,
+			},
+			box: {
+				shape: { kind: "box", rect: { x: 5, y: 5, width: 50, height: 50 } },
+				element: null,
+			},
+		};
+		for (const [name, drawing] of Object.entries(drawings) as [
+			keyof typeof before,
+			Pick<Annotation, "shape" | "element">,
+		][]) {
+			expect(fixedOf(drawing)).toBe(before[name]);
+			if (drawing.element !== null)
+				expect(
+					fixedOf({ ...drawing, element: { ...drawing.element, ...look } }),
+				).toBe(before[name]);
+		}
+	});
+
+	test("goes out once, with mark.create, within what the server keeps; never in mark.patch", () => {
+		const styled: Annotation = {
+			...mark(1),
+			shape: { kind: "element", rect: button.rect },
+			element: {
+				...button,
+				...look,
+				// Not what this build records; a file could hold it. Left out.
+				styles: { ...look.styles, "--brand": "#0a7", cursor: "url(x.cur)" },
+			},
+		};
+		const c = local([styled, mark(2)]);
+		const { book, ops } = synced(c);
+		const created = ops.filter(
+			(op): op is Extract<Op, { type: "mark.create" }> =>
+				op.type === "mark.create",
+		);
+		expect(created[0]?.mark.element).toEqual({ ...button, ...look });
+		expect(created[1]?.mark.element).toBeNull();
+		// Sent: nothing more.
+		expect(deriveOps(c, book, ref, newId).ops).toEqual([]);
+		// A comment changed: a mark.patch without an element.
+		const edited = local([{ ...styled, comment: "Edited" }, mark(2)]);
+		const { ops: next } = deriveOps(edited, book, ref, newId);
+		expect(next.map((op) => op.type)).toEqual(["mark.patch"]);
+		expect(JSON.stringify(next)).not.toContain("styles");
+	});
+
+	test("a mark the build before synced makes no operation, with or without a look here", () => {
+		const plain: Annotation = {
+			...mark(1),
+			shape: { kind: "element", rect: button.rect },
+			element: button,
+		};
+		const { book } = synced(local([plain, mark(2)]));
+		expect(deriveOps(local([plain, mark(2)]), book, ref, newId).ops).toEqual(
+			[],
+		);
+		const styled = { ...plain, element: { ...button, ...look } };
+		expect(deriveOps(local([styled, mark(2)]), book, ref, newId).ops).toEqual(
+			[],
+		);
 	});
 });

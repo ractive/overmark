@@ -2414,3 +2414,74 @@ whole card under "Our bikes".
   strokes), `test/cloud-crops.test.ts` (the crop of a mark made at the server; none
   sent back; a shape off the screenshot; no extra read), `test/case.test.ts` and
   `test/markdown.test.ts` (`ends`).
+
+## DEC-048: How a marked element looked: computed styles, the colour behind it, its neighbours
+
+2026-11-21. With the server of sitegloss.dev's DEC-021 (pull request ractive/sitegloss.dev#21).
+An AI session that fixed a real case through the MCP server missed "computed styles for
+the marked element: colour, background, font size, and height compared with its
+siblings", to find the cause of a contrast or alignment issue without building the page.
+
+- **What.** Three optional fields on `ElementDetails`: `styles` (property name → computed
+  value), `backdrop` (`{ color, depth?, image? }`: the element's background colour,
+  composited over its ancestors' while transparent or translucent, up to the first
+  opaque one, the page's canvas taken as white under all; `depth` how many steps up;
+  `image` when a background image or gradient on the way may show instead) and
+  `siblings` (up to three element siblings with a box before and three after:
+  `{ offset, tag, rect }`). Only on the mark's own element; not on a stroke's ends (an
+  arrow's element is already the end it points at; the start's `rect` answers
+  alignment between the two; three times the record for little).
+- **Which properties.** The full set `get_mark_element` reads from the live page
+  (`pickStyles` in `inspect.ts`), so that what was recorded and what the page shows now
+  compare name for name: colour, background colour (and a background image only as a
+  gradient), opacity, visibility; font family, size, weight, line height, letter
+  spacing, text alignment, white space, text overflow; display, position and offsets,
+  box sizing, width and height with their limits, margin, padding, border, corners;
+  flex and grid container and item properties, gap, vertical alignment; overflow,
+  z-index, transform, shadow, aspect ratio, pointer events. Plus font style, text
+  transform and text decoration. Values at their initial value are left out as
+  `get_mark_element` leaves them out, sides come together (`padding: 8px 16px`). At most
+  40, colour and type first when there would be more. **Never**: a property whose value
+  can hold an address (cursor, content, mask, filter, clip-path, list-style-image,
+  border-image, shape-outside), a custom property (its value is the author's text), or
+  any value that names a URL after all (`namesUrl`: a fetching function, `://`, a
+  quoted path or query, also behind CSS comments and escapes) — the server drops such a
+  value too, as a backstop.
+- **When.** Once per mark, when it is made: the toolbar's marks (`#add` in the
+  annotator) and an AI app's `add_annotation` (`look.ts`'s `withLook`). Never while a
+  page's marks are found again: `describeElement`, which the candidates' scan calls
+  thousands of times within its time budget, records none of it (tested).
+- **Matching and the fingerprint take no part.** Matching compares the fields it names;
+  `fixedOf` strips the three fields explicitly (`withoutLook`) after the way out and in,
+  and `markPatch` never had the element. A mark synced by the build before this one has
+  the same fingerprint here, with or without a look (frozen fingerprints of main at
+  c4e97c9 in `test/cloud-wire.test.ts`): no mark is made anew, the lesson of `ends`
+  (DEC-047). A look goes out once, with `mark.create`, within what the server keeps
+  (`lookOf` again in `elementOut`); what the server sends back may lack what it dropped,
+  which the fingerprint does not see either. A mark made elsewhere takes the server's.
+- **The server drops, never refuses** (its DEC-021 after review): a style it does not
+  keep never costs the mark. The extension keeps the same rules (`stylesWithin`,
+  `backdropWithin`, `siblingsWithin` in `case.ts`) when a file is read and before
+  anything is sent.
+- **The file `sitegloss/1`** takes the fields as an optional addition; a file's entries
+  outside the rules are left out, never a failed import. 0.3.0 reads such a file and
+  drops them (its `validateCase` maps an element field by field; tested in
+  `test/compat-0-3-0.test.ts`), and on a team it passes them by (its `elementIn` maps
+  field by field), sending nothing more.
+- **Shown.** `get_case`: on the element, `styles` in one line, `backdrop` and each sibling
+  in a line, and `look` (the text colour on the colour behind with their WCAG contrast,
+  the font, the display); compact `get_case` gives `look` beside the summary.
+  `get_mark_element` gives `recorded` beside what the page shows now. case.md says
+  "Look:" with the same line. The panel shows nothing new.
+- **Weak.** The canvas is taken as white, also for a page in a dark colour scheme
+  without a background of its own. A background colour this does not read (`oklch()`,
+  `color(display-p3 …)`) ends the walk and is given as it is, without the layers above
+  it. Opacity of an ancestor is not composited. A text colour over a gradient or picture
+  has no reliable contrast (`image: true` says so).
+- **Tested** in `test/look.test.ts` (colours, contrast, the backdrop, siblings, what a
+  file keeps, the lines; describing a candidate records none), `test/cloud-wire.test.ts`
+  (the fingerprints of the build before; once with `mark.create`; never in
+  `mark.patch`), `test/compat-0-3-0.test.ts` (a 0.3.0 browser on the team; a file read
+  by 0.3.0), `test/tools.test.ts`, `test/markdown.test.ts`, and in Chromium on the demo
+  page (`test/e2e/capture.test.ts`: the low-contrast Book link's colour and amber
+  background, its neighbours, no look on a stroke's ends).

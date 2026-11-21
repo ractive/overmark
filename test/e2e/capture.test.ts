@@ -150,6 +150,39 @@ describe.skipIf(browserBinary === undefined)(
 			expect(mark(5).ends).toBeUndefined();
 			// A note has no ends either.
 			expect(mark(2).ends).toBeUndefined();
+
+			// How the low-contrast Book link looked when it was marked (DEC-048):
+			// its text colour, the colour behind it (its own amber background),
+			// its type and box, and the boxes of the card's parts before it.
+			const look = el(1);
+			expect(look.styles?.["color"]).toBe("rgb(245, 207, 88)");
+			expect(look.styles?.["background-color"]).toBe("rgb(242, 194, 48)");
+			expect(look.backdrop).toEqual({ color: "rgb(242, 194, 48)", depth: 0 });
+			expect(look.styles?.["font-weight"]).toBe("700");
+			// An item of the card's flex column: the browser computes block.
+			expect(look.styles?.["display"]).toBe("block");
+			expect(look.styles?.["padding"]).toMatch(/px/);
+			expect(look.styles?.["border-radius"]).toBe("8px");
+			expect(Object.keys(look.styles ?? {}).length).toBeLessThanOrEqual(40);
+			// Nothing that names a URL, no custom property: the cursor is not a style it records.
+			expect(look.styles?.["cursor"]).toBeUndefined();
+			expect(JSON.stringify(look.styles)).not.toContain("url(");
+			expect(
+				Object.keys(look.styles ?? {}).some((k) => k.startsWith("--")),
+			).toBe(false);
+			expect(look.siblings?.map((s) => [s.offset, s.tag])).toEqual([
+				[-3, "h3"],
+				[-2, "p"],
+				[-1, "p"],
+			]);
+			// The badge has a green background of its own; the price has none
+			// and sits on the white card one step up.
+			expect(el(2).backdrop?.color).toBe("rgb(47, 107, 79)");
+			expect(el(3).backdrop).toEqual({ color: "rgb(255, 255, 255)", depth: 1 });
+			// A stroke's ends record no look; only the mark's own element does.
+			expect(mark(3).ends?.start?.styles).toBeUndefined();
+			expect(mark(3).ends?.end?.styles).toBeUndefined();
+			expect(mark(3).ends?.start?.backdrop).toBeUndefined();
 			await page.send("Page.close");
 		}, 120_000);
 	},

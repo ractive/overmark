@@ -21,6 +21,10 @@ Sitegloss stores in your browser, on your computer:
   its tag, role, name, a short piece of its text, a few attributes, its position, and a
   CSS selector. A link's address is kept as its path; a fragment stays only where it
   names a place on the same page (`#book`) or is a route;
+- for the marked element itself, once when you mark it: how it looked, from a fixed list
+  of computed CSS properties (colours, font, size, spacing, border, alignment, overflow;
+  none that can hold an address, no custom properties), the colour behind it, and the
+  position and size of up to six neighbouring elements (their tag only);
 - screenshots of the visible part of the tab, with the marks on them;
 - its settings, and where it syncs to;
 - if you sign in to sitegloss.dev: your name and e-mail address there, your teams, the

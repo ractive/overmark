@@ -9,7 +9,14 @@
  */
 
 import Ajv2020 from "ajv/dist/2020";
-import { MAX_PAGES, pageKey, samePage } from "../src/lib/case.ts";
+import {
+	type ElementDetails,
+	lookOf,
+	MAX_PAGES,
+	pageKey,
+	samePage,
+	withoutLook,
+} from "../src/lib/case.ts";
 import contract from "../src/lib/cloud/openapi-v1.json" with { type: "json" };
 
 /**
@@ -116,6 +123,15 @@ const stampOf = (at: string, user: UserRef, via: AppRef | undefined) => {
 };
 
 /** A comment row: the comment, and the revision it came at (its place in the thread). */
+/** An element as the server keeps it: its look within the server's rules (its `keptLook`). */
+const kept = <T extends object | null>(element: T): T =>
+	element === null
+		? element
+		: ({
+				...withoutLook(element as unknown as ElementDetails),
+				...lookOf(element as ElementDetails),
+			} as unknown as T);
+
 interface CommentRow extends Row<WireComment> {
 	createdRev: number;
 }
@@ -669,9 +685,18 @@ export class FakeServer {
 						author: op.mark.author ?? "user",
 						shape: op.mark.shape,
 						crop: op.mark.crop,
-						element: op.mark.element,
+						// What the server does not keep of a look is dropped, never
+						// refused (the server's DEC-021).
+						element: kept(op.mark.element),
 						// Set with the mark, never patched (the server's DEC-020).
-						...(op.mark.ends === undefined ? {} : { ends: op.mark.ends }),
+						...(op.mark.ends === undefined
+							? {}
+							: {
+									ends: {
+										start: kept(op.mark.ends.start),
+										end: kept(op.mark.ends.end),
+									},
+								}),
 						resolution,
 						reopens: this.#stampReopens(
 							user,

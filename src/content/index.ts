@@ -13,6 +13,7 @@ import {
 	resolveSelector,
 	selectorProblem,
 } from "../lib/inspect.ts";
+import { withLook } from "../lib/look.ts";
 import type {
 	BlurResult,
 	Broadcast,
@@ -83,7 +84,13 @@ function mark(
 	releaseBlur = pageBlur.hold(blurForms);
 	return {
 		ok: true,
-		details: describeElement(el),
+		// The AI app's mark: how its element looks, once, now (DEC-048).
+		details: withLook(
+			describeElement(el),
+			el,
+			{ x: scrollX, y: scrollY },
+			overlay.host,
+		),
 		rect,
 		viewport: {
 			width: innerWidth,

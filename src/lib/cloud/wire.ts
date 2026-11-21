@@ -19,6 +19,7 @@ import {
 	type Finding,
 	type FindingApp,
 	LANGUAGE,
+	lookOf,
 	MAX_CASE_COMMENT,
 	MAX_CASE_COMMENTS,
 	MAX_COMMENT,
@@ -48,6 +49,7 @@ import {
 	shotImage,
 	shotUrl,
 	type UserRef,
+	withoutLook,
 } from "../case.ts";
 import { cropRectFor } from "../save.ts";
 import type {
@@ -212,11 +214,18 @@ export function markViaOf(a: Annotation): { via?: AppRef } {
  * sides are compared in that form everywhere: an element is cut on the way
  * out (an `id` of 600 characters goes as 500) and on the way in, and a
  * mark compared uncut here with itself cut there was "another mark", made
- * anew at every run.
+ * anew at every run. Without the element's computed styles, backdrop and
+ * siblings (DEC-048): marks synced before had none, and a fingerprint that
+ * took them in would make every one of them another drawing, deleted and
+ * made again for the whole team (the lesson of `ends`, DEC-047).
  */
 export function fixedOf(a: Pick<Annotation, "shape" | "element">): string {
+	const element = elementIn(elementOut(a.element));
 	return hashText(
-		canonical([shapeIn(a.shape), elementIn(elementOut(a.element))]),
+		canonical([
+			shapeIn(a.shape),
+			element === null ? null : withoutLook(element),
+		]),
 	);
 }
 
@@ -232,11 +241,15 @@ const stamp = (value: string | undefined): string | undefined =>
 /** The element's details within what the server takes. */
 function elementOut(e: ElementDetails | null): WireElement | null {
 	if (e === null) return null;
+	const { styles: _s, backdrop: _b, siblings: _i, ...rest } = e;
 	return {
-		...e,
+		...rest,
 		...(e.id === undefined ? {} : { id: e.id.slice(0, 500) }),
 		...(e.testId === undefined ? {} : { testId: e.testId.slice(0, 500) }),
 		...(e.role === undefined ? {} : { role: e.role.slice(0, 200) }),
+		// Within the server's rules again, so that nothing in them can make
+		// the request invalid (DEC-048).
+		...lookOf(e),
 	};
 }
 
@@ -988,6 +1001,9 @@ function elementIn(e: WireElement | null | undefined): ElementDetails | null {
 		rect: e.rect,
 		page: e.page,
 		selector: text(e.selector, 2000),
+		// A mark's computed styles, backdrop and siblings (DEC-048): kept,
+		// never fingerprinted (`fixedOf`).
+		...lookOf(e),
 	} as ElementDetails;
 }
 

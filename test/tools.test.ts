@@ -1582,6 +1582,58 @@ describe("tools", () => {
 		).rejects.toThrow("Open https://www.example.com/kk in the user's tab");
 	});
 
+	test("get_case and get_mark_element show how a mark's element looked when it was made (DEC-048)", async () => {
+		const c = await seed();
+		const looked = {
+			styles: {
+				color: "rgb(245, 207, 88)",
+				"font-size": "16px",
+				display: "inline-block",
+			},
+			backdrop: { color: "rgb(242, 194, 48)", depth: 0 },
+			siblings: [
+				{ offset: -1, tag: "p", rect: { x: 1, y: 2, width: 30, height: 40 } },
+			],
+		};
+		await putCase(store, {
+			...c,
+			annotations: c.annotations.map((a, i) =>
+				i === 0 && a.element !== null
+					? { ...a, element: { ...a.element, ...looked } }
+					: a,
+			),
+		});
+		const view = json(await call("get_case", { caseId: "c_1", images: false }));
+		const shown = view.marks[0].element;
+		expect(shown.styles).toBe(
+			"color: rgb(245, 207, 88); font-size: 16px; display: inline-block",
+		);
+		expect(shown.backdrop).toBe("rgb(242, 194, 48), the element's own");
+		expect(shown.siblings).toEqual(["-1 p 30×40 at 1, 2"]);
+		expect(shown.look).toBe(
+			"rgb(245, 207, 88) on rgb(242, 194, 48), contrast 1.11:1 · 16px · inline-block",
+		);
+		// A mark without one says nothing of it.
+		for (const key of ["styles", "backdrop", "siblings", "look"])
+			expect(key in view.marks[1].element).toBe(false);
+		expect(tools.get("get_case")?.description).toContain("contrast");
+
+		const read = json(
+			await call("get_mark_element", { caseId: "c_1", mark: 1 }),
+		);
+		expect(read.recorded).toEqual({
+			note: expect.stringContaining("when the mark was made"),
+			look: shown.look,
+			styles: shown.styles,
+			backdrop: shown.backdrop,
+			siblings: shown.siblings,
+		});
+		expect(
+			"recorded" in
+				json(await call("get_mark_element", { caseId: "c_1", mark: 2 })),
+		).toBe(false);
+	});
+
 	test("highlight passes on that the page is busy", async () => {
 		await seed();
 		await call("load_case", { caseId: "c_1" });

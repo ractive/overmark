@@ -626,6 +626,23 @@
 				"required": ["id", "host"],
 				"description": "An AI app: its client id, the name it declares, and a host: of its id when that is an address, else of where its sign-in returns to."
 			},
+			"Backdrop": {
+				"type": "object",
+				"properties": {
+					"color": {
+						"type": "string",
+						"maxLength": 2000
+					},
+					"depth": {
+						"type": "number"
+					},
+					"image": {
+						"type": "boolean"
+					}
+				},
+				"required": ["color"],
+				"description": "The colour that shows behind the element: its own background colour or, while that is transparent or translucent, composited over its ancestors' until an opaque one. color: as computed. depth: how many steps up the opaque background is (0: the element itself), an integer of at most 1,000; absent when none was and the page's canvas is under it. image: true when a background image or gradient on the way may show instead of the colour. The server drops the whole backdrop when color is empty, longer than 300 characters or names a URL (as a style value), and depth when it is not such an integer; not refused. Hard bound: color of at most 2,000 characters."
+			},
 			"BlobInfo": {
 				"type": "object",
 				"properties": {
@@ -1268,6 +1285,19 @@
 					"selector": {
 						"type": "string",
 						"maxLength": 8000
+					},
+					"styles": {
+						"$ref": "#/components/schemas/ElementStyles"
+					},
+					"backdrop": {
+						"$ref": "#/components/schemas/Backdrop"
+					},
+					"siblings": {
+						"maxItems": 50,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/SiblingBox"
+						}
 					}
 				},
 				"required": [
@@ -1280,6 +1310,19 @@
 					"selector"
 				],
 				"description": "What is recorded about a mark's element."
+			},
+			"ElementStyles": {
+				"type": "object",
+				"propertyNames": {
+					"type": "string",
+					"maxLength": 200
+				},
+				"additionalProperties": {
+					"type": "string",
+					"maxLength": 2000
+				},
+				"maxProperties": 200,
+				"description": "Computed CSS of the element when the mark was made: property name to its value as the browser computed it. Data, shown as text only. Which properties is the client's choice. The server keeps at most 40 entries (the first ones), each with a name of a-z, digits and - (a vendor prefix allowed, never a custom property `--x`) of at most 60 characters and a value of at most 300 characters that names no URL (url(, image(, image-set(, cross-fade(, element(, src(, paint(, :// or a quoted path, also behind CSS escapes or comments); what does not fit is dropped, not refused. Hard bounds, which make the request invalid: at most 200 entries, names of 200 and values of 2,000 characters."
 			},
 			"Finding": {
 				"type": "object",
@@ -2405,6 +2448,23 @@
 					"rev"
 				],
 				"description": "A screenshot of one page of the case. Never changes once created."
+			},
+			"SiblingBox": {
+				"type": "object",
+				"properties": {
+					"offset": {
+						"type": "number"
+					},
+					"tag": {
+						"type": "string",
+						"maxLength": 200
+					},
+					"rect": {
+						"$ref": "#/components/schemas/Rect"
+					}
+				},
+				"required": ["offset", "tag", "rect"],
+				"description": "The box of one of the element's nearest element siblings. offset: its place relative to the element, an integer from -100 to 100, never 0 (-1 the sibling right before it, 1 the one right after). tag: the element's name (a letter, then letters, digits, -, _, . or :; at most 100). rect: in the same document CSS pixels as the element's rect. The server drops a sibling whose offset or tag is not so, and keeps the first 6; not refused."
 			},
 			"Stamp": {
 				"type": "object",

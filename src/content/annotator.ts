@@ -42,6 +42,7 @@ import {
 	describeElement,
 	documentRect,
 } from "../lib/element.ts";
+import { withLook } from "../lib/look.ts";
 import type {
 	AnnotateTarget,
 	CaptureResult,
@@ -582,7 +583,16 @@ export class Annotator {
 			shape,
 			comment: "",
 			element,
-			details: details(element),
+			// How the mark's own element looks, once, now (DEC-048); not its ends'.
+			details:
+				element === null
+					? null
+					: withLook(
+							describeElement(element, context),
+							element,
+							this.#scroll(),
+							this.overlay.host,
+						),
 			...(ends === undefined
 				? {}
 				: { ends: { start: details(ends.start), end: details(ends.end) } }),
