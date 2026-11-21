@@ -7,6 +7,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Case, ElementDetails } from "../../src/lib/case.ts";
+import { lookSummary } from "../../src/lib/element.ts";
 import type { Page } from "./browser.ts";
 import { browserBinary, type Harness, startHarness } from "./harness.ts";
 import {
@@ -179,6 +180,11 @@ describe.skipIf(browserBinary === undefined)(
 			// and sits on the white card one step up.
 			expect(el(2).backdrop?.color).toBe("rgb(47, 107, 79)");
 			expect(el(3).backdrop).toEqual({ color: "rgb(255, 255, 255)", depth: 1 });
+			// The look line: amber on amber, with the ratio, as an opaque
+			// background was found (the link's own).
+			expect(lookSummary(look)).toStartWith(
+				"rgb(245, 207, 88) on rgb(242, 194, 48), contrast 1.11:1",
+			);
 			// A stroke's ends record no look; only the mark's own element does.
 			expect(mark(3).ends?.start?.styles).toBeUndefined();
 			expect(mark(3).ends?.end?.styles).toBeUndefined();

@@ -76,6 +76,7 @@ import {
 	stylesLine,
 	summarize,
 } from "../lib/element.ts";
+import type { Relation } from "../lib/inspect.ts";
 import type {
 	AnnotationMatch,
 	BlurResult,
@@ -440,9 +441,7 @@ function caseView(
 							? summarize(a.element)
 							: elementView(a.element),
 				// How the element looked when the mark was made, in short (DEC-048).
-				...(compact && a.element !== null && lookSummary(a.element)
-					? { look: lookSummary(a.element) }
-					: {}),
+				...(compact ? lookField(a.element) : {}),
 				// An arrow's or a line's two ends: what it links (DEC-047).
 				...(a.ends === undefined
 					? {}
@@ -564,18 +563,30 @@ function elementView(details: ElementDetails) {
 	};
 }
 
+/** A mark's look in a line, for the compact get_case (DEC-048); nothing when none. */
+function lookField(details: ElementDetails | null): { look?: string } {
+	const look = details === null ? undefined : lookSummary(details);
+	return look === undefined ? {} : { look };
+}
+
 /**
  * How the mark's element looked when the mark was made (DEC-048), for
  * get_mark_element beside what the page shows now; none when not recorded.
+ * Compared with styles above only when the element read is the mark's own
+ * (`relation` "mark"); for an ancestor, a descendant or another element of
+ * the page it is said to be the mark's element's, not the one read.
  */
-function recordedView(details: ElementDetails | null) {
+function recordedView(details: ElementDetails | null, relation: Relation) {
 	if (details === null) return undefined;
 	const { styles, backdrop, siblings } = details;
 	if (styles === undefined && backdrop === undefined && siblings === undefined)
 		return undefined;
 	const look = lookSummary(details);
 	return {
-		note: "The mark's element as recorded when the mark was made (not this page now): compare with styles above to see what changed.",
+		note:
+			relation === "mark"
+				? "The mark's element as recorded when the mark was made (not this page now): compare with styles above to see what changed."
+				: `The mark's own element as recorded when the mark was made, not the element read here (that is ${relation === "page" ? "another element of the page" : `its ${relation}`}): do not compare it with styles above.`,
 		...(look === undefined ? {} : { look }),
 		...(styles === undefined ? {} : { styles: stylesLine(styles) }),
 		...(backdrop === undefined ? {} : { backdrop: backdropLine(backdrop) }),
@@ -621,6 +632,7 @@ export function inspectionView(
 	const { page: markPage, ...here } = where;
 	const { inspection, match } = result;
 	const { short, ...rest } = inspection;
+	const recorded = recordedView(marked, result.relation);
 	const withNote = <T extends { html: string }>(
 		v: T,
 		m: { html: string; leftOut?: number; hidden?: number },
@@ -645,9 +657,7 @@ export function inspectionView(
 				selector: cut(result.selector, 500),
 			},
 			...rest,
-			...(recordedView(marked) === undefined
-				? {}
-				: { recorded: recordedView(marked) }),
+			...(recorded === undefined ? {} : { recorded }),
 		},
 		{
 			html: inspection.html,
@@ -877,7 +887,7 @@ export function createTools(deps: ToolDeps): Tool[] {
 		name: "get_case",
 		title: "Read a case",
 		description:
-			"A case with its link (a ticket or the like), its pages (a case can span several pages of a site), its summary for the developer and all its marks: the page it is on, comment, status (open, fixed: waiting to be verified, verified, wontfix, cantreproduce), how it was settled, its reopens (why it came back, oldest first), kind, element details (when recorded with the mark, also how it looked then: styles, its computed CSS in one line; backdrop, the colour behind it; siblings, its neighbours' boxes, -1 the one right before it; look, its colour on the colour behind with their contrast ratio, its font and display; use them for contrast, typography and alignment questions), AI apps' findings (own: yours, which you may edit or delete), and (unless images is false) each mark's crop from the screenshot. Crops that do not fit the size limit are listed; fetch them with get_image.",
+			"A case with its link (a ticket or the like), its pages (a case can span several pages of a site), its summary for the developer and all its marks: the page it is on, comment, status (open, fixed: waiting to be verified, verified, wontfix, cantreproduce), how it was settled, its reopens (why it came back, oldest first), kind, element details (when recorded with the mark, also how it looked then: styles, its computed CSS in one line; backdrop, the colour behind it; siblings, its neighbours' boxes, -1 the one right before it; look, its colour on the colour behind with their contrast ratio where it holds, else why there is none, its font and display; use them for contrast, typography and alignment questions), AI apps' findings (own: yours, which you may edit or delete), and (unless images is false) each mark's crop from the screenshot. Crops that do not fit the size limit are listed; fetch them with get_image.",
 		inputSchema: {
 			type: "object",
 			properties: {

@@ -1628,6 +1628,22 @@ describe("tools", () => {
 			backdrop: shown.backdrop,
 			siblings: shown.siblings,
 		});
+		expect(read.recorded.note).toContain("compare with styles above");
+		// Another element read (selector): the look is said to be the mark's
+		// element's, not compared with what was read (review of #26).
+		const other = json(
+			await call("get_mark_element", {
+				caseId: "c_1",
+				mark: 1,
+				selector: "form",
+			}),
+		);
+		expect(other.element.relation).toBe("ancestor");
+		expect(other.recorded.note).toContain(
+			"not the element read here (that is its ancestor)",
+		);
+		expect(other.recorded.note).not.toContain("compare with styles above");
+		expect(other.recorded.styles).toBe(shown.styles);
 		expect(
 			"recorded" in
 				json(await call("get_mark_element", { caseId: "c_1", mark: 2 })),

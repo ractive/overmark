@@ -38,7 +38,7 @@ import {
 	type SiblingBox,
 } from "./case.ts";
 import { isGeneratedId, readableClass, readableClasses } from "./classes.ts";
-import { contrastRatio } from "./colour.ts";
+import { contrastRatio, parseColor } from "./colour.ts";
 import { closestAcross, hostOf, inDocument, parentOf } from "./shadow.ts";
 
 export const TEST_ID_ATTRIBUTES = [
@@ -771,11 +771,13 @@ export function stylesLine(styles: Record<string, string>): string {
 /** The colour behind an element in words (DEC-048): `rgb(255, 255, 255), 2 up`. */
 export function backdropLine(backdrop: Backdrop): string {
 	const where =
-		backdrop.depth === undefined
-			? "the page's canvas"
-			: backdrop.depth === 0
+		backdrop.depth !== undefined
+			? backdrop.depth === 0
 				? "the element's own"
-				: `${backdrop.depth} up`;
+				: `${backdrop.depth} up`
+			: parseColor(backdrop.color) === undefined
+				? "as the browser gives it, not composited"
+				: "no opaque background up to the page: over its canvas, as its colour scheme gives it";
 	return `${backdrop.color}, ${where}${backdrop.image ? "; a background image or gradient on the way may show instead" : ""}`;
 }
 
@@ -788,6 +790,40 @@ export function siblingLine(sibling: SiblingBox): string {
 }
 
 /**
+ * The text colour on the colour behind, with their WCAG contrast where it
+ * holds, else why there is none (DEC-048). Never a ratio known not to hold:
+ * none at the element's own opacity below 1 (what is recorded does not
+ * keep its own background apart from what lies behind it, so the blend
+ * cannot be worked out), none without an opaque background found (the
+ * canvas colour is the browser's, not reported), none for a colour this
+ * does not read, none when the walk found a filter, a blend mode or an
+ * ancestor's opacity (then no backdrop is recorded).
+ */
+function colours(details: ElementDetails): string | undefined {
+	const s = details.styles ?? {};
+	const color = s["color"];
+	const backdrop = details.backdrop;
+	if (color === undefined && backdrop === undefined) return undefined;
+	if (backdrop === undefined)
+		return `${color}; no contrast ratio: the colour behind it is not known (a filter, a blend mode or an ancestor's opacity changes what shows, which is not worked out)`;
+	if (color === undefined) return `on ${backdrop.color}`;
+	const pair = `${color} on ${backdrop.color}`;
+	const opacity = Number.parseFloat(s["opacity"] ?? "1");
+	if (Number.isFinite(opacity) && opacity < 1)
+		return `${pair}; no contrast ratio: the element is drawn at opacity ${s["opacity"]}, paler than these colours, and what lies behind its own background is not recorded`;
+	if (
+		parseColor(color) === undefined ||
+		parseColor(backdrop.color) === undefined
+	)
+		return `${pair}; no contrast ratio: a colour in a form this does not work out`;
+	if (backdrop.depth === undefined)
+		return `${pair}; no contrast ratio: no opaque background up to the page, and the canvas colour is the browser's (taken from the page's colour scheme, not reported)`;
+	const ratio = contrastRatio(color, backdrop.color);
+	if (ratio === undefined) return pair;
+	return `${pair}, contrast ${ratio.toFixed(2)}:1${backdrop.image ? " (a background image or gradient may show instead)" : ""}`;
+}
+
+/**
  * The few values of a mark's look an AI reads first (DEC-048), in a line:
  * `rgb(170, 170, 170) on rgb(255, 255, 255), contrast 2.32:1 · 14px/20px 600 "Inter" · inline-flex`.
  * Undefined when nothing was recorded.
@@ -795,15 +831,8 @@ export function siblingLine(sibling: SiblingBox): string {
 export function lookSummary(details: ElementDetails): string | undefined {
 	const s = details.styles ?? {};
 	const parts: string[] = [];
-	const color = s["color"];
-	const behind = details.backdrop?.color;
-	if (color !== undefined && behind !== undefined) {
-		const ratio = contrastRatio(color, behind);
-		parts.push(
-			`${color} on ${behind}${ratio === undefined ? "" : `, contrast ${ratio.toFixed(2)}:1`}${details.backdrop?.image ? " (a background image may show instead)" : ""}`,
-		);
-	} else if (color !== undefined) parts.push(`colour ${color}`);
-	else if (behind !== undefined) parts.push(`on ${behind}`);
+	const pair = colours(details);
+	if (pair !== undefined) parts.push(pair);
 	const size = s["font-size"];
 	const font = [
 		size === undefined
@@ -814,5 +843,5 @@ export function lookSummary(details: ElementDetails): string | undefined {
 	].filter((v): v is string => v !== undefined && v !== "");
 	if (font.length > 0) parts.push(font.join(" "));
 	if (s["display"] !== undefined) parts.push(s["display"]);
-	return parts.length > 0 ? cutText(parts.join(" · "), 300) : undefined;
+	return parts.length > 0 ? cutText(parts.join(" · "), 400) : undefined;
 }

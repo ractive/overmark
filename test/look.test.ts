@@ -23,7 +23,13 @@ import {
 	siblingLine,
 	stylesLine,
 } from "../src/lib/element.ts";
-import { backdropOf, siblingsOf, withLook } from "../src/lib/look.ts";
+import {
+	atShot,
+	backdropOf,
+	canvasOf,
+	siblingsOf,
+	withLook,
+} from "../src/lib/look.ts";
 import { sampleCase, withOneMark } from "./fixtures.ts";
 
 let doc: Document;
@@ -237,6 +243,170 @@ describe("what a case keeps of a look", () => {
 	});
 });
 
+describe("the colour behind an element: only what holds (review of #26)", () => {
+	test("a colour it cannot read ends the walk without a depth", () => {
+		// happy-dom keeps hsl() as written, as a browser keeps oklch().
+		doc.body.innerHTML = `<div style="background-color: hsl(0 0% 50%)"><a id="a">x</a></div>`;
+		expect(backdropOf(doc.getElementById("a") as Element)).toEqual({
+			color: "hsl(0 0% 50%)",
+		});
+	});
+
+	test("a filter, a blend mode or an ancestor's opacity: no backdrop at all; the element's own opacity keeps it", () => {
+		doc.body.innerHTML = `
+			<div style="opacity: 0.5"><p style="background-color: rgb(1, 2, 3)"><a id="a">x</a></p></div>
+			<div style="filter: grayscale(1)"><a id="b" style="background-color: rgb(1, 2, 3)">x</a></div>
+			<a id="c" style="mix-blend-mode: multiply; background-color: rgb(1, 2, 3)">x</a>
+			<div style="background-color: rgb(1, 2, 3)"><a id="d" style="opacity: 0.4">x</a></div>`;
+		for (const id of ["a", "b", "c"])
+			expect(backdropOf(doc.getElementById(id) as Element)).toBeUndefined();
+		expect(backdropOf(doc.getElementById("d") as Element)).toEqual({
+			color: "rgb(1, 2, 3)",
+			depth: 1,
+		});
+	});
+
+	test("the canvas from the page's colour scheme, not white for a dark page", () => {
+		doc.head.innerHTML = `<meta name="color-scheme" content="dark">`;
+		doc.body.innerHTML = `<p id="p">On nothing</p>`;
+		expect(canvasOf(doc)).toEqual({ r: 18, g: 18, b: 18, a: 1 });
+		expect(backdropOf(doc.getElementById("p") as Element)).toEqual({
+			color: "rgb(18, 18, 18)",
+		});
+		doc.head.innerHTML = `<meta name="color-scheme" content="light">`;
+		expect(canvasOf(doc)).toEqual({ r: 255, g: 255, b: 255, a: 1 });
+	});
+});
+
+describe("the look line never shows a ratio known not to hold (review of #26)", () => {
+	const look = (
+		styles: Record<string, string>,
+		backdrop?: ElementDetails["backdrop"],
+	): string | undefined =>
+		lookSummary({
+			...element,
+			styles,
+			...(backdrop === undefined ? {} : { backdrop }),
+		});
+
+	test("the reviewer's disabled button: opacity 0.4, white on blue, parent white", () => {
+		const line = look(
+			{
+				color: "rgb(255, 255, 255)",
+				"background-color": "rgb(0, 0, 255)",
+				opacity: "0.4",
+			},
+			{ color: "rgb(0, 0, 255)", depth: 0 },
+		);
+		expect(line).not.toMatch(/contrast \d/);
+		expect(line).toBe(
+			"rgb(255, 255, 255) on rgb(0, 0, 255); no contrast ratio: the element is drawn at opacity 0.4, paler than these colours, and what lies behind its own background is not recorded",
+		);
+	});
+
+	test("the reviewer's unknown canvas: no opaque background up to the page", () => {
+		expect(
+			look({ color: "rgb(119, 119, 119)" }, { color: "rgb(255, 255, 255)" }),
+		).toBe(
+			"rgb(119, 119, 119) on rgb(255, 255, 255); no contrast ratio: no opaque background up to the page, and the canvas colour is the browser's (taken from the page's colour scheme, not reported)",
+		);
+	});
+
+	test("each other reason; a ratio where it holds, flagged over an image", () => {
+		expect(look({ color: "rgb(0, 0, 0)" })).toBe(
+			"rgb(0, 0, 0); no contrast ratio: the colour behind it is not known (a filter, a blend mode or an ancestor's opacity changes what shows, which is not worked out)",
+		);
+		expect(
+			look({ color: "rgb(0, 0, 0)" }, { color: "oklch(0.7 0.1 120)" }),
+		).toBe(
+			"rgb(0, 0, 0) on oklch(0.7 0.1 120); no contrast ratio: a colour in a form this does not work out",
+		);
+		expect(
+			look(
+				{ color: "color(display-p3 0 0 0)" },
+				{ color: "rgb(255, 255, 255)", depth: 1 },
+			),
+		).toContain("no contrast ratio: a colour in a form");
+		expect(
+			look(
+				{ color: "rgb(0, 0, 0)" },
+				{ color: "rgb(255, 255, 255)", depth: 1 },
+			),
+		).toBe("rgb(0, 0, 0) on rgb(255, 255, 255), contrast 21.00:1");
+		expect(
+			look(
+				{ color: "rgb(0, 0, 0)" },
+				{ color: "rgb(255, 255, 255)", depth: 1, image: true },
+			),
+		).toBe(
+			"rgb(0, 0, 0) on rgb(255, 255, 255), contrast 21.00:1 (a background image or gradient may show instead)",
+		);
+		// Opacity 1 written out is no reason.
+		expect(
+			look(
+				{ color: "rgb(0, 0, 0)", opacity: "1" },
+				{ color: "rgb(255, 255, 255)", depth: 0 },
+			),
+		).toContain("contrast 21.00:1");
+	});
+
+	test("the backdrop line says where its colour comes from", () => {
+		expect(backdropLine({ color: "oklch(0.7 0.1 120)" })).toBe(
+			"oklch(0.7 0.1 120), as the browser gives it, not composited",
+		);
+		expect(backdropLine({ color: "rgb(255, 255, 255)" })).toBe(
+			"rgb(255, 255, 255), no opaque background up to the page: over its canvas, as its colour scheme gives it",
+		);
+	});
+});
+
+describe("siblings in a shadow root, and at the screenshot (review of #26)", () => {
+	test("an element at the top of an open shadow root has the root's other children as siblings", () => {
+		doc.body.innerHTML = `<div id="host"><span>slotted</span></div>`;
+		const host = doc.getElementById("host") as Element;
+		const root = host.attachShadow({ mode: "open" });
+		root.innerHTML = `<button id="one">1</button><button id="two">2</button>`;
+		for (const el of [...root.children, ...host.children])
+			(
+				el as unknown as { getBoundingClientRect: () => DOMRect }
+			).getBoundingClientRect = () =>
+				({ x: 5, y: 7, width: 20, height: 10 }) as DOMRect;
+		const two = root.getElementById("two") as Element;
+		expect(
+			siblingsOf(two, { x: 0, y: 0 })?.map((s) => [s.offset, s.tag]),
+		).toEqual([[-1, "button"]]);
+	});
+
+	test("a mark whose element moved before its screenshot keeps one moment's positions", () => {
+		const drawn: ElementDetails = {
+			...element,
+			rect: { x: 24, y: 310, width: 96, height: 40 },
+			siblings: [
+				{
+					offset: -1,
+					tag: "p",
+					rect: { x: 24, y: 260, width: 300, height: 40 },
+				},
+			],
+		};
+		const moved = { x: 24, y: 410, width: 96, height: 40 };
+		const then = [
+			{ offset: -1, tag: "p", rect: { x: 24, y: 360, width: 300, height: 40 } },
+		];
+		expect(atShot(drawn, moved, then)).toEqual({
+			...drawn,
+			rect: moved,
+			siblings: then,
+		});
+		// None with a box at the screenshot: none, not those from before.
+		const { siblings: _s, ...without } = drawn;
+		expect(atShot(drawn, moved, undefined)).toEqual({
+			...without,
+			rect: moved,
+		});
+	});
+});
+
 describe("how the tools and case.md write a look", () => {
 	test("one line each; the few values first, with the contrast", () => {
 		const looked: ElementDetails = {
@@ -265,7 +435,7 @@ describe("how the tools and case.md write a look", () => {
 			"rgb(1, 2, 3), 2 up; a background image or gradient on the way may show instead",
 		);
 		expect(backdropLine({ color: "rgb(1, 2, 3)" })).toBe(
-			"rgb(1, 2, 3), the page's canvas",
+			"rgb(1, 2, 3), no opaque background up to the page: over its canvas, as its colour scheme gives it",
 		);
 		expect(siblingLine(looked.siblings?.[0] as never)).toBe(
 			"-1 p 300×40 at 24, 260.33",

@@ -2425,7 +2425,7 @@ siblings", to find the cause of a contrast or alignment issue without building t
 - **What.** Three optional fields on `ElementDetails`: `styles` (property name → computed
   value), `backdrop` (`{ color, depth?, image? }`: the element's background colour,
   composited over its ancestors' while transparent or translucent, up to the first
-  opaque one, the page's canvas taken as white under all; `depth` how many steps up;
+  opaque one, the page's canvas under all; `depth` how many steps up that opaque one is;
   `image` when a background image or gradient on the way may show instead) and
   `siblings` (up to three element siblings with a box before and three after:
   `{ offset, tag, rect }`). Only on the mark's own element; not on a stroke's ends (an
@@ -2469,15 +2469,44 @@ siblings", to find the cause of a contrast or alignment issue without building t
   `test/compat-0-3-0.test.ts`), and on a team it passes them by (its `elementIn` maps
   field by field), sending nothing more.
 - **Shown.** `get_case`: on the element, `styles` in one line, `backdrop` and each sibling
-  in a line, and `look` (the text colour on the colour behind with their WCAG contrast,
-  the font, the display); compact `get_case` gives `look` beside the summary.
-  `get_mark_element` gives `recorded` beside what the page shows now. case.md says
-  "Look:" with the same line. The panel shows nothing new.
-- **Weak.** The canvas is taken as white, also for a page in a dark colour scheme
-  without a background of its own. A background colour this does not read (`oklch()`,
-  `color(display-p3 …)`) ends the walk and is given as it is, without the layers above
-  it. Opacity of an ancestor is not composited. A text colour over a gradient or picture
-  has no reliable contrast (`image: true` says so).
+  in a line, and `look` (the text colour on the colour behind, the font, the display);
+  compact `get_case` gives `look` beside the summary. `get_mark_element` gives
+  `recorded` beside what the page shows now, to compare with only when the element read
+  is the mark's own (`relation` "mark"); for an ancestor, a descendant or another
+  element it says whose look it is. case.md says "Look:" with the same line. The panel
+  shows nothing new.
+- **Never a contrast ratio known not to hold** (review of #26). The ratio is WCAG's,
+  the text laid over the backdrop where it is translucent, and shown only with an
+  opaque background found (`depth`). Else the line says the pair and why there is no
+  ratio:
+  - the element's own `opacity` below 1: it is drawn paler than its colours, and what
+    is recorded cannot blend it, as the backdrop folds the element's own background
+    in with what lies behind it (the parent's backdrop is not kept apart). Recording
+    that would take a field the server does not keep yet; the reason is said instead;
+  - no opaque background up to the page (no `depth`): the canvas colour is the
+    browser's and not reported; the backdrop takes the browser's default canvas for the
+    colour scheme the page uses (the root's `color-scheme`, else its
+    `<meta name="color-scheme">`, with the reader's preference where it takes both):
+    white, or #121212 (Chromium) / #1c1b22 (Firefox) for a dark page;
+  - a colour in a form this does not read (`oklch()`, `color()`): the walk stops there,
+    without `depth`;
+  - a filter, a backdrop filter or a blend mode on the element or an ancestor, or an
+    ancestor's opacity: no backdrop is recorded at all, as no colour found by the walk
+    holds then.
+
+  Over a background image or gradient the ratio is shown and flagged, as it may not
+  hold where the picture shows. So `depth` means "an opaque background was found this
+  many steps up" and nothing else.
+- **Siblings** are the children of the element's parent node: an element's, or a shadow
+  root's for an element at the top of one (not the host's children, which are what is
+  slotted into it). When the screenshot is taken, the element's `rect` becomes its box
+  then, and the siblings are measured again at that same moment (`atShot`), so that one
+  record holds one moment's positions; with none that has a box then, none.
+- **Weak.** The canvas for a page that sets no background is the browser's default for
+  its colour scheme, not read from the browser (it reports none); a user's forced
+  colours are not seen. A background colour this does not read gives no ratio, nor does
+  an element at its own opacity. A text colour over a gradient or picture has no
+  reliable contrast (`image: true` says so).
 - **Tested** in `test/look.test.ts` (colours, contrast, the backdrop, siblings, what a
   file keeps, the lines; describing a candidate records none), `test/cloud-wire.test.ts`
   (the fingerprints of the build before; once with `mark.create`; never in

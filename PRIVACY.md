@@ -74,10 +74,11 @@ Only in four cases, all started by you:
    Sitegloss's developer, and fetches your team's: titles, links, summaries, the
    addresses, titles and languages of the pages, the window size and the browser's user
    agent, the marks with their comments, statuses, notes, element details (an arrow's
-   two ends too) and AI findings, the case's thread of comments and whether it is
-   closed, and the screenshots and crops. The members of the team you choose can see
-   and change them, in the extension and on the website; the service keeps them until
-   they are deleted, with who made or changed what, and under
+   two ends too; for the marked element also how it looked: its computed styles, the
+   colour behind it and its neighbours' boxes) and AI findings, the case's thread of
+   comments and whether it is closed, and the screenshots and crops. The members of the
+   team you choose can see and change them, in the extension and on the website; the
+   service keeps them until they are deleted, with who made or changed what, and under
    [its own privacy policy](https://sitegloss.dev/privacy/).
 
    When a connected AI app changes a case through Sitegloss (a comment, a mark, a
@@ -173,4 +174,4 @@ at most 30 days.
 Jean-Pierre Bergamin, <https://ractive.ch>, james@ractive.ch.
 Source code: <https://github.com/ractive/sitegloss>.
 
-Last changed: 19 November 2026.
+Last changed: 21 November 2026.
