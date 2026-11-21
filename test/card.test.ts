@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+	ALLOW_DELAY_MS,
+	armed,
 	type CardStatus,
 	CONFIRM_DELAY_MS,
 	cardStatus,
@@ -21,6 +23,8 @@ const base: AiState = {
 	grants: [],
 	pairing: false,
 	questions: [],
+	fillCode: false,
+	fillHere: false,
 };
 const ADDRESS = "https://relay.example/s/sitegloss/mcp";
 const claude = {
@@ -201,5 +205,19 @@ describe("stillPaired (DEC-045)", () => {
 			false,
 		);
 		expect(stillPaired("g2", connected)).toBe(false);
+	});
+});
+
+describe("when a yes to a question counts (Allow, Fill in the code)", () => {
+	test("after the panel has been focused and the question shown, both for the delay", () => {
+		expect(ALLOW_DELAY_MS).toBe(750);
+		// Shown long ago, the panel focused just now: not yet (review of DEC-044).
+		expect(armed(0, 10_000, 10_100)).toBe(false);
+		expect(armed(0, 10_000, 10_750)).toBe(true);
+		// Focused long ago, the question just shown: not yet.
+		expect(armed(10_000, 0, 10_700)).toBe(false);
+		expect(armed(10_000, 0, 10_750)).toBe(true);
+		// Not focused: never.
+		expect(armed(0, undefined, 1_000_000)).toBe(false);
 	});
 });

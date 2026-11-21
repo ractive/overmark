@@ -2117,6 +2117,84 @@ on a yes, fills in its own code there. Typing the code stays the way that always
   test client, since it fetches an AI app's metadata over HTTPS. The test build takes
   the fixture's origin from `siteglossTestFillOrigins` on the worker's global; other
   builds drop that.
+- **After review (2026-11-21), against tab-mcp's DEC-203 (the review of its pull request
+  177 found nine weaknesses in the version it took from Sitegloss).** What applied is
+  fixed; the rules of the question and the fill moved from the connection into
+  `src/worker/code-filler.ts` (`CodeFiller`, the shape of the client library's coming
+  `CodeFiller`, tab-mcp's DEC-206, which Sitegloss can take once client 0.19 is out).
+  - **A setting of its own, off by default.** "Fill in the code for me" under the pairing
+    code turns it on (and asks for the relay's site when Sitegloss does not have it, as
+    "Allow on that site" did); "Stop filling in the code" turns it off, withdraws a
+    question that waits, and gives the relay's site back unless the user gave access to
+    all sites, which is not this feature's. Off, no page is read. Kept in the worker's
+    IndexedDB (`fillCode`). Access to all sites, or the site allowed in 0.3.0, no longer
+    turns it on: a user upgrading from 0.3.0 finds it off. The first start of this version
+    stores the setting off and gives back the relay's site that 0.3.0's "Allow on that
+    site" granted, unless the user gave access to all sites (`settleFillCode`); the
+    setting is written first, so this happens once and never takes a grant given later.
+    Turning it on again asks the browser for the site once more.
+  - **Bound to the request.** The form must carry the relay's hidden `request_id`, and a
+    yes fills in only the same tab, at the relay's origin and path, with the same app, AI
+    app and request id, checked again in the page by the page's function itself (its own
+    `location` and `window.top`), after the code came. A tab that moved on meanwhile
+    (an opener can send a tab it opened to a look-alike page), or a new request of the
+    same AI app in that tab, gets nothing. Sitegloss never fills in without a yes, also
+    not the relay's wrong-code page (the same form again): that page load asks again.
+    tab-mcp's one unasked retry is therefore not needed here.
+  - **Withdrawn at once** when AI access is no longer connected (as before), when the
+    setting goes off, and when another relay is set (the old connection's events are no
+    longer heard then, so the question used to stay). A yes whose code is still on its
+    way fills in nothing once withdrawn or once its tab left the page (each judged by its
+    own page's origin). Stop AI access, Stop filling in the code and another relay
+    withdraw on receipt, before the panel's queue of commands, and the yes does not hold
+    that queue while it waits for its code (up to 10 s), as Disconnect does not: else
+    the code was typed and the AI app connected before the Stop ran (review of the pull
+    request).
+  - **One page, one question, one fill.** A new document in the question's tab ends the
+    question, also when it gets none (an expired request, a form for another app, the
+    site taken away), and withdraws a fill there that has not started; a reload of the
+    same request asks again and fills once, never twice.
+  - **Which code.** The current code when it has 5 s left by this computer's clock (or
+    an end it cannot read); else the next one the relay sends; if none comes within
+    10 s, the current one after all, so a clock that runs ahead never keeps a code from
+    being filled in. Pairing is held on from the yes until 30 s after the fill (was 2
+    minutes), also when Connect's own post leaves the page.
+  - **One question at a time, nothing dropped unseen.** A pairing page in another tab
+    while one question waits is not asked about; the panel says that it also opened and
+    to answer first and reload it, or type the code (it used to replace the waiting
+    question silently), for as long as that question can be answered at most. While only
+    a fill is under way, it says so instead, for 20 s. The same tab loading a pairing page again replaces its question
+    with a new id, so the wait before "Fill in the code" counts starts again.
+  - **The verified host first.** The question says "An AI app at <host> (it calls itself
+    “<name>”) wants to connect…", the notification "Connect an AI app at <host>?": a
+    name can say anything, "Claude (claude.ai)" too. A form with no name is asked about
+    by its host alone.
+  - **The wait before a yes counts from the panel coming in front**, as Allow's does
+    (`armed` in `src/sidepanel/card.ts`, shared by both): it counted from the question
+    being shown, so a question that had waited unseen took a click the moment the panel
+    was focused.
+  - **What did not apply.** No port to close and no messages to check: the page sends
+    the worker nothing, the worker reads and fills by `scripting.executeScript` into the
+    tab's top frame, after checking the tab's address against the hosted relay's origin
+    exactly (port included) and `/authorize`, and the form's `data-app`. The code is
+    shown as the relay sends it, `XXXX-XXXX`.
+  - **Only the hosted relay, as before.** A relay entered in the panel's Relay field gets
+    no fill-in and no offer: its pairing page may be another version, and its site is
+    one more host Sitegloss would ask to read and change. tab-mcp's extension follows its
+    configured relay; Sitegloss can, once the library's `CodeFiller` takes the relay's
+    origin as given.
+  - Tested in `test/pair-fill.test.ts` (the page's functions on look-alike origins, ports,
+    paths and frames, without a request id or with another; which code, with a clock an
+    hour ahead, the wait timed by that clock; `CodeFiller`'s rules, also the ones from the
+    review of the pull request), `test/connection.test.ts` (off by default with access
+    to all sites, on and kept, off withdraws and gives the site back, Stop AI access and
+    another relay withdraw, a yes fills in the code the card shows; each of Stop AI
+    access, Stop filling in the code and another relay while a yes waits for its code
+    fills in nothing; the upgrade's one give-back, `settleFillCode`),
+    `test/e2e/pair-fill.test.ts` (off by default, turned on with the panel's button, the
+    verified host first, a second page not asked about and said, turned off), and
+    `test/card.test.ts` (`armed`). The
+    fixture now has the relay's `request_id` (it had a field of another name).
 
 ## DEC-045: Home in four parts, the sync's state in words, the step after pairing (owner)
 

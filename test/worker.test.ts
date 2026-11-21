@@ -700,6 +700,8 @@ describe("the panel's status line", () => {
 		grants: [],
 		pairing: false,
 		questions: [],
+		fillCode: false,
+		fillHere: false,
 	};
 
 	test.each([
